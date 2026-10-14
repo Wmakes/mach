@@ -195,6 +195,13 @@ pub fun drop_query_failure(s: *Session) {
     s.query_failure_places = fail.reported();
 }
 
+# hold the text an operation handed back, allocated from the query database, as the held
+# failure's text; the session owns it from here
+pub fun adopt_failure_text(s: *Session, text: str) {
+    if (s.query_failure_message != nil && s.query_failure_message != text) { str_free(s.queries.a, s.query_failure_message); }
+    s.query_failure_message = text;
+}
+
 # hold a failure where the session presents it: its text and the places it points at are
 # copied into the session's slot, replacing what the slot held, and the failure returned reads
 # the held copies. text the presentation already owns stays there. a copy the allocator

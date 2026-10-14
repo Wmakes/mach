@@ -970,7 +970,7 @@ pub fun finish_query_phase(p: *project.Project, operation: query.Operation,
         if (operation_failure) { session.drop_query_failure(p.s); }
         if (sel taken.ok) {
             if (taken.ok != nil) {
-                if (operation_failure) { p.s.query_failure_message = taken.ok; }
+                if (operation_failure) { session.adopt_failure_text(p.s, taken.ok); }
                 or                     { str_free(db.a, taken.ok); }
             }
         }
