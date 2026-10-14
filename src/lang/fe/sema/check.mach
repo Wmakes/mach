@@ -841,23 +841,55 @@ fun check_secrecy_cast(sc: *sema_context.SemaContext, from: type.TypeId, to: typ
             "secret memory is reached only through secrecy-typed pointers; erasing `^` to `ptr` would let a public alias read it");
         ret false;
     }
-    val allowed_r: res[secrecy.Agreement, fail.Fail] = secrecy.cast_allowed(sc.s, sema_context.machine_of(sc), from, to);
+    val allowed_r: res[secrecy.Verdict, fail.Fail] = secrecy.cast_allowed(sc.s, sema_context.machine_of(sc), from, to);
     if (sel allowed_r.err) {
         sema_context.refuse(sc, span, allowed_r.err);
         ret false;
     }
-    val allowed: secrecy.Agreement = allowed_r.ok;
-    if (allowed == secrecy.UNDECIDABLE) {
-        report_note(sc, diagnostic_kind.SECRET_CAST_QUALIFIER, span, secrecy.UNBOUNDED_CAST_MSG,
-            "each instance points at a fresh instance, so a comparison through the pointer never reaches an end");
+    val allowed: secrecy.Verdict = allowed_r.ok;
+    if (allowed.agreement == secrecy.AGREE) { ret true; }
+    if (allowed.agreement == secrecy.UNDECIDABLE) {
+        report_secrecy(sc, diagnostic_kind.SECRET_VARIANT_UNPROVABLE, span, secrecy.UNBOUNDED_CAST_MSG, allowed, GROWTH_NOTE);
         ret false;
     }
-    if (allowed != secrecy.AGREE) {
-        report_note(sc, diagnostic_kind.SECRET_CAST_QUALIFIER, span, "`::` and `:~` cannot add or drop the secret qualifier `^`",
-            "a public value coerces up to secret with no syntax; `:>T` is the only downgrade");
-        ret false;
+    report_secrecy(sc, diagnostic_kind.SECRET_CAST_QUALIFIER, span, "`::` and `:~` cannot add or drop the secret qualifier `^`", allowed,
+        "a public value coerces up to secret with no syntax; `:>T` is the only downgrade");
+    ret false;
+}
+
+pub val GROWTH_NOTE: str = "a generic whose argument grows through a pointer is compared by the arguments its fields lay out, never walked. where two laid arguments differ in size or alignment, padding can line the layouts up at one depth and not the next, so the comparison is refused rather than decided";
+
+# a secrecy refusal whose message names the field its answer turned on: where the classes
+# differ, or the instance that grows and what kept it from lining up with the other side
+pub fun report_secrecy(sc: *sema_context.SemaContext, k: diagnostic_kind.Kind, span: lang_source.Span, head: str, v: secrecy.Verdict, note: str) {
+    val msg: opt[str] = secrecy_text(sc, head, v, span);
+    if (sel msg.none) { ret; }
+    fin { sema_context.text_free(sc, msg.some); }
+    if (note == nil) { sema_context.report(sc, k, span, msg.some); }
+    or               { sema_context.report_note(sc, k, span, msg.some, note); }
+}
+
+fun secrecy_text(sc: *sema_context.SemaContext, head: str, v: secrecy.Verdict, span: lang_source.Span) opt[str] {
+    if (type.is_nil(v.owner)) { ret sema_context.text(sc, "{}", head); }
+    val ts: opt[str] = type_text(sc, v.owner, span);
+    if (sel ts.none) { ret opt[str].none{}; }
+    fin { type_str_free(sc, ts.some); }
+    var name: str = "";
+    if (v.field != secrecy.NO_FIELD) {
+        val fe: opt[*type.FieldEntry] = type.field_at(?sc.s.types, type.strip_secret(?sc.s.types, v.owner), v.field);
+        if (sel fe.some) {
+            val spelled: opt[str] = intern.get(?sc.s.interner, fe.some.name);
+            if (sel spelled.some) { name = spelled.some; }
+        }
     }
-    ret true;
+    if (v.agreement == secrecy.UNDECIDABLE) {
+        if (str_len(name) > 0) {
+            ret sema_context.text(sc, "{} - `{}` is an instance of a generic whose argument grows through a pointer, and the arguments its field `{}` lays out differ in size or alignment between the two sides", head, ts.some, name);
+        }
+        ret sema_context.text(sc, "{} - `{}` is an instance of a generic whose argument grows through a pointer, and the other side holds storage of another shape there", head, ts.some);
+    }
+    if (str_len(name) > 0) { ret sema_context.text(sc, "{} - at field `{}` of `{}`", head, name, ts.some); }
+    ret sema_context.text(sc, "{}", head);
 }
 
 pub fun check_reinterpret(sc: *sema_context.SemaContext, from: type.TypeId, to: type.TypeId, span: lang_source.Span) opt[type.TypeId] {
