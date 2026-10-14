@@ -67,6 +67,15 @@ pub fun drop_query_failure(s: *Session);
 
 release the text and the places of the last query failure the session holds
 
+## fun adopt_failure_text
+
+```mach
+pub fun adopt_failure_text(s: *Session, text: str);
+```
+
+hold the text an operation handed back, allocated from the query database, as the held
+failure's text; the session owns it from here
+
 ## fun hold_failure
 
 ```mach
