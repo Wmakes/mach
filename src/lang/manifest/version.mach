@@ -108,6 +108,18 @@ fun pre_release(c: *Cursor, v: *Version) opt[str] {
     ret opt[str].none{};
 }
 
+# dot-separated identifiers of [0-9A-Za-z-], none empty; precedence never reads them
+fun build_metadata(c: *Cursor) opt[str] {
+    for (true) {
+        val id_start: usize = c.at;
+        for (is_ident_byte(peek(c))) { c.at = c.at + 1; }
+        if (c.at == id_start) { ret opt[str].some{"a build metadata identifier is empty"}; }
+        if (peek(c) != '.')   { brk; }
+        c.at = c.at + 1;
+    }
+    ret opt[str].none{};
+}
+
 # major[.minor[.patch[-pre]]]; parts is how many numeric components were written
 fun partial(c: *Cursor, v: *Version, parts: *u32) opt[str] {
     v.major   = 0;
@@ -164,9 +176,8 @@ pub fun parse_version(text: str) res[Version, str] {
     }
     if (peek(?c) == '+') {
         c.at = c.at + 1;
-        val meta_start: usize = c.at;
-        for (is_ident_byte(peek(?c)) || peek(?c) == '.') { c.at = c.at + 1; }
-        if (c.at == meta_start) { ret res[Version, str].err{"build metadata is empty"}; }
+        val e5: opt[str] = build_metadata(?c);
+        if (sel e5.some) { ret res[Version, str].err{e5.some}; }
     }
     if (c.at != c.len) { ret res[Version, str].err{"unexpected text after the version"}; }
     ret res[Version, str].ok{v};
@@ -570,9 +581,9 @@ test parse_version__reads_a_full_version_and_ignores_build_metadata {
     if (sel v.ok) {
         if (v.ok.major != 3 || v.ok.minor != 20 || v.ok.patch != 1 || v.ok.pre_len != 4) { ret 2; }
     }
-    val bad: [6]str = [6]str{"3.2", "v3.2.1", "3.2.1-", "3.2.1+", "3.2.1 ", "03.2.1"};
+    val bad: [7]str = [7]str{"3.2", "v3.2.1", "3.2.1-", "3.2.1+", "3.2.1 ", "03.2.1", "3.2.1+a..b"};
     var i:   usize  = 0;
-    for (i < 6) {
+    for (i < 7) {
         val r: res[Version, str] = parse_version(bad[i]);
         if (sel r.ok) { ret 3; }
         i = i + 1;
