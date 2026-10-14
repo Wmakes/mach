@@ -437,6 +437,7 @@ pub def ProductVisit: fun(ptr, QueryKey, *diagnostic.DiagnosticStore)
 
 what a product walk is shown of each product: its address and the store it reported into,
 nil when it reported nothing
+reached through walk_products
 
 ## fun walk_products
 
@@ -476,12 +477,4 @@ kind: the product's row
 key: the product's key
 since: the first operation the host's reads count; an input is current whenever it was set
 ret: a borrowed view, valid until the next operation, input change or retirement
-
-## fun product_diagnostics
-
-```mach
-pub fun product_diagnostics(db: *QueryDb, kind: *Kind, key: u64) *diagnostic.DiagnosticStore;
-```
-
-the diagnostics a ready product carries, nil when the product is absent or has none
 
