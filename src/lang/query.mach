@@ -58,7 +58,7 @@ def OwnedFn: fun(ptr, KeyOwner, u32) bool;
 
 pub def Revision: u64;
 
-# how a kind's products come to be: set by the host, computed, or sampled from outside;
+# how a kind's products come to be: set by the host, computed, or sampled from outside
 # reached through Kind.role
 pub def Role: u8;
 
@@ -68,12 +68,14 @@ pub val DERIVED:         Role = 2;
 # sampled from a provider outside the database; only a test attaches one
 val METADATA: Role = 3;
 
-# releases what an owned product's bytes hold; reached through Kind.finalize
+# releases what an owned product's bytes hold
+# reached through Kind.finalize
 pub def FinalizeFn: fun(*u8, u32, *A.Allocator);
-# whether two owned products are the same; reached through Kind.equal
+# whether two owned products are the same
+# reached through Kind.equal
 pub def EqualFn: fun(*u8, u32, *u8, u32) bool;
 # a derived product's computation: the context the operation's runtime carries, the row it
-# computes, the key, the allocator its bytes come from and the store it reports into;
+# computes, the key, the allocator its bytes come from and the store it reports into
 # reached through Kind.compute
 pub def ComputeFn: fun(ptr, *Kind, u64, *A.Allocator, *diagnostic.DiagnosticStore) res[QueryOutput, fail.Fail];
 
