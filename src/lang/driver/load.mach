@@ -66,7 +66,7 @@ pub fun join_path(alloc: *A.Allocator, a: str, b: str) res[str, fail.Fail] {
 pub fun target_context(alloc: *A.Allocator, t: *lang_target.Binding, req: *request.BuildRequest,
     compiler_name: intern.StrId, compiler_ver: intern.StrId) comptime.ComptimeCtx {
     var build_mode_id: u32 = comptime_path.MODE_DEBUG;
-    if (request.release(req)) { build_mode_id = comptime_path.MODE_RELEASE; }
+    if (request.is_release(req)) { build_mode_id = comptime_path.MODE_RELEASE; }
     var build_pie: u32 = 0;
     if (req.pie) { build_pie = 1; }
     ret comptime.init(alloc, resolved.facts(?t.target), comptime.build_facts(build_mode_id, build_pie, compiler_name, compiler_ver));

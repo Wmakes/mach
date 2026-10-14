@@ -89,7 +89,7 @@ fun blocking_requirement(oa: *A.Allocator, failed: *Vector[str], u: *build_plan.
     for (i < u.requires.len) {
         var label: str = u.requires.data[i];
         if (!str_empty(u.owner)) {
-            val owned: res[str, fail.Fail] = build_plan.join_msg(oa, u.owner, ".", label);
+            val owned: res[str, fail.Fail] = fail.join(oa, u.owner, ".", label);
             if (sel owned.err) { ret res[opt[str], fail.Fail].err{owned.err}; }
             label = owned.ok;
         }
@@ -106,7 +106,7 @@ fun blocking_requirement(oa: *A.Allocator, failed: *Vector[str], u: *build_plan.
 
 fun record_blocked_unit(bo: *outcome.BuildOutcome, sink: *readout.Sink, oa: *A.Allocator, failed: *Vector[str],
     u: *build_plan.BuildUnit, blocked_by: str) err[fail.Fail] {
-    var f: fail.Fail = fail.user_of(diagnostic_kind.ARTIFACT_BLOCKED, build_plan.join_msg(oa,
+    var f: fail.Fail = fail.user_of(diagnostic_kind.ARTIFACT_BLOCKED, fail.join(oa,
         "artifact '", u.label, "' was not built: it requires artifact '", blocked_by,
         "', which failed to build"));
     readout.failure(sink, ?f, diagnostic.ORIGIN_BUILD);
@@ -195,7 +195,7 @@ fun execute_unit_cold(bp: *build_plan.BuildPlan, unit_index: usize, backing: *A.
     var r:           res[outcome.BuildOutcome, fail.Fail];
     val res_session: res[session.Session, fail.Fail] = toolchain.session_init(?u_alloc);
     if (sel res_session.err) {
-        val f: fail.Fail = fail.message_of(build_plan.join_msg(?u_alloc, "failed to initialise compiler session: ", fail.describe(res_session.err)));
+        val f: fail.Fail = fail.message_of(fail.join(?u_alloc, "failed to initialise compiler session: ", fail.describe(res_session.err)));
         r = cold_fail(oa, sink, f);
     }
     if (sel res_session.ok) {
@@ -524,7 +524,7 @@ fun plan_outputs(p: *driver.Project, unit: *build_plan.BuildUnit, st: *UnitState
         st.artifact = unit.out_path;
     }
     if (goal == request.GOAL_TESTS) {
-        val file_r: res[str, fail.Fail] = build_plan.join_msg(p.alloc, "dispatch.", target_of.object_ext(p.target.of));
+        val file_r: res[str, fail.Fail] = fail.join(p.alloc, "dispatch.", target_of.object_ext(p.target.of));
         if (sel file_r.err) { ret err[fail.Fail].err{file_r.err}; }
         val name_r: res[str, A.Error] = types_path.join(p.alloc, unit.test_dir, file_r.ok);
         str_free(p.alloc, file_r.ok);

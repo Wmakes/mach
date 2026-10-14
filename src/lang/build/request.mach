@@ -214,41 +214,35 @@ pub rec BuildRequest {
 
 pub fun defaults() BuildRequest {
     var r: BuildRequest;
-    r.project_root     = "";
-    r.owner            = "";
-    r.target           = "";
-    r.profile          = "";
-    r.artifact         = "";
-    r.goal             = GOAL_ARTIFACT;
-    r.opt              = pipeline.OPT_DEBUG;
-    r.debug            = false;
-    r.pie              = false;
-    r.subsystem_flag   = SUBSYSTEM_FLAG_NONE;
-    r.subsystem        = catalog_subsystem.CONSOLE;
-    r.simd             = manifest.SIMD_SCALARIZE;
-    r.passes           = pipeline.set_empty();
-    r.skips            = pipeline.set_empty();
-    r.relax            = pass.RELAX_NONE;
-    r.overrides        = false;
-    r.allow            = diagnostic_kind.set_empty();
-    r.jobs             = 0;
-    r.emit_ir          = false;
-    r.ir_form          = ir_printer.IR_FORM_DEBUG;
-    r.emit_asm         = false;
-    r.out              = "";
-    r.work             = "";
-    r.link_tokens.a    = nil;
-    r.link_tokens.data = nil;
-    r.link_tokens.len  = 0;
-    r.link_tokens.cap  = 0;
-    r.lib_dirs.a       = nil;
-    r.lib_dirs.data    = nil;
-    r.lib_dirs.len     = 0;
-    r.lib_dirs.cap     = 0;
-    r.include_deps     = false;
-    r.test_filter      = "";
-    r.no_cache         = false;
-    r.object_cache     = false;
+    r.project_root   = "";
+    r.owner          = "";
+    r.target         = "";
+    r.profile        = "";
+    r.artifact       = "";
+    r.goal           = GOAL_ARTIFACT;
+    r.opt            = pipeline.OPT_DEBUG;
+    r.debug          = false;
+    r.pie            = false;
+    r.subsystem_flag = SUBSYSTEM_FLAG_NONE;
+    r.subsystem      = catalog_subsystem.CONSOLE;
+    r.simd           = manifest.SIMD_SCALARIZE;
+    r.passes         = pipeline.set_empty();
+    r.skips          = pipeline.set_empty();
+    r.relax          = pass.RELAX_NONE;
+    r.overrides      = false;
+    r.allow          = diagnostic_kind.set_empty();
+    r.jobs           = 0;
+    r.emit_ir        = false;
+    r.ir_form        = ir_printer.IR_FORM_DEBUG;
+    r.emit_asm       = false;
+    r.out            = "";
+    r.work           = "";
+    r.link_tokens    = collections_vector.init[LinkToken](nil);
+    r.lib_dirs       = collections_vector.init[str](nil);
+    r.include_deps   = false;
+    r.test_filter    = "";
+    r.no_cache       = false;
+    r.object_cache   = false;
     ret r;
 }
 
@@ -299,7 +293,7 @@ pub fun validate(a: *A.Allocator, r: *BuildRequest) err[fail.Fail] {
     ret err[fail.Fail].ok{};
 }
 
-pub fun release(r: *BuildRequest) bool {
+pub fun is_release(r: *BuildRequest) bool {
     ret r.opt == pipeline.OPT_RELEASE;
 }
 

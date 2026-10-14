@@ -122,11 +122,9 @@ pub rec BuildUnit {
     dep_requires: Vector[str];
 }
 
-pub def BuildRequest: request.BuildRequest;
-
 # project: the root manifest's `[project].id`
 pub rec BuildPlan {
-    request: BuildRequest;
+    request: request.BuildRequest;
     project: str;
     units:   Vector[BuildUnit];
 }
@@ -353,7 +351,7 @@ fun plan_cell(a: *A.Allocator, itn: *intern.Interner, reg: *lang_target.TargetRe
             ti = ti + 1;
         }
         if (!reached) {
-            ret err[fail.Fail].err{in_dependency(a, owner_chain, fail.user_of(diagnostic_kind.ARTIFACT_REQUIREMENT_UNREACHABLE, join_msg(a,
+            ret err[fail.Fail].err{in_dependency(a, owner_chain, fail.user_of(diagnostic_kind.ARTIFACT_REQUIREMENT_UNREACHABLE, fail.join(a,
                 "mach.toml: artifact '", u.sel_artifact, "' requires artifact '", rname,
                 "', which declares no target this build can produce")))};
         }
@@ -370,7 +368,7 @@ fun in_dependency(a: *A.Allocator, owner_chain: str, f: fail.Fail) fail.Fail {
     if (str_empty(owner_chain)) { ret f; }
     val carried: opt[str] = fail.text(f);
     if (sel carried.none) { ret f; }
-    val joined: res[str, fail.Fail] = join_msg(a, "dependency ", owner_chain, ": ", carried.some);
+    val joined: res[str, fail.Fail] = fail.join(a, "dependency ", owner_chain, ": ", carried.some);
     if (sel joined.err) { ret joined.err; }
     ret fail.with_text(f, joined.ok);
 }
@@ -490,11 +488,11 @@ fun plan_dependency_cells(a: *A.Allocator, itn: *intern.Interner, reg: *lang_tar
                         ti = ti + 1;
                     }
                     if (!reached) {
-                        ret err[fail.Fail].err{in_dependency(a, chain, fail.user_of(diagnostic_kind.ARTIFACT_REQUIREMENT_UNREACHABLE, join_msg(a,
+                        ret err[fail.Fail].err{in_dependency(a, chain, fail.user_of(diagnostic_kind.ARTIFACT_REQUIREMENT_UNREACHABLE, fail.join(a,
                             "mach.toml: its export library requires artifact '", rname,
                             "', which declares no target")))};
                     }
-                    val label_r: res[str, fail.Fail] = join_msg(a, owner, ".", rname);
+                    val label_r: res[str, fail.Fail] = fail.join(a, owner, ".", rname);
                     if (sel label_r.err) { ret err[fail.Fail].err{label_r.err}; }
                     val label: str = label_r.ok;
                     if (!label_listed(labels, label)) {
@@ -525,22 +523,23 @@ fun plan_dependency_cell(a: *A.Allocator, itn: *intern.Interner, reg: *lang_targ
     # its closure, so each is preceded by that closure's requirement cells
     var added: Vector[BuildUnit] = collections_vector.init[BuildUnit](a);
     fin { collections_vector.dnit[BuildUnit](?added); }
-    var i: usize = first;
-    for (i < units.len) {
-        val pushed: res[usize, A.Error] = collections_vector.push[BuildUnit](?added, units.data[i]);
-        if (sel pushed.err) { ret err[fail.Fail].err{fail.refused(pushed.err)}; }
-        i = i + 1;
+    for (units.len > first) {
+        val taken: opt[BuildUnit] = collections_vector.pop[BuildUnit](units);
+        if (sel taken.some) {
+            val pushed: res[usize, A.Error] = collections_vector.push[BuildUnit](?added, taken.some);
+            if (sel pushed.err) { ret err[fail.Fail].err{fail.refused(pushed.err)}; }
+        }
     }
-    units.len = first;
-    i         = 0;
-    for (i < added.len) {
+    # popped last first, so the cells are taken back in planned order
+    var i: usize = added.len;
+    for (i > 0) {
+        i = i - 1;
         var u:       BuildUnit      = added.data[i];
         val reached: err[fail.Fail] = plan_dependency_cells(a, itn, reg, closure, root, owner_index::i64,
             req, units, ?u.dep_requires);
         if (sel reached.err) { ret reached; }
         val pushed: res[usize, A.Error] = collections_vector.push[BuildUnit](units, u);
         if (sel pushed.err) { ret err[fail.Fail].err{fail.refused(pushed.err)}; }
-        i = i + 1;
     }
     ret err[fail.Fail].ok{};
 }
@@ -575,7 +574,7 @@ pub fun check_plan_outputs(a: *A.Allocator, plans: *Vector[BuildPlan]) err[fail.
                 for (j < right.len) {
                     val v: *BuildUnit = ?right.data[j];
                     if (writes_output(u) && writes_output(v) && str_equals(u.out_path, v.out_path)) {
-                        ret err[fail.Fail].err{fail.user_of(diagnostic_kind.OUTPUT_COLLISION, join_msg(a,
+                        ret err[fail.Fail].err{fail.user_of(diagnostic_kind.OUTPUT_COLLISION, fail.join(a,
                             "artifact '", u.label, "' in profiles '", u.profile, "' and '", v.profile,
                             "' collides on output path '", u.out_path, "'; put {profile.name} in [project].work"))};
                     }
@@ -612,7 +611,7 @@ fun check_unit_outputs(a: *A.Allocator, units: *Vector[BuildUnit]) err[fail.Fail
             for (j < units.len) {
                 val v: *BuildUnit = ?units.data[j];
                 if (writes_output(v) && str_equals(u.out_path, v.out_path)) {
-                    ret err[fail.Fail].err{fail.user_of(diagnostic_kind.OUTPUT_COLLISION, join_msg(a,
+                    ret err[fail.Fail].err{fail.user_of(diagnostic_kind.OUTPUT_COLLISION, fail.join(a,
                         "artifacts '", u.label, "' and '", v.label, "' collide on output path '", u.out_path, "'"))};
                 }
                 j = j + 1;
@@ -639,7 +638,7 @@ fun out_conflict_msg(a: *A.Allocator, bp: *BuildPlan) res[str, fail.Fail] {
     val cells_r: res[str, textbuild.Error] = textbuild.tb_finish(?cb);
     textbuild.tb_dnit(?cb);
     if (sel cells_r.err) { ret res[str, fail.Fail].err{fail.message(textbuild.text(cells_r.err))}; }
-    ret join_msg(a, "-o names a single output but the selection resolves to several build units (",
+    ret fail.join(a, "-o names a single output but the selection resolves to several build units (",
         cells_r.ok, "); narrow it with -a, -t and -p");
 }
 
@@ -762,7 +761,7 @@ fun plan_unit(a: *A.Allocator, itn: *intern.Interner, reg: *lang_target.TargetRe
     u.owner_chain  = "";
     u.label        = aname;
     if (!str_empty(req.owner)) {
-        val label: res[str, fail.Fail] = join_msg(a, req.owner, ".", aname);
+        val label: res[str, fail.Fail] = fail.join(a, req.owner, ".", aname);
         if (sel label.err) { ret res[BuildUnit, fail.Fail].err{label.err}; }
         u.label = label.ok;
     }
@@ -899,11 +898,11 @@ fun oom_unit() res[BuildUnit, fail.Fail] {
 fun join_template(a: *A.Allocator, itn: *intern.Interner, root: str, dir_id: intern.StrId, what: str) res[str, fail.Fail] {
     val opt_tmpl: opt[str] = intern.get(itn, dir_id);
     if (sel opt_tmpl.none) {
-        ret res[str, fail.Fail].err{fail.message_of(join_msg(a, what, "template not interned", ""))};
+        ret res[str, fail.Fail].err{fail.message_of(fail.join(a, what, "template not interned", ""))};
     }
     val jr: res[str, A.Error] = types_path.join(a, root, opt_tmpl.some);
     if (sel jr.err) {
-        ret res[str, fail.Fail].err{fail.message_of(join_msg(a, what, lang_alloc.text(jr.err), ""))};
+        ret res[str, fail.Fail].err{fail.message_of(fail.join(a, what, lang_alloc.text(jr.err), ""))};
     }
     ret res[str, fail.Fail].ok{jr.ok};
 }
@@ -1102,12 +1101,6 @@ pub fun resolve_requirement(a: *A.Allocator, itn: *intern.Interner, tgt: *lang_t
     li.library            = library;
     li.include_referenced = req.include_referenced;
     ret res[input.Input, fail.Fail].ok{li};
-}
-
-pub fun join_msg(al: *A.Allocator, va: ...) res[str, fail.Fail] {
-    val r: res[str, types_string.StrError] = str_join(al, va...);
-    if (sel r.err) { ret res[str, fail.Fail].err{fail.str_refused(r.err)}; }
-    ret res[str, fail.Fail].ok{r.ok};
 }
 
 # render the effective plan: one block per selected cell, naming the project,

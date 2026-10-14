@@ -200,19 +200,19 @@ fun declared_resource_read(p: *driver.Project, root: str, rel: intern.StrId, nou
     path: *str, bytes: *Vector[u8]) err[fail.Fail] {
     if (intern.str_is_nil(rel)) { ret err[fail.Fail].ok{}; }
     val rel_o: opt[str] = intern.get(?p.s.interner, rel);
-    if (sel rel_o.none) { ret err[fail.Fail].err{fail.message_of(build_plan.join_msg(p.alloc, "artifact ", noun, " path is not interned"))}; }
+    if (sel rel_o.none) { ret err[fail.Fail].err{fail.message_of(fail.join(p.alloc, "artifact ", noun, " path is not interned"))}; }
     val pr: res[str, A.Error] = types_path.join(p.alloc, root, rel_o.some);
     if (sel pr.err) { ret err[fail.Fail].err{fail.refused(pr.err)}; }
     @path = pr.ok;
     val rr: res[Vector[u8], fs.FsError] = fs.read_bytes(p.alloc, @path);
     if (sel rr.err) {
-        ret err[fail.Fail].err{fail.user_of(diagnostic_kind.ARTIFACT_RESOURCE_UNREADABLE, build_plan.join_msg(p.alloc,
+        ret err[fail.Fail].err{fail.user_of(diagnostic_kind.ARTIFACT_RESOURCE_UNREADABLE, fail.join(p.alloc,
             "cannot read artifact ", noun, " '", rel_o.some, "' (", @path, "): ", fail.fs_text(rr.err)))};
     }
     collections_vector.dnit[u8](bytes);
     @bytes = rr.ok;
     if (bytes.len == 0) {
-        ret err[fail.Fail].err{fail.user_of(diagnostic_kind.ARTIFACT_RESOURCE_EMPTY, build_plan.join_msg(p.alloc,
+        ret err[fail.Fail].err{fail.user_of(diagnostic_kind.ARTIFACT_RESOURCE_EMPTY, fail.join(p.alloc,
             "artifact ", noun, " '", rel_o.some, "' is empty"))};
     }
     ret err[fail.Fail].ok{};
