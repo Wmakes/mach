@@ -4255,7 +4255,7 @@ test context__a_change_after_the_freeze_is_refused_unless_reconfigured {
     fin { project.dnit_project(?p); }
     p.req.debug = !p.req.debug;
     val refused: err[fail.Fail] = driver.run_sema_pass(?p);
-    if (sel refused.ok)                                                                 { ret 4; }
+    if (sel refused.ok)                                                                           { ret 4; }
     if (!str_equals(fail.describe(refused.err), "the build context changed after it was frozen")) { ret 5; }
     val reconfigured: err[fail.Fail] = driver.reconfigure(?p, p.req);
     if (sel reconfigured.err) { ret 6; }
