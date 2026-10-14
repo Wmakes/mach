@@ -680,21 +680,6 @@ pub fun select_target(p: *project.Project, t: *project.TargetEntry) err[fail.Fai
     ret err[fail.Fail].ok{};
 }
 
-#[testing]
-fun cfg_contains(hay: str, needle: str) bool {
-    val hn: usize = str_len(hay);
-    val nn: usize = str_len(needle);
-    if (nn > hn) { ret false; }
-    var i: usize = 0;
-    for (i + nn <= hn) {
-        var j: usize = 0;
-        for (j < nn && hay[i + j] == needle[j]) { j = j + 1; }
-        if (j == nn) { ret true; }
-        i = i + 1;
-    }
-    ret false;
-}
-
 # two allocations succeed, then every request is refused
 test clone_step__allocation_failure_is_atomic {
     var t:      T.Testing;
@@ -757,7 +742,7 @@ test validate_declared_step_output_collisions__deterministic {
     var bad:   bool           = sel exact.ok;
     if (sel exact.err) {
         val msg: str = fail.describe(exact.err);
-        if (!cfg_contains(msg, "[step.alpha]") || !cfg_contains(msg, "[step.zeta]")) { bad = true; }
+        if (!str_contains(msg, "[step.alpha]") || !str_contains(msg, "[step.zeta]")) { bad = true; }
         str_free(?alloc, msg);
     }
     collections_vector.dnit[DeclaredStepOutput](?outputs);
@@ -771,7 +756,7 @@ test validate_declared_step_output_collisions__deterministic {
     if (sel nested.ok) { bad = true; }
     if (sel nested.err) {
         val msg: str = fail.describe(nested.err);
-        if (!cfg_contains(msg, "collides")) { bad = true; }
+        if (!str_contains(msg, "collides")) { bad = true; }
         str_free(?alloc, msg);
     }
     collections_vector.dnit[DeclaredStepOutput](?outputs);
@@ -785,7 +770,7 @@ test validate_declared_step_output_collisions__deterministic {
     if (sel same_step_nested.ok) { bad = true; }
     if (sel same_step_nested.err) {
         val msg: str = fail.describe(same_step_nested.err);
-        if (!cfg_contains(msg, "collides")) { bad = true; }
+        if (!str_contains(msg, "collides")) { bad = true; }
         str_free(?alloc, msg);
     }
     collections_vector.dnit[DeclaredStepOutput](?outputs);

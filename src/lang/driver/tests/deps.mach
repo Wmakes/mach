@@ -1097,7 +1097,7 @@ test dep_closure__transitive_manifest_failures_name_the_dependency {
     }
 
     var bad: i32 = 0;
-    if (!ut_dep_build_fails(?s, root, "dep 'b'")) { bad = 1; }
+    if (!ut_dep_build_fails(?s, root, "dependency 'b'")) { bad = 1; }
     val b_manifest:        str                 = ut_cc3(?alloc, b_root, "/", manifest.MANIFEST_FILE);
     val b_manifest_marker: str                 = ut_cc3(?alloc, b_manifest, "/", "keep");
     val remove_file_r:     err[io_error.Error] = fs.remove_file(b_manifest);

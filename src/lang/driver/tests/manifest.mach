@@ -430,7 +430,7 @@ test manifest__the_root_and_each_dependency_are_held_to_one_rule_per_key {
                 bad = 5;
             }
             if (sel pr2.err) {
-                if (!ut_str_contains(fail.describe(pr2.err), "dep 'old': mach.toml: unknown key 'description' in [project]")) { bad = 6; }
+                if (!ut_str_contains(fail.describe(pr2.err), "dependency 'old': mach.toml: unknown key 'description' in [project]")) { bad = 6; }
             }
         }
     }
@@ -450,7 +450,7 @@ test manifest__the_root_and_each_dependency_are_held_to_one_rule_per_key {
                 bad = 8;
             }
             if (sel pr3.err) {
-                if (!ut_str_contains(fail.describe(pr3.err), "dep 'old': mach.toml: missing [profile] table")) { bad = 9; }
+                if (!ut_str_contains(fail.describe(pr3.err), "dependency 'old': mach.toml: missing [profile] table")) { bad = 9; }
             }
         }
     }

@@ -675,7 +675,7 @@ fun missing_fail(s: *session.Session, alias: str, dep_dir: str, root: str) fail.
 }
 
 fun diag_dep_manifest_error(s: *session.Session, alias: str, read_err: str) res[str, fail.Fail] {
-    ret fail.format_intern(?s.interner, s.build_alloc, "dep '{}': {}", alias, read_err);
+    ret fail.format_intern(?s.interner, s.build_alloc, "dependency '{}': {}", alias, read_err);
 }
 
 fun locate_dependency(s: *session.Session, alias: str, project_root: str,
@@ -711,7 +711,7 @@ fun locate_dependency(s: *session.Session, alias: str, project_root: str,
     val mr: res[manifest.Manifest, fail.Fail] = manifest.parse(s.build_alloc, ?s.interner, ?doc);
     manifest.doc_dnit(s.build_alloc, ?doc);
     if (sel mr.err) {
-        val msg_r: res[str, std_format.FormatError] = std_format.sprint(s.build_alloc, "dep '{}': {}", alias,
+        val msg_r: res[str, std_format.FormatError] = std_format.sprint(s.build_alloc, "dependency '{}': {}", alias,
             fail.describe(mr.err));
         if (sel msg_r.err) { ret res[project.DepEntry, fail.Fail].err{mr.err}; }
         ret res[project.DepEntry, fail.Fail].err{fail.with_text(mr.err, msg_r.ok)};
