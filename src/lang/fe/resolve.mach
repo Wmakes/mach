@@ -3383,7 +3383,10 @@ fun bind_literal_head(rc: *ResolveContext, tid: ast_id.TypeId) err[fail.Fail] {
 fun literal_head_names_case(rc: *ResolveContext, tid: ast_id.TypeId) bool {
     if (ast_id.type_is_nil(tid)) { ret false; }
     val t_r: res[ast_type.Type, fail.Fail] = head_node(rc, tid);
-    if (sel t_r.err) { ret false; }
+    if (sel t_r.err) {
+        fail.internal(?rc.status, fail.describe(t_r.err));
+        ret false;
+    }
     ret comptime.names_case(t_r.ok);
 }
 
@@ -3441,14 +3444,20 @@ fun path_tail_symbol(rc: *ResolveContext, path: lang_source.Span) SymbolId {
 
 fun bind_type(rc: *ResolveContext, tid: ast_id.TypeId) err[fail.Fail] {
     if (ast_id.type_is_nil(tid)) { ret err[fail.Fail].ok{}; }
-    val t_r: res[ast_type.Type, fail.Fail] = head_node(rc, tid);
-    if (sel t_r.err) { ret err[fail.Fail].err{t_r.err}; }
-    var node: ast_type.Type  = t_r.ok;
-    val t:    *ast_type.Type = ?node;
+    val t_opt: opt[*ast_type.Type] = ast.get_type(rc.a, tid);
+    if (!sel t_opt.some) { ret err[fail.Fail].err{fail.message("TypeId out of range")}; }
+    val t: *ast_type.Type = t_opt.some;
     if (stack.exhausted()) { ret refuse_nesting(rc, t.span); }
 
     if (t.kind == ast_type.TYPE_KIND_NAMED) {
-        val sid: SymbolId = resolve_type_path(rc, ?t.data.named, t.span);
+        # the path as this resolution reads it: a literal head it split names the type by its prefix
+        val head_r: res[ast_type.Type, fail.Fail] = head_node(rc, tid);
+        if (sel head_r.err) {
+            fail.internal(?rc.status, fail.describe(head_r.err));
+            ret err[fail.Fail].err{head_r.err};
+        }
+        var head: ast_type.Type = head_r.ok;
+        val sid:  SymbolId      = resolve_type_path(rc, ?head.data.named, t.span);
         if (rc.type_resolved != nil) { rc.type_resolved[ast_id.type_index(tid)] = sid; }
         var ai: u32 = 0;
         for (ai < t.data.named.args_len) {
