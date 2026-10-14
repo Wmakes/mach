@@ -4232,3 +4232,34 @@ test retention__a_run_of_rejected_loads_holds_what_the_first_one_held {
     if (ut_held(?s, "uniontest.p") || !ut_held(?s, "uniontest.package_manifes")) { ret 9; }
     ret 0;
 }
+
+# a loaded project's request changed behind the frozen build context is refused rather than
+# read, and the same change announced through reconfigure is read
+test context__a_change_after_the_freeze_is_refused_unless_reconfigured {
+    var alloc:  A.Allocator;
+    val make_r: err[A.Error] = page.make(?alloc);
+    if (sel make_r.err) { ret 1; }
+    var names:  [1]str              = [1]str{"main.mach"};
+    var texts:  [1]str              = [1]str{"fun main() i32 { ret 0; }\n"};
+    var s:      session.Session;
+    val root_r: res[str, fail.Fail] = ut_gate_session(?alloc, ?names[0], ?texts[0], 1, ?s);
+    if (sel root_r.err) { ret 2; }
+    val root: str = root_r.ok;
+    fin {
+        fs.remove_all(?alloc, root);
+        session.dnit(?s);
+    }
+    val built: res[project.Project, fail.Fail] = ut_gate_rebuild(?s, root);
+    if (sel built.err) { ret 3; }
+    var p: project.Project = built.ok;
+    fin { project.dnit_project(?p); }
+    p.req.debug = !p.req.debug;
+    val refused: err[fail.Fail] = driver.run_sema_pass(?p);
+    if (sel refused.ok)                                                                 { ret 4; }
+    if (!str_equals(fail.describe(refused.err), "the build context changed after it was frozen")) { ret 5; }
+    val reconfigured: err[fail.Fail] = driver.reconfigure(?p, p.req);
+    if (sel reconfigured.err) { ret 6; }
+    val read: err[fail.Fail] = driver.run_sema_pass(?p);
+    if (sel read.err) { ret 7; }
+    ret 0;
+}
