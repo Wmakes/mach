@@ -1833,12 +1833,6 @@ pub val DEP_DESTINATION_EXISTS:           Kind = 303
 pub val DEP_DIRTY:                        Kind = 304
 ```
 
-## val DEP_ENTRY_MISSING
-
-```mach
-pub val DEP_ENTRY_MISSING:                Kind = 305
-```
-
 ## val DEP_FETCH
 
 ```mach
@@ -2779,12 +2773,6 @@ pub val TEST_NONE_DECLARED:               Kind = 466
 
 ```mach
 pub val TOML_MALFORMED:                   Kind = 467
-```
-
-## val USE_NO_PUBLIC_MODULE
-
-```mach
-pub val USE_NO_PUBLIC_MODULE:             Kind = 469
 ```
 
 ## val VERSION_INVALID

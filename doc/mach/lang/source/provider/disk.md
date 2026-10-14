@@ -11,10 +11,8 @@ the package id, and the rest is the module's path under `src`
 
 id: the package's `[project].id`
 version: its `[project].version`
-module: the fqn of its public module, or STR_NIL when it has none
 dir: the package's directory
 src: its source directory, relative to `dir`
-artifactless: it declares no artifact
 root: it is the package being built
 
 ## rec Disk
