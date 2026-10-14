@@ -114,6 +114,8 @@ compute: a derived product's computation; an input has none
 finalize: releases what an owned derived product's bytes hold; nil when the bytes own nothing
 equal: whether two owned products are the same, so an equal recomputation keeps the revision;
           requires finalize
+replay: the product lowers or generates a module's object, so a restored object replays its
+          warnings even when the module's front end ran again and reported its own
 
 ## rec QueryKey
 
