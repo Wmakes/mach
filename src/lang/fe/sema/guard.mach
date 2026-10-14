@@ -67,30 +67,63 @@ pub fun guarded(sc: *sema_context.SemaContext, place: ast_id.ExprId, case_name: 
 # a chain whose arms all test one place with `sel` or `!sel` and all exit leaves the block knowing
 # which cases remain; when exactly one remains the rest of the block is guarded for it
 pub fun open_exit_chain(sc: *sema_context.SemaContext, sid: ast_id.StmtId, frame: *sema_context.Guard) res[bool, fail.Fail] {
-    var place: ast_id.ExprId = ast_id.EXPR_NIL;
-    var cur:   ast_id.StmtId = sid;
+    var place: ast_id.ExprId        = ast_id.EXPR_NIL;
+    var tail:  ast_id.StmtId        = ast_id.STMT_NIL;
+    val ok:    res[bool, fail.Fail] = chain_place(sc, sid, true, ?place, ?tail);
+    if (sel ok.err)                          { ret ok; }
+    if (!ok.ok || !ast_id.stmt_is_nil(tail)) { ret res[bool, fail.Fail].ok{false}; }
+    ret open_remaining(sc, sid, place, frame);
+}
+
+# a chain whose arms all test one place with `sel` or `!sel` reaches its final bare `or` knowing
+# which cases remain, exiting or not; when exactly one remains the `or` body is guarded for it,
+# as the rest of the block is after a chain that exits
+pub fun open_final_or(sc: *sema_context.SemaContext, sid: ast_id.StmtId, frame: *sema_context.Guard) res[bool, fail.Fail] {
+    var place: ast_id.ExprId        = ast_id.EXPR_NIL;
+    var tail:  ast_id.StmtId        = ast_id.STMT_NIL;
+    val ok:    res[bool, fail.Fail] = chain_place(sc, sid, false, ?place, ?tail);
+    if (sel ok.err)                         { ret ok; }
+    if (!ok.ok || ast_id.stmt_is_nil(tail)) { ret res[bool, fail.Fail].ok{false}; }
+    ret open_remaining(sc, sid, place, frame);
+}
+
+# the place every arm of the chain from `sid` tests with `sel` or `!sel`, each arm exiting when
+# `exiting`; `tail` is the body of the chain's final bare `or`, nil when it has none. false when
+# an arm tests anything else, tests another place, or falls through where it must exit
+fun chain_place(sc: *sema_context.SemaContext, sid: ast_id.StmtId, exiting: bool, place: *ast_id.ExprId, tail: *ast_id.StmtId) res[bool, fail.Fail] {
+    @place = ast_id.EXPR_NIL;
+    @tail  = ast_id.STMT_NIL;
+    var cur: ast_id.StmtId = sid;
     for (!ast_id.stmt_is_nil(cur)) {
         val s_opt: opt[*ast_stmt.Stmt] = ast.get_stmt(sc.view.a, cur);
         if (!sel s_opt.some) { ret res[bool, fail.Fail].ok{false}; }
         val s: *ast_stmt.Stmt = s_opt.some;
-        if (s.kind != ast_stmt.STMT_KIND_IF) { ret res[bool, fail.Fail].ok{false}; }
+        if (s.kind != ast_stmt.STMT_KIND_IF) {
+            # only an `or` can follow an arm, so a statement that is not an arm is the chain's bare `or`
+            if (ast_id.stmt_same(cur, sid)) { ret res[bool, fail.Fail].ok{false}; }
+            @tail = cur;
+            brk;
+        }
         var neg:       bool                 = false;
         var arm_place: ast_id.ExprId        = ast_id.EXPR_NIL;
         var arm_case:  intern.StrId         = intern.STR_NIL;
         val tested:    res[bool, fail.Fail] = sel_test(sc, s.data.if_.cond, ?neg, ?arm_place, ?arm_case);
-        if (sel tested.err)            { ret tested; }
-        if (!tested.ok)                { ret res[bool, fail.Fail].ok{false}; }
-        if (ast_id.expr_is_nil(place)) { place = arm_place; }
+        if (sel tested.err)             { ret tested; }
+        if (!tested.ok)                 { ret res[bool, fail.Fail].ok{false}; }
+        if (ast_id.expr_is_nil(@place)) { @place = arm_place; }
         or {
-            val same: res[bool, fail.Fail] = place_equal(sc, place, arm_place);
+            val same: res[bool, fail.Fail] = place_equal(sc, @place, arm_place);
             if (sel same.err) { ret same; }
             if (!same.ok)     { ret res[bool, fail.Fail].ok{false}; }
         }
-        if (!stmt_exits(sc, s.data.if_.then_block, 0)) { ret res[bool, fail.Fail].ok{false}; }
+        if (exiting && !stmt_exits(sc, s.data.if_.then_block, 0)) { ret res[bool, fail.Fail].ok{false}; }
         cur = s.data.if_.else_block;
     }
-    if (ast_id.expr_is_nil(place)) { ret res[bool, fail.Fail].ok{false}; }
+    ret res[bool, fail.Fail].ok{!ast_id.expr_is_nil(@place)};
+}
 
+# guards `place` for the one case of its tag the chain from `sid` leaves untested, if exactly one
+fun open_remaining(sc: *sema_context.SemaContext, sid: ast_id.StmtId, place: ast_id.ExprId, frame: *sema_context.Guard) res[bool, fail.Fail] {
     val tag_ty: type.TypeId = type.strip_secret(?sc.s.types, tested_type(sc, place));
     if (!type.is_tag(?sc.s.types, tag_ty)) { ret res[bool, fail.Fail].ok{false}; }
     val count: u32 = type.field_count(?sc.s.types, tag_ty);
@@ -232,7 +265,9 @@ fun case_possible(sc: *sema_context.SemaContext, chain: ast_id.StmtId, name: int
     for (!ast_id.stmt_is_nil(cur)) {
         val s_opt: opt[*ast_stmt.Stmt] = ast.get_stmt(sc.view.a, cur);
         if (!sel s_opt.some) { ret res[bool, fail.Fail].ok{false}; }
-        val s:         *ast_stmt.Stmt       = s_opt.some;
+        val s: *ast_stmt.Stmt = s_opt.some;
+        # the chain's arms end at its bare `or`
+        if (s.kind != ast_stmt.STMT_KIND_IF) { brk; }
         var neg:       bool                 = false;
         var arm_place: ast_id.ExprId        = ast_id.EXPR_NIL;
         var arm_case:  intern.StrId         = intern.STR_NIL;

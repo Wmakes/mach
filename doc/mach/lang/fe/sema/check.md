@@ -88,6 +88,21 @@ pub fun check_member(sc: *sema_context.SemaContext, object: type.TypeId, name: i
 pub fun check_cast(sc: *sema_context.SemaContext, from: type.TypeId, to: type.TypeId, span: lang_source.Span) opt[type.TypeId];
 ```
 
+## val GROWTH_NOTE
+
+```mach
+pub val GROWTH_NOTE: str = "a generic whose argument grows through a pointer is compared by the arguments its fields lay out, never walked. where two laid arguments differ in size or alignment, padding can line the layouts up at one depth and not the next, so the comparison is refused rather than decided"
+```
+
+## fun report_secrecy
+
+```mach
+pub fun report_secrecy(sc: *sema_context.SemaContext, k: diagnostic_kind.Kind, span: lang_source.Span, head: str, v: secrecy.Verdict, note: str);
+```
+
+a secrecy refusal whose message names the field its answer turned on: where the classes
+differ, or the instance that grows and what kept it from lining up with the other side
+
 ## fun check_reinterpret
 
 ```mach

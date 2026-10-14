@@ -673,20 +673,20 @@ fun check_uni_secrecy(sc: *sema_context.SemaContext, nom: type.TypeId, fields_st
             var j:  u32                 = 0;
             for (j < i) {
                 if (sized[j]) {
-                    val jtn:    *ast_decl.TypedName               = ?sc.view.a.typed_names.data[fields_start + j];
-                    val jty:    type.TypeId                       = sema_context.resolved_type_of(sc, jtn.ty);
-                    val agreed: res[secrecy.Agreement, fail.Fail] = secrecy.overlay_agrees(sc.s, sema_context.machine_of(sc), jty, ty);
+                    val jtn:    *ast_decl.TypedName             = ?sc.view.a.typed_names.data[fields_start + j];
+                    val jty:    type.TypeId                     = sema_context.resolved_type_of(sc, jtn.ty);
+                    val agreed: res[secrecy.Verdict, fail.Fail] = secrecy.overlay_agrees(sc.s, sema_context.machine_of(sc), jty, ty);
                     if (sel agreed.err) {
                         sema_context.refuse(sc, tn.name, agreed.err);
                         ret next;
                     }
-                    val agree: secrecy.Agreement = agreed.ok;
-                    if (agree == secrecy.UNDECIDABLE) {
-                        sema_context.report(sc, diagnostic_kind.SECRET_VARIANT_UNPROVABLE, tn.name, secrecy.UNBOUNDED_VARIANTS_MSG);
+                    val agree: secrecy.Verdict = agreed.ok;
+                    if (agree.agreement == secrecy.UNDECIDABLE) {
+                        check.report_secrecy(sc, diagnostic_kind.SECRET_VARIANT_UNPROVABLE, tn.name, secrecy.UNBOUNDED_VARIANTS_MSG, agree, check.GROWTH_NOTE);
                         brk;
                     }
-                    if (agree != secrecy.AGREE) {
-                        sema_context.report(sc, diagnostic_kind.SECRET_VARIANT_MISMATCH, tn.name, "union variants must agree on secrecy: overlapping fields are part secret `^` and part public, which would alias the same storage at two classifications");
+                    if (agree.agreement != secrecy.AGREE) {
+                        check.report_secrecy(sc, diagnostic_kind.SECRET_VARIANT_MISMATCH, tn.name, "union variants must agree on secrecy: overlapping fields are part secret `^` and part public, which would alias the same storage at two classifications", agree, nil);
                         brk;
                     }
                 }

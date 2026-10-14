@@ -13,8 +13,9 @@ use A: std.allocator;
 
 use mach.lang.fail;
 use mach.lang.fe.ast;
-use ast_id:       mach.lang.fe.ast.id;
-use ast_type:     mach.lang.fe.ast.type;
+use ast_id:   mach.lang.fe.ast.id;
+use ast_type: mach.lang.fe.ast.type;
+use mach.lang.fe.sema.check;
 use sema_context: mach.lang.fe.sema.context;
 use lang_source:  mach.lang.source;
 use mach.lang.type;
@@ -289,20 +290,20 @@ fun check_variants(c: *Check, nom: type.TypeId, who: *type.GenericOwner, args: *
             val vj: opt[type.TypeId] = variant_at(q, nom, j, who, args, arg_len);
             if (sel vi.some) {
                 if (sel vj.some) {
-                    val agreement: res[secrecy.Agreement, fail.Fail] = secrecy.overlay_agrees(sc.s, sema_context.machine_of(sc), vj.some, vi.some);
+                    val agreement: res[secrecy.Verdict, fail.Fail] = secrecy.overlay_agrees(sc.s, sema_context.machine_of(sc), vj.some, vi.some);
                     if (sel agreement.err) {
                         type_query.inherit(q, agreement.err);
                         ret;
                     }
-                    if (agreement.ok == secrecy.UNDECIDABLE) {
+                    if (agreement.ok.agreement == secrecy.UNDECIDABLE) {
                         if (sema_context.uni_report_mark(sc.typing.uni_reports, key)) {
-                            sema_context.report(sc, diagnostic_kind.SECRET_VARIANT_UNPROVABLE, c.span, secrecy.UNBOUNDED_VARIANTS_MSG);
+                            check.report_secrecy(sc, diagnostic_kind.SECRET_VARIANT_UNPROVABLE, c.span, secrecy.UNBOUNDED_VARIANTS_MSG, agreement.ok, check.GROWTH_NOTE);
                         }
                         ret;
                     }
-                    if (agreement.ok == secrecy.DISAGREE) {
+                    if (agreement.ok.agreement == secrecy.DISAGREE) {
                         if (sema_context.uni_report_mark(sc.typing.uni_reports, key)) {
-                            sema_context.report(sc, diagnostic_kind.SECRET_VARIANT_MISMATCH, c.span, "union variants must agree on secrecy: this instantiation makes overlapping fields part secret `^` and part public, which would alias the same storage at two classifications");
+                            check.report_secrecy(sc, diagnostic_kind.SECRET_VARIANT_MISMATCH, c.span, "union variants must agree on secrecy: this instantiation makes overlapping fields part secret `^` and part public, which would alias the same storage at two classifications", agreement.ok, nil);
                         }
                         ret;
                     }
