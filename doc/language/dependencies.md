@@ -421,7 +421,7 @@ Command-line usage (`pull`, `verify`, `add`, `update`, `remove`, `list`) is
 documented by `mach help dep`.
 
 A dependency's export surface — all a consumer sees — is its source module tree
-(addressed by the dep's id), the module a bare `use <id>;` binds, its
+(each module addressed by the dep's id and its source path), its
 `export = true` link entries and library artifact, and the steps and artifacts
 those demand. Nothing else in a dependency's manifest applies to consumers.
 

@@ -35,16 +35,9 @@ val c: usize      = 3;
 val d: my_usize   = 4;
 ```
 
-```mach fragment
-use mylib;                       # bare project id: binds mylib's public module
-```
-
-A one-segment path equal to a resolvable project id binds that project's
-public module, the `entry` of its library artifact marked `export = true`
-(see [modules.md](modules.md#bare-project-id-imports)). A dependency that
-exports none has no public module and is imported by full path only; std is
-one (`use std;` is refused naming the rule, while `use std.print;` needs no
-export).
+A path is always `<project id>.<source path>`. A one-segment path such as
+`use std;` names a project and no module, so it is refused like any path that
+names nothing (see [modules.md](modules.md#a-use-path-is-a-project-id-and-a-source-path)).
 
 ## Design rule
 
