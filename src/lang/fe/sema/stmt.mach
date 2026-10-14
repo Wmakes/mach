@@ -130,17 +130,7 @@ pub fun infer_stmt(sc: *sema_context.SemaContext, sid: ast_id.StmtId, fn_ret: ty
     if (st.kind == ast_stmt.STMT_KIND_BLOCK) {
         ret infer_stmt_list(sc, st.data.block.stmts_start, st.data.block.stmts_len, fn_ret);
     }
-    if (st.kind == ast_stmt.STMT_KIND_IF) {
-        val cond_ty: type.TypeId = infer.infer_expr(sc, st.data.if_.cond);
-        if (!type.is_error(cond_ty)) { check.check_condition(sc, cond_ty, st.span); }
-        var arm_guard: sema_context.Guard;
-        val opened:    res[bool, fail.Fail] = guard.open_sel(sc, st.data.if_.cond, ?arm_guard);
-        if (sel opened.err) { ret err[fail.Fail].err{opened.err}; }
-        val res_then: err[fail.Fail] = infer_stmt(sc, st.data.if_.then_block, fn_ret);
-        if (opened.ok)        { guard.close(sc, ?arm_guard); }
-        if (sel res_then.err) { ret res_then; }
-        ret infer_stmt(sc, st.data.if_.else_block, fn_ret);
-    }
+    if (st.kind == ast_stmt.STMT_KIND_IF) { ret infer_if_chain(sc, sid, fn_ret); }
     if (st.kind == ast_stmt.STMT_KIND_FOR) {
         if (!ast_id.expr_is_nil(st.data.for_.cond)) {
             val cond_ty: type.TypeId = infer.infer_expr(sc, st.data.for_.cond);
@@ -430,6 +420,41 @@ fun infer_const_array_each(sc: *sema_context.SemaContext, ce: *ast_stmt.StmtComp
         if (sel res_body.err)  { ret res_body; }
         if (sel res_close.err) { ret res_close; }
         i = i + 1;
+    }
+    ret err[fail.Fail].ok{};
+}
+
+# an `if` and its `or` arms, walked as one chain so its final bare `or` is guarded by every arm
+# before it
+fun infer_if_chain(sc: *sema_context.SemaContext, head: ast_id.StmtId, fn_ret: type.TypeId) err[fail.Fail] {
+    var cur: ast_id.StmtId = head;
+    for (true) {
+        val opt_stmt: opt[*ast_stmt.Stmt] = ast.get_stmt(sc.view.a, cur);
+        if (!sel opt_stmt.some) { ret err[fail.Fail].err{fail.message("StmtId out of range")}; }
+        val st:      *ast_stmt.Stmt = opt_stmt.some;
+        val cond_ty: type.TypeId    = infer.infer_expr(sc, st.data.if_.cond);
+        if (!type.is_error(cond_ty)) { check.check_condition(sc, cond_ty, st.span); }
+        var arm_guard: sema_context.Guard;
+        val opened:    res[bool, fail.Fail] = guard.open_sel(sc, st.data.if_.cond, ?arm_guard);
+        if (sel opened.err) { ret err[fail.Fail].err{opened.err}; }
+        val res_then: err[fail.Fail] = infer_stmt(sc, st.data.if_.then_block, fn_ret);
+        if (opened.ok)        { guard.close(sc, ?arm_guard); }
+        if (sel res_then.err) { ret res_then; }
+
+        val next: ast_id.StmtId = st.data.if_.else_block;
+        if (ast_id.stmt_is_nil(next)) { ret err[fail.Fail].ok{}; }
+        val opt_next: opt[*ast_stmt.Stmt] = ast.get_stmt(sc.view.a, next);
+        if (!sel opt_next.some) { ret err[fail.Fail].err{fail.message("StmtId out of range")}; }
+        if (opt_next.some.kind == ast_stmt.STMT_KIND_IF) {
+            cur = next;
+            cnt;
+        }
+        var or_guard: sema_context.Guard;
+        val guarded:  res[bool, fail.Fail] = guard.open_final_or(sc, head, ?or_guard);
+        if (sel guarded.err) { ret err[fail.Fail].err{guarded.err}; }
+        val res_or: err[fail.Fail] = infer_stmt(sc, next, fn_ret);
+        if (guarded.ok) { guard.close(sc, ?or_guard); }
+        ret res_or;
     }
     ret err[fail.Fail].ok{};
 }

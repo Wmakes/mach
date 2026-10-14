@@ -38,7 +38,8 @@ fun read(reply: Reply) i64 {
 
 A guard is a lexical region, not a flow fact. A chain whose every arm exits
 guards the remainder of the enclosing block for the case the chain left
-untested. See [tag.md](tag.md).
+untested, and a chain's final bare `or` is guarded the same way for the one case
+the arms before it left untested. See [tag.md](tag.md).
 
 ## `for`
 

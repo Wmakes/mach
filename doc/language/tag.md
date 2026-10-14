@@ -284,6 +284,26 @@ fun read_value(reply: Reply) i64 {
 }
 ```
 
+A chain's final bare `or` stands where that remainder does: when every arm before
+it tests one place with `sel` or `!sel` and they leave one case untested, the
+`or` body is guarded for that case, whether or not the arms exit.
+
+```mach
+tag Shape: u8 { dot; line: i64; square: i64; }
+
+fun size(s: Shape) i64 {
+    if (sel s.dot) {
+        ret 0;
+    }
+    or (sel s.line) {
+        ret s.line;
+    }
+    or {
+        ret s.square * s.square; # the one case the arms left untested
+    }
+}
+```
+
 A payload read outside a guard is a compile error:
 
 ```mach error a tag payload requires a `sel` guard
