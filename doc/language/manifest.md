@@ -1152,7 +1152,7 @@ reads the selected artifact's name.
 | `icon` | absent: no icon | Project-root-relative `.ico` path embedded in a Windows executable's PE resources. Non-empty path string; `bin` artifacts only. |
 | `manifest` | absent: no application manifest | Project-root-relative application-manifest path embedded byte-for-byte in a Windows executable's PE resources. Non-empty path string; `bin` artifacts only. |
 | `default` | absent: not marked | Selection only. `true` puts the artifact in the [default selection](build.md#selection-and-the-build-matrix): with no `-a`, `mach build` and `mach check` take the marked artifacts among those supporting the selected target (every one of them when none is marked), and a command that needs one artifact (`mach test`, `mach run`, the editor's union build) takes the marked one. A command that needs one artifact refuses two marked candidates; an explicit `-a` always wins, and a sole candidate needs no marker. |
-| `export` | absent: not exported | `true` marks the library a bare `use <id>;` binds and whose requirements travel to consumers (see [Dependency requirements travel](#dependency-requirements-travel)). It applies to `static` and `shared` artifacts only, and a project exports at most one. |
+| `export` | absent: not exported | `true` marks the library whose requirements travel to consumers (see [Dependency requirements travel](#dependency-requirements-travel)). It describes the prebuilt library only and never affects how a `use` path resolves. It applies to `static` and `shared` artifacts only, and a project exports at most one. |
 
 `entry` is the build cell's source root. The build follows its active `use` and
 `fwd` edges transitively and compiles that reachable module set; another file under

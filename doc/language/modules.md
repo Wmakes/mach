@@ -13,25 +13,21 @@ There is no `this.` self-prefix. Within a project, modules always reference
 each other by their full project-rooted path. Every reference is
 syntactically uniform regardless of where it appears.
 
-## Bare project-id imports
+## A use path is a project id and a source path
 
-A one-segment `use`/`fwd` path equal to a resolvable project id — a dependency's
-id or the current project's own id — binds that project's **public module**.
-For a dependency that is the `entry` of its library artifact marked
-`export = true`: a library that declares one `static` artifact with
-`export = true` and `entry = "lib/libstd.mach"` gives `use std;` the module
-`std.lib.libstd`. A project exports at most one library, and a `bin` never
-publishes an entry. `default = true` only selects what a command builds and
-binds nothing. For the current project it is the selected artifact's entry. A
-dependency with no export library has no public module, and a bare import of it
-is an error (`project 'x' has no public module: a bare import binds the entry of
-its library artifact marked `export = true`; import a full path, or mark one
-static or shared [artifact.*] table export = true in its manifest`). Longer
-paths are unaffected: `use std.print;` needs no export. A dependency that
-declares no artifact at all has no public module either, and the refusal says
-so (`project 'x' declares no artifact, so it has no public module: import a
-full path, or declare a static or shared [artifact.*] table marked export =
-true in its manifest`), so a library declares its artifact.
+A `use` or `fwd` path is always `<project id>.<source path>`: its first segment
+names a project, the current one or a declared dependency, and the rest names a
+file under that project's source directory. `use std.print;` binds
+`src/print.mach` of the project `std`. A one-segment path names a project and
+no module, so `use std;` is refused with the ordinary unresolved-path error,
+`use path 'std' does not name a module`, whatever files the project holds. A
+module whose file is named for its project, such as `src/std.mach`, is
+imported as `use std.std;`.
+
+A library artifact's `entry` and `export = true` describe the prebuilt library
+the project ships (see [manifest.md](manifest.md#artifactname)) and play no part in
+name resolution. A consumer imports a library's modules by their source paths
+whether or not it links that library prebuilt.
 
 ## Shadow-module pattern
 

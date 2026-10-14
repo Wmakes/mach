@@ -1,6 +1,6 @@
-use boom;
-use shader;
-use p: std.print;
+use boom:   boom.lib;
+use shader: shader.lib;
+use p:      std.print;
 use std.runtime;
 
 #[symbol("main")]

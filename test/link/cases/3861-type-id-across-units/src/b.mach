@@ -1,5 +1,5 @@
 # a second module instantiating the same generic over the same types
-use shapes;
+use shapes: shapes.lib;
 
 pub fun dep_point_id() u64 {
     ret $type_id(shapes.Point);

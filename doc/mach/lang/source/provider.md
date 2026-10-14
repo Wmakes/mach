@@ -25,17 +25,6 @@ where a module's text is read from
 path: how the source map names the module's file, owned by the caller of `module_locate`
 home: the package that owns it
 
-## rec Package
-
-```mach
-pub rec Package;
-```
-
-what a bare import of a package's id binds
-
-module: the fqn of the package's public module, or STR_NIL when it has none
-artifactless: the package declares no artifact at all, so it can have no public module
-
 ## rec Text
 
 ```mach
@@ -51,7 +40,7 @@ pub rec Provider;
 ```
 
 the module namespace a load reads: which names are modules, where each is read from, and
-what each package's bare id binds. every member answers for names it does not hold by
+which package ids it holds. every member answers for names it does not hold by
 saying so, never by failing, so a provider can stand in front of another one
 
 ctx: the member's own state
@@ -59,7 +48,7 @@ locate: where the module an fqn names would be read from, none when no package o
          fqn's head segment; it does not say the module exists
 exists: whether the fqn names a module, spelled exactly as the provider holds it
 read: the text at a path `locate` gave
-package: what a bare import of a package id binds, none when no package has that id
+package: whether a package has the id
 
 ## fun module_locate
 
@@ -79,10 +68,10 @@ pub fun module_exists(p: *Provider, a: *A.Allocator, fqn: intern.StrId) res[bool
 pub fun module_read(p: *Provider, a: *A.Allocator, path: str) res[Text, fail.Fail];
 ```
 
-## fun package_find
+## fun package_known
 
 ```mach
-pub fun package_find(p: *Provider, id: intern.StrId) opt[Package];
+pub fun package_known(p: *Provider, id: intern.StrId) bool;
 ```
 
 ## fun origin_dnit

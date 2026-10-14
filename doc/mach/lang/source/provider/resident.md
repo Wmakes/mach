@@ -40,13 +40,13 @@ pub fun module_set(r: *Resident, name: str, text: str) err[fail.Fail];
 
 hold `text` as the module `name`, replacing what it held before
 
-## fun package_set
+## fun package_add
 
 ```mach
-pub fun package_set(r: *Resident, id: str, module: str) err[fail.Fail];
+pub fun package_add(r: *Resident, id: str) err[fail.Fail];
 ```
 
-say what a bare import of the package `id` binds: its public module `module`, or none when empty
+know the package `id`
 
 ## fun provider_of
 

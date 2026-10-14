@@ -2,7 +2,7 @@
 use p: std.print;
 use case.a;
 use case.b;
-use shapes;
+use shapes: shapes.lib;
 use std.runtime;
 use std.types.bool.bool;
 use std.types.string.str;

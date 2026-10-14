@@ -344,7 +344,7 @@ pub val DEP_CONFLICT:                     Kind = 301;
 pub val DEP_CYCLE:                        Kind = 302;
 pub val DEP_DESTINATION_EXISTS:           Kind = 303;
 pub val DEP_DIRTY:                        Kind = 304;
-pub val DEP_ENTRY_MISSING:                Kind = 305;
+val     DEP_ENTRY_MISSING:                Kind = 305;
 pub val DEP_FETCH:                        Kind = 306;
 pub val DEP_GITMODULES_MISMATCH:          Kind = 307;
 pub val DEP_ID_MISMATCH:                  Kind = 308;
@@ -508,7 +508,7 @@ pub val TEMPLATE_UNTERMINATED:            Kind = 465;
 pub val TEST_NONE_DECLARED:               Kind = 466;
 pub val TOML_MALFORMED:                   Kind = 467;
 val     TOML_VALUE_TOO_LONG:              Kind = 468;
-pub val USE_NO_PUBLIC_MODULE:             Kind = 469;
+val     USE_NO_PUBLIC_MODULE:             Kind = 469;
 pub val VERSION_INVALID:                  Kind = 470;
 pub val VERSION_INVALID_RANGE:            Kind = 471;
 pub val LINK_ABI_MISMATCH:                Kind = 472;
@@ -867,7 +867,7 @@ val     KINDS: [COUNT]Spec = [COUNT]Spec{
     Spec{kind: DEP_CYCLE, key: "dep.cycle", level: LEVEL_ERROR, source: false, retired: false},
     Spec{kind: DEP_DESTINATION_EXISTS, key: "dep.destination_exists", level: LEVEL_ERROR, source: false, retired: false},
     Spec{kind: DEP_DIRTY, key: "dep.dirty", level: LEVEL_ERROR, source: false, retired: false},
-    Spec{kind: DEP_ENTRY_MISSING, key: "dep.entry_missing", level: LEVEL_ERROR, source: false, retired: false},
+    Spec{kind: DEP_ENTRY_MISSING, key: "dep.entry_missing", level: LEVEL_ERROR, source: false, retired: true},
     Spec{kind: DEP_FETCH, key: "dep.fetch", level: LEVEL_ERROR, source: false, retired: false},
     Spec{kind: DEP_GITMODULES_MISMATCH, key: "dep.gitmodules_mismatch", level: LEVEL_ERROR, source: false, retired: false},
     Spec{kind: DEP_ID_MISMATCH, key: "dep.id_mismatch", level: LEVEL_ERROR, source: false, retired: false},
@@ -1031,7 +1031,7 @@ val     KINDS: [COUNT]Spec = [COUNT]Spec{
     Spec{kind: TEST_NONE_DECLARED, key: "test.none_declared", level: LEVEL_ERROR, source: false, retired: false},
     Spec{kind: TOML_MALFORMED, key: "toml.malformed", level: LEVEL_ERROR, source: false, retired: false},
     Spec{kind: TOML_VALUE_TOO_LONG, key: "toml.value_too_long", level: LEVEL_ERROR, source: false, retired: true},
-    Spec{kind: USE_NO_PUBLIC_MODULE, key: "use.no_public_module", level: LEVEL_ERROR, source: false, retired: false},
+    Spec{kind: USE_NO_PUBLIC_MODULE, key: "use.no_public_module", level: LEVEL_ERROR, source: false, retired: true},
     Spec{kind: VERSION_INVALID, key: "version.invalid", level: LEVEL_ERROR, source: false, retired: false},
     Spec{kind: VERSION_INVALID_RANGE, key: "version.invalid_range", level: LEVEL_ERROR, source: false, retired: false},
     Spec{kind: LINK_ABI_MISMATCH, key: "link.abi_mismatch", level: LEVEL_ERROR, source: false, retired: false},

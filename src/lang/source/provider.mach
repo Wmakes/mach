@@ -33,15 +33,6 @@ pub rec Origin {
     home: Home;
 }
 
-# what a bare import of a package's id binds
-# ---
-# module:       the fqn of the package's public module, or STR_NIL when it has none
-# artifactless: the package declares no artifact at all, so it can have no public module
-pub rec Package {
-    module:       intern.StrId;
-    artifactless: bool;
-}
-
 # a module's text: borrowed from the provider, or owned by the reader when `owned`
 pub rec Text {
     data:  str;
@@ -49,7 +40,7 @@ pub rec Text {
 }
 
 # the module namespace a load reads: which names are modules, where each is read from, and
-# what each package's bare id binds. every member answers for names it does not hold by
+# which package ids it holds. every member answers for names it does not hold by
 # saying so, never by failing, so a provider can stand in front of another one
 # ---
 # ctx:     the member's own state
@@ -57,13 +48,13 @@ pub rec Text {
 #          fqn's head segment; it does not say the module exists
 # exists:  whether the fqn names a module, spelled exactly as the provider holds it
 # read:    the text at a path `locate` gave
-# package: what a bare import of a package id binds, none when no package has that id
+# package: whether a package has the id
 pub rec Provider {
     ctx:     ptr;
     locate:  fun(ptr, *A.Allocator, intern.StrId) res[opt[Origin], fail.Fail];
     exists:  fun(ptr, *A.Allocator, intern.StrId) res[bool, fail.Fail];
     read:    fun(ptr, *A.Allocator, str) res[Text, fail.Fail];
-    package: fun(ptr, intern.StrId) opt[Package];
+    package: fun(ptr, intern.StrId) bool;
 }
 
 pub fun module_locate(p: *Provider, a: *A.Allocator, fqn: intern.StrId) res[opt[Origin], fail.Fail] {
@@ -78,7 +69,7 @@ pub fun module_read(p: *Provider, a: *A.Allocator, path: str) res[Text, fail.Fai
     ret p.read(p.ctx, a, path);
 }
 
-pub fun package_find(p: *Provider, id: intern.StrId) opt[Package] {
+pub fun package_known(p: *Provider, id: intern.StrId) bool {
     ret p.package(p.ctx, id);
 }
 

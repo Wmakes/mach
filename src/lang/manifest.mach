@@ -120,20 +120,9 @@ fwd mach.lang.manifest.select.resolve_cells;
 # the file name of a project manifest, looked up in a project root
 pub val MANIFEST_FILE: str = "mach.toml";
 
-# the public entry a bare `use <id>;` binds: the entry of the library artifact
-# marked `export = true`. a `bin` never publishes an entry
-# ---
-# m:   a parsed manifest
-# ret: the export library's entry id; STR_NIL when no artifact is exported
-pub fun canonical_module(m: *Manifest) intern.StrId {
-    val a: *ArtifactDef = export_artifact(m);
-    if (a == nil) { ret intern.STR_NIL; }
-    ret a.entry;
-}
-
 # only `export = true` publishes an entry: `default = true` selects and binds
 # nothing, and an export on a `bin` or a second export is refused
-test canonical_module__binds_the_export_library_entry {
+test export_artifact__is_the_one_library_marked_export {
     var backing: A.Allocator;
     var ar:      arena.Arena;
     var alloc:   A.Allocator;
@@ -164,13 +153,14 @@ test canonical_module__binds_the_export_library_entry {
             cnt;
         }
         if (sel parsed.err) { ret 2; }
-        var m:     Manifest     = parsed.ok;
-        val entry: intern.StrId = canonical_module(?m);
+        var m:        Manifest     = parsed.ok;
+        val exported: *ArtifactDef = export_artifact(?m);
         if (!public[i]) {
-            if (!intern.str_is_nil(entry)) { ret 3; }
+            if (exported != nil) { ret 3; }
         }
         or {
-            val text: opt[str] = intern.get(?itn, entry);
+            if (exported == nil) { ret 4; }
+            val text: opt[str] = intern.get(?itn, exported.entry);
             if (sel text.none)                      { ret 4; }
             if (!str_equals(text.some, "api.mach")) { ret 4; }
         }

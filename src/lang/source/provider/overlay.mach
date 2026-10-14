@@ -56,7 +56,7 @@ fun read(ctx: ptr, a: *A.Allocator, path: str) res[provider.Text, fail.Fail] {
     ret provider.module_read(?o.base, a, path);
 }
 
-fun package(ctx: ptr, id: intern.StrId) opt[provider.Package] {
+fun package(ctx: ptr, id: intern.StrId) bool {
     val o: *Overlay = ctx::*Overlay;
-    ret provider.package_find(?o.base, id);
+    ret provider.package_known(?o.base, id);
 }

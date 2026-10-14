@@ -85,7 +85,6 @@ pub rec DepEntry {
     alias:           intern.StrId;
     project_id:      intern.StrId;
     project_dir_src: intern.StrId;
-    project_module:  intern.StrId;
     vendor_root:     intern.StrId;
     source:          intern.StrId;
     ref:             intern.StrId;

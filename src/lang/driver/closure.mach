@@ -40,20 +40,6 @@ use lang_target: mach.lang.target;
 use mach.lang.toolchain;
 use lang_version: mach.lang.version;
 
-fun module_file_present(alloc: *A.Allocator, root: str, src_dir: str, module_rel: str) res[bool, fail.Fail] {
-    val a: res[str, fail.Fail] = driver_load.join_path(alloc, root, src_dir);
-    if (sel a.err) { ret res[bool, fail.Fail].err{a.err}; }
-    val mid: str                 = a.ok;
-    val b:   res[str, fail.Fail] = driver_load.join_path(alloc, mid, module_rel);
-    str_free(alloc, mid);
-    if (sel b.err) { ret res[bool, fail.Fail].err{b.err}; }
-    val full:      str                       = b.ok;
-    val is_file_r: res[bool, io_error.Error] = fs.is_file(full);
-    val ok_:       bool                      = (sel is_file_r.ok && is_file_r.ok);
-    str_free(alloc, full);
-    ret res[bool, fail.Fail].ok{ok_};
-}
-
 # whether `id` names the project `owner`; an unnamed project names none
 fun id_names(s: *session.Session, id: intern.StrId, owner: str) bool {
     ret !intern.str_is_nil(id) && str_equals(intern.text(?s.interner, id), owner);
@@ -755,20 +741,6 @@ fun locate_dependency(s: *session.Session, alias: str, project_root: str,
     val source_r: res[intern.StrId, fail.Fail] = dep_source_label(s, d);
     if (sel source_r.err) { ret res[project.DepEntry, fail.Fail].err{source_r.err}; }
     entry.source = source_r.ok;
-
-    # the public entry is only ever an explicitly defaulted library artifact's
-    entry.project_module = manifest.canonical_module(?entry.manifest);
-
-    val dep_src_text: str = intern.text(?s.interner, entry.project_dir_src);
-    if (!intern.str_is_nil(entry.project_module)) {
-        val dep_entry_file: str                  = intern.text(?s.interner, entry.project_module);
-        val present_r:      res[bool, fail.Fail] = module_file_present(s.build_alloc, dep_dir, dep_src_text, dep_entry_file);
-        if (sel present_r.err) { ret res[project.DepEntry, fail.Fail].err{present_r.err}; }
-        if (!present_r.ok) {
-            val msg: res[str, fail.Fail] = driver_load.diag_join_named(s, "dep '", entry.alias, "' mach.toml: public entry names no file");
-            ret res[project.DepEntry, fail.Fail].err{fail.user_of(diagnostic_kind.DEP_ENTRY_MISSING, msg)};
-        }
-    }
 
     val rvr: res[intern.StrId, A.Error] = intern.add(?s.interner, dep_dir);
     if (sel rvr.err) { ret res[project.DepEntry, fail.Fail].err{fail.refused(rvr.err)}; }

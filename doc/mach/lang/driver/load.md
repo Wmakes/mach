@@ -12,14 +12,6 @@ pub val MACH_VERSION: str = lang_version.MACH_VERSION
 pub fun entry_module_fqn(p: *project.Project, t: *project.TargetEntry) res[intern.StrId, fail.Fail];
 ```
 
-## fun diag_join_named
-
-```mach
-pub fun diag_join_named(s: *session.Session, prefix: str, name_id: intern.StrId, suffix: str) res[str, fail.Fail];
-```
-
-`prefix`, the text of `name_id`, then `suffix`, interned
-
 ## fun join_path
 
 ```mach
