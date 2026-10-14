@@ -9,10 +9,6 @@ declarations reached from code outside a test
 pub fun warn_deprecated_uses(sc: *sema_context.SemaContext) err[fail.Fail];
 ```
 
-one warning per source site after every body and instantiation has been inferred: named
-declaration uses through their resolved symbol, and tag case uses (construction, `sel`,
-payload place) through the case table of the place's tag
-
 ## fun check_testing_uses
 
 ```mach
