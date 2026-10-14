@@ -87,8 +87,8 @@ the places parameter `param` of a settled generic takes
 ## fun via
 
 ```mach
-pub fun via(p: *Places, generic: type.TypeId, param: u32, place: Place) opt[u32];
+pub fun via(p: *Places, generic: type.TypeId, param: u32, place: Place) u32;
 ```
 
-the field of `generic` through which `param` first took place `place`, none when it does not
+the field of `generic` through which `param` first took place `place`, which it must take
 

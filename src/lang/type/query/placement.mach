@@ -130,12 +130,14 @@ pub fun bits(p: *Places, generic: type.TypeId, param: u32) u8 {
     ret p.params.data[at].bits;
 }
 
-# the field of `generic` through which `param` first took place `place`, none when it does not
-pub fun via(p: *Places, generic: type.TypeId, param: u32, place: Place) opt[u32] {
+# the field of `generic` through which `param` first took place `place`, which it must take
+pub fun via(p: *Places, generic: type.TypeId, param: u32, place: Place) u32 {
     val at: u32 = param_at(p, generic, param);
-    if (at == NO_ENTRY)                            { ret opt[u32].none{}; }
-    if ((p.params.data[at].bits & place::u8) == 0) { ret opt[u32].none{}; }
-    ret opt[u32].some{p.params.data[at].via[slot(place)]};
+    if (at == NO_ENTRY || (p.params.data[at].bits & place::u8) == 0) {
+        fail.internal(p.q.status, "placement: a field was asked of a place the parameter does not take");
+        ret NO_FIELD;
+    }
+    ret p.params.data[at].via[slot(place)];
 }
 
 fun param_at(p: *Places, generic: type.TypeId, param: u32) u32 {

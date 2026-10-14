@@ -391,8 +391,8 @@ fun laid(held: u8) placement.Place {
 fun instances_agree(w: *Comparison, a: Run, b: Run) bool {
     val oa: opt[*type.Type] = type.get(w.mz.q.types, a.inst);
     val ob: opt[*type.Type] = type.get(w.mz.q.types, b.inst);
-    if (!sel oa.some) { ret false; }
-    if (!sel ob.some) { ret false; }
+    if (!sel oa.some) { ret unpaired(w); }
+    if (!sel ob.some) { ret unpaired(w); }
     val ta:      *type.Type  = oa.some;
     val tb:      *type.Type  = ob.some;
     val generic: type.TypeId = ta.data.instance.nominal;
@@ -415,7 +415,7 @@ fun instances_agree(w: *Comparison, a: Run, b: Run) bool {
             if (!ea.ok || !eb.ok) { ret false; }
             if (ea.size != eb.size || ea.align != eb.align) {
                 w.unbounded = true;
-                witness(w, a.inst, field_or_none(placement.via(?w.places, generic, j, laid(held))));
+                witness(w, a.inst, placement.via(?w.places, generic, j, laid(held)));
                 ret false;
             }
         }
@@ -430,7 +430,7 @@ fun instances_agree(w: *Comparison, a: Run, b: Run) bool {
         for (k < placement.PLACE_COUNT) {
             val at: placement.Place = placement.place_at(k);
             if ((held & at::u8) != 0 && !args_agree(w, x, y, at, a.secret)) {
-                witness(w, a.inst, field_or_none(placement.via(?w.places, generic, j, at)));
+                witness(w, a.inst, placement.via(?w.places, generic, j, at));
                 ret false;
             }
             k = k + 1;
@@ -440,14 +440,18 @@ fun instances_agree(w: *Comparison, a: Run, b: Run) bool {
     ret true;
 }
 
-fun field_or_none(f: opt[u32]) u32 {
-    if (sel f.some) { ret f.some; }
-    ret NO_FIELD;
+# a pair `paired` admitted whose instance the store does not hold
+fun unpaired(w: *Comparison) bool {
+    fail.internal(w.mz.q.status, "secrecy: a paired instance is not in the store");
+    ret false;
 }
 
 fun arg_at(w: *Comparison, t: *type.Type, j: u32) type.TypeId {
     val arg: opt[type.TypeId] = type.get_param(w.mz.q.types, t.data.instance.args_start + j);
-    if (!sel arg.some) { ret type.TYPE_ERROR; }
+    if (!sel arg.some) {
+        fail.internal(w.mz.q.status, "secrecy: an argument list runs past the store");
+        ret type.TYPE_ERROR;
+    }
     ret arg.some;
 }
 
