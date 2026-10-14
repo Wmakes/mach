@@ -567,7 +567,7 @@ pub rec Declared {
 # the declaration `sym` names: one of the module in scope by its id, or another module's by
 # its kind and canonical name
 pub fun declared(lc: *LowerContext, sym: *resolve.Symbol) res[Declared, fail.Fail] {
-    if (!module.same(sym.origin, lc.scope.own_module)) { ret declared_named(lc, sym.origin, sym.definition_kind, sym.canon); }
+    if (!module.same(resolve.origin_of(lc.s, sym), lc.scope.own_module)) { ret declared_named(lc, resolve.origin_of(lc.s, sym), sym.definition_kind, sym.canon); }
     val iface: *fe_sema.interface.Interface        = lc.scope.iface;
     val own:   opt[*fe_sema.interface.Declaration] = fe_sema.interface.declaration_at(iface, sym.decl);
     if (sel own.none) {
@@ -716,7 +716,7 @@ pub fun resolve_module_member_const(lc: *LowerContext, eid: ast_id.ExprId) res[o
     val scalar: opt[comptime.CTValue] = declared_scalar(lc, found.ok);
     if (sel scalar.none) { ret res[opt[comptime.CTValue], comptime.EvalFail].ok{opt[comptime.CTValue].none{}}; }
     if (found.ok.declaration.gated && lc.scope.env.build.union_build) {
-        val msg_r: res[str, fail.Fail] = gated_lower_member_const_message(lc, sym.name, session.module_fqn(lc.s, sym.origin));
+        val msg_r: res[str, fail.Fail] = gated_lower_member_const_message(lc, sym.name, session.module_fqn(lc.s, resolve.origin_of(lc.s, sym)));
         if (sel msg_r.err) { ret res[opt[comptime.CTValue], comptime.EvalFail].err{comptime.eval_from_fail(msg_r.err, diagnostic_kind.CONST_TUPLE_DEPENDENT, "")}; }
         val msg:   str                           = msg_r.ok;
         val e_opt: res[ast_expr.Expr, fail.Fail] = expression(lc, eid);
@@ -1950,7 +1950,7 @@ fun scope_fixture(s: *session.Session, f: *ScopeFixture) bool {
     f.sm1.decl_count = 1;
     f.mid            = module.id(0);
     f.fqn            = intern.str_id(7);
-    val ri: err[fail.Fail] = session.register_module_identity(s, f.mid, ?f.a1, f.fqn, module.stable_id(5));
+    val ri: err[fail.Fail] = session.register_module_identity(s, f.mid, f.fqn, module.stable_id(5));
     ret sel ri.ok;
 }
 

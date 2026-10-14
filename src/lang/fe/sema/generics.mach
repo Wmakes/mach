@@ -81,7 +81,7 @@ fun nominal_of(sc: *sema_context.SemaContext, sym: *resolve.Symbol) type.TypeId 
         ret type.TYPE_ERROR;
     }
     val nominal: res[type.TypeId, fail.Fail] = type.intern_nominal(?sc.s.types, sym.canon,
-        resolve.type_owner(sc.s, sym.origin, sym.definition_file), kind);
+        resolve.type_owner(sc.s, resolve.origin_of(sc.s, sym), sym.definition_file), kind);
     if (sel nominal.err) {
         fail.internal(?sc.status, fail.describe(nominal.err));
         ret type.TYPE_ERROR;

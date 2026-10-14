@@ -200,7 +200,7 @@ fun validate_workgroup_dim(sc: *sema_context.SemaContext, dec: *ast_decl.Decorat
                 sema_context.report(sc, diagnostic_kind.DECORATOR_ARGUMENT, dec.name, "`workgroup` decorator dimensions must be integers");
                 ret false;
             }
-            if (own && module.same(sym.origin, sc.view.own_module)) {
+            if (own && module.same(resolve.origin_of(sc.s, sym), sc.view.own_module)) {
                 val opt_d: opt[*ast_decl.Decl] = ast.get_decl(sc.view.a, sym.decl);
                 if (sel opt_d.some && !decorator.has(sc.view.a, opt_d.some, decorator.SPEC)) {
                     sema_context.report(sc, diagnostic_kind.DECORATOR_NOT_CONSTANT, sema_context.decorator_arg_span(sc, eid, dec.name), "a `workgroup` dimension that is not a constant must name a `#[spec(id)]` var, whose value the host supplies at pipeline creation; any other variable has no value when the pipeline is built");

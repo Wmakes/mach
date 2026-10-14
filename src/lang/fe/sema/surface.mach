@@ -31,12 +31,11 @@ pub rec Owner {
     ctx:    *comptime.ComptimeCtx;
 }
 
-# where the surfaces of the modules a surface forwards from are read: the stable id of a
-# loaded module, nil when it is not loaded, and its published surface, owned by the caller
+# where the surfaces of the modules a surface forwards from are read: a loaded module's
+# published surface, owned by the caller
 pub rec Origins {
-    ctx:    ptr;
-    stable: fun(ptr, session.ModuleId) session.StableModuleId;
-    read:   fun(ptr, session.ModuleId, *A.Allocator) res[sema_product.ModuleSema, fail.Fail];
+    ctx:  ptr;
+    read: fun(ptr, session.ModuleId, *A.Allocator) res[sema_product.ModuleSema, fail.Fail];
 }
 
 # a module's own export, with the constant type checking left it bound to
@@ -47,7 +46,7 @@ fun own_export(s: *session.Session, owner: *Owner, symbol: *resolve.Symbol,
         constant: resolve.ExportConstant{name: symbol.canon}
     };
     if (symbol.definition_kind == resolve.SYM_USE) { ret res[sema_product.TypeExport, fail.Fail].ok{row}; }
-    if (!module.same(symbol.origin, owner.module) || sr == nil || ast_id.decl_is_nil(symbol.decl) || ast_id.decl_index(symbol.decl) >= sr.decl_count) {
+    if (!module.stable_same(symbol.origin, owner.stable) || sr == nil || ast_id.decl_is_nil(symbol.decl) || ast_id.decl_index(symbol.decl) >= sr.decl_count) {
         ret res[sema_product.TypeExport, fail.Fail].err{fail.message("typed export has no matching current declaration")};
     }
     row.ty = sr.decl_type[ast_id.decl_index(symbol.decl)];
@@ -108,9 +107,9 @@ fun origin_surface(s: *session.Session, origins: *Origins, mid: session.ModuleId
 
 fun imported_export(s: *session.Session, origins: *Origins, symbol: *resolve.Symbol,
     decoded: *collections_vector.Vector[OriginSurface]) res[sema_product.TypeExport, fail.Fail] {
-    val mid:    session.ModuleId       = symbol.origin;
-    val origin: session.StableModuleId = origins.stable(origins.ctx, mid);
-    if (module.stable_is_nil(origin)) { ret res[sema_product.TypeExport, fail.Fail].err{fail.message("forwarded type origin is not loaded")}; }
+    val origin: session.StableModuleId = symbol.origin;
+    val mid:    session.ModuleId       = resolve.origin_of(s, symbol);
+    if (module.stable_is_nil(origin) || module.is_nil(mid)) { ret res[sema_product.TypeExport, fail.Fail].err{fail.message("forwarded type origin is not loaded")}; }
     val acquired: res[*sema_product.ModuleSema, fail.Fail] = origin_surface(s, origins, mid, decoded);
     if (sel acquired.err) { ret res[sema_product.TypeExport, fail.Fail].err{acquired.err}; }
     val surface: *sema_product.ModuleSema = acquired.ok;
@@ -138,9 +137,9 @@ pub fun exports(s: *session.Session, owner: *Owner, rr: *resolve.ResolveResult, 
     for (i < rr.pub_count) {
         val symbol:   *resolve.Symbol = ?rr.symbols[i];
         var captured: res[sema_product.TypeExport, fail.Fail];
-        if (module.same(symbol.origin, owner.module)) { captured = own_export(s, owner, symbol, rr, sr); }
-        or                                            { captured = imported_export(s, origins, symbol, ?decoded); }
-        if (sel captured.err)                         { ret res[sema_product.ModuleSema, fail.Fail].err{captured.err}; }
+        if (module.stable_same(symbol.origin, owner.stable)) { captured = own_export(s, owner, symbol, rr, sr); }
+        or                                                   { captured = imported_export(s, origins, symbol, ?decoded); }
+        if (sel captured.err)                                { ret res[sema_product.ModuleSema, fail.Fail].err{captured.err}; }
         val added: res[usize, A.Error] = collections_vector.push[sema_product.TypeExport](?surface.exports, captured.ok);
         if (sel added.err) { ret res[sema_product.ModuleSema, fail.Fail].err{fail.refused(added.err)}; }
         i = i + 1;

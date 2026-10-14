@@ -99,7 +99,7 @@ fun lower_fwd(ctx: *lower_context.LowerContext, did: ast_id.DeclId) err[fail.Fai
     fin { reexport_walk_close(ctx, ?walk); }
     val sym: *resolve.Symbol = opt_sym.some;
     ret record_reexport(ctx, fe_sema.interface.Exported{
-        kind:          sym.kind, name: sym.name, canon: sym.canon, origin: sym.origin_stable, module: sym.slot_stable,
+        kind:          sym.kind, name: sym.name, canon: sym.canon, origin: sym.origin, module: resolve.use_stable(sym),
         generic_arity: sym.generic_arity, has_comptime_params: sym.has_comptime_params, has_pack_param: sym.has_pack_param
     }, ?walk, ReexportSite{did: did, direct: true});
 }

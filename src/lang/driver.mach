@@ -4,7 +4,6 @@ use std.types.bool.bool;
 use std.types.bool.false;
 use std.types.bool.true;
 use std.types.error.err;
-use std.types.option.opt;
 use std.types.result.res;
 use std.types.size.usize;
 use std.types.string.str;
@@ -24,6 +23,7 @@ use std.collections.vector.Vector;
 use mach.lang.build.request;
 use mach.lang.diagnostic;
 use diagnostic_kind: mach.lang.diagnostic.kind;
+use mach.lang.fe.ast;
 use mach.lang.intern;
 use mach.lang.manifest;
 use mach.lang.me.pipeline;
@@ -34,10 +34,11 @@ use lang_source: mach.lang.source;
 use lang_target: mach.lang.target;
 use std_format:  std.format;
 
-use lang_alloc: mach.lang.alloc;
 use mach.lang.driver.cache;
 use driver_closure: mach.lang.driver.closure;
 use mach.lang.driver.config;
+use mach.lang.driver.context;
+use mach.lang.driver.frontend;
 use driver_load: mach.lang.driver.load;
 use mach.lang.driver.passes;
 use mach.lang.driver.project;
@@ -57,9 +58,13 @@ fwd project.module_by_fqn;
 fwd project.module_count;
 fwd project.module_at;
 fwd project.link_name_for;
-fwd project.begin_query_phase;
-fwd project.finish_query_phase;
-fwd project.refresh_diagnostics;
+fwd frontend.begin_query_phase;
+fwd frontend.finish_query_phase;
+fwd frontend.refresh_diagnostics;
+fwd frontend.frontend_status;
+fwd frontend.syntax;
+fwd frontend.resolved;
+fwd frontend.typed;
 
 fwd passes.codegen_reusable;
 fwd passes.CodeSources;
@@ -67,7 +72,6 @@ fwd passes.code_sources;
 fwd passes.sources_dnit;
 fwd passes.module_in_current_project;
 fwd passes.debug_info_of;
-fwd passes.frontend_status;
 fwd driver_load.entry_module_fqn;
 
 #[testing]
@@ -75,19 +79,20 @@ fwd config.resolve_artifact_path;
 fwd config.resolve_run_artifact;
 fwd config.RunArtifact;
 
+# each module's product of one kind, keyed as the kind's owner says: a file-keyed kind by the
+# module's file, a module-keyed one by its stable id (a normal object's back-half key)
 fun append_phase_roots(p: *project.Project, roots: *Vector[query.QueryKey],
-    kind: query.QueryKind, count: u32) err[fail.Fail] {
+    kind: *query.Kind, count: u32) err[fail.Fail] {
     var i: u32 = 0;
     for (i < count) {
         val m: *project.ModuleEntry = project.module_at(p, p.topo[i]::u32);
         # a module the front end skips has only its parse and its restored object
-        if (m.frontend_skipped && kind != query.Q_PARSE && kind != query.Q_CODEGEN) {
+        if (m.frontend_skipped && kind != ?frontend.PARSE && kind != ?passes.CODEGEN) {
             i = i + 1;
             cnt;
         }
         var key: u64 = module.stable_index(m.stable_id)::u64;
-        if (kind == query.Q_PARSE)                                                             { key = lang_source.file_index(m.file_id)::u64; }
-        or (kind == query.Q_INLINE_BODIES || kind == query.Q_LOWER || kind == query.Q_CODEGEN) { key = passes.back_half_key_for(p, m); }
+        if (kind.owner == query.KEY_FILE) { key = lang_source.file_index(m.file_id)::u64; }
         val added: res[usize, A.Error] = collections_vector.push[query.QueryKey](roots, query.QueryKey{kind: kind, key: key});
         if (sel added.err) {
             ret err[fail.Fail].err{fail.refused(added.err)};
@@ -98,24 +103,24 @@ fun append_phase_roots(p: *project.Project, roots: *Vector[query.QueryKey],
 }
 
 pub fun append_frontend_roots(p: *project.Project, roots: *Vector[query.QueryKey]) err[fail.Fail] {
-    val parsed: err[fail.Fail] = append_phase_roots(p, roots, query.Q_PARSE, p.topo_len);
+    val parsed: err[fail.Fail] = append_phase_roots(p, roots, ?frontend.PARSE, p.topo_len);
     if (sel parsed.err) { ret parsed; }
-    val resolved: err[fail.Fail] = append_phase_roots(p, roots, query.Q_RESOLVE, p.topo_len);
+    val resolved: err[fail.Fail] = append_phase_roots(p, roots, ?frontend.RESOLVE, p.topo_len);
     if (sel resolved.err) { ret resolved; }
-    ret append_phase_roots(p, roots, query.Q_SEMA, p.topo_len);
+    ret append_phase_roots(p, roots, ?frontend.SEMA, p.topo_len);
 }
 
 fun append_backend_roots(p: *project.Project, roots: *Vector[query.QueryKey],
     codegen: bool) err[fail.Fail] {
     val frontend: err[fail.Fail] = append_frontend_roots(p, roots);
     if (sel frontend.err) { ret frontend; }
-    val surface: err[fail.Fail] = append_phase_roots(p, roots, query.Q_LOWERED_SURFACE, p.emit_len);
+    val surface: err[fail.Fail] = append_phase_roots(p, roots, ?passes.LOWERED_SURFACE, p.emit_len);
     if (sel surface.err) { ret surface; }
-    val bodies: err[fail.Fail] = append_phase_roots(p, roots, query.Q_INLINE_BODIES, p.emit_len);
+    val bodies: err[fail.Fail] = append_phase_roots(p, roots, ?passes.INLINE_BODIES, p.emit_len);
     if (sel bodies.err) { ret bodies; }
-    val lowered: err[fail.Fail] = append_phase_roots(p, roots, query.Q_LOWER, p.emit_len);
+    val lowered: err[fail.Fail] = append_phase_roots(p, roots, ?passes.LOWER, p.emit_len);
     if (sel lowered.err) { ret lowered; }
-    if (codegen)         { ret append_phase_roots(p, roots, query.Q_CODEGEN, p.emit_len); }
+    if (codegen)         { ret append_phase_roots(p, roots, ?passes.CODEGEN, p.emit_len); }
     ret err[fail.Fail].ok{};
 }
 
@@ -127,9 +132,9 @@ pub fun append_test_roots(p: *project.Project, roots: *Vector[query.QueryKey]) e
     for (i < p.emit_len) {
         val m: *project.ModuleEntry = project.module_at(p, p.topo[i]::u32);
         if (passes.has_test_object(p, m)) {
-            val lowered: res[usize, A.Error] = collections_vector.push[query.QueryKey](roots, query.QueryKey{kind: query.Q_LOWER, key: passes.test_key_for(m)});
+            val lowered: res[usize, A.Error] = collections_vector.push[query.QueryKey](roots, query.QueryKey{kind: ?passes.LOWER, key: passes.test_key_for(m)});
             if (sel lowered.err) { ret err[fail.Fail].err{fail.refused(lowered.err)}; }
-            val emitted: res[usize, A.Error] = collections_vector.push[query.QueryKey](roots, query.QueryKey{kind: query.Q_CODEGEN, key: passes.test_key_for(m)});
+            val emitted: res[usize, A.Error] = collections_vector.push[query.QueryKey](roots, query.QueryKey{kind: ?passes.CODEGEN, key: passes.test_key_for(m)});
             if (sel emitted.err) { ret err[fail.Fail].err{fail.refused(emitted.err)}; }
         }
         i = i + 1;
@@ -139,19 +144,19 @@ pub fun append_test_roots(p: *project.Project, roots: *Vector[query.QueryKey]) e
 
 fun run_query_pass(p: *project.Project, roots: *Vector[query.QueryKey],
     run: fun(*project.Project) err[fail.Fail]) err[fail.Fail] {
-    val begun: res[query.Operation, fail.Fail] = project.begin_query_phase(p);
+    val begun: res[query.Operation, fail.Fail] = frontend.begin_query_phase(p);
     if (sel begun.err) {
         ret err[fail.Fail].err{begun.err};
     }
     val result: err[fail.Fail] = run(p);
-    ret project.finish_query_phase(p, begun.ok, roots.data, roots.len, result);
+    ret frontend.finish_query_phase(p, begun.ok, roots.data, roots.len, result);
 }
 
 # a phase the query engine does not run is published as one it does: the
 # project's diagnostics are refreshed beside its result
 pub fun phase_finish(p: *project.Project,
     result: err[fail.Fail]) err[fail.Fail] {
-    val refreshed: err[fail.Fail] = project.refresh_diagnostics(p);
+    val refreshed: err[fail.Fail] = frontend.refresh_diagnostics(p);
     if (sel refreshed.err) {
         diagnostic.note_lost(?p.diags);
         diagnostic.note_lost(?p.s.diags);
@@ -160,39 +165,18 @@ pub fun phase_finish(p: *project.Project,
     ret result;
 }
 
+# a loaded project under another request from its host: the build context is frozen again, so
+# what read the old one is computed again, and nothing reads a context no freeze captured
+pub fun reconfigure(p: *project.Project, req: request.BuildRequest) err[fail.Fail] {
+    p.req = req;
+    ret context.freeze(p);
+}
+
 # a project that failed is released, its failure kept where the session presents it
 pub fun project_failure(p: *project.Project, failure: fail.Fail) res[project.Project, fail.Fail] {
-    var stable:  fail.Fail = failure;
-    val carried: opt[str]  = fail.text(failure);
-    if (sel carried.some) {
-        val text: str = carried.some;
-        if (text != p.s.query_failure_message
-            && (p.s.query_presentation == nil || text != p.s.query_presentation.message)) {
-            val copied: res[str, A.Error] = str_dup(p.s.queries.a, text);
-            if (sel copied.err) {
-                stable = fail.with_text(failure, lang_alloc.text(copied.err));
-                diagnostic.note_lost(?p.diags);
-            }
-            if (sel copied.ok) {
-                if (p.s.query_failure_message != nil) { str_free(p.s.queries.a, p.s.query_failure_message); }
-                p.s.query_failure_message = copied.ok;
-                stable                    = fail.with_text(failure, p.s.query_failure_message);
-            }
-        }
-    }
-    # the places a failure points at are held beside its text, in the session's slot
-    if (!fail.same_places(stable, p.s.query_failure_places)) {
-        val copied: res[fail.Fail, A.Error] = fail.places_retain(p.s.queries.a, stable);
-        if (sel copied.err) {
-            stable = fail.without_places(stable);
-            diagnostic.note_lost(?p.diags);
-        }
-        if (sel copied.ok) {
-            fail.places_dnit(p.s.queries.a, p.s.query_failure_places);
-            p.s.query_failure_places = copied.ok;
-            stable                   = copied.ok;
-        }
-    }
+    var lost:   bool      = false;
+    val stable: fail.Fail = session.hold_failure(p.s, failure, ?lost);
+    if (lost) { diagnostic.note_lost(?p.diags); }
     val published: err[fail.Fail] = phase_finish(p, err[fail.Fail].err{stable});
     project.dnit_project(p);
     if (sel published.err) { ret res[project.Project, fail.Fail].err{published.err}; }
@@ -201,8 +185,6 @@ pub fun project_failure(p: *project.Project, failure: fail.Fail) res[project.Pro
 
 pub fun run_sema_pass(p: *project.Project) err[fail.Fail] {
     project.set_origin(p, diagnostic.ORIGIN_SEMA);
-    val prepared: err[fail.Fail] = passes.prepare_sema_pass(p);
-    if (sel prepared.err) { ret prepared; }
     var roots: Vector[query.QueryKey] = collections_vector.init[query.QueryKey](p.alloc);
     fin { collections_vector.dnit[query.QueryKey](?roots); }
     val rooted: err[fail.Fail] = append_frontend_roots(p, ?roots);
@@ -224,8 +206,6 @@ pub fun run_lower_pass(p: *project.Project) err[fail.Fail] {
 #[testing]
 pub fun run_codegen_pass(p: *project.Project) err[fail.Fail] {
     project.set_origin(p, diagnostic.ORIGIN_CODEGEN);
-    val prepared: err[fail.Fail] = passes.prepare_codegen_pass(p);
-    if (sel prepared.err) { ret prepared; }
     var roots: Vector[query.QueryKey] = collections_vector.init[query.QueryKey](p.alloc);
     fin { collections_vector.dnit[query.QueryKey](?roots); }
     val rooted: err[fail.Fail] = append_backend_roots(p, ?roots, true);
@@ -245,67 +225,27 @@ pub fun run_test_pass(p: *project.Project) err[fail.Fail] {
 
 pub fun run_link_pass(p: *project.Project) res[bool, fail.Fail] {
     project.set_origin(p, diagnostic.ORIGIN_LINK);
-    val prepared: err[fail.Fail] = passes.prepare_link_pass(p);
-    if (sel prepared.err) {
-        ret res[bool, fail.Fail].err{prepared.err};
-    }
     var roots: Vector[query.QueryKey] = collections_vector.init[query.QueryKey](p.alloc);
     fin { collections_vector.dnit[query.QueryKey](?roots); }
     val rooted: err[fail.Fail] = append_backend_roots(p, ?roots, true);
     if (sel rooted.err) {
         ret res[bool, fail.Fail].err{rooted.err};
     }
-    val linked: res[usize, A.Error] = collections_vector.push[query.QueryKey](?roots, query.QueryKey{kind: query.Q_LINK, key: 0});
+    val linked: res[usize, A.Error] = collections_vector.push[query.QueryKey](?roots, query.QueryKey{kind: ?passes.LINK, key: 0});
     if (sel linked.err) {
         ret res[bool, fail.Fail].err{fail.refused(linked.err)};
     }
-    val begun: res[query.Operation, fail.Fail] = project.begin_query_phase(p);
+    val begun: res[query.Operation, fail.Fail] = frontend.begin_query_phase(p);
     if (sel begun.err) {
         ret res[bool, fail.Fail].err{begun.err};
     }
     val result:   res[bool, fail.Fail] = passes.run_link_pass(p);
-    val finished: err[fail.Fail]       = project.finish_query_phase(p,
+    val finished: err[fail.Fail]       = frontend.finish_query_phase(p,
         begun.ok, roots.data, roots.len, fail.unit[bool](result));
     if (sel finished.err) {
         ret res[bool, fail.Fail].err{finished.err};
     }
     ret result;
-}
-
-# the phase a query's diagnostics belong to; a kind outside the driver's
-# computations names none
-fun query_origin(kind: query.QueryKind) diagnostic.Origin {
-    if (kind == query.Q_PARSE)                                                                     { ret diagnostic.ORIGIN_LOAD; }
-    if (kind == query.Q_RESOLVE || kind == query.Q_EXPORTS)                                        { ret diagnostic.ORIGIN_RESOLVE; }
-    if (kind == query.Q_SEMA || kind == query.Q_TYPED_EXPORTS)                                     { ret diagnostic.ORIGIN_SEMA; }
-    if (kind == query.Q_LOWERED_SURFACE || kind == query.Q_INLINE_BODIES || kind == query.Q_LOWER) { ret diagnostic.ORIGIN_LOWER; }
-    if (kind == query.Q_CODEGEN)                                                                   { ret diagnostic.ORIGIN_CODEGEN; }
-    if (kind == query.Q_LINK)                                                                      { ret diagnostic.ORIGIN_LINK; }
-    ret diagnostic.ORIGIN_NONE;
-}
-
-fun query_compute(p: *project.Project, kind: query.QueryKind, key: u64,
-    alloc: *A.Allocator, diags: *diagnostic.DiagnosticStore) res[query.QueryOutput, fail.Fail] {
-    project.note_compute(p, kind);
-    diagnostic.set_origin(diags, query_origin(kind));
-    if (kind == query.Q_PARSE)           { ret driver_load.q_parse_compute(p, key, alloc, diags); }
-    if (kind == query.Q_RESOLVE)         { ret passes.q_resolve_compute(p, key, alloc, diags); }
-    if (kind == query.Q_EXPORTS)         { ret driver_load.q_exports_compute(p, key, alloc, diags); }
-    if (kind == query.Q_SEMA)            { ret passes.q_sema_compute(p, key, alloc, diags); }
-    if (kind == query.Q_TYPED_EXPORTS)   { ret passes.q_typed_exports_compute(p, key, alloc, diags); }
-    if (kind == query.Q_LOWERED_SURFACE) { ret passes.q_lowered_surface_compute(p, key, alloc, diags); }
-    if (kind == query.Q_LOWER)           { ret passes.q_lower_compute(p, key, alloc, diags); }
-    if (kind == query.Q_INLINE_BODIES)   { ret passes.q_inline_bodies_compute(p, key, alloc, diags); }
-    if (kind == query.Q_CODEGEN)         { ret passes.q_codegen_compute(p, key, alloc, diags); }
-    if (kind == query.Q_LINK)            { ret passes.q_link_compute(p, key, alloc, diags); }
-    # a registered kind without a driver computation is an input kind the
-    # engine must never ask the driver for; an unregistered kind is outside
-    # the catalog. both are internal and name the tag
-    var c: fail.Catalog = fail.unknown_member("QueryKind", kind::u32);
-    if (query.is_registered(?p.s.queries, kind)) {
-        c = fail.unknown_member_in("QueryKind", kind::u32, "the driver compute dispatch");
-    }
-    ret res[query.QueryOutput, fail.Fail].err{fail.message_of(fail.catalog_interned(?p.s.interner, p.s.alloc, c))};
 }
 
 pub fun build_project(s: *session.Session, project_root: str, selectors: *manifest.Selectors) res[project.Project, fail.Fail] {
@@ -456,7 +396,7 @@ pub fun analyze_project(s: *session.Session, m: *manifest.Manifest, req: *reques
 # ran, whatever its phases decided, so a consumer can read the trees, resolve
 # results and sema results beside the diagnostics. every module that reached
 # a phase carries that phase's product on its ModuleEntry even when the
-# module's own query was rejected; the standing is passes.frontend_status(p).
+# module's own query was rejected; the standing is frontend.frontend_status(p).
 # a rejected phase ends the analysis at that phase; err is an operational
 # failure only (an unreadable manifest, allocation, I/O)
 # ---
@@ -567,11 +507,6 @@ fun begin_build_impl(s: *session.Session, project_root: str, c: *manifest.Cell, 
 
     val for_union: bool = roots == project.ROOT_UNION;
 
-    val q_r: err[fail.Fail] = bind_queries(?p);
-    if (sel q_r.err) {
-        ret project_failure(?p, q_r.err);
-    }
-
     var owner: str = "";
     if (req != nil) { owner = req.owner; }
     val cfg_r: err[fail.Fail] = config.load_config_manifest(?p, project_root, m, c, owner, for_union);
@@ -611,7 +546,7 @@ fun run_load_phase_roots(p: *project.Project, extra_roots: *intern.StrId,
 # a load the walk finished but rejected (a `use` that names nothing) is a rejected
 # round like a failed one: the last accepted build's holdings stay
 fun retain_loaded(p: *project.Project, result: err[fail.Fail]) err[fail.Fail] {
-    val standing: fail.PhaseStatus = passes.load_status(p);
+    val standing: fail.PhaseStatus = frontend.load_status(p);
     val rejected: bool             = sel result.err || !sel standing.kind.accepted;
     val kept:     err[fail.Fail]   = passes.retain_modules(p, rejected);
     # a rejected load reports its own failure first; a retention failure beside it only keeps products
@@ -705,7 +640,7 @@ fun load_phase_impl(p: *project.Project, extra_roots: *intern.StrId,
         ret err[fail.Fail].err{reg_r.err};
     }
 
-    val cfg_in_r: err[fail.Fail] = passes.set_build_config_input(p);
+    val cfg_in_r: err[fail.Fail] = context.freeze(p);
     if (sel cfg_in_r.err) {
         ret err[fail.Fail].err{cfg_in_r.err};
     }
@@ -760,7 +695,8 @@ pub fun refresh_frontend(p: *project.Project, mid: session.ModuleId, phase: Fron
     diagnostic.store_dnit(?s.diags);
     s.diags = diagnostic.store_init(s.alloc);
     diagnostic.drop_file(?p.diags, m.file_id);
-    if (m.a != nil) { session.forget_export_names(s, mid, m.a.decls.len::u32); }
+    val syn: *ast.Ast = frontend.syntax(p, m);
+    if (syn != nil) { session.forget_export_names(s, mid, syn.decls.len::u32); }
 
     project.set_origin(p, diagnostic.ORIGIN_LOAD);
     val kept: res[bool, fail.Fail] = driver_load.module_reload(p, mid);
@@ -796,10 +732,9 @@ fun refresh_phases(p: *project.Project, phase: FrontendPhase) err[fail.Fail] {
 
 fun resolve_query_phase(p: *project.Project) err[fail.Fail] {
     project.set_origin(p, diagnostic.ORIGIN_RESOLVE);
-    val prepared: err[fail.Fail] = passes.prepare_resolve_pass(p);
-    if (sel prepared.err) {
-        ret err[fail.Fail].err{prepared.err};
-    }
+    # what the load walk decided for each module is an input the resolution reads
+    val viewed: err[fail.Fail] = frontend.record_load_views(p);
+    if (sel viewed.err) { ret viewed; }
     var roots: Vector[query.QueryKey] = collections_vector.init[query.QueryKey](p.alloc);
     fin { collections_vector.dnit[query.QueryKey](?roots); }
     var i: u32 = 0;
@@ -810,17 +745,17 @@ fun resolve_query_phase(p: *project.Project) err[fail.Fail] {
             cnt;
         }
         val added: res[usize, A.Error] = collections_vector.push[query.QueryKey](?roots,
-            query.QueryKey{kind: query.Q_PARSE, key: lang_source.file_index(m.file_id)::u64});
+            query.QueryKey{kind: ?frontend.PARSE, key: lang_source.file_index(m.file_id)::u64});
         if (sel added.err) {
             ret err[fail.Fail].err{fail.refused(added.err)};
         }
         i = i + 1;
     }
-    val resolved: err[fail.Fail] = append_phase_roots(p, ?roots, query.Q_RESOLVE, p.topo_len);
+    val resolved: err[fail.Fail] = append_phase_roots(p, ?roots, ?frontend.RESOLVE, p.topo_len);
     if (sel resolved.err) { ret resolved; }
-    val exported: err[fail.Fail] = append_phase_roots(p, ?roots, query.Q_EXPORTS, p.topo_len);
+    val exported: err[fail.Fail] = append_phase_roots(p, ?roots, ?frontend.EXPORTS, p.topo_len);
     if (sel exported.err) { ret exported; }
-    val begun: res[query.Operation, fail.Fail] = project.begin_query_phase(p);
+    val begun: res[query.Operation, fail.Fail] = frontend.begin_query_phase(p);
     if (sel begun.err) {
         ret err[fail.Fail].err{begun.err};
     }
@@ -831,7 +766,7 @@ fun resolve_query_phase(p: *project.Project) err[fail.Fail] {
     if (sel computed.err) {
         result = err[fail.Fail].err{computed.err};
     }
-    ret project.finish_query_phase(p, begun.ok, roots.data, roots.len, result);
+    ret frontend.finish_query_phase(p, begun.ok, roots.data, roots.len, result);
 }
 
 # a module walked again under a union tuple it was reached under late can import one the topo
@@ -981,23 +916,10 @@ pub fun build_project_union_for(s: *session.Session, project_root: str, target: 
     ret build_selected(s, project_root, ?union_sel, nil, project.ROOT_UNION, true);
 }
 
-fun bind_queries(p: *project.Project) err[fail.Fail] {
-    val rt_r: res[query.QueryRuntime[project.Project], fail.Fail] = query.runtime[project.Project](?p.s.queries, query_compute);
-    if (sel rt_r.err) {
-        ret err[fail.Fail].err{rt_r.err};
-    }
-    p.queries = rt_r.ok;
-    if (!query.is_registered(?p.s.queries, query.Q_PARSE)) {
-        val rp: err[fail.Fail] = query.register_derived_owned(?p.s.queries, query.Q_PARSE, driver_load.q_parse_finalize);
-        if (sel rp.err) { ret err[fail.Fail].err{rp.err}; }
-    }
-    ret err[fail.Fail].ok{};
-}
-
 # a load that failed: the frontend's recorded status wins over the loader's
 # own failure, and a loader message is the user's
 fun load_failure_of(p: *project.Project, f: fail.Fail) fail.Fail {
-    val status: fail.PhaseStatus = passes.frontend_status(p);
+    val status: fail.PhaseStatus = frontend.frontend_status(p);
     if (!sel status.kind.accepted) { ret fail.phase_failure(status); }
     ret fail.as_user(diagnostic_kind.SOURCE_LOAD, f);
 }

@@ -148,12 +148,12 @@ pub fun public_surface_encode(s: *wire.Sink, rr: *resolve.ResolveResult, origin:
         wire.put_u8(s, symbol.has_pack_param::u8);
         deprecation_encode(s, symbol.deprecation);
         wire.put_u8(s, symbol.testing::u8);
-        var slot: u32 = symbol.slot;
-        if (symbol.definition_kind == resolve.SYM_USE) { slot = symbol.slot_stable::u32; }
-        wire.put_u32(s, slot);
-        wire.put_u32(s, symbol.origin_stable::u32);
+        wire.put_u32(s, symbol.slot);
+        wire.put_u32(s, symbol.origin::u32);
         i = i + 1;
     }
+    # a refusal changes what an importer reports about a missing name
+    wire.put_u8(s, rr.refused::u8);
     wire.put_u32(s, rr.public_constant_count);
     i = 0;
     for (i < rr.public_constant_count) {
@@ -161,8 +161,6 @@ pub fun public_surface_encode(s: *wire.Sink, rr: *resolve.ResolveResult, origin:
         if (sel item.err) { ret item; }
         i = i + 1;
     }
-    # a refusal changes what an importer reports about a missing name
-    wire.put_u8(s, rr.refused::u8);
     ret err[fail.Fail].ok{};
 }
 
@@ -182,15 +180,15 @@ fun deprecation_decode(r: *wire.Source) res[deprecation.Deprecation, fail.Fail] 
         owner: owner::lang_source.FileId, message: message::intern.StrId}};
 }
 
-#[testing]
-fun public_symbols_decode(a: *A.Allocator, s: *session.Session, bytes: *u8, len: u32,
-    path: intern.StrId, mid: session.ModuleId) res[resolve.ModuleExports, fail.Fail] {
-    if (len < 8) { ret res[resolve.ModuleExports, fail.Fail].err{fail.message("public symbol surface is truncated")}; }
+# what the exports product of module `stable` says an importer reads, its symbols allocated from `a`
+pub fun public_symbols_decode(a: *A.Allocator, s: *session.Session, bytes: *u8, len: u32,
+    path: intern.StrId, stable: session.StableModuleId) res[resolve.ModuleExports, fail.Fail] {
+    if (len < 9) { ret res[resolve.ModuleExports, fail.Fail].err{fail.message("public symbol surface is truncated")}; }
     var r: wire.Source = wire.source(bytes, len::usize);
     val n: u32         = wire.take_u32(?r);
-    if (n > (len - 8) / 36) { ret res[resolve.ModuleExports, fail.Fail].err{fail.message("public symbol surface is truncated")}; }
-    var out: resolve.ModuleExports = resolve.ModuleExports{path: path, module: mid};
-    if (n == 0) { ret res[resolve.ModuleExports, fail.Fail].ok{out}; }
+    if (n > (len - 9) / 36) { ret res[resolve.ModuleExports, fail.Fail].err{fail.message("public symbol surface is truncated")}; }
+    var out: resolve.ModuleExports = resolve.ModuleExports{path: path, module: stable};
+    if (n == 0) { ret symbols_refusal(?r, out); }
     val allocated: res[*resolve.PublicSymbol, A.Error] = A.allocate[resolve.PublicSymbol](a, n::usize);
     if (sel allocated.err) { ret res[resolve.ModuleExports, fail.Fail].err{fail.refused(allocated.err)}; }
     val symbols:     *resolve.PublicSymbol = allocated.ok;
@@ -229,40 +227,35 @@ fun public_symbols_decode(a: *A.Allocator, s: *session.Session, bytes: *u8, len:
         if (testing > 1) { ret res[resolve.ModuleExports, fail.Fail].err{fail.message("public symbol testing flag is invalid")}; }
         symbol.testing = testing != 0;
         symbol.slot    = slot;
-        val stable: session.StableModuleId = origin::session.StableModuleId;
-        symbol.origin = session.module_id_for_stable(s, stable);
-        if (!module.stable_is_nil(stable) && module.is_nil(symbol.origin)) {
-            ret res[resolve.ModuleExports, fail.Fail].err{fail.message("public symbol origin is not loaded")};
-        }
-        if (symbol.kind == resolve.SYM_USE) {
-            val slot_stable: session.StableModuleId = symbol.slot::session.StableModuleId;
-            symbol.slot = session.module_id_for_stable(s, slot_stable)::u32;
-            if (!module.stable_is_nil(slot_stable) && symbol.slot == session.MODULE_NIL::u32) {
-                ret res[resolve.ModuleExports, fail.Fail].err{fail.message("public module slot is not loaded")};
-            }
-        }
-        symbols[i] = symbol;
-        i          = i + 1;
+        symbol.origin  = origin::session.StableModuleId;
+        symbols[i]     = symbol;
+        i              = i + 1;
     }
     out.symbols = symbols;
     out.count   = n;
-    transferred = true;
+    val refusal: res[resolve.ModuleExports, fail.Fail] = symbols_refusal(?r, out);
+    if (sel refusal.ok) { transferred = true; }
+    ret refusal;
+}
+
+fun symbols_refusal(r: *wire.Source, exports: resolve.ModuleExports) res[resolve.ModuleExports, fail.Fail] {
+    var out:     resolve.ModuleExports = exports;
+    val refused: u8                    = wire.take_u8(r);
+    if (r.bad)       { ret res[resolve.ModuleExports, fail.Fail].err{fail.message("public symbol surface is truncated")}; }
+    if (refused > 1) { ret res[resolve.ModuleExports, fail.Fail].err{fail.message("public symbol refusal flag is invalid")}; }
+    out.refused = refused != 0;
     ret res[resolve.ModuleExports, fail.Fail].ok{out};
 }
 
-test public_surface__canonical_name_is_owned_and_module_slots_are_remapped {
+test public_surface__canonical_name_is_owned_and_modules_keep_their_stable_ids {
     var alloc: A.Allocator;
     page.make(?alloc);
     val initialized: res[session.Session, fail.Fail] = session.init(?alloc);
     if (sel initialized.err) { ret 1; }
     var s: session.Session = initialized.ok;
     fin { session.dnit(?s); }
-    val register_stable_mid_r: err[fail.Fail] = session.register_stable_mid(?s, module.stable_id(17), module.id(2));
-    if (sel register_stable_mid_r.err) { ret 2; }
-    val register_stable_mid_r2: err[fail.Fail] = session.register_stable_mid(?s, module.stable_id(18), module.id(3));
-    if (sel register_stable_mid_r2.err) { ret 3; }
     var symbol: resolve.Symbol = resolve.Symbol{kind: resolve.SYM_USE, definition_kind: resolve.SYM_USE, name: intern.str_id(5), canon: intern.str_id(6),
-        decl: ast_id.decl(7), slot: 1, origin: module.id(0), origin_stable: module.stable_id(17), slot_stable: module.stable_id(18)};
+        decl: ast_id.decl(7), slot: 18, origin: module.stable_id(17)};
     var result: resolve.ResolveResult = resolve.ResolveResult{symbols: ?symbol, pub_count: 1};
     var before: wire.Sink             = wire.grown(?alloc);
     fin { wire.dnit(?before); }
@@ -275,14 +268,14 @@ test public_surface__canonical_name_is_owned_and_module_slots_are_remapped {
     if (sel encoded2.err)                                                                                                                    { ret 5; }
     if (before.len != 46 || after.len != 46 || t_same_bytes(?before, ?after))                                                                { ret 6; }
     if (wire.bytes(?after)[9] != 0x12 || wire.bytes(?after)[10] != 0x34 || wire.bytes(?after)[11] != 0x56 || wire.bytes(?after)[12] != 0x78) { ret 7; }
-    symbol.canon       = intern.str_id(99);
-    symbol.slot_stable = session.STABLE_MODULE_NIL;
-    val decoded: res[resolve.ModuleExports, fail.Fail] = public_symbols_decode(?alloc, ?s, wire.bytes(?after), after.len::u32, intern.str_id(4), module.id(2));
+    symbol.canon = intern.str_id(99);
+    symbol.slot  = session.STABLE_MODULE_NIL::u32;
+    val decoded: res[resolve.ModuleExports, fail.Fail] = public_symbols_decode(?alloc, ?s, wire.bytes(?after), after.len::u32, intern.str_id(4), module.stable_id(2));
     if (sel decoded.err) { ret 8; }
     val exports: resolve.ModuleExports = decoded.ok;
     fin { A.deallocate[resolve.PublicSymbol](?alloc, exports.symbols, exports.count::usize); }
-    if (exports.count != 1 || !intern.str_same(exports.symbols[0].canon, intern.str_id(0x78563412))) { ret 9; }
-    if (!module.same(exports.symbols[0].origin, module.id(2)) || exports.symbols[0].slot != 3)       { ret 10; }
+    if (exports.count != 1 || !intern.str_same(exports.symbols[0].canon, intern.str_id(0x78563412)))           { ret 9; }
+    if (!module.stable_same(exports.symbols[0].origin, module.stable_id(17)) || exports.symbols[0].slot != 18) { ret 10; }
     ret 0;
 }
 
@@ -324,7 +317,7 @@ test public_surface__definition_kind_changes_without_a_spelling_change {
     if (sel make_r.err) { ret 1; }
     var symbol: resolve.Symbol = resolve.Symbol{kind: resolve.SYM_IMPORTED,
         definition_kind: resolve.SYM_FUN, name: intern.str_id(11), canon: intern.str_id(12), decl: ast_id.decl(3),
-        origin:          module.id(0), origin_stable: module.stable_id(4), slot_stable: session.STABLE_MODULE_NIL};
+        origin:          module.stable_id(4)};
     var result:   resolve.ResolveResult = resolve.ResolveResult{symbols: ?symbol, pub_count: 1};
     var function: wire.Sink             = wire.grown(?alloc);
     fin { wire.dnit(?function); }
@@ -356,10 +349,15 @@ test public_surface__a_refusal_is_observable {
     if (sel clean_r.err) { ret 2; }
     result.refused = true;
     val refused_r: err[fail.Fail] = public_surface_encode(?refused, ?result, module.stable_id(4), 1);
-    if (sel refused_r.err)                                                                    { ret 3; }
-    if (clean.len != refused.len)                                                             { ret 4; }
-    if (t_same_bytes(?clean, ?refused))                                                       { ret 5; }
-    if (wire.bytes(?clean)[clean.len - 1] != 0 || wire.bytes(?refused)[refused.len - 1] != 1) { ret 6; }
+    if (sel refused_r.err)                                          { ret 3; }
+    if (clean.len != refused.len)                                   { ret 4; }
+    if (t_same_bytes(?clean, ?refused))                             { ret 5; }
+    if (wire.bytes(?clean)[4] != 0 || wire.bytes(?refused)[4] != 1) { ret 6; }
+    # the decoder reads the refusal back, so an importer of a refused module knows it
+    var s:       session.Session                       = session.Session{};
+    val decoded: res[resolve.ModuleExports, fail.Fail] = public_symbols_decode(?alloc, ?s, wire.bytes(?refused), refused.len::u32, intern.str_id(1), module.stable_id(2));
+    if (sel decoded.err)     { ret 7; }
+    if (!decoded.ok.refused) { ret 8; }
     ret 0;
 }
 
@@ -574,7 +572,7 @@ test public_surface__testing_flag_is_observable_and_round_trips {
     val registered: err[fail.Fail] = session.register_stable_mid(?s, module.stable_id(17), module.id(2));
     if (sel registered.err) { ret 2; }
     var symbol: resolve.Symbol = resolve.Symbol{definition_kind: resolve.SYM_FUN, name: intern.str_id(5), canon: intern.str_id(6),
-        definition_file: lang_source.file_id(8), origin_stable: module.stable_id(17)};
+        definition_file: lang_source.file_id(8), origin: module.stable_id(17)};
     var result: resolve.ResolveResult = resolve.ResolveResult{symbols: ?symbol, pub_count: 1};
     var clean:  wire.Sink             = wire.grown(?alloc);
     var marked: wire.Sink             = wire.grown(?alloc);
@@ -588,12 +586,12 @@ test public_surface__testing_flag_is_observable_and_round_trips {
     val marked_r: err[fail.Fail] = public_surface_encode(?marked, ?result, module.stable_id(17), 1);
     if (sel marked_r.err)                                         { ret 4; }
     if (clean.len != marked.len || t_same_bytes(?clean, ?marked)) { ret 5; }
-    val decoded: res[resolve.ModuleExports, fail.Fail] = public_symbols_decode(?alloc, ?s, wire.bytes(?marked), marked.len::u32, intern.str_id(1), module.id(2));
+    val decoded: res[resolve.ModuleExports, fail.Fail] = public_symbols_decode(?alloc, ?s, wire.bytes(?marked), marked.len::u32, intern.str_id(1), module.stable_id(2));
     if (sel decoded.err) { ret 6; }
     val exports: resolve.ModuleExports = decoded.ok;
     fin { A.deallocate[resolve.PublicSymbol](?alloc, exports.symbols, exports.count::usize); }
     if (exports.count != 1 || !exports.symbols[0].testing) { ret 7; }
-    val plain: res[resolve.ModuleExports, fail.Fail] = public_symbols_decode(?alloc, ?s, wire.bytes(?clean), clean.len::u32, intern.str_id(1), module.id(2));
+    val plain: res[resolve.ModuleExports, fail.Fail] = public_symbols_decode(?alloc, ?s, wire.bytes(?clean), clean.len::u32, intern.str_id(1), module.stable_id(2));
     if (sel plain.err) { ret 8; }
     val plain_exports: resolve.ModuleExports = plain.ok;
     fin { A.deallocate[resolve.PublicSymbol](?alloc, plain_exports.symbols, plain_exports.count::usize); }
@@ -611,7 +609,7 @@ test public_surface__deprecation_owner_and_message_are_observable {
     val register_stable_mid_r: err[fail.Fail] = session.register_stable_mid(?s, module.stable_id(17), module.id(2));
     if (sel register_stable_mid_r.err) { ret 2; }
     var symbol: resolve.Symbol = resolve.Symbol{definition_kind: resolve.SYM_FUN, name: intern.str_id(5), canon: intern.str_id(6),
-        definition_file: lang_source.file_id(8), origin_stable: module.stable_id(17)};
+        definition_file: lang_source.file_id(8), origin: module.stable_id(17)};
     symbol.deprecation = deprecation.Deprecation{present: true, owner: lang_source.file_id(9), message: intern.str_id(10)};
     var result:   resolve.ResolveResult = resolve.ResolveResult{symbols: ?symbol, pub_count: 1};
     var original: wire.Sink             = wire.grown(?alloc);
@@ -633,11 +631,11 @@ test public_surface__deprecation_owner_and_message_are_observable {
     if (sel encoded3.err)                                                     { ret 5; }
     if (original.len != 46 || changed.len != 46 || moved.len != 46)           { ret 6; }
     if (t_same_bytes(?original, ?changed) || t_same_bytes(?original, ?moved)) { ret 7; }
-    val decoded: res[resolve.ModuleExports, fail.Fail] = public_symbols_decode(?alloc, ?s, wire.bytes(?original), original.len::u32, intern.str_id(1), module.id(2));
+    val decoded: res[resolve.ModuleExports, fail.Fail] = public_symbols_decode(?alloc, ?s, wire.bytes(?original), original.len::u32, intern.str_id(1), module.stable_id(2));
     if (sel decoded.err) { ret 8; }
     val exports: resolve.ModuleExports = decoded.ok;
     fin { A.deallocate[resolve.PublicSymbol](?alloc, exports.symbols, exports.count::usize); }
-    if (exports.count != 1 || !lang_source.file_same(exports.symbols[0].file, lang_source.file_id(8)) || !module.same(exports.symbols[0].origin, module.id(2))
+    if (exports.count != 1 || !lang_source.file_same(exports.symbols[0].file, lang_source.file_id(8)) || !module.stable_same(exports.symbols[0].origin, module.stable_id(17))
         || !exports.symbols[0].deprecation.present || !lang_source.file_same(exports.symbols[0].deprecation.owner, lang_source.file_id(9))
         || !intern.str_same(exports.symbols[0].deprecation.message, intern.str_id(10))) { ret 9; }
     ret 0;

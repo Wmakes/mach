@@ -410,7 +410,7 @@ fun caller_pack_slot(w: *Walk) u32 {
 }
 
 fun owned_by_caller(w: *Walk, sym: *resolve.Symbol) bool {
-    ret module.same(sym.origin, w.own) && ast_id.decl_index(sym.decl) == w.caller;
+    ret module.same(resolve.origin_of(w.s, sym), w.own) && ast_id.decl_index(sym.decl) == w.caller;
 }
 
 # the slot of the caller's value or pack parameter `eid` names exactly, or NONE
@@ -549,7 +549,7 @@ fun call_visit(w: *Walk, c: *ast_expr.ExprCall, site: lang_source.Span) {
     val so: opt[*resolve.Symbol] = symbol_of_expr(w, c.callee);
     if (sel so.none) { ret; }
     val sym: *resolve.Symbol = so.some;
-    if (sym.kind != resolve.SYM_FUN || !module.same(sym.origin, w.own)) { ret; }
+    if (sym.kind != resolve.SYM_FUN || !module.same(resolve.origin_of(w.s, sym), w.own)) { ret; }
     val go: opt[*ast_decl.Decl] = ast.get_decl(w.a, sym.decl);
     if (sel go.none)                    { ret; }
     if (!fun_is_template(w.a, go.some)) { ret; }

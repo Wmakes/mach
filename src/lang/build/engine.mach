@@ -753,9 +753,6 @@ fun test_phase(p: *driver.Project, st: *UnitState) err[fail.Fail] {
 fun codegen_phase(p: *driver.Project, st: *UnitState) err[fail.Fail] {
     readout.phase_begin(p.progress, readout.CODEGEN);
     project.set_origin(p, diagnostic.ORIGIN_CODEGEN);
-    val prepared: err[fail.Fail] = passes.prepare_codegen_pass(p);
-    if (sel prepared.err) { ret prepared; }
-
     var roots: Vector[query.QueryKey] = collections_vector.init[query.QueryKey](p.alloc);
     fin { collections_vector.dnit[query.QueryKey](?roots); }
     val frontend: err[fail.Fail] = driver.append_frontend_roots(p, ?roots);
@@ -765,12 +762,12 @@ fun codegen_phase(p: *driver.Project, st: *UnitState) err[fail.Fail] {
         val m:       *driver.ModuleEntry = project.module_at(p, p.topo[i]::u32);
         val key:     u64                 = passes.back_half_key_for(p, m);
         val lowered: res[usize, A.Error] = collections_vector.push[query.QueryKey](?roots,
-            query.QueryKey{kind: query.Q_LOWER, key: key});
+            query.QueryKey{kind: ?passes.LOWER, key: key});
         if (sel lowered.err) {
             ret err[fail.Fail].err{fail.refused(lowered.err)};
         }
         val emitted: res[usize, A.Error] = collections_vector.push[query.QueryKey](?roots,
-            query.QueryKey{kind: query.Q_CODEGEN, key: key});
+            query.QueryKey{kind: ?passes.CODEGEN, key: key});
         if (sel emitted.err) {
             ret err[fail.Fail].err{fail.refused(emitted.err)};
         }
@@ -901,7 +898,7 @@ fun artifact_reusable(s: *session.Session, relinked: bool, artifact: *u8, revisi
 }
 
 fun record_artifact_publication(s: *session.Session, artifact: *u8, revision: query.Revision) err[fail.Fail] {
-    if (query.peek_revision(?s.queries, query.Q_LINK, 0) != revision) {
+    if (query.peek_revision(?s.queries, ?passes.LINK, 0) != revision) {
         ret err[fail.Fail].err{fail.message("the link query's revision moved while the artifact was being written")};
     }
     var d:   [32]u8;
@@ -1006,7 +1003,7 @@ fun link_phase(p: *driver.Project, unit: *build_plan.BuildUnit, st: *UnitState,
     if (sel cfg_r.err) { ret cfg_r; }
     val relink_r: res[bool, fail.Fail] = driver.run_link_pass(p);
     if (sel relink_r.err) { ret err[fail.Fail].err{relink_r.err}; }
-    val link_rev: query.Revision       = query.peek_revision(?p.s.queries, query.Q_LINK, 0);
+    val link_rev: query.Revision       = query.peek_revision(?p.s.queries, ?passes.LINK, 0);
     val reusable: res[bool, fail.Fail] = artifact_reusable(p.s, relink_r.ok, artifact::*u8, link_rev);
     if (sel reusable.err) { ret err[fail.Fail].err{reusable.err}; }
     if (reusable.ok) {
@@ -1056,7 +1053,7 @@ fun link_dispatch_phase(p: *driver.Project, unit: *build_plan.BuildUnit, st: *Un
 
     val relink_r: res[bool, fail.Fail] = driver.run_link_pass(p);
     if (sel relink_r.err) { ret err[fail.Fail].err{relink_r.err}; }
-    val link_rev: query.Revision       = query.peek_revision(?p.s.queries, query.Q_LINK, 0);
+    val link_rev: query.Revision       = query.peek_revision(?p.s.queries, ?passes.LINK, 0);
     val reusable: res[bool, fail.Fail] = artifact_reusable(p.s, relink_r.ok, artifact::*u8, link_rev);
     if (sel reusable.err) { ret err[fail.Fail].err{reusable.err}; }
     if (reusable.ok)      { ret err[fail.Fail].ok{}; }
@@ -1126,7 +1123,7 @@ fun link_flat(p: *driver.Project, unit: *build_plan.BuildUnit, st: *UnitState, t
     if (sel cfg_r.err) { ret cfg_r; }
     val relink_r: res[bool, fail.Fail] = driver.run_link_pass(p);
     if (sel relink_r.err) { ret err[fail.Fail].err{relink_r.err}; }
-    val link_rev: query.Revision       = query.peek_revision(?p.s.queries, query.Q_LINK, 0);
+    val link_rev: query.Revision       = query.peek_revision(?p.s.queries, ?passes.LINK, 0);
     val reusable: res[bool, fail.Fail] = artifact_reusable(p.s, relink_r.ok, artifact::*u8, link_rev);
     if (sel reusable.err) { ret err[fail.Fail].err{reusable.err}; }
     if (reusable.ok) {
@@ -1162,7 +1159,7 @@ fun link_finished(p: *driver.Project, unit: *build_plan.BuildUnit, st: *UnitStat
     if (sel cfg_r.err) { ret cfg_r; }
     val relink_r: res[bool, fail.Fail] = driver.run_link_pass(p);
     if (sel relink_r.err) { ret err[fail.Fail].err{relink_r.err}; }
-    val link_rev: query.Revision       = query.peek_revision(?p.s.queries, query.Q_LINK, 0);
+    val link_rev: query.Revision       = query.peek_revision(?p.s.queries, ?passes.LINK, 0);
     val reusable: res[bool, fail.Fail] = artifact_reusable(p.s, relink_r.ok, artifact::*u8, link_rev);
     if (sel reusable.err) { ret err[fail.Fail].err{reusable.err}; }
     if (!reusable.ok) {
@@ -1242,7 +1239,7 @@ pub fun set_link_config_input(p: *driver.Project, out_path: *u8, product: *u8, o
 fun set_link_config(p: *driver.Project, fb: *wire.Sink) err[fail.Fail] {
     val taken: res[query.QueryOutput, fail.Fail] = driver_query.output(fb);
     if (sel taken.err) { ret err[fail.Fail].err{taken.err}; }
-    val si: err[fail.Fail] = query.set_input(?p.s.queries, query.Q_LINK_CONFIG, 0, taken.ok.bytes, taken.ok.len);
+    val si: err[fail.Fail] = query.set_input(?p.s.queries, ?passes.LINK_CONFIG, 0, taken.ok.bytes, taken.ok.len);
     if (taken.ok.bytes != nil) { A.deallocate[u8](p.alloc, taken.ok.bytes, taken.ok.len::usize); }
     ret si;
 }
@@ -1315,22 +1312,22 @@ test link_config__provider_policy_invalidates_without_changing_names {
     val set_link_config_input_r: err[fail.Fail] = set_link_config_input(?p, "app", "app", catalog_artifact.EXECUTABLE::u32,
         nil, 0, ?lib, 1, nil);
     if (sel set_link_config_input_r.err) { ret 4; }
-    val baseline: query.Revision = query.peek_revision(?s.queries, query.Q_LINK_CONFIG, 0);
+    val baseline: query.Revision = query.peek_revision(?s.queries, ?passes.LINK_CONFIG, 0);
     if (baseline == 0) { ret 5; }
     val set_link_config_input_r2: err[fail.Fail] = set_link_config_input(?p, "app", "app", catalog_artifact.EXECUTABLE::u32,
         nil, 0, ?lib, 1, nil);
     if (sel set_link_config_input_r2.err)                                    { ret 6; }
-    if (query.peek_revision(?s.queries, query.Q_LINK_CONFIG, 0) != baseline) { ret 7; }
+    if (query.peek_revision(?s.queries, ?passes.LINK_CONFIG, 0) != baseline) { ret 7; }
     lib.include_referenced = true;
     val set_link_config_input_r3: err[fail.Fail] = set_link_config_input(?p, "app", "app", catalog_artifact.EXECUTABLE::u32,
         nil, 0, ?lib, 1, nil);
     if (sel set_link_config_input_r3.err) { ret 8; }
-    val changed: query.Revision = query.peek_revision(?s.queries, query.Q_LINK_CONFIG, 0);
+    val changed: query.Revision = query.peek_revision(?s.queries, ?passes.LINK_CONFIG, 0);
     if (changed == baseline) { ret 9; }
     val set_link_config_input_r4: err[fail.Fail] = set_link_config_input(?p, "app", "app", catalog_artifact.EXECUTABLE::u32,
         nil, 0, ?lib, 1, nil);
     if (sel set_link_config_input_r4.err)                                   { ret 10; }
-    if (query.peek_revision(?s.queries, query.Q_LINK_CONFIG, 0) != changed) { ret 11; }
+    if (query.peek_revision(?s.queries, ?passes.LINK_CONFIG, 0) != changed) { ret 11; }
     ret 0;
 }
 

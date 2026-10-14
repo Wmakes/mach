@@ -121,10 +121,8 @@ pub val SYM_PRIM:   SymKind = 11;
 pub val SYM_VECTOR: SymKind = 12;
 pub val SYM_TAG:    SymKind = 13;
 
-#[testing]
 val SYM_KIND_COUNT: u32 = 14;
 
-#[testing]
 pub fun sym_kind_valid(kind: SymKind) bool {
     ret kind::u32 < SYM_KIND_COUNT;
 }
@@ -140,21 +138,21 @@ pub val SYM_FLAG_MODULE: u8 = 4;
 # same notice and testing mark, so a `#[deprecated]` or `#[testing]` binding never taints a clean
 # alias of the same canonical name
 rec ImportedKey {
-    origin:  session.ModuleId;
+    origin:  session.StableModuleId;
     canon:   intern.StrId;
     notice:  deprecation.Deprecation;
     testing: bool;
 }
 
 fun imported_hash(k: *ImportedKey) u64 {
-    var h: u64 = module.index(k.origin)::u64 ^ (intern.str_index(k.canon)::u64 << 32);
+    var h: u64 = module.stable_index(k.origin)::u64 ^ (intern.str_index(k.canon)::u64 << 32);
     if (k.notice.present) { h = h ^ (lang_source.file_index(k.notice.owner)::u64 * 1099511628211) ^ intern.str_index(k.notice.message)::u64 ^ 1; }
     if (k.testing)        { h = h ^ 0x9e3779b97f4a7c15; }
     ret h;
 }
 
 fun imported_equal(x: *ImportedKey, y: *ImportedKey) bool {
-    ret module.same(x.origin, y.origin) && intern.str_same(x.canon, y.canon) && deprecation.equal(x.notice, y.notice) && x.testing == y.testing;
+    ret module.stable_same(x.origin, y.origin) && intern.str_same(x.canon, y.canon) && deprecation.equal(x.notice, y.notice) && x.testing == y.testing;
 }
 
 pub rec Symbol {
@@ -170,10 +168,11 @@ pub rec Symbol {
     name:                intern.StrId;
     canon:               intern.StrId;
     decl:                ast_id.DeclId;
-    slot:                u32;
-    origin:              session.ModuleId;
-    origin_stable:       session.StableModuleId;
-    slot_stable:         session.StableModuleId;
+    # a `use` symbol's slot is the stable id of the module it names
+    slot: u32;
+    # the module the symbol is defined in. a result outlives the operation that numbered the
+    # modules, so it names modules by stable id and a reader numbers them through origin_of
+    origin: session.StableModuleId;
 }
 
 pub rec PublicSymbol {
@@ -186,13 +185,15 @@ pub rec PublicSymbol {
     has_pack_param:      bool;
     deprecation:         deprecation.Deprecation;
     testing:             bool;
-    slot:                u32;
-    origin:              session.ModuleId;
+    # a `use` symbol's slot is the stable id of the module it names
+    slot:   u32;
+    origin: session.StableModuleId;
 }
 
+# what a module exports to an importer, every module it names by stable id
 pub rec ModuleExports {
     path:    intern.StrId;
-    module:  session.ModuleId;
+    module:  session.StableModuleId;
     symbols: *PublicSymbol;
     count:   u32;
     # the module refused itself, and that refusal is its diagnostic, so a missing name is not one
@@ -281,7 +282,7 @@ rec ResolveContext {
     deps:       *ResolveDeps;
     ctx:        *comptime.ComptimeCtx;
     caps:       comptime.PhaseCapabilities[ResolveContext];
-    own_module: session.ModuleId;
+    own_stable: session.StableModuleId;
     source:     str;
     # binding an arm of a statement-level gate that only sema can decide
     in_deferred_arm: bool;
@@ -353,9 +354,6 @@ pub rec ResolveResult {
 
     # a module-scope `$error` in a decided arm refused the module, so nothing else was resolved
     refused: bool;
-
-    remap_sequence: u64;
-    remap_modules:  u32;
 }
 
 # one `{name}` of an asm block and the local it binds
@@ -383,35 +381,32 @@ pub fun type_owner(s: *session.Session, mid: session.ModuleId, file: lang_source
     ret type.TypeOwner{module: stable_of_module(s, mid), file: file};
 }
 
-pub fun remap_result(r: *ResolveResult, s: *session.Session) {
-    if (r == nil || r.symbols == nil) { ret; }
-    # a loaded module keeps its id for the whole operation, so a result already
-    # remapped under this operation and module census is current
-    val sequence: u64 = s.queries.operation_sequence;
-    val modules:  u32 = session.module_count(s);
-    if (r.remap_sequence == sequence && r.remap_modules == modules) { ret; }
-    var i: u32 = 0;
-    for (i < r.symbol_count) {
-        val sym: *Symbol = ?r.symbols[i];
-        sym.origin = session.module_id_for_stable(s, sym.origin_stable);
-        if (sym.kind == SYM_USE) {
-            sym.slot = session.module_id_for_stable(s, sym.slot_stable)::u32;
-        }
-        i = i + 1;
-    }
-    r.remap_sequence = sequence;
-    r.remap_modules  = modules;
+# the module a symbol is defined in, as the current operation numbers it
+pub fun origin_of(s: *session.Session, sym: *Symbol) session.ModuleId {
+    ret session.module_id_for_stable(s, sym.origin);
+}
+
+# the module a `use` symbol names, as the current operation numbers it
+pub fun use_target(s: *session.Session, sym: *Symbol) session.ModuleId {
+    ret session.module_id_for_stable(s, sym.slot::session.StableModuleId);
+}
+
+# the stable id of the module a `use` symbol names, nil for any other symbol
+pub fun use_stable(sym: *Symbol) session.StableModuleId {
+    if (sym.kind != SYM_USE) { ret session.STABLE_MODULE_NIL; }
+    ret sym.slot::session.StableModuleId;
 }
 
 # the modules an importer's resolution reads: how many are loaded, with ids below that count,
-# each one's resolution, nil when it has none, whether that resolution is current, and the
-# path it is imported by
+# what each one exports, and the path it is imported by
+# ---
+# exports: what a module exports to an importer, its symbols allocated from the allocator given;
+#          reading it is what makes the importer's resolution depend on the exporter's surface
 pub rec Exporters {
-    ctx:      ptr;
-    count:    u32;
-    result:   fun(ptr, session.ModuleId) *ResolveResult;
-    resolved: fun(ptr, session.ModuleId) bool;
-    path:     fun(ptr, session.ModuleId) intern.StrId;
+    ctx:     ptr;
+    count:   u32;
+    exports: fun(ptr, session.ModuleId, *A.Allocator) res[ModuleExports, fail.Fail];
+    path:    fun(ptr, session.ModuleId) intern.StrId;
 }
 
 fun list_holds(list: *session.ModuleId, len: u32, id: session.ModuleId) bool {
@@ -423,16 +418,13 @@ fun list_holds(list: *session.ModuleId, len: u32, id: session.ModuleId) bool {
     ret false;
 }
 
-# what module `mid` exports to an importer
-fun exports_of(alloc: *A.Allocator, from: *Exporters, mid: session.ModuleId) res[ModuleExports, fail.Fail] {
-    val rr: *ResolveResult = from.result(from.ctx, mid);
-    var mx: ModuleExports;
-    mx.path    = from.path(from.ctx, mid);
-    mx.module  = mid;
-    mx.symbols = nil;
-    mx.count   = 0;
-    mx.refused = rr != nil && rr.refused;
-    if (!from.resolved(from.ctx, mid) || rr == nil || rr.pub_count == 0) { ret res[ModuleExports, fail.Fail].ok{mx}; }
+# what a finished resolution of module `stable` exports to an importer
+# ---
+# alloc: owns the returned symbols, released with the ModuleExports they are in
+pub fun result_exports(alloc: *A.Allocator, rr: *ResolveResult, path: intern.StrId,
+    stable: session.StableModuleId) res[ModuleExports, fail.Fail] {
+    var mx: ModuleExports = ModuleExports{path: path, module: stable, refused: rr != nil && rr.refused};
+    if (rr == nil || rr.pub_count == 0) { ret res[ModuleExports, fail.Fail].ok{mx}; }
     val r: res[*PublicSymbol, A.Error] = A.allocate[PublicSymbol](alloc, rr.pub_count::usize);
     if (sel r.err) { ret res[ModuleExports, fail.Fail].err{fail.refused(r.err)}; }
     val syms: *PublicSymbol = r.ok;
@@ -461,17 +453,22 @@ fun exports_of(alloc: *A.Allocator, from: *Exporters, mid: session.ModuleId) res
 
 # the exports module `m` of loader `l` reads: each loaded module it imports and every module a
 # reached one re-exports, each once, allocated from `alloc` and released with deps_dnit
-pub fun deps_of(alloc: *A.Allocator, l: *fe_load.Loader, m: *fe_load.Module, from: *Exporters) res[ResolveDeps, fail.Fail] {
+pub fun deps_of(alloc: *A.Allocator, s: *session.Session, l: *fe_load.Loader, m: *fe_load.Module, from: *Exporters) res[ResolveDeps, fail.Fail] {
     var deps: ResolveDeps = ResolveDeps{};
     if (m.deps.len == 0) { ret res[ResolveDeps, fail.Fail].ok{deps}; }
     val lr: res[*session.ModuleId, A.Error] = A.allocate[session.ModuleId](alloc, from.count::usize);
     if (sel lr.err) { ret res[ResolveDeps, fail.Fail].err{fail.refused(lr.err)}; }
-    val list: *session.ModuleId = lr.ok;
-    var len:  u32               = 0;
-    var done: bool              = false;
+    val list: *session.ModuleId            = lr.ok;
+    var len:  u32                          = 0;
+    val er:   res[*ModuleExports, A.Error] = A.allocate[ModuleExports](alloc, from.count::usize);
+    if (sel er.err) {
+        A.deallocate[session.ModuleId](alloc, list, from.count::usize);
+        ret res[ResolveDeps, fail.Fail].err{fail.refused(er.err)};
+    }
+    deps.entries = er.ok;
+    var cap: u32 = from.count;
     fin {
         A.deallocate[session.ModuleId](alloc, list, from.count::usize);
-        if (!done) { deps_dnit(alloc, ?deps); }
     }
     var i: usize = 0;
     for (i < m.deps.len) {
@@ -484,42 +481,59 @@ pub fun deps_of(alloc: *A.Allocator, l: *fe_load.Loader, m: *fe_load.Module, fro
     }
     var head: u32 = 0;
     for (head < len) {
-        val rr: *ResolveResult = from.result(from.ctx, list[head]);
-        if (from.resolved(from.ctx, list[head]) && rr != nil && rr.symbols != nil) {
-            var k: u32 = 0;
-            for (k < rr.pub_count) {
-                val sym: *Symbol = ?rr.symbols[k];
-                if (sym.kind == SYM_USE) {
-                    val target: session.ModuleId = sym.slot::session.ModuleId;
-                    if (target::u32 < from.count && !list_holds(list, len, target)) {
-                        list[len] = target;
-                        len       = len + 1;
-                    }
+        val mx: res[ModuleExports, fail.Fail] = from.exports(from.ctx, list[head], alloc);
+        if (sel mx.err) {
+            deps_release(alloc, ?deps, cap);
+            ret res[ResolveDeps, fail.Fail].err{mx.err};
+        }
+        deps.entries[head] = mx.ok;
+        deps.count         = head + 1;
+        var k: u32 = 0;
+        for (k < mx.ok.count) {
+            val ps: *PublicSymbol = ?mx.ok.symbols[k];
+            if (ps.kind == SYM_USE) {
+                val target: session.ModuleId = session.module_id_for_stable(s, ps.slot::session.StableModuleId);
+                if (target::u32 < from.count && !list_holds(list, len, target)) {
+                    list[len] = target;
+                    len       = len + 1;
                 }
-                k = k + 1;
             }
+            k = k + 1;
         }
         head = head + 1;
     }
-    val r: res[*ModuleExports, A.Error] = A.allocate[ModuleExports](alloc, len::usize);
-    if (sel r.err) { ret res[ResolveDeps, fail.Fail].err{fail.refused(r.err)}; }
-    deps.entries = r.ok;
-    deps.count   = len;
-    var z: u32 = 0;
-    for (z < len) {
-        deps.entries[z].symbols = nil;
-        deps.entries[z].count   = 0;
-        z                       = z + 1;
+    # the entries were sized for every loaded module; keep only those read
+    if (len == 0) {
+        A.deallocate[ModuleExports](alloc, deps.entries, cap::usize);
+        deps.entries = nil;
+        ret res[ResolveDeps, fail.Fail].ok{deps};
+    }
+    val fitted: res[*ModuleExports, A.Error] = A.allocate[ModuleExports](alloc, len::usize);
+    if (sel fitted.err) {
+        deps_release(alloc, ?deps, cap);
+        ret res[ResolveDeps, fail.Fail].err{fail.refused(fitted.err)};
     }
     var e: u32 = 0;
     for (e < len) {
-        val mx: res[ModuleExports, fail.Fail] = exports_of(alloc, from, list[e]);
-        if (sel mx.err) { ret res[ResolveDeps, fail.Fail].err{mx.err}; }
-        deps.entries[e] = mx.ok;
-        e               = e + 1;
+        fitted.ok[e] = deps.entries[e];
+        e            = e + 1;
     }
-    done = true;
+    A.deallocate[ModuleExports](alloc, deps.entries, cap::usize);
+    deps.entries = fitted.ok;
     ret res[ResolveDeps, fail.Fail].ok{deps};
+}
+
+# release the entries deps_of read so far, from an entry array of `cap` slots
+fun deps_release(alloc: *A.Allocator, deps: *ResolveDeps, cap: u32) {
+    var i: u32 = 0;
+    for (i < deps.count) {
+        val mx: *ModuleExports = ?deps.entries[i];
+        if (mx.symbols != nil && mx.count > 0) { A.deallocate[PublicSymbol](alloc, mx.symbols, mx.count::usize); }
+        i = i + 1;
+    }
+    A.deallocate[ModuleExports](alloc, deps.entries, cap::usize);
+    deps.entries = nil;
+    deps.count   = 0;
 }
 
 # release what deps_of allocated
@@ -578,7 +592,7 @@ pub fun result_dnit(r: *ResolveResult) {
 pub fun result_copy(r: *ResolveResult, alloc: *A.Allocator) res[ResolveResult, fail.Fail] {
     var out: ResolveResult = ResolveResult{status: r.status, alloc: alloc, symbol_count: r.symbol_count, pub_count: r.pub_count,
         expr_count:         r.expr_count, type_count: r.type_count, decl_count: r.decl_count, public_constant_count: r.public_constant_count,
-        expr_choices_count: r.expr_choices_count, refused: r.refused, remap_sequence: r.remap_sequence, remap_modules: r.remap_modules,
+        expr_choices_count: r.expr_choices_count, refused: r.refused,
         param_index:        map.init[u64, SymbolId](alloc), constants: comptime.bindings_init(alloc)};
     var done: bool = false;
     fin {
@@ -649,13 +663,14 @@ pub fun resolve(
     deps: *ResolveDeps,
     load: *comptime.ComptimeCtx,
     own_module: session.ModuleId,
+    own_stable: session.StableModuleId,
     diags: *diagnostic.DiagnosticStore) res[ResolveResult, fail.Fail] {
     var scope: comptime.ComptimeCtx = comptime.stage_init(load, comptime.STAGE_RESOLVE, s.alloc);
     fin { comptime.dnit(?scope); }
     val gates: err[fail.Fail] = comptime.prepare_gates(?scope, a.exprs.len::u32);
     if (sel gates.err) { ret res[ResolveResult, fail.Fail].err{gates.err}; }
     var rc:     ResolveContext;
-    val init_r: err[fail.Fail] = init_context(?rc, s, a, deps, ?scope, own_module, diags);
+    val init_r: err[fail.Fail] = init_context(?rc, s, a, deps, ?scope, own_module, own_stable, diags);
     if (sel init_r.err) { ret res[ResolveResult, fail.Fail].err{init_r.err}; }
     fin { dnit_context(?rc); }
 
@@ -739,6 +754,7 @@ fun init_context(
     deps: *ResolveDeps,
     ctx: *comptime.ComptimeCtx,
     own_module: session.ModuleId,
+    own_stable: session.StableModuleId,
     diags: *diagnostic.DiagnosticStore) err[fail.Fail] {
     rc.status = fail.accepted();
     rc.s      = s;
@@ -752,7 +768,7 @@ fun init_context(
         ret err[fail.Fail].err{caps_r.err};
     }
     rc.caps            = caps_r.ok;
-    rc.own_module      = own_module;
+    rc.own_stable      = own_stable;
     rc.in_deferred_arm = false;
 
     val src_opt: opt[*lang_source.SourceFile] = lang_source.get(?s.sources, a.file_id);
@@ -995,7 +1011,8 @@ pub fun declaration_testing(a: *ast.Ast, did: ast_id.DeclId) bool {
     ret decorator.has(a, defining.some, decorator.TESTING);
 }
 
-fun add_symbol(rc: *ResolveContext, kind: SymKind, flags: u8, name: intern.StrId, canon: intern.StrId, decl_id: ast_id.DeclId, slot: u32, origin: session.ModuleId) res[SymbolId, fail.Fail] {
+# a `use` symbol's slot is the stable id of the module it names
+fun add_symbol(rc: *ResolveContext, kind: SymKind, flags: u8, name: intern.StrId, canon: intern.StrId, decl_id: ast_id.DeclId, slot: u32, origin: session.StableModuleId) res[SymbolId, fail.Fail] {
     if (rc.sym_len >= symbol_index(SYMBOL_RESERVED_MIN)) {
         val message: str = "resolver symbol table exhausted";
         fail.internal(?rc.status, message);
@@ -1013,13 +1030,13 @@ fun add_symbol(rc: *ResolveContext, kind: SymKind, flags: u8, name: intern.StrId
     sym.generic_arity   = 0;
     sym.deprecation     = deprecation.none();
     sym.testing         = false;
-    if (rc.a != nil && module.same(origin, rc.own_module) && kind != SYM_PARAM && kind != SYM_GENERIC) {
+    if (rc.a != nil && module.stable_same(origin, rc.own_stable) && kind != SYM_PARAM && kind != SYM_GENERIC) {
         val notice: res[deprecation.Deprecation, fail.Fail] = declaration_deprecation(rc.ctx, rc.a, decl_id);
         if (sel notice.err) { ret res[SymbolId, fail.Fail].err{notice.err}; }
         sym.deprecation = notice.ok;
         sym.testing     = declaration_testing(rc.a, decl_id);
     }
-    if (rc.a != nil && module.same(origin, rc.own_module)) {
+    if (rc.a != nil && module.stable_same(origin, rc.own_stable)) {
         sym.definition_file = rc.a.file_id;
         val defining: opt[*ast_decl.Decl] = ast.get_decl(rc.a, decl_id);
         if (sel defining.some) {
@@ -1040,14 +1057,12 @@ fun add_symbol(rc: *ResolveContext, kind: SymKind, flags: u8, name: intern.StrId
             or (d.kind == ast_decl.DECL_KIND_TAG) { sym.generic_arity = d.data.tag_.generics_len; }
         }
     }
-    sym.flags         = flags;
-    sym.name          = name;
-    sym.canon         = canon;
-    sym.decl          = decl_id;
-    sym.slot          = slot;
-    sym.origin        = origin;
-    sym.origin_stable = session.STABLE_MODULE_NIL;
-    sym.slot_stable   = session.STABLE_MODULE_NIL;
+    sym.flags  = flags;
+    sym.name   = name;
+    sym.canon  = canon;
+    sym.decl   = decl_id;
+    sym.slot   = slot;
+    sym.origin = origin;
     val sid: SymbolId = symbol_id(rc.sym_len);
     rc.symbols[rc.sym_len] = sym;
     rc.sym_len             = rc.sym_len + 1;
@@ -1061,7 +1076,7 @@ fun declare(
     name: lang_source.Span,
     decl_id: ast_id.DeclId,
     slot: u32,
-    origin: session.ModuleId,
+    origin: session.StableModuleId,
     scope: ScopeId) res[SymbolId, fail.Fail] {
     if (name.len == 0) {
         ret res[SymbolId, fail.Fail].ok{SYMBOL_NIL};
@@ -1120,7 +1135,7 @@ fun reject_builtin_type_name(rc: *ResolveContext, kind: SymKind, name: lang_sour
 }
 
 fun attach_prior_binding(rc: *ResolveContext, b: *diagnostic.DiagnosticBuilder, prior: SymbolId) err[fail.Fail] {
-    if (module.same(rc.symbols[symbol_index(prior)].origin, rc.own_module) && !ast_id.decl_is_nil(rc.symbols[symbol_index(prior)].decl)) {
+    if (module.stable_same(rc.symbols[symbol_index(prior)].origin, rc.own_stable) && !ast_id.decl_is_nil(rc.symbols[symbol_index(prior)].decl)) {
         val prev: lang_source.Span = prior_name_span(rc, rc.symbols[symbol_index(prior)].decl);
         if (prev.len != 0) { ret diagnostic.attach_related(b, rc.a.file_id, prev, "previous definition here"); }
     }
@@ -1160,7 +1175,7 @@ fun seed_one_primitive(rc: *ResolveContext, index: u32, name: str, kind_ordinal:
     }
     val name_id: intern.StrId = r_id.ok;
 
-    val r_sym: res[SymbolId, fail.Fail] = add_symbol(rc, SYM_PRIM, 0, name_id, name_id, ast_id.DECL_NIL, kind_ordinal, rc.own_module);
+    val r_sym: res[SymbolId, fail.Fail] = add_symbol(rc, SYM_PRIM, 0, name_id, name_id, ast_id.DECL_NIL, kind_ordinal, rc.own_stable);
     if (sel r_sym.err) {
         fail.internal(?rc.status, fail.describe(r_sym.err));
         ret err[fail.Fail].err{r_sym.err};
@@ -1224,7 +1239,7 @@ fun type_spelling(rc: *ResolveContext, name: intern.StrId) res[TypeSpelling, fai
     }
     val vtid: type.TypeId = r_tid.ok;
 
-    val r_sym: res[SymbolId, fail.Fail] = add_symbol(rc, SYM_VECTOR, 0, name, name, ast_id.DECL_NIL, vtid::u32, rc.own_module);
+    val r_sym: res[SymbolId, fail.Fail] = add_symbol(rc, SYM_VECTOR, 0, name, name, ast_id.DECL_NIL, vtid::u32, rc.own_stable);
     if (sel r_sym.err) {
         fail.internal(?rc.status, fail.describe(r_sym.err));
         ret res[TypeSpelling, fail.Fail].err{r_sym.err};
@@ -1331,7 +1346,7 @@ fun collect_one_decl(rc: *ResolveContext, decl_id: ast_id.DeclId, scope: ScopeId
 }
 
 fun declare_decl(rc: *ResolveContext, kind: SymKind, flags: u8, name_span: lang_source.Span, decl_id: ast_id.DeclId, scope: ScopeId) err[fail.Fail] {
-    val r: res[SymbolId, fail.Fail] = declare(rc, kind, flags, name_span, decl_id, 0, rc.own_module, scope);
+    val r: res[SymbolId, fail.Fail] = declare(rc, kind, flags, name_span, decl_id, 0, rc.own_stable, scope);
     if (sel r.err) {
         fail.internal(?rc.status, fail.describe(r.err));
         ret err[fail.Fail].err{r.err};
@@ -1642,7 +1657,7 @@ fun collect_use(rc: *ResolveContext, decl_id: ast_id.DeclId, du: *ast_decl.DeclU
         if (alias_span.len == 0) {
             alias_span = leaf_span(rc, du.path);
         }
-        val r: res[SymbolId, fail.Fail] = declare(rc, SYM_USE, 0, alias_span, decl_id, mx.module::u32, rc.own_module, scope);
+        val r: res[SymbolId, fail.Fail] = declare(rc, SYM_USE, 0, alias_span, decl_id, mx.module::u32, rc.own_stable, scope);
         if (sel r.err) {
             fail.internal(?rc.status, fail.describe(r.err));
             ret err[fail.Fail].err{r.err};
@@ -1690,7 +1705,7 @@ fun collect_use(rc: *ResolveContext, decl_id: ast_id.DeclId, du: *ast_decl.DeclU
 # bind a `use` as the load recorded it: a module under its alias or last segment, or a member
 # of the module the load found by its name
 fun bind_recorded_use(rc: *ResolveContext, decl_id: ast_id.DeclId, du: *ast_decl.DeclUse, b: *fe_load.Binding, scope: ScopeId) err[fail.Fail] {
-    val mx: *ModuleExports = find_module_exports_by_module(rc, session.module_id_for_stable(rc.s, b.module));
+    val mx: *ModuleExports = find_module_exports_by_module(rc, b.module);
     if (mx == nil) {
         record_report(rc, diagnostic_kind.MODULE_NOT_IN_DEPS, du.path, "imported module is not in the dep set");
         ret err[fail.Fail].ok{};
@@ -1699,7 +1714,7 @@ fun bind_recorded_use(rc: *ResolveContext, decl_id: ast_id.DeclId, du: *ast_decl
     if (b.kind == fe_load.BINDING_MODULE) {
         var alias_span: lang_source.Span = du.alias;
         if (alias_span.len == 0) { alias_span = leaf; }
-        val r: res[SymbolId, fail.Fail] = declare(rc, SYM_USE, 0, alias_span, decl_id, mx.module::u32, rc.own_module, scope);
+        val r: res[SymbolId, fail.Fail] = declare(rc, SYM_USE, 0, alias_span, decl_id, mx.module::u32, rc.own_stable, scope);
         if (sel r.err) {
             fail.internal(?rc.status, fail.describe(r.err));
             ret err[fail.Fail].err{r.err};
@@ -1818,11 +1833,11 @@ fun find_module_exports(rc: *ResolveContext, path: intern.StrId) *ModuleExports 
     ret nil;
 }
 
-fun find_module_exports_by_module(rc: *ResolveContext, mid: session.ModuleId) *ModuleExports {
+fun find_module_exports_by_module(rc: *ResolveContext, stable: session.StableModuleId) *ModuleExports {
     var i: u32 = 0;
     for (i < rc.deps.count) {
         val mx: *ModuleExports = ?rc.deps.entries[i];
-        if (module.same(mx.module, mid)) { ret mx; }
+        if (module.stable_same(mx.module, stable)) { ret mx; }
         i = i + 1;
     }
     ret nil;
@@ -1839,8 +1854,7 @@ fun bind_member_qualified(rc: *ResolveContext, eid: ast_id.ExprId, member: *ast_
     val osym: *Symbol = ?rc.symbols[symbol_index(osid)];
     if (osym.kind != SYM_USE) { ret err[fail.Fail].ok{}; }
 
-    val target: session.ModuleId = osym.slot::session.ModuleId;
-    val mx:     *ModuleExports   = find_module_exports_by_module(rc, target);
+    val mx: *ModuleExports = find_module_exports_by_module(rc, use_stable(osym));
     if (mx == nil) {
         record_report(rc, diagnostic_kind.MODULE_NOT_IN_DEPS, member.name, "module alias names a module that is not in the dep set");
         ret err[fail.Fail].ok{};
@@ -1897,7 +1911,7 @@ fun resolve_prefix_module(rc: *ResolveContext, prefix: lang_source.Span) *Module
     if (!symbol_is_nil(sid) && symbol_index(sid) < rc.sym_len) {
         val sym: *Symbol = ?rc.symbols[symbol_index(sid)];
         if (sym.kind == SYM_USE) {
-            ret find_module_exports_by_module(rc, sym.slot::session.ModuleId);
+            ret find_module_exports_by_module(rc, use_stable(sym));
         }
     }
     ret find_module_exports(rc, prefix_id);
@@ -2017,7 +2031,7 @@ fun collect_fwd(rc: *ResolveContext, decl_id: ast_id.DeclId, df: *ast_decl.DeclF
     val recorded: *fe_load.Binding = binding_for(rc, decl_id);
     var full_mx:  *ModuleExports   = nil;
     if (recorded != nil && recorded.kind == fe_load.BINDING_MODULE) {
-        full_mx = find_module_exports_by_module(rc, session.module_id_for_stable(rc.s, recorded.module));
+        full_mx = find_module_exports_by_module(rc, recorded.module);
     }
     or (recorded == nil) {
         val r_full: res[intern.StrId, A.Error] = fe_path.intern_path(?rc.s.interner, rc.source, df.path);
@@ -2040,7 +2054,7 @@ fun collect_fwd(rc: *ResolveContext, decl_id: ast_id.DeclId, df: *ast_decl.DeclF
 
     var pmx: *ModuleExports = nil;
     if (recorded != nil && recorded.kind == fe_load.BINDING_MEMBER) {
-        pmx = find_module_exports_by_module(rc, session.module_id_for_stable(rc.s, recorded.module));
+        pmx = find_module_exports_by_module(rc, recorded.module);
     }
     or { pmx = resolve_prefix_module(rc, prefix); }
     if (pmx == nil) {
@@ -2107,7 +2121,7 @@ fun collect_fwd(rc: *ResolveContext, decl_id: ast_id.DeclId, df: *ast_decl.DeclF
     ret err[fail.Fail].ok{};
 }
 
-fun collect_fwd_module(rc: *ResolveContext, decl_id: ast_id.DeclId, df: *ast_decl.DeclFwd, mid: session.ModuleId) err[fail.Fail] {
+fun collect_fwd_module(rc: *ResolveContext, decl_id: ast_id.DeclId, df: *ast_decl.DeclFwd, stable: session.StableModuleId) err[fail.Fail] {
     var alias_span: lang_source.Span = df.alias;
     if (alias_span.len == 0) {
         alias_span = leaf_span(rc, df.path);
@@ -2126,7 +2140,7 @@ fun collect_fwd_module(rc: *ResolveContext, decl_id: ast_id.DeclId, df: *ast_dec
         ret err[fail.Fail].ok{};
     }
 
-    val r: res[SymbolId, fail.Fail] = declare(rc, SYM_USE, SYM_FLAG_PUB, alias_span, decl_id, mid::u32, rc.own_module, rc.module_scope);
+    val r: res[SymbolId, fail.Fail] = declare(rc, SYM_USE, SYM_FLAG_PUB, alias_span, decl_id, stable::u32, rc.own_stable, rc.module_scope);
     if (sel r.err) {
         fail.internal(?rc.status, fail.describe(r.err));
         ret err[fail.Fail].err{r.err};
@@ -2499,7 +2513,7 @@ fun bind_fun(rc: *ResolveContext, f: *ast_decl.DeclFun, decl_id: ast_id.DeclId) 
     var gi: u32 = 0;
     for (gi < f.generics_len) {
         val name: lang_source.Span         = rc.a.generic_names.data[f.generics_start + gi];
-        val r:    res[SymbolId, fail.Fail] = declare(rc, SYM_GENERIC, 0, name, decl_id, gi, rc.own_module, gen_scope);
+        val r:    res[SymbolId, fail.Fail] = declare(rc, SYM_GENERIC, 0, name, decl_id, gi, rc.own_stable, gen_scope);
         if (sel r.err) {
             fail.internal(?rc.status, fail.describe(r.err));
             rc.current_scope = saved_scope;
@@ -2525,7 +2539,7 @@ fun bind_fun(rc: *ResolveContext, f: *ast_decl.DeclFun, decl_id: ast_id.DeclId) 
             ret rt;
         }
         val pflags: u8                       = param_flags(tn);
-        val r:      res[SymbolId, fail.Fail] = declare(rc, SYM_PARAM, pflags, tn.name, decl_id, pi, rc.own_module, param_scope);
+        val r:      res[SymbolId, fail.Fail] = declare(rc, SYM_PARAM, pflags, tn.name, decl_id, pi, rc.own_stable, param_scope);
         if (sel r.err) {
             fail.internal(?rc.status, fail.describe(r.err));
             rc.current_scope = saved_scope;
@@ -2577,7 +2591,7 @@ fun bind_aggregate(rc: *ResolveContext, generics_start: u32, generics_len: u32, 
     var gi: u32 = 0;
     for (gi < generics_len) {
         val name: lang_source.Span         = rc.a.generic_names.data[generics_start + gi];
-        val rd:   res[SymbolId, fail.Fail] = declare(rc, SYM_GENERIC, 0, name, decl_id, gi, rc.own_module, gen_scope);
+        val rd:   res[SymbolId, fail.Fail] = declare(rc, SYM_GENERIC, 0, name, decl_id, gi, rc.own_stable, gen_scope);
         if (sel rd.err) {
             fail.internal(?rc.status, fail.describe(rd.err));
             rc.current_scope = saved_scope;
@@ -2671,7 +2685,7 @@ fun bind_comptime_each(rc: *ResolveContext, ce: *ast_stmt.StmtComptimeEach) err[
     val saved: ScopeId = rc.current_scope;
     rc.current_scope = r_s.ok;
 
-    val rd: res[SymbolId, fail.Fail] = declare(rc, SYM_VAL, SYM_FLAG_COMPTIME, ce.var_name, ast_id.DECL_NIL, 0, rc.own_module, rc.current_scope);
+    val rd: res[SymbolId, fail.Fail] = declare(rc, SYM_VAL, SYM_FLAG_COMPTIME, ce.var_name, ast_id.DECL_NIL, 0, rc.own_stable, rc.current_scope);
     if (sel rd.err) {
         fail.internal(?rc.status, fail.describe(rd.err));
         rc.current_scope = saved;
@@ -2717,7 +2731,7 @@ fun bind_local_decl(rc: *ResolveContext, decl_id: ast_id.DeclId) err[fail.Fail] 
     }
 
     val kind:  SymKind                  = if_val_kind(d.kind == ast_decl.DECL_KIND_VAL);
-    val r_sym: res[SymbolId, fail.Fail] = declare(rc, kind, 0, d.data.bind.name, decl_id, 0, rc.own_module, rc.current_scope);
+    val r_sym: res[SymbolId, fail.Fail] = declare(rc, kind, 0, d.data.bind.name, decl_id, 0, rc.own_stable, rc.current_scope);
     if (sel r_sym.err) {
         fail.internal(?rc.status, fail.describe(r_sym.err));
         ret err[fail.Fail].err{r_sym.err};
@@ -3355,11 +3369,11 @@ fun split_case_head(rc: *ResolveContext, named: *ast_type.TypeNamed) {
 # the tail symbol of a dotted path, without reporting: SYMBOL_NIL when any segment is unknown
 fun path_tail_symbol(rc: *ResolveContext, path: lang_source.Span) SymbolId {
     if (path.len == 0) { ret SYMBOL_NIL; }
-    var cursor:         usize            = path.offset;
-    val end:            usize            = path.offset + path.len;
-    var current_module: session.ModuleId = session.MODULE_NIL;
-    var current_sym:    SymbolId         = SYMBOL_NIL;
-    var first:          bool             = true;
+    var cursor:         usize                  = path.offset;
+    val end:            usize                  = path.offset + path.len;
+    var current_module: session.StableModuleId = session.STABLE_MODULE_NIL;
+    var current_sym:    SymbolId               = SYMBOL_NIL;
+    var first:          bool                   = true;
 
     for (cursor < end) {
         val seg_span: lang_source.Span = fe_path.next(rc.source, path, ?cursor);
@@ -3378,7 +3392,7 @@ fun path_tail_symbol(rc: *ResolveContext, path: lang_source.Span) SymbolId {
         if (symbol_is_nil(current_sym))                            { ret SYMBOL_NIL; }
         if (cursor >= end)                                         { brk; }
         if (rc.symbols[symbol_index(current_sym)].kind != SYM_USE) { ret SYMBOL_NIL; }
-        current_module = rc.symbols[symbol_index(current_sym)].slot::session.ModuleId;
+        current_module = use_stable(?rc.symbols[symbol_index(current_sym)]);
     }
     ret current_sym;
 }
@@ -3481,9 +3495,9 @@ fun resolve_type_path(rc: *ResolveContext, named: *ast_type.TypeNamed, full: lan
     var cursor: usize = path.offset;
     val end:    usize = path.offset + path.len;
 
-    var current_module: session.ModuleId = session.MODULE_NIL;
-    var current_sym:    SymbolId         = SYMBOL_NIL;
-    var first:          bool             = true;
+    var current_module: session.StableModuleId = session.STABLE_MODULE_NIL;
+    var current_sym:    SymbolId               = SYMBOL_NIL;
+    var first:          bool                   = true;
 
     for (cursor < end) {
         val seg_span: lang_source.Span = fe_path.next(rc.source, path, ?cursor);
@@ -3531,7 +3545,7 @@ fun resolve_type_path(rc: *ResolveContext, named: *ast_type.TypeNamed, full: lan
 
         val sym: *Symbol = ?rc.symbols[symbol_index(current_sym)];
         if (sym.kind == SYM_USE) {
-            current_module = sym.slot::session.ModuleId;
+            current_module = use_stable(sym);
         }
         or {
             record_report(rc, diagnostic_kind.MODULE_ALIAS_EXPECTED, full, "expected a module alias before `.`");
@@ -3542,7 +3556,7 @@ fun resolve_type_path(rc: *ResolveContext, named: *ast_type.TypeNamed, full: lan
     ret current_sym;
 }
 
-fun lookup_in_module(rc: *ResolveContext, m: session.ModuleId, name: intern.StrId) SymbolId {
+fun lookup_in_module(rc: *ResolveContext, m: session.StableModuleId, name: intern.StrId) SymbolId {
     val mx: *ModuleExports = find_module_exports_by_module(rc, m);
     if (mx == nil) { ret SYMBOL_NIL; }
     val ps: *PublicSymbol = find_export(mx, name);
@@ -3628,19 +3642,6 @@ fun build_result(rc: *ResolveContext) res[ResolveResult, fail.Fail] {
     }
 
     if (remap != nil) { A.deallocate[u32](rc.s.alloc, remap, rc.sym_len::usize); }
-
-    var si: u32 = 0;
-    for (si < rc.sym_len) {
-        val sym: *Symbol = ?out_syms[si];
-        sym.origin_stable = stable_of_module(rc.s, sym.origin);
-        if (sym.kind == SYM_USE) {
-            sym.slot_stable = stable_of_module(rc.s, sym.slot::session.ModuleId);
-        }
-        or {
-            sym.slot_stable = session.STABLE_MODULE_NIL;
-        }
-        si = si + 1;
-    }
 
     var param_index: map.Map[u64, SymbolId] = map.init[u64, SymbolId](rc.s.alloc);
     fin {
@@ -3894,7 +3895,7 @@ fun t_symbol_growth_boundary(exhausted: bool) i32 {
     rc.sym_len = rc.sym_cap;
     val old_cap: u32                      = rc.sym_cap;
     val r:       res[SymbolId, fail.Fail] = add_symbol(?rc, SYM_VAL, 0, intern.STR_NIL, intern.STR_NIL,
-        ast_id.DECL_NIL, 0, session.MODULE_NIL);
+        ast_id.DECL_NIL, 0, session.STABLE_MODULE_NIL);
     if (sel r.ok)                     { ret 1; }
     if (!sel rc.status.kind.internal) { ret 1; }
     if (exhausted) {
@@ -4133,8 +4134,9 @@ fun fixture_result(raw: ptr, mid: session.ModuleId) *ResolveResult {
 }
 
 #[testing]
-fun fixture_resolved(raw: ptr, mid: session.ModuleId) bool {
-    ret fixture_result(raw, mid) != nil;
+fun fixture_exports(raw: ptr, mid: session.ModuleId, alloc: *A.Allocator) res[ModuleExports, fail.Fail] {
+    val r: *Resolved = raw::*Resolved;
+    ret result_exports(alloc, fixture_result(raw, mid), fixture_path(raw, mid), resolved_row(r, mid).stable);
 }
 
 #[testing]
@@ -4195,7 +4197,7 @@ pub fun resolved_check(r: *Resolved, src: *Sources) err[fail.Fail] {
     for (i < r.host.count) {
         val row: fe_load.Row = r.host.rows[i];
         if (row.syntax == nil) { ret err[fail.Fail].err{fail.message("a fixture module was not parsed")}; }
-        val registered: err[fail.Fail] = session.register_module_identity(?r.s, module.id(i), row.syntax, row.name, row.stable);
+        val registered: err[fail.Fail] = session.register_module_identity(?r.s, module.id(i), row.name, row.stable);
         if (sel registered.err) { ret registered; }
         val recorded: err[fail.Fail] = fe_load.decorators_record(?r.loader, module.id(i));
         if (sel recorded.err) { ret recorded; }
@@ -4204,18 +4206,18 @@ pub fun resolved_check(r: *Resolved, src: *Sources) err[fail.Fail] {
         i = i + 1;
     }
 
-    var from: Exporters = Exporters{ctx: r::ptr, count: r.host.count, result: fixture_result, resolved: fixture_resolved, path: fixture_path};
+    var from: Exporters = Exporters{ctx: r::ptr, count: r.host.count, exports: fixture_exports, path: fixture_path};
     i = 0;
     for (i < r.host.closed) {
         val mid:   session.ModuleId            = r.host.done[i];
         val row:   fe_load.Row                 = resolved_row(r, mid);
         var deps:  ResolveDeps                 = ResolveDeps{};
-        val built: res[ResolveDeps, fail.Fail] = deps_of(?r.alloc, ?r.loader, row.load, ?from);
+        val built: res[ResolveDeps, fail.Fail] = deps_of(?r.alloc, ?r.s, ?r.loader, row.load, ?from);
         if (sel built.err) { ret err[fail.Fail].err{built.err}; }
         deps               = built.ok;
         deps.bindings      = row.load.bindings.data;
         deps.binding_count = row.load.bindings.len::u32;
-        val rr: res[ResolveResult, fail.Fail] = resolve(?r.s, row.syntax, ?deps, ?row.load.ctx, mid, ?r.s.diags);
+        val rr: res[ResolveResult, fail.Fail] = resolve(?r.s, row.syntax, ?deps, ?row.load.ctx, mid, row.stable, ?r.s.diags);
         deps_dnit(?r.alloc, ?deps);
         if (sel rr.err) { ret err[fail.Fail].err{rr.err}; }
         r.order[i]   = mid;
