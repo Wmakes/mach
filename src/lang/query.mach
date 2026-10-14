@@ -2169,6 +2169,8 @@ val T_MODE_BRANCH:          TestComputeMode = 11;
 val T_MODE_REJECT:          TestComputeMode = 12;
 #[testing]
 val T_MODE_RETIRE:          TestComputeMode = 13;
+#[testing]
+val T_MODE_IMPORTS:         TestComputeMode = 14;
 
 #[testing]
 val T_TEXT:     Kind = Kind{name: "text", role: INPUT, owner: KEY_UNOWNED};
@@ -2399,11 +2401,78 @@ fun t_compute(raw: ptr, kind: *Kind, key: u64, a: *A.Allocator, diags: *diagnost
         if (kind == ?T_RETIRE_PARENT) { ret t_retire_parent_compute(ctx, key, a, diags); }
     }
     if (ctx.mode == T_MODE_OWNED_DIAG) { ret t_owned_diag_compute(ctx, key, a, diags); }
+    if (ctx.mode == T_MODE_IMPORTS)    { ret t_imports_compute(ctx, kind, key, a, diags); }
     if (ctx.mode == T_MODE_AUTO_DEP) {
         if (kind == ?T_TOKENIZE) { ret t_tok_compute(ctx, key, a, diags); }
         if (kind == ?T_PARSE)    { ret t_auto_dep_outer_compute(ctx, key, a, diags); }
     }
     ret res[QueryOutput, fail.Fail].err{fail.message("test query kind has no compute capability")};
+}
+
+# module k's lower reads its sema, and its sema reads the sema of module k - 1, which it imports
+#[testing]
+fun t_imports_compute(ctx: *TestQueryContext, kind: *Kind, key: u64, a: *A.Allocator, diags: *diagnostic.DiagnosticStore) res[QueryOutput, fail.Fail] {
+    var read: err[fail.Fail] = err[fail.Fail].ok{};
+    if (kind == ?T_LOWER)           { read = depend[TestQueryContext](?ctx.runtime, ctx, ?T_SEMA, key); }
+    if (kind == ?T_SEMA && key > 0) { read = depend[TestQueryContext](?ctx.runtime, ctx, ?T_SEMA, key - 1); }
+    if (sel read.err)               { ret res[QueryOutput, fail.Fail].err{read.err}; }
+    val buf: res[*u8, A.Error] = A.allocate[u8](a, 1);
+    if (sel buf.err) { ret res[QueryOutput, fail.Fail].err{fail.refused(buf.err)}; }
+    buf.ok[0] = key::u8;
+    ret res[QueryOutput, fail.Fail].ok{QueryOutput{bytes: buf.ok, len: 1}};
+}
+
+#[testing]
+rec TestWalk {
+    key:    u64;
+    all:    bool;
+    visits: u32;
+}
+
+#[testing]
+fun t_walk_enter(raw: ptr, product: QueryKey) bool {
+    val w: *TestWalk = raw::*TestWalk;
+    ret w.all || product.key == w.key;
+}
+
+#[testing]
+fun t_walk_visit(raw: ptr, product: QueryKey, store: *diagnostic.DiagnosticStore) {
+    val w: *TestWalk = raw::*TestWalk;
+    w.visits = w.visits + 1;
+}
+
+# a walk the filter keeps to one module's products visits that module's two, however many
+# modules its chain imports, while an unfiltered walk reaches every sema in the chain
+test walk_products__a_filtered_walk_does_not_grow_with_the_imports {
+    var depths: [2]u64 = [2]u64{2, 8};
+    var d:      usize  = 0;
+    for (d < 2) {
+        var alloc: A.Allocator;
+        page.make(?alloc);
+        val opened: res[QueryDb, fail.Fail] = init(?alloc);
+        if (sel opened.err) { ret 1; }
+        var db:  QueryDb = opened.ok;
+        var ctx: TestQueryContext;
+        if (!t_context_init(?ctx, ?db, T_MODE_IMPORTS)) {
+            dnit(?db);
+            ret 2;
+        }
+        val n:     u64                         = depths[d];
+        val built: res[*QueryEntry, fail.Fail] = t_get(?ctx, ?T_LOWER, n);
+        var own:   TestWalk                    = TestWalk{key: n, all: false};
+        var all:   TestWalk                    = TestWalk{key: n, all: true};
+        val root:  QueryKey                    = QueryKey{kind: ?T_LOWER, key: n};
+        val w_own: err[fail.Fail]              = walk_products(?db, root, (?own)::ptr, t_walk_enter, t_walk_visit);
+        val w_all: err[fail.Fail]              = walk_products(?db, root, (?all)::ptr, t_walk_enter, t_walk_visit);
+        t_context_dnit(?ctx);
+        dnit(?db);
+        val code: i32 = (d::i32 + 1) * 10;
+        if (sel built.err || sel w_own.err || sel w_all.err) { ret code + 1; }
+        if (all.visits::u64 != n + 2)                        { ret code + 2; }
+        if (own.visits != 2)                                 { ret code + 3; }
+        d = d + 1;
+    }
+    ret 0;
 }
 
 test kind__a_malformed_row_is_refused_on_first_use_and_leaves_no_shard {
