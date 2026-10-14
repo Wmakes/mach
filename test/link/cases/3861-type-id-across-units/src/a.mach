@@ -1,5 +1,5 @@
 # one module's identities: the dependency's types, and a record named like one of them
-use shapes;
+use shapes: shapes.lib;
 
 pub rec Point { x: u64; }
 
