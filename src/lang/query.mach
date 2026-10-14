@@ -1629,45 +1629,61 @@ pub fun cached_dependency_keys(db: *QueryDb, kind: *Kind, key: u64,
     ret res[Vector[QueryKey], fail.Fail].ok{keys};
 }
 
+# whether a product walk enters a product, visiting it and walking what it was computed from
+# reached through walk_products
+pub def ProductFilter: fun(ptr, QueryKey) bool;
+
 # what a product walk is shown of each product: its address and the store it reported into,
 # nil when it reported nothing
 # reached through walk_products
 pub def ProductVisit: fun(ptr, QueryKey, *diagnostic.DiagnosticStore);
 
-# visit a product and every product it was computed from, each once and its dependencies
-# first, as presentation walks them; a product with no current value ends its branch
-# ---
-# db:    the database, its products as the open operation or the last one left them
-# root:  the product to start from
-# ctx:   passed to visit
-# visit: shown each product reached
-pub fun walk_products(db: *QueryDb, root: QueryKey, ctx: ptr, visit: ProductVisit) err[fail.Fail] {
-    if (db == nil || visit == nil) { ret err[fail.Fail].err{fail.message("a product walk requires a database and a visitor")}; }
-    val sh: *QueryShard = shard_find(db, root.kind);
-    if (sh == nil) { ret err[fail.Fail].ok{}; }
-    var visited: Map[Slot, u8] = map.init[Slot, u8](db.a);
-    fin { map.dnit[Slot, u8](?visited); }
-    ret walk_node(db, Slot{kind: sh.kind, key: root.key}, ?visited, ctx, visit);
+rec ProductWalk {
+    db:      *QueryDb;
+    visited: Map[Slot, u8];
+    ctx:     ptr;
+    enter:   ProductFilter;
+    visit:   ProductVisit;
 }
 
-fun walk_node(db: *QueryDb, key: Slot, visited: *Map[Slot, u8], ctx: ptr, visit: ProductVisit) err[fail.Fail] {
+# visit a product and every product it was computed from that the filter enters, each once
+# and its dependencies first, as presentation walks them. a product the filter refuses, or one
+# with no current value, ends its branch, so a walk costs what it enters, not the closure
+# ---
+# db:    the database, its products as the open operation or the last one left them
+# root:  the product to start from, itself subject to the filter
+# ctx:   passed to enter and visit
+# enter: whether the walk enters a product
+# visit: shown each product entered
+pub fun walk_products(db: *QueryDb, root: QueryKey, ctx: ptr, enter: ProductFilter, visit: ProductVisit) err[fail.Fail] {
+    if (db == nil || enter == nil || visit == nil) { ret err[fail.Fail].err{fail.message("a product walk requires a database, a filter and a visitor")}; }
+    val sh: *QueryShard = shard_find(db, root.kind);
+    if (sh == nil) { ret err[fail.Fail].ok{}; }
+    var walk: ProductWalk = ProductWalk{db: db, visited: map.init[Slot, u8](db.a), ctx: ctx, enter: enter, visit: visit};
+    fin { map.dnit[Slot, u8](?walk.visited); }
+    ret walk_node(?walk, Slot{kind: sh.kind, key: root.key});
+}
+
+fun walk_node(walk: *ProductWalk, key: Slot) err[fail.Fail] {
     var lookup: Slot     = key;
-    val prior:  opt[*u8] = map.get[Slot, u8](visited, ?lookup);
+    val prior:  opt[*u8] = map.get[Slot, u8](?walk.visited, ?lookup);
     if (sel prior.some) { ret err[fail.Fail].ok{}; }
-    val entered: res[bool, A.Error] = map.insert[Slot, u8](visited, key, 1);
+    val entered: res[bool, A.Error] = map.insert[Slot, u8](?walk.visited, key, 1);
     if (sel entered.err) { ret err[fail.Fail].err{fail.refused(entered.err)}; }
-    val sh: *QueryShard = db.storage[key.kind::u32];
+    val sh: *QueryShard = walk.db.storage[key.kind::u32];
     if (sh.role == METADATA) { ret err[fail.Fail].ok{}; }
+    val product: QueryKey = key_of(walk.db, key);
+    if (!walk.enter(walk.ctx, product)) { ret err[fail.Fail].ok{}; }
     val entry: *QueryEntry = entry_find(sh, key.key);
     if (entry == nil || !entry.ready) { ret err[fail.Fail].ok{}; }
     var i: u32 = 0;
     for (i < entry.dep_len) {
-        val walked: err[fail.Fail] = walk_node(db, Slot{kind: entry.deps[i].kind, key: entry.deps[i].key}, visited, ctx, visit);
+        val walked: err[fail.Fail] = walk_node(walk, Slot{kind: entry.deps[i].kind, key: entry.deps[i].key});
         if (sel walked.err) { ret walked; }
         i = i + 1;
     }
     if (entry.diags != nil && entry.diags.lost != 0) { ret err[fail.Fail].err{fail.message("query diagnostics contain a lost emission")}; }
-    visit(ctx, key_of(db, key), entry.diags);
+    walk.visit(walk.ctx, product, entry.diags);
     ret err[fail.Fail].ok{};
 }
 

@@ -935,10 +935,16 @@ fun recorded_file(ctx: ptr, path: str) res[lang_source.FileId, fail.Fail] {
     ret res[lang_source.FileId, fail.Fail].ok{lang_source.FILE_NIL};
 }
 
-# a product the walk reached adds its warnings when it is the object's module's own
+# the walk enters only the object's module's own products: another module's warnings belong to
+# its own object, and acyclic imports mean none of them leads back to this module's products
+fun warning_enter(raw: ptr, product: query.QueryKey) bool {
+    val sink: *WarningSink = raw::*WarningSink;
+    ret product.kind.owner == query.KEY_MODULE && product.key == sink.key;
+}
+
 fun warning_visit(raw: ptr, product: query.QueryKey, store: *diagnostic.DiagnosticStore) {
     val sink: *WarningSink = raw::*WarningSink;
-    if (store == nil || product.kind.owner != query.KEY_MODULE || product.key != sink.key) { ret; }
+    if (store == nil) { ret; }
     put_warnings(sink.w, sink.p, store, product.kind.replay);
 }
 
@@ -967,7 +973,7 @@ fun gather_warnings(p: *project.Project, object: query.QueryKey, scratch: *A.All
     var w: wire.Sink = wire.grown(scratch);
     fin { wire.dnit(?w); }
     var sink:   WarningSink    = WarningSink{w: ?w, p: p, key: object.key};
-    val walked: err[fail.Fail] = query.walk_products(?p.s.queries, object, (?sink)::ptr, warning_visit);
+    val walked: err[fail.Fail] = query.walk_products(?p.s.queries, object, (?sink)::ptr, warning_enter, warning_visit);
     if (sel walked.err)     { ret walked; }
     if (w.failed)           { ret err[fail.Fail].err{fail.message("out of memory recording a module's warnings")}; }
     if (w.len == 0)         { ret err[fail.Fail].ok{}; }
