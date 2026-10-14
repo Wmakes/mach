@@ -1626,6 +1626,47 @@ pub fun cached_dependency_keys(db: *QueryDb, kind: *Kind, key: u64,
     ret res[Vector[QueryKey], fail.Fail].ok{keys};
 }
 
+# what a product walk is shown of each product: its address and the store it reported into,
+# nil when it reported nothing
+pub def ProductVisit: fun(ptr, QueryKey, *diagnostic.DiagnosticStore);
+
+# visit a product and every product it was computed from, each once and its dependencies
+# first, as presentation walks them; a product with no current value ends its branch
+# ---
+# db:    the database, its products as the open operation or the last one left them
+# root:  the product to start from
+# ctx:   passed to visit
+# visit: shown each product reached
+pub fun walk_products(db: *QueryDb, root: QueryKey, ctx: ptr, visit: ProductVisit) err[fail.Fail] {
+    if (db == nil || visit == nil) { ret err[fail.Fail].err{fail.message("a product walk requires a database and a visitor")}; }
+    val sh: *QueryShard = shard_find(db, root.kind);
+    if (sh == nil) { ret err[fail.Fail].ok{}; }
+    var visited: Map[Slot, u8] = map.init[Slot, u8](db.a);
+    fin { map.dnit[Slot, u8](?visited); }
+    ret walk_node(db, Slot{kind: sh.kind, key: root.key}, ?visited, ctx, visit);
+}
+
+fun walk_node(db: *QueryDb, key: Slot, visited: *Map[Slot, u8], ctx: ptr, visit: ProductVisit) err[fail.Fail] {
+    var lookup: Slot     = key;
+    val prior:  opt[*u8] = map.get[Slot, u8](visited, ?lookup);
+    if (sel prior.some) { ret err[fail.Fail].ok{}; }
+    val entered: res[bool, A.Error] = map.insert[Slot, u8](visited, key, 1);
+    if (sel entered.err) { ret err[fail.Fail].err{fail.refused(entered.err)}; }
+    val sh: *QueryShard = db.storage[key.kind::u32];
+    if (sh.role == METADATA) { ret err[fail.Fail].ok{}; }
+    val entry: *QueryEntry = entry_find(sh, key.key);
+    if (entry == nil || !entry.ready) { ret err[fail.Fail].ok{}; }
+    var i: u32 = 0;
+    for (i < entry.dep_len) {
+        val walked: err[fail.Fail] = walk_node(db, Slot{kind: entry.deps[i].kind, key: entry.deps[i].key}, visited, ctx, visit);
+        if (sel walked.err) { ret walked; }
+        i = i + 1;
+    }
+    if (entry.diags != nil && entry.diags.lost != 0) { ret err[fail.Fail].err{fail.message("query diagnostics contain a lost emission")}; }
+    visit(ctx, key_of(db, key), entry.diags);
+    ret err[fail.Fail].ok{};
+}
+
 # the revision a product last changed at, without validating it; 0 when it has none
 pub fun peek_revision(db: *QueryDb, kind: *Kind, key: u64) Revision {
     val sh: *QueryShard = shard_find(db, kind);

@@ -1248,13 +1248,7 @@ fun run_codegen_one(p: *project.Project, mid: session.ModuleId) err[fail.Fail] {
     m.object_image = img;
     # a generated object, or one this session held, carries the key of the
     # current snapshot into `obj/`
-    var back: [3]*query.Kind = back_half_kinds();
-    ret cache.publish(p, m, img, cache.BackHalf{kinds: ?back[0], count: 3, key: back_half_key_for(p, m)});
-}
-
-# the kinds of an object's back half, whose warnings its cache record carries
-fun back_half_kinds() [3]*query.Kind {
-    ret [3]*query.Kind{?INLINE_BODIES, ?LOWER, ?CODEGEN};
+    ret cache.publish(p, m, img, query.QueryKey{kind: ?CODEGEN, key: back_half_key_for(p, m)});
 }
 
 # the module's test object, lowered against its normal object and generated
@@ -1267,8 +1261,7 @@ fun run_test_object_one(p: *project.Project, mid: session.ModuleId) err[fail.Fai
     if (img == nil) { ret err[fail.Fail].err{fail.message("the codegen query produced no test object handle")}; }
 
     m.test.object_image = img;
-    var back: [3]*query.Kind = back_half_kinds();
-    ret cache.publish_test(p, m, img, cache.BackHalf{kinds: ?back[0], count: 3, key: test_key_for(m)});
+    ret cache.publish_test(p, m, img, query.QueryKey{kind: ?CODEGEN, key: test_key_for(m)});
 }
 
 # the module's test ir, which test codegen workers read before the query publishes the object
