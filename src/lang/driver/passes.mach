@@ -73,22 +73,23 @@ use mach.lang.toolchain;
 
 # a module's source with what lowering omits cut away, keyed by its stable id
 pub val LOWERED_SURFACE: query.Kind = query.Kind{
-    name: "lowered surface", role: query.DERIVED, owner: query.KEY_MODULE, origin: diagnostic.ORIGIN_LOWER, compute: lowered_surface_compute
+    name:   "lowered surface", role: query.DERIVED, owner: query.KEY_MODULE, origin: diagnostic.ORIGIN_LOWER, compute: lowered_surface_compute,
+    replay: true
 };
 # the bodies a module offers its importers to inline, keyed by its back-half key
 pub val INLINE_BODIES: query.Kind = query.Kind{
     name:     "inline bodies", role: query.DERIVED, owner: query.KEY_MODULE, origin: diagnostic.ORIGIN_LOWER, compute: inline_bodies_compute,
-    finalize: lower_finalize, equal: lower_output_equal
+    finalize: lower_finalize, equal: lower_output_equal, replay: true
 };
 # a module's optimized ir, keyed by its back-half key
 pub val LOWER: query.Kind = query.Kind{
     name:  "lower", role: query.DERIVED, owner: query.KEY_MODULE, origin: diagnostic.ORIGIN_LOWER, compute: lower_compute, finalize: lower_finalize,
-    equal: lower_output_equal
+    equal: lower_output_equal, replay: true
 };
 # a module's object image, keyed by its back-half key
 pub val CODEGEN: query.Kind = query.Kind{
     name:     "codegen", role: query.DERIVED, owner: query.KEY_MODULE, origin: diagnostic.ORIGIN_CODEGEN, compute: codegen_compute,
-    finalize: codegen_finalize
+    finalize: codegen_finalize, replay: true
 };
 # the link's inputs as revisions, so a link reruns only when one moved
 pub val LINK: query.Kind = query.Kind{name: "link", role: query.DERIVED, owner: query.KEY_UNOWNED, origin: diagnostic.ORIGIN_LINK, compute: link_compute};

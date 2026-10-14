@@ -939,13 +939,7 @@ fun recorded_file(ctx: ptr, path: str) res[lang_source.FileId, fail.Fail] {
 fun warning_visit(raw: ptr, product: query.QueryKey, store: *diagnostic.DiagnosticStore) {
     val sink: *WarningSink = raw::*WarningSink;
     if (store == nil || product.kind.owner != query.KEY_MODULE || product.key != sink.key) { ret; }
-    put_warnings(sink.w, sink.p, store, back_phase(product.kind.origin));
-}
-
-# a phase that lowers or generates the object, whose warnings a restored object replays even
-# when its front end ran again
-fun back_phase(origin: diagnostic.Origin) bool {
-    ret origin >= diagnostic.ORIGIN_LOWER && origin <= diagnostic.ORIGIN_LINK;
+    put_warnings(sink.w, sink.p, store, product.kind.replay);
 }
 
 # a product store's warnings: the cache records a module only when it built,

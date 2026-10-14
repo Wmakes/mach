@@ -90,6 +90,8 @@ pub def ComputeFn: fun(ptr, *Kind, u64, *A.Allocator, *diagnostic.DiagnosticStor
 # finalize: releases what an owned derived product's bytes hold; nil when the bytes own nothing
 # equal:    whether two owned products are the same, so an equal recomputation keeps the revision;
 #           requires finalize
+# replay:   the product lowers or generates a module's object, so a restored object replays its
+#           warnings even when the module's front end ran again and reported its own
 pub rec Kind {
     name:     str;
     role:     Role;
@@ -98,6 +100,7 @@ pub rec Kind {
     compute:  ComputeFn;
     finalize: FinalizeFn;
     equal:    EqualFn;
+    replay:   bool;
 }
 
 # a kind's index among the shards of one database, taken on the row's first use
