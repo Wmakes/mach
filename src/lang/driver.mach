@@ -38,11 +38,11 @@ use mach.lang.driver.cache;
 use driver_closure: mach.lang.driver.closure;
 use mach.lang.driver.config;
 use mach.lang.driver.context;
+use mach.lang.driver.declared;
 use mach.lang.driver.frontend;
 use driver_load: mach.lang.driver.load;
 use mach.lang.driver.passes;
 use mach.lang.driver.project;
-use mach.lang.driver.union;
 use mach.lang.fail;
 # the retained fuzz corpus, answered by every untrusted boundary the driver composes
 #[testing]
@@ -639,11 +639,11 @@ fun load_phase_impl(p: *project.Project, extra_roots: *intern.StrId,
 
     close_load_row(p);
 
-    val strings_r: err[fail.Fail] = union.decorator_strings_register(p);
+    val strings_r: err[fail.Fail] = declared.decorator_strings_register(p);
     if (sel strings_r.err) {
         ret err[fail.Fail].err{strings_r.err};
     }
-    val emb_r: err[fail.Fail] = union.register_embed_inputs(p);
+    val emb_r: err[fail.Fail] = declared.register_embed_inputs(p);
     if (sel emb_r.err) {
         ret err[fail.Fail].err{emb_r.err};
     }
@@ -657,7 +657,7 @@ fun load_phase_impl(p: *project.Project, extra_roots: *intern.StrId,
         if (sel final_resolve.err) { ret err[fail.Fail].err{final_resolve.err}; }
     }
 
-    val exp_r: err[fail.Fail] = union.register_export_names(p);
+    val exp_r: err[fail.Fail] = declared.register_export_names(p);
     if (sel exp_r.err) {
         ret err[fail.Fail].err{exp_r.err};
     }
@@ -710,13 +710,13 @@ fun refresh_phases(p: *project.Project, phase: FrontendPhase) err[fail.Fail] {
     cache.forget(p);
     val reg_r: err[fail.Fail] = driver_load.register_module_asts(p);
     if (sel reg_r.err) { ret err[fail.Fail].err{reg_r.err}; }
-    val strings_r: err[fail.Fail] = union.decorator_strings_register(p);
+    val strings_r: err[fail.Fail] = declared.decorator_strings_register(p);
     if (sel strings_r.err) { ret err[fail.Fail].err{strings_r.err}; }
-    val emb_r: err[fail.Fail] = union.register_embed_inputs(p);
+    val emb_r: err[fail.Fail] = declared.register_embed_inputs(p);
     if (sel emb_r.err) { ret err[fail.Fail].err{emb_r.err}; }
     val resolved: err[fail.Fail] = resolve_query_phase(p);
     if (sel resolved.err) { ret err[fail.Fail].err{resolved.err}; }
-    val exp_r: err[fail.Fail] = union.register_export_names(p);
+    val exp_r: err[fail.Fail] = declared.register_export_names(p);
     if (sel exp_r.err)          { ret err[fail.Fail].err{exp_r.err}; }
     if (phase == FRONTEND_SEMA) { ret run_sema_pass(p); }
     ret err[fail.Fail].ok{};

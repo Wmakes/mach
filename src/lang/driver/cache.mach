@@ -38,9 +38,9 @@ use std.types.string.str_len;
 use mach.lang.driver.cache.compiler;
 use mach.lang.driver.cache.memo;
 use cache_record: mach.lang.driver.cache.record;
+use mach.lang.driver.declared;
 use mach.lang.driver.surface;
 use mach.lang.driver.toolchain;
-use mach.lang.driver.union;
 use me_ir: mach.lang.me.ir;
 use mach.lang.me.lower.testrunner;
 use mach.lang.me.pass;
@@ -571,7 +571,7 @@ fun key_embeds(b: *cache_key.Builder, p: *project.Project, mid: u32) err[fail.Fa
         }
         collections_vector.dnit[str](?paths);
     }
-    val collected: err[fail.Fail] = union.module_embeds(p, mid::session.ModuleId, ?paths);
+    val collected: err[fail.Fail] = declared.module_embeds(p, mid::session.ModuleId, ?paths);
     if (sel collected.err) { ret collected; }
     cache_key.number(b, paths.len::u64);
     var i: usize = 0;

@@ -59,13 +59,13 @@ use mach.lang.wire;
 use mach.lang.driver.cache;
 use mach.lang.driver.codec;
 use mach.lang.driver.context;
+use mach.lang.driver.declared;
 use driver_environment: mach.lang.driver.environment;
 use mach.lang.driver.frontend;
 use driver_load: mach.lang.driver.load;
 use mach.lang.driver.project;
 use mach.lang.driver.surface;
 use mach.lang.driver.toolchain;
-use mach.lang.driver.union;
 use mach.lang.fail;
 use mach.lang.growth;
 use mach.lang.module;
@@ -327,7 +327,7 @@ pub fun run_lower_pass(p: *project.Project) err[fail.Fail] {
 }
 
 pub fun prepare_lower_pass(p: *project.Project) err[fail.Fail] {
-    val imports: err[fail.Fail] = union.register_import_libraries(p);
+    val imports: err[fail.Fail] = declared.register_import_libraries(p);
     if (sel imports.err) { ret err[fail.Fail].err{fail.as_user(diagnostic_kind.LINK_IMPORT_LIBRARY, imports.err)}; }
 
     ret err[fail.Fail].ok{};
