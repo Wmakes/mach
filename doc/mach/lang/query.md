@@ -429,6 +429,29 @@ pub fun revision[T](rt: *QueryRuntime[T], ctx: *T, kind: *Kind, key: u64) res[Re
 pub fun depend[T](rt: *QueryRuntime[T], ctx: *T, kind: *Kind, key: u64) err[fail.Fail];
 ```
 
+## def ProductVisit
+
+```mach
+pub def ProductVisit: fun(ptr, QueryKey, *diagnostic.DiagnosticStore)
+```
+
+what a product walk is shown of each product: its address and the store it reported into,
+nil when it reported nothing
+
+## fun walk_products
+
+```mach
+pub fun walk_products(db: *QueryDb, root: QueryKey, ctx: ptr, visit: ProductVisit) err[fail.Fail];
+```
+
+visit a product and every product it was computed from, each once and its dependencies
+first, as presentation walks them; a product with no current value ends its branch
+
+db: the database, its products as the open operation or the last one left them
+root: the product to start from
+ctx: passed to visit
+visit: shown each product reached
+
 ## fun peek_revision
 
 ```mach
