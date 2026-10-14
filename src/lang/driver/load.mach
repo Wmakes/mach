@@ -99,32 +99,20 @@ fun artifact_context(p: *project.Project, artifact: intern.StrId) res[comptime.C
 # each dependency of the closure
 fun packages_set(p: *project.Project) err[fail.Fail] {
     disk.packages_clear(?p.disk);
-    val root_module: res[intern.StrId, fail.Fail] = public_module(p, p.config.id, p.config.module);
-    if (sel root_module.err) { ret err[fail.Fail].err{root_module.err}; }
     val root: err[fail.Fail] = disk.package_add(?p.disk, disk.Package{
-        id:  p.config.id, version: p.config.version, module: root_module.ok,
-        dir: p.config.project_root, src: p.config.dir_src, artifactless: false, root: true
+        id: p.config.id, version: p.config.version, dir: p.config.project_root, src: p.config.dir_src, root: true
     });
     if (sel root.err) { ret root; }
     var k: u32 = 0;
     for (k < p.config.dep_count) {
-        val dep:    *project.DepEntry            = ?p.config.deps[k];
-        val public: res[intern.StrId, fail.Fail] = public_module(p, dep.project_id, dep.project_module);
-        if (sel public.err) { ret err[fail.Fail].err{public.err}; }
-        val added: err[fail.Fail] = disk.package_add(?p.disk, disk.Package{
-            id:  dep.project_id, version: dep.manifest.version, module: public.ok,
-            dir: dep.vendor_root, src: dep.project_dir_src, artifactless: dep.manifest.artifact_count == 0, root: false
+        val dep:   *project.DepEntry = ?p.config.deps[k];
+        val added: err[fail.Fail]    = disk.package_add(?p.disk, disk.Package{
+            id: dep.project_id, version: dep.manifest.version, dir: dep.vendor_root, src: dep.project_dir_src, root: false
         });
         if (sel added.err) { ret added; }
         k = k + 1;
     }
     ret err[fail.Fail].ok{};
-}
-
-# the fqn of a package's public module from its entry path, STR_NIL when it has none
-fun public_module(p: *project.Project, id: intern.StrId, entry: intern.StrId) res[intern.StrId, fail.Fail] {
-    if (intern.str_is_nil(entry)) { ret res[intern.StrId, fail.Fail].ok{intern.STR_NIL}; }
-    ret module.compose_fqn(p.alloc, ?p.s.interner, intern.text(?p.s.interner, id), intern.text(?p.s.interner, entry));
 }
 
 # the project's loader, pointed at the project where it is now: the project is a value its

@@ -145,7 +145,6 @@ pub fun configuration(scratch: *A.Allocator, p: *project.Project, config: *u8, c
         cache_key.name(?b, ?p.s.interner, d.alias);
         cache_key.name(?b, ?p.s.interner, d.project_id);
         cache_key.name(?b, ?p.s.interner, d.project_dir_src);
-        cache_key.name(?b, ?p.s.interner, d.project_module);
         val vendor: opt[str] = intern.get(?p.s.interner, d.vendor_root);
         if (sel vendor.none) { ret err[fail.Fail].err{fail.message("the cache configuration dependency has no vendor root")}; }
         val vendor_keyed: err[fail.Fail] = key_path(?b, scratch, cwd, vendor.some, spelling_matters);
@@ -1124,7 +1123,6 @@ test configuration__tracks_compiler_request_steps_dependencies_and_providers {
     dependencies[0].source           = ids[3];
     dependencies[0].vendor_root      = ids[4];
     dependencies[0].project_dir_src  = ids[5];
-    dependencies[0].project_module   = ids[6];
     dependencies[0].ref              = ids[0];
     dependencies[0].manifest.version = ids[1];
     dependencies[0].direct           = ?direct_aliases[0];

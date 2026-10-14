@@ -1938,17 +1938,9 @@ fun use_target(l: *Loader, source: str, path: lang_source.Span) res[UseTarget, f
     if (sel leaf_r.err) { ret res[UseTarget, fail.Fail].err{leaf_r.err}; }
     val leaf: intern.StrId = leaf_r.ok;
 
+    # a path is a project id then a source path, so one segment names a project and no module
     if (fe_path.prefix(source, path).len == 0) {
-        val found: opt[provider.Package] = provider.package_find(?l.sources, full_id);
-        if (sel found.some) {
-            if (intern.str_is_nil(found.some.module)) {
-                if (found.some.artifactless) {
-                    ret res[UseTarget, fail.Fail].err{fail.user_of(diagnostic_kind.USE_NO_PUBLIC_MODULE, name_joined(l.s, "project '", full_id, "' declares no artifact, so it has no public module: import a full path, or declare a static or shared [artifact.*] table marked export = true in its manifest"))};
-                }
-                ret res[UseTarget, fail.Fail].err{fail.user_of(diagnostic_kind.USE_NO_PUBLIC_MODULE, name_joined(l.s, "project '", full_id, "' has no public module: a bare import binds the entry of its library artifact marked `export = true`; import a full path, or mark one static or shared [artifact.*] table export = true in its manifest"))};
-            }
-            ret res[UseTarget, fail.Fail].ok{UseTarget{module_fqn: found.some.module, leaf: leaf, binds_module: true}};
-        }
+        ret res[UseTarget, fail.Fail].err{fail.user_of(diagnostic_kind.USE_UNRESOLVED, unresolvable_use_msg(l, source, path, full_id))};
     }
 
     val names_file: res[bool, fail.Fail] = provider.module_exists(?l.sources, l.alloc, full_id);
@@ -1984,8 +1976,7 @@ fun unresolvable_use_msg(l: *Loader, source: str, path: lang_source.Span, full_i
     if (sel root_r.err) { ret res[str, fail.Fail].err{fail.refused(root_r.err)}; }
     val root_id: intern.StrId = root_r.ok;
 
-    val known: opt[provider.Package] = provider.package_find(?l.sources, root_id);
-    if (sel known.some) { ret name_joined(l.s, "use path '", full_id, "' does not name a module"); }
+    if (provider.package_known(?l.sources, root_id)) { ret name_joined(l.s, "use path '", full_id, "' does not name a module"); }
 
     ret fail.format_intern(?l.s.interner, l.s.alloc,
         "use path '{}': module root '{}' is not this project or a declared dependency; declare it in mach.toml",
@@ -2786,15 +2777,16 @@ test load__modules_given_as_names_and_text {
     if (sel app.err) { ret 1; }
     var held: resident.Resident = resident.init(?a, ?s.interner, app.ok);
     fin { resident.dnit(?held); }
-    val main_text: str = "use app.flags;\nuse app.flags.ON;\nuse lib;\nuse app.gone;\nuse app.flags.ON.deep;\n$if (flags.MODE == 2) { use app.extra; }\n$if (ON == 1) { use app.more; } $or { use app.never; }\nfun main() i32 { ret 0; }\n";
+    val main_text: str = "use app.flags;\nuse app.flags.ON;\nuse lib.core;\nuse lib;\nuse app.gone;\nuse app.flags.ON.deep;\n$if (flags.MODE == 2) { use app.extra; }\n$if (ON == 1) { use app.more; } $or { use app.never; }\nfun main() i32 { ret 0; }\n";
     if (!held_set(?held, "app.main", main_text))                                       { ret 2; }
     if (!held_set(?held, "app.flags", "pub val MODE: u8 = 2;\npub val ON: u8 = 1;\n")) { ret 2; }
     if (!held_set(?held, "app.extra", "pub fun x() i32 { ret 1; }\n"))                 { ret 2; }
     if (!held_set(?held, "app.never", "pub fun y() i32 { ret 2; }\n"))                 { ret 2; }
     if (!held_set(?held, "app.more", "pub fun w() i32 { ret 4; }\n"))                  { ret 2; }
     if (!held_set(?held, "lib.core", "pub fun z() i32 { ret 3; }\n"))                  { ret 2; }
-    val bare_set: err[fail.Fail] = resident.package_set(?held, "lib", "lib.core");
-    if (sel bare_set.err) { ret 2; }
+    if (!held_set(?held, "lib", "pub fun q() i32 { ret 5; }\n"))                       { ret 2; }
+    val known: err[fail.Fail] = resident.package_add(?held, "lib");
+    if (sel known.err) { ret 2; }
 
     var f: Fixture = fixture_init(?s, ?a, ?diags);
     fin { fixture_dnit(?f); }
@@ -2828,20 +2820,22 @@ test load__modules_given_as_names_and_text {
     if (sel on.some) {
         if (on.some.kind != BINDING_MEMBER || !on.some.constant) { ret 11; }
     }
-    val bare: opt[*Binding] = binding_named(?l, main, "lib");
-    if (sel bare.none) { ret 12; }
-    if (sel bare.some) {
-        if (bare.some.kind != BINDING_MODULE)                                    { ret 12; }
-        if (!module.stable_same(bare.some.module, stable_named(?l, "lib.core"))) { ret 12; }
+    val core: opt[*Binding] = binding_named(?l, main, "core");
+    if (sel core.none) { ret 12; }
+    if (sel core.some) {
+        if (core.some.kind != BINDING_MODULE)                                    { ret 12; }
+        if (!module.stable_same(core.some.module, stable_named(?l, "lib.core"))) { ret 12; }
     }
+    # one segment names a project, never a module, though a module is held under that name
+    if (!module.stable_is_nil(stable_named(?l, "lib"))) { ret 12; }
     var unbound: u32   = 0;
     var bi:      usize = 0;
     for (bi < main.bindings.len) {
         if (main.bindings.data[bi].kind == BINDING_UNBOUND) { unbound = unbound + 1; }
         bi = bi + 1;
     }
-    # a path that names no module and runs on past a module's member is refused like one that names nothing
-    if (unbound != 2 || !fail.is_rejected(main.status) || !diagnostic.has_errors(?diags)) { ret 13; }
+    # a project id alone, a path that names nothing and one that runs on past a module's member are refused
+    if (unbound != 3 || !fail.is_rejected(main.status) || !diagnostic.has_errors(?diags)) { ret 13; }
 
     # the exporter's public constants are its load product, and the importer's gate read them
     val exporter: *Module = module_at(?l, module_of(?l, stable_named(?l, "app.flags")));

@@ -32,19 +32,14 @@ pub rec Resident {
     itn:      *intern.Interner;
     root:     intern.StrId;
     modules:  collections_vector.Vector[Module];
-    packages: collections_vector.Vector[Bare];
-}
-
-rec Bare {
-    id:      intern.StrId;
-    package: provider.Package;
+    packages: collections_vector.Vector[intern.StrId];
 }
 
 # `root` is the id of the package being built, STR_NIL when none is
 pub fun init(a: *A.Allocator, itn: *intern.Interner, root: intern.StrId) Resident {
     ret Resident{
         alloc:   a, itn: itn, root: root,
-        modules: collections_vector.init[Module](a), packages: collections_vector.init[Bare](a)
+        modules: collections_vector.init[Module](a), packages: collections_vector.init[intern.StrId](a)
     };
 }
 
@@ -55,7 +50,7 @@ pub fun dnit(r: *Resident) {
         i = i + 1;
     }
     collections_vector.dnit[Module](?r.modules);
-    collections_vector.dnit[Bare](?r.packages);
+    collections_vector.dnit[intern.StrId](?r.packages);
 }
 
 # hold `text` as the module `name`, replacing what it held before
@@ -78,18 +73,11 @@ pub fun module_set(r: *Resident, name: str, text: str) err[fail.Fail] {
     ret err[fail.Fail].ok{};
 }
 
-# say what a bare import of the package `id` binds: its public module `module`, or none when empty
-pub fun package_set(r: *Resident, id: str, module: str) err[fail.Fail] {
+# know the package `id`
+pub fun package_add(r: *Resident, id: str) err[fail.Fail] {
     val pid: res[intern.StrId, A.Error] = intern.add(r.itn, id);
     if (sel pid.err) { ret err[fail.Fail].err{fail.refused(pid.err)}; }
-    var public: intern.StrId = intern.STR_NIL;
-    if (str_len(module) > 0) {
-        val mid: res[intern.StrId, A.Error] = intern.add(r.itn, module);
-        if (sel mid.err) { ret err[fail.Fail].err{fail.refused(mid.err)}; }
-        public = mid.ok;
-    }
-    val pushed: res[usize, A.Error] = collections_vector.push[Bare](?r.packages,
-        Bare{id: pid.ok, package: provider.Package{module: public, artifactless: false}});
+    val pushed: res[usize, A.Error] = collections_vector.push[intern.StrId](?r.packages, pid.ok);
     if (sel pushed.err) { ret err[fail.Fail].err{fail.refused(pushed.err)}; }
     ret err[fail.Fail].ok{};
 }
@@ -178,12 +166,12 @@ fun read(ctx: ptr, a: *A.Allocator, path: str) res[provider.Text, fail.Fail] {
     ret res[provider.Text, fail.Fail].ok{provider.Text{data: held.some.text, owned: false}};
 }
 
-fun package(ctx: ptr, id: intern.StrId) opt[provider.Package] {
+fun package(ctx: ptr, id: intern.StrId) bool {
     val r: *Resident = ctx::*Resident;
     var i: usize     = 0;
     for (i < r.packages.len) {
-        if (intern.str_same(r.packages.data[i].id, id)) { ret opt[provider.Package].some{r.packages.data[i].package}; }
+        if (intern.str_same(r.packages.data[i], id)) { ret true; }
         i = i + 1;
     }
-    ret opt[provider.Package].none{};
+    ret false;
 }

@@ -436,7 +436,7 @@ fun emit_artifacts(b: *textbuild.TextBuilder, id: *u8, is_lib: bool, oses: *Vect
         }
         if (listed > 0) { buf_put(b, "]\n"); }
     }
-    # a library's public entry is only ever an explicitly exported artifact
+    # the scaffolded library is the one the project ships prebuilt
     if (is_lib) { buf_put(b, "export = true\n"); }
     buf_put(b, "\n");
 }

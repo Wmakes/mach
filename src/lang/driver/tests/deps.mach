@@ -585,7 +585,7 @@ test path_dependency__verifies_content_without_changing_git {
     if (sel first_r.err) { bad = 1; }
     if (sel first_r.ok) {
         var p: project.Project = first_r.ok;
-        if (p.config.dep_count != 1 || !intern.str_is_nil(p.config.deps[0].project_module)) { bad = 1; }
+        if (p.config.dep_count != 1) { bad = 1; }
         project.dnit_project(?p);
     }
 
@@ -1796,7 +1796,7 @@ test plan_refusals__point_at_the_manifest_entry_that_caused_them {
 # `dep_manifest` and the given modules, and holds the build to a refusal naming `needle`;
 # a non-empty `full_main` then must build: 0 when both hold
 #[testing]
-fun ut_bare_import(alias: str, dep_manifest: str, dep_names: *str, dep_texts: *str, n: u32,
+fun ut_dep_import(alias: str, dep_manifest: str, dep_names: *str, dep_texts: *str, n: u32,
     main_text: str, needle: str, full_main: str) i32 {
     var alloc:  A.Allocator;
     val make_r: err[A.Error] = page.make(?alloc);
@@ -1847,25 +1847,15 @@ fun ut_bare_import(alias: str, dep_manifest: str, dep_names: *str, dep_texts: *s
     ret 0;
 }
 
-# a bare import binds the entry of a dependency's export library: a library marked only
-# `default = true` binds nothing and is refused saying so, an artifact-less dependency is
-# refused naming the export, and a full-path import of the latter still binds
-test bare_import__needs_the_export_library_entry {
-    var split_names: [2]str = [2]str{"one.mach", "two.mach"};
-    var split_texts: [2]str = [2]str{"pub fun v() i32 { ret 1; }\n", "pub fun v() i32 { ret 2; }\n"};
-    val split:       i32    = ut_bare_import("split",
-        "[project]\nmach = \">=5\"\nid = \"split\"\nversion = \"0.0.0\"\nsrc = \"src\"\nwork = \"out/{target.name}/{profile.name}\"\n\n[artifact.one]\nkind = \"static\"\ndefault = true\nentry = \"one.mach\"\nout = \"{project.work}/lib/one\"\ntargets = [\"*\"]\nlink = []\nneed = []\n\n[artifact.two]\nkind = \"static\"\nentry = \"two.mach\"\nout = \"{project.work}/lib/two\"\ntargets = [\"*\"]\nlink = []\nneed = []\n[profile.debug]\ndefault = true\noptimize = false\ndebug = true\nsimd = \"scalarize\"\n[profile.release]\noptimize = true\ndebug = false\nsimd = \"scalarize\"\n",
-        ?split_names[0], ?split_texts[0], 2, "use split;\n\nfun main() i32 { ret 0; }\n",
-        "project 'split' has no public module: a bare import binds the entry of its library artifact marked `export = true`", "");
-    if (split != 0) { ret 10 + split; }
-
-    var bare_names: [1]str = [1]str{"lib.mach"};
-    var bare_texts: [1]str = [1]str{"pub fun v() i32 { ret 0; }\n"};
-    val bare:       i32    = ut_bare_import("bare",
-        "[project]\nmach = \">=5\"\nid = \"bare\"\nversion = \"0.0.0\"\nsrc = \"src\"\nwork = \"out/{target.name}/{profile.name}\"\n[profile.debug]\noptimize = false\ndebug = false\nsimd = \"scalarize\"\n",
-        ?bare_names[0], ?bare_texts[0], 1, "use bare;\n\nfun main() i32 { ret bare.v(); }\n",
-        "project 'bare' declares no artifact, so it has no public module: import a full path, or declare a static or shared [artifact.*] table marked export = true in its manifest",
-        "use bare.lib;\n\nfun main() i32 { ret lib.v(); }\n");
+# a use path is a project id then a source path: the dependency's id alone names no module, though
+# its library is export = true and a file is named for it, and a full path to that file binds
+test use_path__project_id_alone_names_no_module {
+    var names: [2]str = [2]str{"lib.mach", "bare.mach"};
+    var texts: [2]str = [2]str{"pub fun v() i32 { ret 0; }\n", "pub fun w() i32 { ret 0; }\n"};
+    val bare:  i32    = ut_dep_import("bare",
+        "[project]\nmach = \">=5\"\nid = \"bare\"\nversion = \"0.0.0\"\nsrc = \"src\"\nwork = \"out/{target.name}/{profile.name}\"\n\n[artifact.bare]\nexport = true\nkind = \"static\"\nentry = \"lib.mach\"\nout = \"{project.work}/lib/bare\"\ntargets = [\"*\"]\nlink = []\nneed = []\n[profile.debug]\ndefault = true\noptimize = false\ndebug = false\nsimd = \"scalarize\"\n",
+        ?names[0], ?texts[0], 2, "use bare;\n\nfun main() i32 { ret bare.v(); }\n",
+        "use path 'bare' does not name a module", "use bare.lib;\nuse bare.bare;\n\nfun main() i32 { ret lib.v() + bare.w(); }\n");
     if (bare != 0) { ret 20 + bare; }
     ret 0;
 }
