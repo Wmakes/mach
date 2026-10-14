@@ -156,7 +156,7 @@ test alloc_failure__sema_neither_leaks_nor_half_commits_a_fix {
     fs.remove_all(?backing, root);
     if (sel pr.err) { ret 1; }
     var p: project.Project = pr.ok;
-    fin { driver.dnit_project(?p); }
+    fin { project.dnit_project(?p); }
 
     val mid: session.ModuleId     = ut_mid(?p, ?s, "semaharness.main");
     val m:   *project.ModuleEntry = ut_module(?p, ?s, "semaharness.main");
@@ -248,7 +248,7 @@ test alloc_failure__report_marks_the_status_internal {
     fs.remove_all(?backing, root);
     if (sel pr.err) { ret 1; }
     var p: project.Project = pr.ok;
-    fin { driver.dnit_project(?p); }
+    fin { project.dnit_project(?p); }
 
     val m: *project.ModuleEntry = ut_module(?p, ?s, "semaharness.main");
     if (m == nil) { ret 1; }
@@ -313,7 +313,7 @@ test alloc_failure__real_error_still_rejects_the_module {
     fs.remove_all(?backing, root);
     if (sel pr.err) { ret 1; }
     var p: project.Project = pr.ok;
-    fin { driver.dnit_project(?p); }
+    fin { project.dnit_project(?p); }
 
     val mid: session.ModuleId     = ut_mid(?p, ?s, "semaharness.main");
     val m:   *project.ModuleEntry = ut_module(?p, ?s, "semaharness.main");
@@ -433,7 +433,7 @@ fun ut_registration_sweep(src: str) i32 {
     fs.remove_all(?backing, root);
     if (sel pr.err) { ret 1; }
     var p: project.Project = pr.ok;
-    fin { driver.dnit_project(?p); }
+    fin { project.dnit_project(?p); }
 
     val mid: session.ModuleId     = ut_mid(?p, ?s, "semaharness.main");
     val m:   *project.ModuleEntry = ut_module(?p, ?s, "semaharness.main");
@@ -538,7 +538,7 @@ fun ut_sweep_for(text: str, target: str, src: str, forbidden: str) i32 {
     fs.remove_all(?backing, root);
     if (sel pr.err) { ret 1; }
     var p: project.Project = pr.ok;
-    fin { driver.dnit_project(?p); }
+    fin { project.dnit_project(?p); }
 
     val mid: session.ModuleId     = ut_mid(?p, ?s, "semaharness.main");
     val m:   *project.ModuleEntry = ut_module(?p, ?s, "semaharness.main");
@@ -707,7 +707,7 @@ fun ut_sema_diag_has_for(text: str, target: str, src: str, needle: str) bool {
     fs.remove_all(?backing, root);
     if (sel pr.err) { ret false; }
     var p: project.Project = pr.ok;
-    fin { driver.dnit_project(?p); }
+    fin { project.dnit_project(?p); }
 
     val mid: session.ModuleId     = ut_mid(?p, ?s, "semaharness.main");
     val m:   *project.ModuleEntry = ut_module(?p, ?s, "semaharness.main");
@@ -968,7 +968,7 @@ test alloc_failure__diagnostic_store_is_internal {
     fs.remove_all(?backing, root);
     if (sel pr.err) { ret 1; }
     var p: project.Project = pr.ok;
-    fin { driver.dnit_project(?p); }
+    fin { project.dnit_project(?p); }
 
     val mid: session.ModuleId     = ut_mid(?p, ?s, "semaharness.main");
     val m:   *project.ModuleEntry = ut_module(?p, ?s, "semaharness.main");
@@ -1042,7 +1042,7 @@ fun ut_sema_error_free(src: str) bool {
     fs.remove_all(?backing, root);
     if (sel pr.err) { ret false; }
     var p: project.Project = pr.ok;
-    fin { driver.dnit_project(?p); }
+    fin { project.dnit_project(?p); }
     val mid: session.ModuleId     = ut_mid(?p, ?s, "semaharness.main");
     val m:   *project.ModuleEntry = ut_module(?p, ?s, "semaharness.main");
     if (m == nil || module.is_nil(mid)) { ret false; }
@@ -1243,7 +1243,7 @@ fun t_binding_outcome(mode: u8) i32 {
     fin { session.dnit(?s); }
     if (sel pr.err) { ret 3; }
     var p: project.Project = pr.ok;
-    fin { driver.dnit_project(?p); }
+    fin { project.dnit_project(?p); }
     val m: *project.ModuleEntry = ut_module(?p, ?s, "semaharness.main");
     if (m == nil || frontend.resolved(?p, m) == nil) { ret 4; }
     val rr: *resolve.ResolveResult = frontend.resolved(?p, m);

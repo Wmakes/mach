@@ -50,14 +50,6 @@ use mach.lang.fuzz;
 use mach.lang.driver.toolchain;
 use mach.lang.module;
 
-fwd project.Project;
-fwd project.ModuleEntry;
-fwd project.TargetEntry;
-fwd project.dnit_project;
-fwd project.module_by_fqn;
-fwd project.module_count;
-fwd project.module_at;
-fwd project.link_name_for;
 fwd frontend.begin_query_phase;
 fwd frontend.finish_query_phase;
 fwd frontend.refresh_diagnostics;
