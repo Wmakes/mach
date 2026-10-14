@@ -1622,6 +1622,8 @@ test storage__readonly_qualifier_is_checked {
         "unknown `storage` memory qualifier")) { ret 3; }
     if (!ut_sema_rejects_with("rec P { c: [8]f32x4; }\n\n#[uniform(0, 3, \"readonly\")] var u: P;\n\nfun main() i32 { ret 0; }\n",
         "takes two arguments")) { ret 4; }
+    # a pointer read out of the binding writes its own target, so a store through it is no store to the binding
+    if (ut_sema_rejects("rec Q { n: u32; }\nrec P { q: *Q; r: *u32; }\n\n#[storage(0, 3, \"readonly\")] var ro: P;\n\nfun poke(v: u32) { ro.q.n = v; @ro.r = v; }\n\nfun main() i32 { ret 0; }\n")) { ret 5; }
     ret 0;
 }
 
@@ -1638,6 +1640,11 @@ test storage__writeonly_qualifier_refuses_a_read {
     if (!ut_sema_rejects_with("rec P { c: [8]f32x4; }\n\n#[storage(0, 3, \"readonly\", \"writeonly\")] var both: P;\n\nfun main() i32 { ret 0; }\n",
         "`\"readonly\"` and `\"writeonly\"` together")) { ret 4; }
     if (ut_sema_rejects("rec P { c: [8]f32x4; }\n\n#[storage(0, 3, \"coherent\")] var co: P;\n#[storage(0, 4, \"writeonly\", \"coherent\")] var wc: P;\n\nfun poke(v: f32x4) { co.c[1] = co.c[0] + v; wc.c[1] = v; }\n\nfun main() i32 { ret 0; }\n")) { ret 5; }
+    # storing through a pointer read out of the binding reads the binding, and writes no lane of it
+    if (!ut_sema_rejects_with("rec Q { v: f32x4; }\nrec P { q: *Q; }\n\n#[storage(0, 3, \"writeonly\")] var wo: P;\n\nfun poke(v: f32x4) { wo.q.v = v; }\n\nfun main() i32 { ret 0; }\n",
+        "cannot read a `#[storage(set, binding, \"writeonly\")]` binding")) { ret 7; }
+    if (ut_sema_rejects_with("rec Q { v: f32x4; }\nrec P { q: *Q; }\n\n#[storage(0, 3, \"writeonly\")] var wo: P;\n\nfun poke() { wo.q.v[1] = 2.0; }\n\nfun main() i32 { ret 0; }\n",
+        "cannot write one lane")) { ret 8; }
     ret 0;
 }
 
@@ -3735,6 +3742,17 @@ test physical_pointer__a_linked_list_walk_validates_where_the_feature_is_held {
     if (logical != 0)                                                               { ret 80 + logical; }
     if (v.model != isa_spirv.ADDRESSING_LOGICAL || v.capability || v.physical != 0) { ret 90; }
     ret 0;
+}
+
+# a store through a physical pointer read out of a `"readonly"` binding writes the buffer the
+# pointer reaches, not the binding, whether the place is written inline or through a local
+test physical_pointer__a_readonly_table_stores_through_its_pointers {
+    var alloc:  A.Allocator;
+    val make_r: err[A.Error] = page.make(?alloc);
+    if (sel make_r.err) { ret 1; }
+    val src: str = "rec Shard { v: [64]u32; }\nrec Table { shards: [4]*Shard; }\n#[storage(0, 0, \"readonly\")] var table: Table;\n#[builtin(\"local_invocation_index\")] var lid: u32;\n#[stage(\"compute\")]\n#[workgroup(64, 1, 1)]\nfun cs() {\n    table.shards[0].v[lid] = lid;\n    val p: *Shard = table.shards[1];\n    p.v[lid] = lid;\n}\n";
+    var v:   UtBda;
+    ret ut_bda_module(?alloc, src, "env = \"vulkan1.2\"\nextensions = [\"buffer_device_address\"]\n", "vulkan1.2", "", ?v);
 }
 
 # holding, loading and storing through a physical pointer computes on no 64-bit value, so

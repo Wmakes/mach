@@ -422,13 +422,15 @@ test recursive_type__occurs_check {
 }
 
 # a generic whose argument grows through a pointer has unboundedly many instances
-#: what its instances reach is answered over its declaration, and a
-# comparison that would follow its pointers without end is refused, not walked
+#: what its instances reach is answered over its declaration, and two of its instances
+# below a pointer are compared by the arguments their fields lay out, never walked. a
+# parameter that sits nowhere is not compared, a disagreement names its field, and where
+# laid arguments differ in layout the comparison is refused as unprovable
 test generic_growth__answered_over_the_declaration {
     val erase:  str = "secret-welded pointer cannot be erased";
-    val agree:  str = "cannot prove that overlapping fields agree on secrecy";
     val cast:   str = "cannot prove that the two types agree on secrecy";
     val unions: str = "instantiated unboundedly many ways";
+    val mutual: str = "rec A[T] { v: ^u32; b: *B[[2]T]; }\nrec B[T] { w: T; a: *A[*T]; }\n";
 
     var bad: i32 = 0;
     if (!sema_checked.sema_rejects_with("rec M[T] { v: T; next: *M[*T]; }\nfun main() i32 { var m: M[^u32]; val p: ptr = (?m)::ptr; ret 0; }\n", erase))                                 { bad = 1; }
@@ -438,11 +440,16 @@ test generic_growth__answered_over_the_declaration {
     if (!sema_checked.sema_rejects_with("rec A[T] { v: u32; b: *B[[2]T]; }\nrec B[T] { w: T; a: *A[*T]; }\nfun main() i32 { var a: A[^u32]; val p: ptr = (?a)::ptr; ret 0; }\n", erase)) { bad = 5; }
     if (!sema_checked.sema_clean("rec A[T] { v: u32; b: *B[[2]T]; }\nrec B[T] { w: T; a: *A[*T]; }\nfun main() i32 { var a: A[u32]; val p: ptr = (?a)::ptr; ret 0; }\n"))                { bad = 6; }
 
-    if (!sema_checked.sema_rejects_with("rec S[T] { v: ^u32; next: *S[*T]; }\nuni U { a: *S[u32]; b: *S[u64]; }\nfun main() i32 { ret 0; }\n", agree))              { bad = 7; }
-    if (!sema_checked.sema_clean("rec S[T] { v: ^u32; next: *S[*T]; }\nuni U { a: *S[u32]; b: *S[u32]; }\nfun main() i32 { var u: U; ret 0; }\n"))                  { bad = 8; }
-    if (!sema_checked.sema_rejects_with("rec S[T] { v: ^u32; next: *S[*T]; }\nfun main() i32 { var s: S[u32]; val c: *S[u64] = (?s)::*S[u64]; ret 0; }\n", cast))   { bad = 9; }
-    if (!sema_checked.sema_rejects_with("uni V[T] { a: T; b: u32; }\nrec W[T] { u: V[T]; next: *W[[2]T]; }\nfun main() i32 { var w: W[^u32]; ret 0; }\n", unions))  { bad = 10; }
-    if (!sema_checked.sema_clean("uni V[T] { a: T; b: u32; }\nrec W[T] { u: V[T]; next: *W[[2]T]; }\nfun main() i32 { var s: ^u32 = 1; var w: W[u32]; ret 0; }\n")) { bad = 11; }
+    if (!sema_checked.sema_clean("rec S[T] { v: ^u32; next: *S[*T]; }\nuni U { a: *S[u32]; b: *S[u64]; }\nfun main() i32 { var u: U; ret 0; }\n"))                               { bad = 7; }
+    if (!sema_checked.sema_clean("rec S[T] { v: ^u32; next: *S[*T]; }\nfun main() i32 { var s: S[u32]; val c: *S[u64] = (?s)::*S[u64]; ret 0; }\n"))                             { bad = 8; }
+    if (sema_checked.sema_diag("rec S[T] { v: T; next: *S[*T]; }\nuni U { a: *S[^u32]; b: *S[u32]; }\nfun main() i32 { ret 0; }\n", "at field `v` of `S[^u32]`") != 0)           { bad = 9; }
+    if (sema_checked.sema_ok(sema_checked.joined(mutual, "fun main() i32 { var a: A[u32]; val c: *A[i32] = (?a)::*A[i32]; ret 0; }\n")) != 0)                                    { bad = 12; }
+    if (sema_checked.sema_diag(sema_checked.joined(mutual, "fun main() i32 { var a: A[^u32]; val c: *A[u32] = (?a)::*A[u32]; ret 0; }\n"), "at field `w` of `B[[2]^u32]`") != 0) { bad = 13; }
+    if (sema_checked.sema_diag("rec W[T] { pad: u32; x: T; }\nrec S[T] { s: ^u64; v: T; next: *S[W[T]]; }\nrec R { a: u32; b: u32; }\nfun main() i32 { var s: S[u64]; val c: *S[R] = (?s)::*S[R]; ret 0; }\n",
+        "the arguments its field `v` lays out differ in size or alignment") != 0) { bad = 14; }
+    if (sema_checked.sema_diag("rec S[T] { v: ^u32; next: *S[*T]; }\nrec R { v: ^u32; next: *R; }\nfun main() i32 { var s: S[u32]; val c: *R = (?s)::*R; ret 0; }\n", cast) != 0) { bad = 15; }
+    if (!sema_checked.sema_rejects_with("uni V[T] { a: T; b: u32; }\nrec W[T] { u: V[T]; next: *W[[2]T]; }\nfun main() i32 { var w: W[^u32]; ret 0; }\n", unions))                { bad = 10; }
+    if (!sema_checked.sema_clean("uni V[T] { a: T; b: u32; }\nrec W[T] { u: V[T]; next: *W[[2]T]; }\nfun main() i32 { var s: ^u32 = 1; var w: W[u32]; ret 0; }\n"))               { bad = 11; }
     ret bad;
 }
 

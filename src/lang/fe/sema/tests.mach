@@ -1735,6 +1735,20 @@ test sel__exiting_chains_guard_the_rest_of_the_block {
     ret ut_tag_corpus_range(137, 20);
 }
 
+# a chain's final bare `or` guards the one case its arms leave untested, as the rest of the
+# block does after a chain whose arms all exit
+test sel__final_or_guards_the_untested_case {
+    if (!ut_sema_clean("tag Three: u8 { a: i64; b: i64; c: i64; }\nfun f(e: Three) i64 { if (sel e.a) { ret e.a; } or (sel e.b) { ret e.b; } ret e.c; }\n"))                               { ret 1; }
+    if (!ut_sema_clean("tag Three: u8 { a: i64; b: i64; c: i64; }\nfun f(e: Three) i64 { if (sel e.a) { ret e.a; } or (sel e.b) { ret e.b; } or { ret e.c; } }\n"))                        { ret 2; }
+    if (!ut_sema_clean("tag Three: u8 { a: i64; b: i64; c: i64; }\nfun f(e: Three) i64 { var n: i64 = 0; if (sel e.a) { n = e.a; } or (sel e.b) { n = e.b; } or { n = e.c; } ret n; }\n")) { ret 3; }
+    if (!ut_sema_clean("tag Three: u8 { a: i64; b: i64; c: i64; }\nfun f(e: Three) i64 { if (!sel e.c) { ret 0; } or { ret e.c; } }\n"))                                                   { ret 4; }
+    val unguarded: str = "a tag payload requires a `sel` guard for its case";
+    if (!ut_sema_rejects_with("tag Three: u8 { a: i64; b: i64; c: i64; }\nfun f(e: Three) i64 { if (sel e.a) { ret 0; } or { ret e.c; } }\n", unguarded))                                   { ret 5; }
+    if (!ut_sema_rejects_with("tag Three: u8 { a: i64; b: i64; c: i64; }\nfun f(e: Three, g: Three) i64 { if (sel e.a) { ret 0; } or (sel e.b) { ret 0; } or { ret g.c; } }\n", unguarded)) { ret 6; }
+    if (!ut_sema_rejects_with("tag Three: u8 { a: i64; b: i64; c: i64; }\nfun f(e: Three, k: u8) i64 { if (sel e.a) { ret 0; } or (k == 1) { ret 0; } or { ret e.c; } }\n", unguarded))     { ret 7; }
+    ret 0;
+}
+
 test sel__guarded_place_rejects_whole_value_assignment {
     ret ut_tag_corpus_range(157, 5);
 }

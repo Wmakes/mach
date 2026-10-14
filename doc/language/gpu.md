@@ -203,6 +203,23 @@ So an accidental write does not produce a wrong module, it produces a **correct 
 that quietly costs a hardware feature**. Marking the binding turns that into a
 diagnostic instead.
 
+A store is judged by the storage it writes. A physical pointer read out of the
+binding reaches another buffer, so a store through it writes that buffer and not
+the binding, and it is accepted whether it is written inline or through a local:
+
+```mach
+rec Shard { v: [64]u32; }
+rec Table { shards: [4]*Shard; }
+#[storage(0, 0, "readonly")]
+var table: Table;
+
+fun fill(i: u32, x: u32) {
+    table.shards[0].v[i] = x; # writes the shard, not `table`
+    val p: *Shard = table.shards[1];
+    p.v[i] = x; # the same store through a local
+}
+```
+
 The inference is one-sided on purpose. Anything the compiler cannot follow, such as
 the binding's address handed to a function, counts as a write, so a missing
 decoration is possible and a wrong one is not.
@@ -219,7 +236,9 @@ var frame: Frame;
 A read of a `"writeonly"` binding is a compile error on every target, naming the
 expression that read it. Storing into a field or an element reads nothing, and
 neither does taking the binding's address, so `frame.texels[i] = c` and
-`?frame.texels[i]` are accepted. Writing **one lane** of a vector inside it is
+`?frame.texels[i]` are accepted. A store through a pointer read out of the binding
+reads the binding for the pointer, though it writes only what the pointer reaches.
+Writing **one lane** of a vector inside it is
 refused, because a lane write loads the whole vector and stores it back: store the
 whole vector instead. On SPIR-V, a load the compiler follows through the binding's
 address is refused as well, with the same caution as `"readonly"`: anything the

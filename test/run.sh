@@ -37,6 +37,12 @@
 #                  (--case <mode> selects one mode, such as --case add)
 #   --shard <i>/<n>  with --f16proof, the i-th of n equal slices of every mode's domain (default 0/1)
 #   MACH           the compiler under test, default out/<host>/debug/bin/mach
+#   CASE_TIMEOUT   seconds one command of a case may take, default 120: a case build, a case
+#                  run, a doc block run. a command that exceeds it fails its case, naming the
+#                  command, and the rest of the run still reports
+#
+# exit is nonzero on any failure, when nothing was checked (no pass), and on a host
+# that is not linux, darwin or windows on x86_64 or aarch64 (status 2)
 #   DOCS           the pages --docs reads, default doc/language
 set -u
 
@@ -107,12 +113,12 @@ case "$(uname -s)" in
     Linux)  host_os=linux ;;
     Darwin) host_os=darwin ;;
     MINGW*|MSYS*|CYGWIN*) host_os=windows ;;
-    *) host_os=$(uname -s) ;;
+    *) echo "run.sh: unknown host os '$(uname -s)'" >&2; exit 2 ;;
 esac
 case "$(uname -m)" in
     x86_64|amd64)  host_isa=x86_64 ;;
     aarch64|arm64) host_isa=aarch64 ;;
-    *) host_isa=$(uname -m) ;;
+    *) echo "run.sh: unknown host isa '$(uname -m)'" >&2; exit 2 ;;
 esac
 exe=
 [ "$host_os" = windows ] && exe=.exe
@@ -121,8 +127,20 @@ case "$host_os/$host_isa" in
     linux/aarch64)  host_dir=linux-arm64 ;;
     darwin/x86_64)  host_dir=darwin-x86_64 ;;
     darwin/aarch64) host_dir=darwin-aarch64 ;;
-    *)              host_dir=windows-x86_64 ;;
+    windows/x86_64) host_dir=windows-x86_64 ;;
+    *)              echo "run.sh: unknown host $host_os/$host_isa" >&2; exit 2 ;;
 esac
+
+# the one bound on a command a case runs. bounded <command...> runs it under
+# timeout and, when the bound is hit, prints "timed out after <n>s: <command>" to
+# stderr and returns 124
+case_timeout=${CASE_TIMEOUT:-120}
+case "$case_timeout" in ''|*[!0-9]*) echo "run.sh: CASE_TIMEOUT '$case_timeout' is not a number of seconds" >&2; exit 2 ;; esac
+bounded() {
+    timeout "$case_timeout" "$@"; brc=$?
+    [ "$brc" -ne 124 ] || echo "timed out after ${case_timeout}s: $*" >&2
+    return "$brc"
+}
 
 mach=${MACH:-$repo/out/$host_dir/debug/bin/mach$exe}
 case "$mach" in /*) : ;; *) mach=$PWD/$mach ;; esac
@@ -378,7 +396,7 @@ build() {
     fi
     log=$(log_of "$t" "$p" "$c" "$role")
     mkdir -p "$out/log"
-    "$mach" build "$proj" --target "$t" --profile "$p" $sel >"$log" 2>&1 || return 1
+    bounded "$mach" build "$proj" --target "$t" --profile "$p" $sel >"$log" 2>&1 || return 1
     [ -z "$run_bin" ] || python3 "$here/lib/elf_loadable.py" "$run_bin" "$run_bin.load" >>"$log" 2>&1
 }
 
@@ -404,7 +422,7 @@ differential() {
         # the status is the program's own, read before any substitution (PIPESTATUS
         # after an assignment is the assignment's); a wrong program may print a
         # NUL, which a substitution would warn about, so the output is filed first
-        timeout 60 $eng "$bin" >"$out/log/$t.$p.$(art "$c").out" 2>"$out/log/$t.$p.$(art "$c").err"; rc=$?
+        bounded $eng "$bin" >"$out/log/$t.$p.$(art "$c").out" 2>"$out/log/$t.$p.$(art "$c").err"; rc=$?
         got=$(tr -d '\0' <"$out/log/$t.$p.$(art "$c").out")
         # a program admitting a secret multiply sets PSTATE.DIT at start and
         # refuses, with std's one-line refusal and status 255, on an aarch64
@@ -413,6 +431,7 @@ differential() {
         if [ "$rc" -eq 255 ] && grep -q "data-independent-timing mode (PSTATE.DIT)" "$out/log/$t.$p.$(art "$c").err"; then
             why="$p: this host provides no PSTATE.DIT, so the program refused to start"; return 2
         fi
+        if [ "$rc" -eq 124 ]; then why="$p: $(tail -n1 "$out/log/$t.$p.$(art "$c").err")"; return 1; fi
         if [ "$rc" -ne 0 ]; then why="$p: exit $rc"; return 1; fi
         if [ -s "$out/log/$t.$p.$(art "$c").err" ]; then why="$p: wrote to stderr"; return 1; fi
         if [ "$got" != "$ref" ]; then why="$p: mach says $got, the reference says $ref"; return 1; fi
@@ -430,7 +449,8 @@ exact_reference() {
     for xp in o0 o2; do
         build "$xt" "$xp" "$xc" run || { echo "build $xp: $(first_error "$(log_of "$xt" "$xp" "$xc" run)")" >&2; return 1; }
         xo=$out/log/$xt.$xp.$(art "$xc").out
-        timeout 60 $xeng "$(artifact "$xt" "$xp" "$xc" run)" >"$xo" 2>/dev/null; xrc=$?
+        bounded $xeng "$(artifact "$xt" "$xp" "$xc" run)" >"$xo" 2>"$xo.err"; xrc=$?
+        [ "$xrc" -ne 124 ] || { echo "$xp: $(tail -n1 "$xo.err")" >&2; return 1; }
         [ "$xrc" -eq 0 ] || { echo "$xp: exit $xrc" >&2; return 1; }
         xv=$(tr -d '\0' <"$xo")
         [ -z "$xans" ] || [ "$xv" = "$xans" ] || { echo "its O0 and O2 disagree ($xans vs $xv)" >&2; return 1; }
@@ -1070,7 +1090,10 @@ doc_cell() {
         doc_pass "pass compiled"; return
     fi
     bin=$b/o/bin/block$exe
-    timeout 60 "$bin" </dev/null >"$b/run.out" 2>&1; rc=$?
+    bounded "$bin" </dev/null >"$b/run.out" 2>&1; rc=$?
+    if [ "$rc" -eq 124 ]; then
+        echo "FAIL $label $(tail -n1 "$b/run.out")" >"$b/result"; return
+    fi
     if [ "$rc" -ne 0 ]; then
         echo "FAIL $label exits $rc: $(tail -n1 "$b/run.out")" >"$b/result"; return
     fi
@@ -1244,4 +1267,5 @@ fi
 
 tail=; [ "$unruns" -eq 0 ] || tail=", $unruns differential not run"
 echo "run.sh: $passes pass, $fails fail, $skips skip$tail"
+[ "$passes" -gt 0 ] || [ "$fails" -gt 0 ] || { echo "run.sh: nothing was checked" >&2; exit 1; }
 [ "$fails" -eq 0 ]

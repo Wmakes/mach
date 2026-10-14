@@ -331,6 +331,42 @@ the rule is directional:
 A by-value cast between aggregates is the one place a byte may turn from public
 to secret, and a pointer field keeps its target exact even there.
 
+A generic whose argument grows through a pointer, such as `rec S[T] { v: ^u32;
+next: *S[*T]; }`, has a fresh instance below every pointer, so the comparison
+cannot walk it there. Below a pointer, two instances of one such generic are
+compared by their arguments instead. The declarations place each parameter:
+**laid** when its argument's bytes sit inside the storage beside other fields,
+the whole **target** of a pointer, or **nowhere** when it only flows into
+parameters that are themselves placed nowhere. A laid pair of arguments must have
+one size, one alignment and the same class at every byte, a target pair must match
+both ways, and an argument placed nowhere is not compared at all. A
+disagreement names the field it lies in.
+
+```mach
+rec S[T] { v: ^u32; next: *S[*T]; }
+
+# fine: `T` reaches no byte, so the two agree at every depth
+fun view(p: *S[u32]) *S[u64] {
+    ret p::*S[u64];
+}
+```
+
+Two laid arguments that differ in size or alignment are refused as unprovable,
+under `secret.variant_unprovable`, because padding can line the two layouts up at
+one depth and not the next. So is a pointer from such an instance into storage of
+another shape, since the two sides never meet at an instance they could compare.
+
+```mach error cannot prove that the two types agree on secrecy
+rec W[T] { pad: u32; x: T; }
+rec S[T] { s: ^u64; v: T; next: *S[W[T]]; }
+rec R    { a: u32; b: u32; }
+
+# refused: below the first pointer `v` holds `W[u64]` on one side and `W[R]` on the other
+fun view(p: *S[u64]) *S[R] {
+    ret p::*S[R];
+}
+```
+
 The rule is the same for scalars and aggregates, and the variants of a union
 overlay its own storage from offset 0, so every pair of variants agrees on each
 byte both cover. A widening past a secret is refused because the extra bytes

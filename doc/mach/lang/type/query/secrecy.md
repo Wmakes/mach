@@ -3,16 +3,6 @@
 whether two types laid over one storage keep every byte's secrecy class: a cast or
 retype from one to the other, or two union variants
 
-## def Agreement
-
-```mach
-pub def Agreement: u8
-```
-
-how two storages compare on secrecy: they agree, they disagree, or the
-comparison would follow pointers into an expansive generic, whose instances
-are unbounded, so it cannot be decided and is refused
-
 ## val AGREE
 
 ```mach
@@ -31,22 +21,40 @@ pub val DISAGREE:    Agreement = 1
 pub val UNDECIDABLE: Agreement = 2
 ```
 
+## rec Verdict
+
+```mach
+pub rec Verdict;
+```
+
+an answer and the field it turned on. for a disagreement, `owner` is the aggregate whose
+field `field` holds the first byte whose class differs; for an undecidable comparison it
+is the instance that grows, with `field` the field whose laid arguments differ in size or
+alignment between the sides, or NO_FIELD when the other side holds storage of another
+shape. `owner` is TYPE_NIL when no field is known
+
+## val NO_FIELD
+
+```mach
+pub val NO_FIELD: u32 = 0xFFFFFFFF
+```
+
 ## val UNBOUNDED_VARIANTS_MSG
 
 ```mach
-pub val UNBOUNDED_VARIANTS_MSG: str = "union variants: cannot prove that overlapping fields agree on secrecy - they point into a generic whose argument grows through a pointer, which has unboundedly many instances, so the storage below the pointers cannot be compared"
+pub val UNBOUNDED_VARIANTS_MSG: str = "union variants: cannot prove that overlapping fields agree on secrecy"
 ```
 
 ## val UNBOUNDED_CAST_MSG
 
 ```mach
-pub val UNBOUNDED_CAST_MSG:     str = "cannot prove that the two types agree on secrecy - they point into a generic whose argument grows through a pointer, which has unboundedly many instances, so the storage below the pointers cannot be compared"
+pub val UNBOUNDED_CAST_MSG:     str = "cannot prove that the two types agree on secrecy"
 ```
 
 ## fun cast_allowed
 
 ```mach
-pub fun cast_allowed(s: *session.Session, m: layout.Machine, from: type.TypeId, to: type.TypeId) res[Agreement, fail.Fail];
+pub fun cast_allowed(s: *session.Session, m: layout.Machine, from: type.TypeId, to: type.TypeId) res[Verdict, fail.Fail];
 ```
 
 whether a `::` or `:~` from `from` to `to` keeps every byte's secrecy class or only makes public bytes secret in a value
@@ -54,7 +62,7 @@ whether a `::` or `:~` from `from` to `to` keeps every byte's secrecy class or o
 ## fun overlay_agrees
 
 ```mach
-pub fun overlay_agrees(s: *session.Session, m: layout.Machine, a: type.TypeId, b: type.TypeId) res[Agreement, fail.Fail];
+pub fun overlay_agrees(s: *session.Session, m: layout.Machine, a: type.TypeId, b: type.TypeId) res[Verdict, fail.Fail];
 ```
 
 whether two union variants overlaying one storage agree on every byte they share

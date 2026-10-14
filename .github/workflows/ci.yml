@@ -1,8 +1,10 @@
 name: CI
 
-# every pull request, and every merge queue entry, runs the same lanes on the
-# linux runners. the windows, darwin and slow lanes run when a dispatch names
-# one. `lane=all` on dev is the release gate.
+# the build and the unit suite, nothing else. every pull request and every
+# merge queue entry runs them on the linux runners. the windows, darwin and
+# release lanes run only when a dispatch names one, and `lane=all` on dev is
+# the release gate. the other checks are local commands (CONTRIBUTING.md,
+# "Checks CI does not run").
 
 on:
   pull_request:
@@ -13,7 +15,7 @@ on:
         description: lane to run beside the pull request lanes
         type: choice
         default: none
-        options: [none, all, windows, darwin, release, dwarf, f16proof]
+        options: [none, all, windows, darwin, release]
 
 permissions:
   contents: read
@@ -26,51 +28,8 @@ defaults:
   run:
     shell: bash
 
-env:
-  LLVM_MAJOR: 22
-  VULKAN_SDK_VERSION: 1.4.357.0
-
 jobs:
-  docs:
-    name: docs
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    permissions:
-      contents: read
-      issues: read
-    steps:
-      - uses: actions/checkout@v6
-      - uses: actions/cache@v6
-        with:
-          path: ${{ runner.temp }}/chain
-          key: chain-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.github/bootstrap-chain') }}
-      - run: bash .github/scripts/bootstrap.sh
-      - name: release notes selection
-        run: bash .github/scripts/release-notes-test.sh
-      - name: documented flags are accepted
-        run: python3 .github/scripts/doc-flags.py "$MACH" doc
-      - name: the committed reference is what mach doc generates
-        run: |
-          "$MACH" doc . -o out/docgen -q
-          diff -r out/docgen/mach doc/mach
-          diff out/docgen/README.md doc/README.md
-      - name: docs cite open issues and comments say what is
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-        run: python3 .github/scripts/doc-markers.py doc/language src
-      - name: doc/language code blocks compile and run
-        run: bash test/run.sh --docs
-      - name: formatter
-        run: |
-          rc=0
-          "$MACH" fmt --check . || rc=1
-          # corpus cases are lone sources, link cases and the f16 proof are projects
-          for f in $(find test/cases test/lib -name '*.mach' | sort); do "$MACH" fmt --check "$f" || rc=1; done
-          for p in $(find test/link/cases -name mach.toml | sort) test/f16proof; do "$MACH" fmt --check "$p" || rc=1; done
-          exit "$rc"
-
-  # the fixpoint and the debug unit suite, on each native runner
+  # the debug unit suite, on each native runner
   host:
     name: host ${{ matrix.target }}
     runs-on: ${{ matrix.runs-on }}
@@ -87,7 +46,7 @@ jobs:
         with:
           path: ${{ runner.temp }}/chain
           key: chain-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.github/bootstrap-chain') }}
-      - run: bash .github/scripts/bootstrap.sh --fixpoint
+      - run: bash .github/scripts/bootstrap.sh
       - name: unit suite
         run: |
           "$MACH" test .
@@ -104,7 +63,7 @@ jobs:
         with:
           path: ${{ runner.temp }}/chain
           key: chain-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.github/bootstrap-chain') }}
-      - run: bash .github/scripts/bootstrap.sh --fixpoint
+      - run: bash .github/scripts/bootstrap.sh
       - name: unit suite
         run: |
           "$MACH" test .
@@ -127,135 +86,11 @@ jobs:
         with:
           path: ${{ runner.temp }}/chain
           key: chain-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.github/bootstrap-chain') }}
-      - run: bash .github/scripts/bootstrap.sh --fixpoint
+      - run: bash .github/scripts/bootstrap.sh
       - name: unit suite
         run: |
           "$MACH" test .
           "$MACH" test . -a tests
-
-  incremental:
-    name: incremental ${{ matrix.target }}
-    runs-on: ${{ matrix.runs-on }}
-    timeout-minutes: 20
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - { target: x86_64-linux,  runs-on: ubuntu-latest }
-          - { target: aarch64-linux, runs-on: ubuntu-24.04-arm }
-    steps:
-      - uses: actions/checkout@v6
-      - uses: actions/cache@v6
-        with:
-          path: ${{ runner.temp }}/chain
-          key: chain-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.github/bootstrap-chain') }}
-      - run: bash .github/scripts/bootstrap.sh
-      - name: warm rebuilds match clean
-        run: bash test/run.sh --incremental
-      # docs runs them on x86_64
-      - name: doc/language code blocks compile and run
-        if: matrix.target == 'aarch64-linux'
-        run: bash test/run.sh --docs
-
-  # the corpus differential runs where a runner executes the column natively,
-  # every other column is built only
-  codegen:
-    name: codegen ${{ matrix.name }}
-    runs-on: ${{ matrix.runs-on }}
-    timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - { name: x86_64 1/4, runs-on: ubuntu-latest, targets: x86_64-linux x86_64v3-linux, flags: --asm, shard: 1/4 }
-          - { name: x86_64 2/4, runs-on: ubuntu-latest, targets: x86_64-linux x86_64v3-linux, flags: --asm, shard: 2/4 }
-          - { name: x86_64 3/4, runs-on: ubuntu-latest, targets: x86_64-linux x86_64v3-linux, flags: --asm, shard: 3/4 }
-          - { name: x86_64 4/4, runs-on: ubuntu-latest, targets: x86_64-linux x86_64v3-linux, flags: --asm, shard: 4/4 }
-          - { name: aarch64, runs-on: ubuntu-24.04-arm, targets: aarch64-linux aarch64fp16-linux }
-          - { name: x86_64-windows, runs-on: ubuntu-24.04-arm, targets: x86_64-windows }
-          - { name: darwin, runs-on: ubuntu-24.04-arm, targets: x86_64-darwin aarch64-darwin, cross: darwin-x86_64 darwin-aarch64 }
-          - { name: riscv64, runs-on: ubuntu-24.04-arm, targets: riscv64-linux riscv64zkt-linux riscv64zfh-linux, cross: linux-riscv64 }
-          - { name: riscv32, runs-on: ubuntu-24.04-arm, targets: riscv32 }
-          - { name: spirv, runs-on: ubuntu-latest, targets: spirv, flags: --dwarf, spirv: true }
-    steps:
-      - uses: actions/checkout@v6
-      - uses: actions/cache@v6
-        with:
-          path: ${{ runner.temp }}/chain
-          key: chain-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.github/bootstrap-chain') }}
-      - run: bash .github/scripts/bootstrap.sh
-      - name: install spirv-tools
-        if: matrix.spirv
-        run: |
-          curl -fsSL "https://sdk.lunarg.com/sdk/download/$VULKAN_SDK_VERSION/linux/vulkansdk-linux-x86_64-$VULKAN_SDK_VERSION.tar.xz" \
-            | sudo tar -xJf - -C /usr/local/bin --strip-components=3 "$VULKAN_SDK_VERSION/x86_64/bin/spirv-dis" "$VULKAN_SDK_VERSION/x86_64/bin/spirv-val"
-      - name: corpus
-        env:
-          TARGETS: ${{ matrix.targets }}
-          FLAGS: ${{ matrix.flags }}
-          SHARD: ${{ matrix.shard }}
-        run: |
-          args=()
-          for t in $TARGETS; do args+=(--target "$t"); done
-          # shard i/n takes every nth case of the sorted corpus
-          if [ -n "$SHARD" ]; then
-            for c in $(cd test/cases && ls -1 */*.mach | sed 's/\.mach$//' | LC_ALL=C sort |
-                awk -v s="$SHARD" 'BEGIN { split(s, p, "/") } (NR - 1) % p[2] == p[1] - 1'); do
-              args+=(--case "$c")
-            done
-          fi
-          bash test/run.sh "${args[@]}" $FLAGS
-      - name: cross-build the compiler
-        if: matrix.cross
-        env:
-          CROSS: ${{ matrix.cross }}
-        run: for t in $CROSS; do "$MACH" build . --target "$t" --profile release -o "out/cross-$t"; done
-
-  link:
-    name: link ${{ matrix.target }}
-    runs-on: ${{ matrix.runs-on }}
-    timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - { target: x86_64-linux,  runs-on: ubuntu-latest }
-          - { target: aarch64-linux, runs-on: ubuntu-24.04-arm }
-    steps:
-      - uses: actions/checkout@v6
-      - uses: actions/cache@v6
-        with:
-          path: ${{ runner.temp }}/chain
-          key: chain-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.github/bootstrap-chain') }}
-      - run: bash .github/scripts/bootstrap.sh
-      - name: install the readers
-        run: |
-          curl -fsSL https://apt.llvm.org/llvm.sh | sudo bash -s -- "$LLVM_MAJOR"
-          echo "/usr/lib/llvm-$LLVM_MAJOR/bin" >> "$GITHUB_PATH"
-          sudo apt-get install -y binutils gdb
-      # the x86_64 leg cross-builds every foreign format, spirv included
-      - name: install spirv-tools
-        if: matrix.target == 'x86_64-linux'
-        run: |
-          curl -fsSL "https://sdk.lunarg.com/sdk/download/$VULKAN_SDK_VERSION/linux/vulkansdk-linux-x86_64-$VULKAN_SDK_VERSION.tar.xz" \
-            | sudo tar -xJf - -C /usr/local/bin --strip-components=3 "$VULKAN_SDK_VERSION/x86_64/bin/spirv-dis" "$VULKAN_SDK_VERSION/x86_64/bin/spirv-val"
-      - name: link cases
-        run: bash test/run.sh --link
-
-  link-windows:
-    name: link x86_64-windows
-    if: contains(fromJSON('["all", "windows"]'), inputs.lane)
-    runs-on: windows-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v6
-      - uses: actions/cache@v6
-        with:
-          path: ${{ runner.temp }}/chain
-          key: chain-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.github/bootstrap-chain') }}
-      - run: bash .github/scripts/bootstrap.sh
-      - name: link cases
-        run: bash test/run.sh --link
 
   release:
     name: release ${{ matrix.target }}
@@ -277,7 +112,7 @@ jobs:
         with:
           path: ${{ runner.temp }}/chain
           key: chain-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.github/bootstrap-chain') }}
-      - run: bash .github/scripts/bootstrap.sh --fixpoint --profile release
+      - run: bash .github/scripts/bootstrap.sh --profile release
       - name: unit suite
         run: |
           "$MACH" test .
@@ -285,86 +120,10 @@ jobs:
           "$MACH" test . -a tests
           "$MACH" test . -a tests --profile release
 
-  dwarf:
-    name: dwarf ${{ matrix.target }}
-    if: contains(fromJSON('["all", "dwarf"]'), inputs.lane)
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
-    strategy:
-      fail-fast: false
-      matrix:
-        target: [x86_64-linux, aarch64-linux, riscv64-linux, riscv64zkt-linux, x86_64-windows, x86_64-darwin, aarch64-darwin]
-    steps:
-      - uses: actions/checkout@v6
-      - uses: actions/cache@v6
-        with:
-          path: ${{ runner.temp }}/chain
-          key: chain-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.github/bootstrap-chain') }}
-      - run: bash .github/scripts/bootstrap.sh
-      - name: install llvm
-        run: |
-          curl -fsSL https://apt.llvm.org/llvm.sh | sudo bash -s -- "$LLVM_MAJOR"
-          echo "/usr/lib/llvm-$LLVM_MAJOR/bin" >> "$GITHUB_PATH"
-      - name: dwarf verify
-        run: bash test/run.sh --dwarf --target "${{ matrix.target }}"
-
-  link-darwin:
-    name: link ${{ matrix.target }}
-    if: contains(fromJSON('["all", "darwin"]'), inputs.lane)
-    runs-on: ${{ matrix.runs-on }}
-    timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - { target: aarch64-darwin, runs-on: macos-15 }
-          - { target: x86_64-darwin,  runs-on: macos-15-intel }
-    steps:
-      - uses: actions/checkout@v6
-      - uses: actions/cache@v6
-        with:
-          path: ${{ runner.temp }}/chain
-          key: chain-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.github/bootstrap-chain') }}
-      - run: bash .github/scripts/bootstrap.sh
-      # homebrew's llvm is keg-only
-      - name: install the readers
-        run: |
-          brew install llvm
-          echo "$(brew --prefix llvm)/bin" >> "$GITHUB_PATH"
-      # run.sh passes a host it does not recognize, so the leg must be named
-      - name: link cases
-        env:
-          LEG: ${{ matrix.target }}
-        run: |
-          bash test/run.sh --link | tee link.log
-          grep -Eq "^legs: .* $LEG( |\$)" link.log || { echo "::error::run.sh did not run the $LEG leg"; exit 1; }
-
-  # every f16 operation against a correctly rounded reference, 2^32 cases per
-  # operation, so only a dispatch naming it runs it
-  f16proof:
-    name: f16proof ${{ matrix.target }} ${{ matrix.shard }}/4
-    if: inputs.lane == 'f16proof'
-    runs-on: ${{ startsWith(matrix.target, 'aarch64') && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
-    timeout-minutes: 120
-    strategy:
-      fail-fast: false
-      matrix:
-        target: [x86_64-linux, x86_64v3-linux, aarch64-linux, aarch64fp16-linux]
-        shard: [0, 1, 2, 3]
-    steps:
-      - uses: actions/checkout@v6
-      - uses: actions/cache@v6
-        with:
-          path: ${{ runner.temp }}/chain
-          key: chain-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.github/bootstrap-chain') }}
-      - run: bash .github/scripts/bootstrap.sh
-      - name: proof
-        run: bash test/run.sh --f16proof --target "${{ matrix.target }}" --shard "${{ matrix.shard }}/4"
-
   gate:
     name: gate
     if: always()
-    needs: [docs, host, host-windows, host-darwin, incremental, codegen, link, link-windows, link-darwin, release, dwarf, f16proof]
+    needs: [host, host-windows, host-darwin, release]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

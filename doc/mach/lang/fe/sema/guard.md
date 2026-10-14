@@ -35,6 +35,16 @@ pub fun open_exit_chain(sc: *sema_context.SemaContext, sid: ast_id.StmtId, frame
 a chain whose arms all test one place with `sel` or `!sel` and all exit leaves the block knowing
 which cases remain; when exactly one remains the rest of the block is guarded for it
 
+## fun open_final_or
+
+```mach
+pub fun open_final_or(sc: *sema_context.SemaContext, sid: ast_id.StmtId, frame: *sema_context.Guard) res[bool, fail.Fail];
+```
+
+a chain whose arms all test one place with `sel` or `!sel` reaches its final bare `or` knowing
+which cases remain, exiting or not; when exactly one remains the `or` body is guarded for it,
+as the rest of the block is after a chain that exits
+
 ## fun check_assign
 
 ```mach
