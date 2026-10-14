@@ -134,7 +134,7 @@ fun run_reported(cx: *args.Call) i64 {
     val res_cfg: res[args.CliArgs, fail.Fail] = args.build_cli_invocation(a, inv, argv);
     if (sel res_cfg.err) { ret cli_diagnostic.report_fail(r, res_cfg.err, diagnostic.ORIGIN_NONE); }
     var config: args.CliArgs = res_cfg.ok;
-    config.include_deps = args.given(inv, ?INCLUDE_DEPS);
+    config.overrides.include_deps = args.given(inv, ?INCLUDE_DEPS);
 
     val list:        bool     = args.given(inv, ?LIST);
     val allow_none:  bool     = args.given(inv, ?args.ALLOW_UNRUNNABLE);
@@ -155,7 +155,7 @@ fun run_reported(cx: *args.Call) i64 {
         timeout = tv.some;
     }
 
-    val jobs: u32 = request.workers(config.jobs);
+    val jobs: u32 = request.workers(config.overrides.jobs);
 
     var root_arg: *u8 = nil;
     if (inv.has_positional) { root_arg = argv[inv.positional_idx]; }

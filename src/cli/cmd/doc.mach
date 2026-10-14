@@ -689,9 +689,9 @@ pub fun run(cx: *args.Call) res[i64, fail.Fail] {
     if (sel out_given.some)              { leaf = out_given.some::str; }
     if (!manifest.is_project_path(leaf)) { ret res[i64, fail.Fail].err{fail.user(diagnostic_kind.OUTPUT_PATH_INVALID, manifest.OUTPUT_CONSTRAINT)}; }
 
-    val config_r: res[request.CliArgs, fail.Fail] = args.build_cli_invocation(alloc, inv, argv);
+    val config_r: res[args.CliArgs, fail.Fail] = args.build_cli_invocation(alloc, inv, argv);
     if (sel config_r.err) { ret res[i64, fail.Fail].err{config_r.err}; }
-    var config: request.CliArgs = config_r.ok;
+    var config: args.CliArgs = config_r.ok;
 
     var arg: *u8 = nil;
     if (inv.has_positional) { arg = argv[inv.positional_idx]; }
