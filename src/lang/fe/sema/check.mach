@@ -441,7 +441,7 @@ fun record_value_instance(sc: *sema_context.SemaContext, eid: ast_id.ExprId, cal
     if (sel acquired.err) { ret; }
     var item: sema_instance.Instance;
     item.kind      = sema_instance.KIND_VALUE;
-    item.origin    = sym.origin;
+    item.origin    = resolve.origin_of(sc.s, sym);
     item.decl      = acquired.ok.symbol.decl;
     item.args      = nil;
     item.arg_len   = 0;
@@ -465,7 +465,7 @@ fun comptime_param_type(sc: *sema_context.SemaContext, callee: ast_id.ExprId, pa
     val opt_sym: opt[*resolve.Symbol] = sema_context.symbol_for_expr(sc, callee);
     if (!sel opt_sym.some) { ret type.TYPE_ERROR; }
     val sym: *resolve.Symbol = opt_sym.some;
-    if (module.same(sym.origin, sc.view.own_module)) {
+    if (module.same(resolve.origin_of(sc.s, sym), sc.view.own_module)) {
         if (sc.view.type_resolved_ty == nil) { ret type.TYPE_ERROR; }
         ret sc.view.type_resolved_ty[ast_id.type_index(ty)];
     }
@@ -1196,8 +1196,8 @@ fun callee_origin_ast(sc: *sema_context.SemaContext, callee: ast_id.ExprId) *ast
     val opt_sym: opt[*resolve.Symbol] = sema_context.symbol_for_expr(sc, callee);
     if (!sel opt_sym.some) { ret nil; }
     val sym: *resolve.Symbol = opt_sym.some;
-    if (module.same(sym.origin, sc.view.own_module)) { ret sc.view.a; }
-    ret sema_context.definition_ast(sc, sym.origin);
+    if (module.same(resolve.origin_of(sc.s, sym), sc.view.own_module)) { ret sc.view.a; }
+    ret sema_context.definition_ast(sc, resolve.origin_of(sc.s, sym));
 }
 
 fun deref_one(sc: *sema_context.SemaContext, object: type.TypeId) type.TypeId {

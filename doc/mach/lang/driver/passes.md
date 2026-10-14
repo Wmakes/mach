@@ -1,29 +1,52 @@
 # mach.lang.driver.passes
 
-## fun lower_scope_prepare
+## val LOWERED_SURFACE
 
 ```mach
-pub fun lower_scope_prepare(m: *project.ModuleEntry) err[fail.Fail];
+pub val LOWERED_SURFACE: query.Kind = query.Kind;
 ```
 
-the scope lowering binds a module's constants in, over what the load, resolve and sema bound
-over it, made on the first call and kept for as long as the module's syntax stands; each call
-sets the layers to the module's current products, so it runs only where nothing else reads them
+a module's source with what lowering omits cut away, keyed by its stable id
 
-## fun lower_scope_of
+## val INLINE_BODIES
 
 ```mach
-pub fun lower_scope_of(m: *project.ModuleEntry) res[*comptime.ComptimeCtx, fail.Fail];
+pub val INLINE_BODIES: query.Kind = query.Kind;
 ```
 
-the lowering scope `lower_scope_prepare` made, read without writing it: a scope that was never
-made, or whose layers are not the module's current products, is a defect of the caller
+the bodies a module offers its importers to inline, keyed by its back-half key
 
-## fun prepare_resolve_pass
+## val LOWER
 
 ```mach
-pub fun prepare_resolve_pass(p: *project.Project) err[fail.Fail];
+pub val LOWER: query.Kind = query.Kind;
 ```
+
+a module's optimized ir, keyed by its back-half key
+
+## val CODEGEN
+
+```mach
+pub val CODEGEN: query.Kind = query.Kind;
+```
+
+a module's object image, keyed by its back-half key
+
+## val LINK
+
+```mach
+pub val LINK: query.Kind = query.Kind;
+```
+
+the link's inputs as revisions, so a link reruns only when one moved
+
+## val LINK_CONFIG
+
+```mach
+pub val LINK_CONFIG: query.Kind = query.Kind;
+```
+
+what the link is configured with beyond the build context, set by the build
 
 ## fun run_resolve_pass
 
@@ -34,18 +57,6 @@ pub fun run_resolve_pass(p: *project.Project) err[fail.Fail];
 a rejected module is one module's answer, so the pass folds it and carries
 on over the rest; an internal failure ends the pass where it met it
 
-## fun q_resolve_compute
-
-```mach
-pub fun q_resolve_compute(p: *project.Project, key: u64, alloc: *A.Allocator, diags: *diagnostic.DiagnosticStore) res[query.QueryOutput, fail.Fail];
-```
-
-## fun prepare_sema_pass
-
-```mach
-pub fun prepare_sema_pass(p: *project.Project) err[fail.Fail];
-```
-
 ## fun run_sema_pass
 
 ```mach
@@ -54,12 +65,6 @@ pub fun run_sema_pass(p: *project.Project) err[fail.Fail];
 
 a rejected module is one module's answer, so the pass folds it and carries
 on over the rest; an internal failure ends the pass where it met it
-
-## fun q_sema_compute
-
-```mach
-pub fun q_sema_compute(p: *project.Project, key: u64, alloc: *A.Allocator, diags: *diagnostic.DiagnosticStore) res[query.QueryOutput, fail.Fail];
-```
 
 ## fun retain_modules
 
@@ -70,12 +75,6 @@ pub fun retain_modules(p: *project.Project, rejected: bool) err[fail.Fail];
 every module the load reached, gated out or not, is held under the session's active retainer: the
 project borrows each one's parse. a load closes its retainer's round unless a caller keeps the round
 open across builds, and then whatever no retainer holds is retired
-
-## fun q_typed_exports_compute
-
-```mach
-pub fun q_typed_exports_compute(p: *project.Project, key: u64, alloc: *A.Allocator, diags: *diagnostic.DiagnosticStore) res[query.QueryOutput, fail.Fail];
-```
 
 ## fun back_half_key
 
@@ -145,44 +144,6 @@ pub fun run_lower_pass(p: *project.Project) err[fail.Fail];
 pub fun prepare_lower_pass(p: *project.Project) err[fail.Fail];
 ```
 
-## fun load_status
-
-```mach
-pub fun load_status(p: *project.Project) fail.PhaseStatus;
-```
-
-the standing of the load walk alone, over every module it reached
-
-## fun frontend_status
-
-```mach
-pub fun frontend_status(p: *project.Project) fail.PhaseStatus;
-```
-
-## fun q_lowered_surface_compute
-
-```mach
-pub fun q_lowered_surface_compute(p: *project.Project, key: u64, alloc: *A.Allocator, diags: *diagnostic.DiagnosticStore) res[query.QueryOutput, fail.Fail];
-```
-
-## fun q_inline_bodies_compute
-
-```mach
-pub fun q_inline_bodies_compute(p: *project.Project, key: u64, alloc: *A.Allocator, diags: *diagnostic.DiagnosticStore) res[query.QueryOutput, fail.Fail];
-```
-
-## fun q_lower_compute
-
-```mach
-pub fun q_lower_compute(p: *project.Project, key: u64, alloc: *A.Allocator, diags: *diagnostic.DiagnosticStore) res[query.QueryOutput, fail.Fail];
-```
-
-## fun prepare_codegen_pass
-
-```mach
-pub fun prepare_codegen_pass(p: *project.Project) err[fail.Fail];
-```
-
 ## fun acquire_codegen_inputs
 
 ```mach
@@ -242,34 +203,10 @@ pub fun test_codegen_reusable(p: *project.Project, mid: session.ModuleId) res[bo
 
 the test object's codegen product is current or cached, so no worker generates it
 
-## fun q_codegen_compute
-
-```mach
-pub fun q_codegen_compute(p: *project.Project, key: u64, alloc: *A.Allocator, diags: *diagnostic.DiagnosticStore) res[query.QueryOutput, fail.Fail];
-```
-
-## fun prepare_link_pass
-
-```mach
-pub fun prepare_link_pass(p: *project.Project) err[fail.Fail];
-```
-
 ## fun run_link_pass
 
 ```mach
 pub fun run_link_pass(p: *project.Project) res[bool, fail.Fail];
-```
-
-## fun q_link_compute
-
-```mach
-pub fun q_link_compute(p: *project.Project, key: u64, alloc: *A.Allocator, diags: *diagnostic.DiagnosticStore) res[query.QueryOutput, fail.Fail];
-```
-
-## fun capture_build_config
-
-```mach
-pub fun capture_build_config(p: *project.Project, alloc: *A.Allocator) res[query.QueryOutput, fail.Fail];
 ```
 
 ## fun prepare_object_cache
@@ -280,12 +217,6 @@ pub fun prepare_object_cache(p: *project.Project) err[fail.Fail];
 
 key the loaded modules and read `obj/` under their keys (driver/cache),
 reported as the cache phase carved out of resolve, which it precedes
-
-## fun set_build_config_input
-
-```mach
-pub fun set_build_config_input(p: *project.Project) err[fail.Fail];
-```
 
 ## fun module_in_current_project
 

@@ -1,3 +1,4 @@
+use mach.lang.build.request;
 use mach.lang.fail;
 use mach.lang.host;
 use std.allocator.page;
@@ -3668,7 +3669,10 @@ fun ut_bda_module(alloc: *A.Allocator, src: str, env_line: str, target_env: str,
         if (sel pr.err) { ret 2; }
         var p: project.Project = pr.ok;
         fin { project.dnit_project(?p); }
-        if (profile == 1) { p.req.opt = pipeline.OPT_RELEASE; }
+        var req: request.BuildRequest = p.req;
+        if (profile == 1) { req.opt = pipeline.OPT_RELEASE; }
+        val reconfigured: err[fail.Fail] = driver.reconfigure(?p, req);
+        if (sel reconfigured.err) { ret 3; }
         val run_sema_pass_r: err[fail.Fail] = driver.run_sema_pass(?p);
         if (sel run_sema_pass_r.err) { ret 3; }
         val run_lower_pass_r: err[fail.Fail] = driver.run_lower_pass(?p);
@@ -4398,7 +4402,10 @@ fun ut_l6_project(s: *session.Session, alloc: *A.Allocator, src: str, release: b
     fin {
         if (!handed) { project.dnit_project(?p); }
     }
-    if (release) { p.req.opt = pipeline.OPT_RELEASE; }
+    var req: request.BuildRequest = p.req;
+    if (release) { req.opt = pipeline.OPT_RELEASE; }
+    val reconfigured: err[fail.Fail] = driver.reconfigure(?p, req);
+    if (sel reconfigured.err) { ret res[project.Project, fail.Fail].err{reconfigured.err}; }
     val sr2: err[fail.Fail] = driver.run_sema_pass(?p);
     if (sel sr2.err) { ret res[project.Project, fail.Fail].err{sr2.err}; }
     val lr: err[fail.Fail] = driver.run_lower_pass(?p);

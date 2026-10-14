@@ -88,7 +88,7 @@ fun callee_body_reaches(sc: *sema_context.SemaContext, rr: *resolve.ResolveResul
     val acquired: res[sema_product.DefinedSymbol, fail.Fail] = sema_context.symbol_definition(sc, sym, sema_product.DEFINITION_RESOLVED);
     if (sel acquired.err) { ret false; }
     val current: sema_product.DefinedSymbol = acquired.ok;
-    ret decl_reaches_c_variadic(sc, current.symbol.origin, current.symbol.decl, want_spread, seen);
+    ret decl_reaches_c_variadic(sc, resolve.origin_of(sc.s, ?current.symbol), current.symbol.decl, want_spread, seen);
 }
 
 fun expr_has_c_variadic_call(sc: *sema_context.SemaContext, a: *ast.Ast, rr: *resolve.ResolveResult, eid: ast_id.ExprId, want_spread: bool, seen: *ReachSeen) bool {

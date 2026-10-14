@@ -1473,7 +1473,7 @@ fun callee_packs_to_c_tail(sc: *sema_context.SemaContext, callee: ast_id.ExprId)
     val acquired: res[sema_product.DefinedSymbol, fail.Fail] = sema_context.symbol_definition(sc, sym, sema_product.DEFINITION_RESOLVED);
     if (sel acquired.err) { ret false; }
     val current: sema_product.DefinedSymbol = acquired.ok;
-    ret sema_variadic.decl_body_spreads_pack_to_c_variadic(sc, current.symbol.origin, current.symbol.decl);
+    ret sema_variadic.decl_body_spreads_pack_to_c_variadic(sc, resolve.origin_of(sc.s, ?current.symbol), current.symbol.decl);
 }
 
 # a call to a declared function whose last parameter is a pack
@@ -1504,7 +1504,7 @@ fun record_pack_call(sc: *sema_context.SemaContext, eid: ast_id.ExprId, c: *ast_
 
     var item: sema_instance.Instance;
     item.kind    = sema_instance.KIND_PACK;
-    item.origin  = sym.origin;
+    item.origin  = resolve.origin_of(sc.s, sym);
     item.decl    = current.symbol.decl;
     item.args    = args;
     item.arg_len = arg_len;
@@ -1904,7 +1904,7 @@ fun compute_generic_signature(sc: *sema_context.SemaContext, c: *ast_expr.ExprCa
     }
     val defined: sema_product.DefinedSymbol        = defined_r.ok;
     val who_r:   res[type.GenericOwner, fail.Fail] = sema_context.generic_owner_of_decl(sc.s, defined.definition.parsed.a,
-        sym.origin, defined.symbol.decl);
+        resolve.origin_of(sc.s, sym), defined.symbol.decl);
     if (sel who_r.err) {
         fail.internal(?sc.status, fail.describe(who_r.err));
         ret type.TYPE_ERROR;
@@ -1936,7 +1936,7 @@ fun queue_generic_instance(sc: *sema_context.SemaContext, eid: ast_id.ExprId, sy
     val current: sema_product.DefinedSymbol = acquired.ok;
     var item:    sema_instance.Instance;
     item.kind    = sema_instance.KIND_TYPE;
-    item.origin  = sym.origin;
+    item.origin  = resolve.origin_of(sc.s, sym);
     item.decl    = current.symbol.decl;
     item.args    = args;
     item.arg_len = arg_len;

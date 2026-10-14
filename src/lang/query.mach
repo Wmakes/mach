@@ -1,13 +1,15 @@
-# the query database: every language product is one registered kind. a
-# product declares how its bytes are owned (an input the host sets, derived
-# bytes the database owns, an owned handle released by its finalizer, or a
-# metadata revision sampled from outside), records its dependencies by reading
-# them inside its compute (`get`, `depend`, `observe`), and owns the diagnostic
-# store its compute wrote into. validation is transitive and depth first; equal
-# bytes on recomputation keep the previous revision and stop propagation; a
-# failed dependency fails the product and the previous value is never served.
-# all reads happen inside one operation, and `end` refuses success when a
-# sampled metadata revision moved
+# the query database: every product is of one kind, a `Kind` row its owner
+# declares beside the computation. a row says how its bytes are owned (an input
+# the host sets, derived bytes the database owns, an owned handle released by its
+# finalizer, or a metadata revision sampled from outside), what its keys name and
+# how a derived product is computed; the database takes a row on its first use and
+# knows no kind of its own. a product records its dependencies by reading them
+# inside its compute (`get`, `depend`, `observe`), and owns the diagnostic store
+# its compute wrote into. validation is transitive and depth first; equal bytes
+# on recomputation keep the previous revision and stop propagation; a failed
+# dependency fails the product and the previous value is never served. all reads
+# happen inside one operation, and `end` refuses success when a sampled metadata
+# revision moved
 use std.allocator.page;
 use std.collections.map;
 use std.collections.map.Map;
@@ -40,88 +42,69 @@ use mach.lang.handle;
 use lang_source: mach.lang.source;
 use mach.lang.textbuild;
 
-pub def QueryKind: u16;
-
-pub val Q_PROJECT_ROOT:    QueryKind = 0;
-pub val Q_TARGET:          QueryKind = 1;
-pub val Q_FILE_TEXT:       QueryKind = 2;
-#[testing]
-pub val Q_TOKENIZE:        QueryKind = 3;
-pub val Q_PARSE:           QueryKind = 4;
-pub val Q_RESOLVE:         QueryKind = 7;
-pub val Q_EXPORTS:         QueryKind = 8;
-pub val Q_SEMA:            QueryKind = 9;
-pub val Q_LOWER:           QueryKind = 10;
-pub val Q_CODEGEN:         QueryKind = 11;
-pub val Q_LINK:            QueryKind = 12;
-pub val Q_TYPED_EXPORTS:   QueryKind = 13;
-pub val Q_MODULE_NUMBER:   QueryKind = 14;
-pub val Q_LINK_CONFIG:     QueryKind = 15;
-pub val Q_LOWERED_SURFACE: QueryKind = 17;
-pub val Q_EMBED_FILE:      QueryKind = 18;
-pub val Q_LOAD_VIEW:       QueryKind = 20;
-pub val Q_INLINE_BODIES:   QueryKind = 21;
-pub val Q_OBJECT_KEY:      QueryKind = 22;
-
 # what a kind's keys name, so a session can release every product a module or file left behind.
 # a kind keyed by a module carries its stable module id in the key's low 32 bits, whatever the
-# higher bits add (a test build), and a kind keyed by a file is keyed
-# by its file id alone. file text is the source map's and the editor's input, released with them
+# higher bits add (a test build), and a kind keyed by a file is keyed by its file id alone. a row
+# left at KEY_UNDECLARED is refused on its first use, so a kind cannot leak by omission
 pub def KeyOwner: u8;
 
 val     KEY_UNDECLARED: KeyOwner = 0;
-val     KEY_UNOWNED:    KeyOwner = 1;
+pub val KEY_UNOWNED:    KeyOwner = 1;
 pub val KEY_MODULE:     KeyOwner = 2;
 pub val KEY_FILE:       KeyOwner = 3;
-
-# one past the highest kind; the owner table and every kind constant stay inside it
-val QUERY_KIND_COUNT: u32 = 23;
-
-# every kind's owner, indexed by kind. a kind is declared here before it can be registered, and an
-# entry left at KEY_UNDECLARED refuses registration, so a new kind cannot leak by omission
-val KEY_OWNERS: [23]KeyOwner = [23]KeyOwner{
-    KEY_UNOWNED, # Q_PROJECT_ROOT
-    KEY_UNOWNED, # Q_TARGET
-    KEY_UNOWNED, # Q_FILE_TEXT, the source map's and the editor's input
-    KEY_FILE, # Q_TOKENIZE
-    KEY_FILE, # Q_PARSE
-    KEY_UNOWNED, # 5, no kind
-    KEY_UNOWNED, # 6, no kind
-    KEY_MODULE, # Q_RESOLVE
-    KEY_MODULE, # Q_EXPORTS
-    KEY_MODULE, # Q_SEMA
-    KEY_MODULE, # Q_LOWER
-    KEY_MODULE, # Q_CODEGEN
-    KEY_UNOWNED, # Q_LINK
-    KEY_MODULE, # Q_TYPED_EXPORTS
-    KEY_MODULE, # Q_MODULE_NUMBER
-    KEY_UNOWNED, # Q_LINK_CONFIG
-    KEY_UNOWNED, # 16, no kind
-    KEY_MODULE, # Q_LOWERED_SURFACE
-    KEY_UNOWNED, # Q_EMBED_FILE, keyed by path
-    KEY_UNOWNED, # 19, no kind
-    KEY_MODULE, # Q_LOAD_VIEW
-    KEY_MODULE, # Q_INLINE_BODIES
-    KEY_MODULE # Q_OBJECT_KEY, the key a module's reused object was built under
-};
-
-fun key_owner(kind: QueryKind) KeyOwner {
-    if (kind::u32 >= QUERY_KIND_COUNT) { ret KEY_UNDECLARED; }
-    ret KEY_OWNERS[kind::u32];
-}
 
 # whether a released owner's products go, given the kind's owner class and the id its key names
 def OwnedFn: fun(ptr, KeyOwner, u32) bool;
 
 pub def Revision: u64;
 
-def ShardRole: u8;
+# how a kind's products come to be: set by the host, computed, or sampled from outside
+# reached through Kind.role
+pub def Role: u8;
 
-val SHARD_INPUT:    ShardRole = 0;
-val SHARD_DERIVED:  ShardRole = 1;
-val SHARD_METADATA: ShardRole = 2;
+val     ROLE_UNDECLARED: Role = 0;
+pub val INPUT:           Role = 1;
+pub val DERIVED:         Role = 2;
+# sampled from a provider outside the database; only a test attaches one
+val METADATA: Role = 3;
 
-def FinalizeFn: fun(*u8, u32, *A.Allocator);
+# releases what an owned product's bytes hold
+# reached through Kind.finalize
+pub def FinalizeFn: fun(*u8, u32, *A.Allocator);
+# whether two owned products are the same
+# reached through Kind.equal
+pub def EqualFn: fun(*u8, u32, *u8, u32) bool;
+# a derived product's computation: the context the operation's runtime carries, the row it
+# computes, the key, the allocator its bytes come from and the store it reports into
+# reached through Kind.compute
+pub def ComputeFn: fun(ptr, *Kind, u64, *A.Allocator, *diagnostic.DiagnosticStore) res[QueryOutput, fail.Fail];
+
+# one kind of product, declared once beside the computation that owns it. the database takes
+# the row on its first use; a row's address is its identity, so two rows never share a shard
+# ---
+# name:     how failures and cycles name the kind
+# role:     INPUT or DERIVED
+# owner:    what the kind's keys name
+# origin:   the phase a derived product's diagnostics belong to
+# compute:  a derived product's computation; an input has none
+# finalize: releases what an owned derived product's bytes hold; nil when the bytes own nothing
+# equal:    whether two owned products are the same, so an equal recomputation keeps the revision;
+#           requires finalize
+# replay:   the product lowers or generates a module's object, so a restored object replays its
+#           warnings even when the module's front end ran again and reported its own
+pub rec Kind {
+    name:     str;
+    role:     Role;
+    owner:    KeyOwner;
+    origin:   diagnostic.Origin;
+    compute:  ComputeFn;
+    finalize: FinalizeFn;
+    equal:    EqualFn;
+    replay:   bool;
+}
+
+# a kind's index among the shards of one database, taken on the row's first use
+def KindIndex: u16;
 
 rec MetadataRevision {
     present:  bool;
@@ -135,8 +118,15 @@ rec RevisionProvider {
     read:    RevisionFn;
 }
 
+# a product's address within one database: its kind's index and its key
+rec Slot {
+    kind: KindIndex;
+    key:  u64;
+}
+
+# a product's address: the row of its kind and its key
 pub rec QueryKey {
-    kind: QueryKind;
+    kind: *Kind;
     key:  u64;
 }
 
@@ -153,7 +143,7 @@ pub rec Operation {
 
 pub rec PreparedQuery {
     operation: Operation;
-    key:       QueryKey;
+    key:       Slot;
 }
 
 # what collect hands the caller after an operation: the diagnostics of every product
@@ -173,12 +163,12 @@ pub rec Presentation {
 }
 
 rec MetadataSample {
-    key:   QueryKey;
+    key:   Slot;
     value: MetadataRevision;
 }
 
 rec Attempt {
-    key:       QueryKey;
+    key:       Slot;
     prepared:  *QueryEntry;
     fresh:     bool;
     cancelled: bool;
@@ -193,7 +183,7 @@ pub rec QueryOutput {
 }
 
 rec Dep {
-    kind:                QueryKind;
+    kind:                KindIndex;
     key:                 u64;
     last_changed:        Revision;
     diagnostics_changed: Revision;
@@ -225,6 +215,10 @@ rec QueryEntry {
     diags:               *diagnostic.DiagnosticStore;
     diagnostics_changed: Revision;
     ready:               bool;
+    # the last validation or recomputation failed, so the bytes are not served between operations
+    stale: bool;
+    # the operation that last validated or computed the product
+    validated_at: u64;
 }
 
 rec QueryEntryDomain {}
@@ -235,29 +229,36 @@ rec QueryIndexEntry {
 }
 
 rec StackFrame {
-    kind:  QueryKind;
+    kind:  KindIndex;
     key:   u64;
     entry: *QueryEntry;
 }
 
-pub rec QueryShard {
-    kind:       QueryKind;
-    role:       ShardRole;
-    revisions:  RevisionProvider;
-    finalize:   FinalizeFn;
-    equal:      fun(*u8, u32, *u8, u32) bool;
-    registered: bool;
-    entries:    handle.HandleTable[QueryEntry, QueryEntryDomain];
-    index:      Vector[QueryIndexEntry];
-    by_key:     Map[u64, handle.HandleId[QueryEntryDomain]];
+# one kind's products in one database, made on the row's first use
+# ---
+# kind:      the shard's index in the database
+# spec:      the row the shard was made from
+# role:      the row's role, or METADATA for a shard a revision provider was attached to
+# revisions: a metadata shard's provider
+# computes:  how many products of the kind this database computed rather than reused
+rec QueryShard {
+    kind:      KindIndex;
+    spec:      *Kind;
+    role:      Role;
+    revisions: RevisionProvider;
+    computes:  u64;
+    entries:   handle.HandleTable[QueryEntry, QueryEntryDomain];
+    index:     Vector[QueryIndexEntry];
+    by_key:    Map[u64, handle.HandleId[QueryEntryDomain]];
 }
 
 pub rec QueryDb {
     a:                    *A.Allocator;
     revision:             Revision;
-    storage:              *QueryShard;
+    storage:              **QueryShard;
     storage_cap:          u32;
     kinds:                u32;
+    by_row:               Map[u64, KindIndex];
     compute_depth:        u32;
     stack:                Vector[StackFrame];
     prepared_count:       usize;
@@ -268,25 +269,22 @@ pub rec QueryDb {
     operation_message:    str;
     rejections:           u64;
     attempts:             Vector[Attempt];
-    attempt_index:        Map[QueryKey, usize];
-    validated:            Map[QueryKey, Revision];
+    attempt_index:        Map[Slot, usize];
+    validated:            Map[Slot, Revision];
     metadata:             Vector[MetadataSample];
-    metadata_index:       Map[QueryKey, usize];
+    metadata_index:       Map[Slot, usize];
 }
 
-rec QueryCapabilities[T] {
-    compute: fun(*T, QueryKind, u64, *A.Allocator, *diagnostic.DiagnosticStore) res[QueryOutput, fail.Fail];
-}
-
+# the database as an operation's computations see it: each product is computed with the
+# runtime's context, a `T` the computations of every kind read through
 pub rec QueryRuntime[T] {
-    db:   *QueryDb;
-    caps: QueryCapabilities[T];
+    db: *QueryDb;
 }
 
 val FIRST_REVISION: Revision = 1;
 
-# a database over a caller-owned allocator; register every kind before the first begin
-# and tear down with dnit, which runs every owned product's finalizer
+# a database over a caller-owned allocator, holding no kind until a row is first used;
+# torn down with dnit, which runs every owned product's finalizer
 # ---
 # a: owns the db, its shards and every derived product's bytes
 pub fun init(a: *A.Allocator) res[QueryDb, fail.Fail] {
@@ -296,6 +294,7 @@ pub fun init(a: *A.Allocator) res[QueryDb, fail.Fail] {
     db.storage              = nil;
     db.storage_cap          = 0;
     db.kinds                = 0;
+    db.by_row               = map.init[u64, KindIndex](a);
     db.compute_depth        = 0;
     db.stack                = collections_vector.init[StackFrame](a);
     db.prepared_count       = 0;
@@ -306,10 +305,10 @@ pub fun init(a: *A.Allocator) res[QueryDb, fail.Fail] {
     db.operation_message    = nil;
     db.rejections           = 0;
     db.attempts             = collections_vector.init[Attempt](a);
-    db.attempt_index        = map.init[QueryKey, usize](a);
-    db.validated            = map.init[QueryKey, Revision](a);
+    db.attempt_index        = map.init[Slot, usize](a);
+    db.validated            = map.init[Slot, Revision](a);
     db.metadata             = collections_vector.init[MetadataSample](a);
-    db.metadata_index       = map.init[QueryKey, usize](a);
+    db.metadata_index       = map.init[Slot, usize](a);
     ret res[QueryDb, fail.Fail].ok{db};
 }
 
@@ -324,23 +323,25 @@ pub fun dnit(db: *QueryDb) {
         db.operation_message = nil;
     }
     collections_vector.dnit[Attempt](?db.attempts);
-    map.dnit[QueryKey, usize](?db.attempt_index);
+    map.dnit[Slot, usize](?db.attempt_index);
 
     if (db.storage != nil) {
         var i: u32 = 0;
         for (i < db.kinds) {
-            shard_entries_free(db, ?db.storage[i]);
+            shard_entries_free(db, db.storage[i]);
+            A.deallocate[QueryShard](db.a, db.storage[i], 1);
             i = i + 1;
         }
         if (db.storage_cap > 0) {
-            A.deallocate[QueryShard](db.a, db.storage, db.storage_cap::usize);
+            A.deallocate[*QueryShard](db.a, db.storage, db.storage_cap::usize);
         }
     }
+    map.dnit[u64, KindIndex](?db.by_row);
 
     collections_vector.dnit[StackFrame](?db.stack);
-    map.dnit[QueryKey, Revision](?db.validated);
+    map.dnit[Slot, Revision](?db.validated);
     collections_vector.dnit[MetadataSample](?db.metadata);
-    map.dnit[QueryKey, usize](?db.metadata_index);
+    map.dnit[Slot, usize](?db.metadata_index);
     db.operation_active = false;
 
     db.storage     = nil;
@@ -349,47 +350,19 @@ pub fun dnit(db: *QueryDb) {
     db.revision    = 0;
 }
 
-pub fun register_input(db: *QueryDb, kind: QueryKind) err[fail.Fail] {
-    ret register(db, kind, SHARD_INPUT, RevisionProvider{});
-}
-
-pub fun register_derived(db: *QueryDb, kind: QueryKind) err[fail.Fail] {
-    ret register(db, kind, SHARD_DERIVED, RevisionProvider{});
-}
-
-pub fun register_derived_owned(db: *QueryDb, kind: QueryKind, finalize: FinalizeFn) err[fail.Fail] {
-    val res_register: err[fail.Fail] = register(db, kind, SHARD_DERIVED, RevisionProvider{});
-    if (sel res_register.err) { ret res_register; }
-
-    val sh: *QueryShard = ?db.storage[kind::u32];
-    sh.finalize = finalize;
-    ret err[fail.Fail].ok{};
-}
-
-pub fun register_derived_equatable(db: *QueryDb, kind: QueryKind, finalize: FinalizeFn,
-    equal: fun(*u8, u32, *u8, u32) bool) err[fail.Fail] {
-    if (finalize == nil || equal == nil) { ret err[fail.Fail].err{fail.message("owned query equality requires a finalizer and comparator")}; }
-    val registered: err[fail.Fail] = register_derived_owned(db, kind, finalize);
-    if (sel registered.err) { ret registered; }
-    db.storage[kind::u32].equal = equal;
-    ret err[fail.Fail].ok{};
-}
-
+# attach a revision provider to a metadata row, before its first use
 #[testing]
-fun register_metadata(db: *QueryDb, kind: QueryKind, provider: RevisionProvider) err[fail.Fail] {
+fun register_metadata(db: *QueryDb, kind: *Kind, provider: RevisionProvider) err[fail.Fail] {
     if (provider.read == nil) { ret err[fail.Fail].err{fail.message("metadata query requires a revision provider")}; }
-    ret register(db, kind, SHARD_METADATA, provider);
+    val made: res[*QueryShard, fail.Fail] = shard_make(db, kind, METADATA);
+    if (sel made.err) { ret err[fail.Fail].err{made.err}; }
+    made.ok.revisions = provider;
+    ret err[fail.Fail].ok{};
 }
 
-pub fun runtime[T](db: *QueryDb, compute: fun(*T, QueryKind, u64, *A.Allocator, *diagnostic.DiagnosticStore) res[QueryOutput, fail.Fail]) res[QueryRuntime[T], fail.Fail] {
-    if (db == nil)      { ret res[QueryRuntime[T], fail.Fail].err{fail.message("query runtime requires a database")}; }
-    if (compute == nil) { ret res[QueryRuntime[T], fail.Fail].err{fail.message("query runtime requires a compute capability")}; }
-    var caps: QueryCapabilities[T];
-    caps.compute = compute;
-    var rt: QueryRuntime[T];
-    rt.db   = db;
-    rt.caps = caps;
-    ret res[QueryRuntime[T], fail.Fail].ok{rt};
+pub fun runtime[T](db: *QueryDb) res[QueryRuntime[T], fail.Fail] {
+    if (db == nil) { ret res[QueryRuntime[T], fail.Fail].err{fail.message("query runtime requires a database")}; }
+    ret res[QueryRuntime[T], fail.Fail].ok{QueryRuntime[T]{db: db}};
 }
 
 # open an operation. one is open at a time, and the previous one's presentation must
@@ -403,8 +376,8 @@ pub fun begin(db: *QueryDb) res[Operation, fail.Fail] {
     if (db.operation_active || db.stack.len != 0) { ret res[Operation, fail.Fail].err{fail.message("query operation is already active")}; }
     if (db.presentation_pending)                  { ret res[Operation, fail.Fail].err{fail.message("collect or discard the previous query presentation first")}; }
     if (db.operation_sequence == ~(0::u64))       { ret res[Operation, fail.Fail].err{fail.message("query operation sequence exhausted")}; }
-    map.clear[QueryKey, Revision](?db.validated);
-    map.clear[QueryKey, usize](?db.metadata_index);
+    map.clear[Slot, Revision](?db.validated);
+    map.clear[Slot, usize](?db.metadata_index);
     db.metadata.len       = 0;
     db.operation_sequence = db.operation_sequence + 1;
     db.operation_active   = true;
@@ -483,14 +456,14 @@ fun operation_poison(db: *QueryDb) opt[fail.Fail] {
     ret opt[fail.Fail].none{};
 }
 
-fun attempt_prepare(db: *QueryDb, key: QueryKey) res[usize, fail.Fail] {
-    var lookup: QueryKey    = key;
-    val prior:  opt[*usize] = map.get[QueryKey, usize](?db.attempt_index, ?lookup);
+fun attempt_prepare(db: *QueryDb, key: Slot) res[usize, fail.Fail] {
+    var lookup: Slot        = key;
+    val prior:  opt[*usize] = map.get[Slot, usize](?db.attempt_index, ?lookup);
     if (sel prior.some) { ret res[usize, fail.Fail].ok{@prior.some}; }
     val index: usize               = db.attempts.len;
     val added: res[usize, A.Error] = collections_vector.push[Attempt](?db.attempts, Attempt{key: key});
     if (sel added.err) { ret res[usize, fail.Fail].err{fail.refused(added.err)}; }
-    val indexed: res[bool, A.Error] = map.insert[QueryKey, usize](?db.attempt_index, key, index);
+    val indexed: res[bool, A.Error] = map.insert[Slot, usize](?db.attempt_index, key, index);
     if (sel indexed.err) {
         db.attempts.len = index;
         ret res[usize, fail.Fail].err{fail.refused(indexed.err)};
@@ -517,15 +490,15 @@ fun attempts_clear(db: *QueryDb) {
     for (i < db.attempts.len) {
         val attempt: *Attempt = ?db.attempts.data[i];
         if (attempt.prepared != nil) {
-            entry_free(db, ?db.storage[attempt.key.kind::u32], attempt.prepared);
+            entry_free(db, db.storage[attempt.key.kind::u32], attempt.prepared);
             A.deallocate[QueryEntry](db.a, attempt.prepared, 1);
         }
-        entry_free(db, ?db.storage[attempt.key.kind::u32], ?attempt.evidence);
+        entry_free(db, db.storage[attempt.key.kind::u32], ?attempt.evidence);
         i = i + 1;
     }
     db.attempts.len   = 0;
     db.prepared_count = 0;
-    map.clear[QueryKey, usize](?db.attempt_index);
+    map.clear[Slot, usize](?db.attempt_index);
 }
 
 # release a pending presentation without collecting it: the attempts, the failure and
@@ -543,8 +516,8 @@ pub fun discard(db: *QueryDb, operation: Operation) err[fail.Fail] {
         str_free(db.a, db.operation_message);
         db.operation_message = nil;
     }
-    map.clear[QueryKey, Revision](?db.validated);
-    map.clear[QueryKey, usize](?db.metadata_index);
+    map.clear[Slot, Revision](?db.validated);
+    map.clear[Slot, usize](?db.metadata_index);
     db.metadata.len         = 0;
     db.operation_failure    = opt[fail.Fail].none{};
     db.presentation_pending = false;
@@ -599,12 +572,16 @@ pub fun collect(db: *QueryDb, operation: Operation, roots: *QueryKey, count: usi
             presentation_dnit(result);
         }
     }
-    var visited: Map[QueryKey, u8] = map.init[QueryKey, u8](a);
-    fin { map.dnit[QueryKey, u8](?visited); }
+    var visited: Map[Slot, u8] = map.init[Slot, u8](a);
+    fin { map.dnit[Slot, u8](?visited); }
     var i: usize = 0;
     for (i < count) {
-        val copied: err[fail.Fail] = collect_node(db, roots[i], ?visited, store);
-        if (sel copied.err) { ret res[*Presentation, fail.Fail].err{copied.err}; }
+        # a kind nothing used has no product to present
+        val sh: *QueryShard = shard_find(db, roots[i].kind);
+        if (sh != nil) {
+            val copied: err[fail.Fail] = collect_node(db, Slot{kind: sh.kind, key: roots[i].key}, ?visited, store);
+            if (sel copied.err) { ret res[*Presentation, fail.Fail].err{copied.err}; }
+        }
         i = i + 1;
     }
     result.failure       = db.operation_failure;
@@ -625,27 +602,27 @@ pub fun presentation_dnit(p: *Presentation) {
     A.deallocate[Presentation](a, p, 1);
 }
 
-fun collect_node(db: *QueryDb, key: QueryKey, visited: *Map[QueryKey, u8],
+fun collect_node(db: *QueryDb, key: Slot, visited: *Map[Slot, u8],
     into: *diagnostic.DiagnosticStore) err[fail.Fail] {
-    var lookup: QueryKey = key;
-    val prior:  opt[*u8] = map.get[QueryKey, u8](visited, ?lookup);
+    var lookup: Slot     = key;
+    val prior:  opt[*u8] = map.get[Slot, u8](visited, ?lookup);
     if (sel prior.some) {
         if (@prior.some == 1) { ret err[fail.Fail].err{fail.message("query diagnostic provenance contains a cycle")}; }
         ret err[fail.Fail].ok{};
     }
-    val entered: res[bool, A.Error] = map.insert[QueryKey, u8](visited, key, 1);
+    val entered: res[bool, A.Error] = map.insert[Slot, u8](visited, key, 1);
     if (sel entered.err) { ret err[fail.Fail].err{fail.refused(entered.err)}; }
     var entry:     *QueryEntry = nil;
-    val attempted: opt[*usize] = map.get[QueryKey, usize](?db.attempt_index, ?lookup);
+    val attempted: opt[*usize] = map.get[Slot, usize](?db.attempt_index, ?lookup);
     if (sel attempted.some) {
         val attempt: *Attempt = ?db.attempts.data[@attempted.some];
         if (attempt.failed) { entry = ?attempt.evidence; }
     }
     if (entry == nil) {
-        val current: opt[*Revision] = map.get[QueryKey, Revision](?db.validated, ?lookup);
+        val current: opt[*Revision] = map.get[Slot, Revision](?db.validated, ?lookup);
         if (sel current.some) {
             if (@current.some != 0) {
-                val sh: *QueryShard = ?db.storage[key.kind::u32];
+                val sh: *QueryShard = db.storage[key.kind::u32];
                 entry = entry_find(sh, key.key);
                 if (entry == nil || !entry.ready || entry.last_changed != @current.some) {
                     ret err[fail.Fail].err{fail.message("query presentation owner changed after validation")};
@@ -657,7 +634,7 @@ fun collect_node(db: *QueryDb, key: QueryKey, visited: *Map[QueryKey, u8],
         var i: u32 = 0;
         for (i < entry.dep_len) {
             val dep:    Dep            = entry.deps[i];
-            val copied: err[fail.Fail] = collect_node(db, QueryKey{kind: dep.kind, key: dep.key}, visited, into);
+            val copied: err[fail.Fail] = collect_node(db, Slot{kind: dep.kind, key: dep.key}, visited, into);
             if (sel copied.err) { ret copied; }
             i = i + 1;
         }
@@ -667,20 +644,20 @@ fun collect_node(db: *QueryDb, key: QueryKey, visited: *Map[QueryKey, u8],
             if (sel copied.err) { ret copied; }
         }
     }
-    val state: opt[*u8] = map.get[QueryKey, u8](visited, ?lookup);
+    val state: opt[*u8] = map.get[Slot, u8](visited, ?lookup);
     if (sel state.none) { ret err[fail.Fail].err{fail.message("query cycle walk lost a visited entry")}; }
     @state.some = 2;
     ret err[fail.Fail].ok{};
 }
 
-fun sample_metadata(db: *QueryDb, kind: QueryKind, key: u64) res[MetadataRevision, fail.Fail] {
+fun sample_metadata(db: *QueryDb, kind: KindIndex, key: u64) res[MetadataRevision, fail.Fail] {
     if (!db.operation_active) { ret res[MetadataRevision, fail.Fail].err{fail.message("metadata read requires an active query operation")}; }
     val sr: res[*QueryShard, fail.Fail] = shard_get(db, kind);
     if (sel sr.err) { ret res[MetadataRevision, fail.Fail].err{sr.err}; }
     val sh: *QueryShard = sr.ok;
-    if (sh.role != SHARD_METADATA) { ret res[MetadataRevision, fail.Fail].err{fail.message("metadata read requires a metadata query")}; }
-    var pair:  QueryKey    = QueryKey{kind: kind, key: key};
-    val prior: opt[*usize] = map.get[QueryKey, usize](?db.metadata_index, ?pair);
+    if (sh.role != METADATA) { ret res[MetadataRevision, fail.Fail].err{fail.message("metadata read requires a metadata query")}; }
+    var pair:  Slot        = Slot{kind: kind, key: key};
+    val prior: opt[*usize] = map.get[Slot, usize](?db.metadata_index, ?pair);
     if (sel prior.some) { ret res[MetadataRevision, fail.Fail].ok{db.metadata.data[@prior.some].value}; }
     val read: res[MetadataRevision, fail.Fail] = sh.revisions.read(sh.revisions.context, key);
     if (sel read.err) { ret read; }
@@ -688,17 +665,12 @@ fun sample_metadata(db: *QueryDb, kind: QueryKind, key: u64) res[MetadataRevisio
     val index:  usize               = db.metadata.len;
     val pushed: res[usize, A.Error] = collections_vector.push[MetadataSample](?db.metadata, MetadataSample{key: pair, value: value});
     if (sel pushed.err) { ret res[MetadataRevision, fail.Fail].err{fail.refused(pushed.err)}; }
-    val indexed: res[bool, A.Error] = map.insert[QueryKey, usize](?db.metadata_index, pair, index);
+    val indexed: res[bool, A.Error] = map.insert[Slot, usize](?db.metadata_index, pair, index);
     if (sel indexed.err) {
         db.metadata.len = index;
         ret res[MetadataRevision, fail.Fail].err{fail.refused(indexed.err)};
     }
     ret res[MetadataRevision, fail.Fail].ok{value};
-}
-
-pub fun is_registered(db: *QueryDb, kind: QueryKind) bool {
-    if (kind::u32 >= db.kinds) { ret false; }
-    ret (?db.storage[kind::u32]).registered;
 }
 
 fun next_revision(db: *QueryDb) res[Revision, fail.Fail] {
@@ -707,12 +679,15 @@ fun next_revision(db: *QueryDb) res[Revision, fail.Fail] {
     ret res[Revision, fail.Fail].ok{db.revision};
 }
 
-pub fun set_input(db: *QueryDb, kind: QueryKind, key: u64, value: *u8, value_len: u32) err[fail.Fail] {
+# set an input product's bytes, copied into the database. equal bytes keep the revision
+# ---
+# kind: an INPUT row
+pub fun set_input(db: *QueryDb, kind: *Kind, key: u64, value: *u8, value_len: u32) err[fail.Fail] {
     if (db.operation_active || db.presentation_pending) { ret err[fail.Fail].err{fail.message("cannot change query inputs before the operation is released")}; }
-    val res_shard: res[*QueryShard, fail.Fail] = shard_get(db, kind);
+    val res_shard: res[*QueryShard, fail.Fail] = shard_of(db, kind);
     if (sel res_shard.err) { ret err[fail.Fail].err{res_shard.err}; }
     val sh: *QueryShard = res_shard.ok;
-    if (sh.role != SHARD_INPUT)         { ret err[fail.Fail].err{fail.message("set_input: kind is not an input query")}; }
+    if (sh.role != INPUT)               { ret err[fail.Fail].err{fail.message("set_input: kind is not an input query")}; }
     if (value_len != 0 && value == nil) { ret err[fail.Fail].err{fail.message("input bytes are nil")}; }
     var entry: *QueryEntry = entry_find(sh, key);
     if (entry != nil && entry.ready && entry.value_len == value_len
@@ -740,11 +715,10 @@ pub fun set_input(db: *QueryDb, kind: QueryKind, key: u64, value: *u8, value_len
 }
 
 #[testing]
-fun invalidate(db: *QueryDb, kind: QueryKind, key: u64) err[fail.Fail] {
+fun invalidate(db: *QueryDb, kind: *Kind, key: u64) err[fail.Fail] {
     if (db.operation_active || db.presentation_pending) { ret err[fail.Fail].err{fail.message("cannot retire a query before the operation is released")}; }
-    val res_shard: res[*QueryShard, fail.Fail] = shard_get(db, kind);
-    if (sel res_shard.err) { ret err[fail.Fail].err{res_shard.err}; }
-    val sh: *QueryShard = res_shard.ok;
+    val sh: *QueryShard = shard_find(db, kind);
+    if (sh == nil)                  { ret err[fail.Fail].ok{}; }
     if (entry_find(sh, key) == nil) { ret err[fail.Fail].ok{}; }
     val rev: res[Revision, fail.Fail] = next_revision(db);
     if (sel rev.err) { ret err[fail.Fail].err{rev.err}; }
@@ -756,12 +730,12 @@ pub rec PreparedRetirement {
     owner:     *QueryDb;
     operation: u64;
     revision:  Revision;
-    keys:      Vector[QueryKey];
-    selected:  Map[QueryKey, usize];
+    keys:      Vector[Slot];
+    selected:  Map[Slot, usize];
 }
 
 rec RetireNode {
-    key:        QueryKey;
+    key:        Slot;
     entry:      *QueryEntry;
     first:      usize;
     dependents: usize;
@@ -775,19 +749,43 @@ rec RetireEdge {
 
 pub fun discard_retirement(prepared: *PreparedRetirement) {
     if (prepared.owner == nil) { ret; }
-    collections_vector.dnit[QueryKey](?prepared.keys);
-    map.dnit[QueryKey, usize](?prepared.selected);
+    collections_vector.dnit[Slot](?prepared.keys);
+    map.dnit[Slot, usize](?prepared.selected);
     prepared.owner = nil;
 }
 
+# a retirement rooted at the given products and every product that depends on them. a root
+# whose kind was never used has nothing to retire
+# ---
+# db:    the database; no operation may be active
+# roots: the products to retire; nil only with count 0
+# count: how many roots
+# ret:   the prepared retirement, committed or discarded by the caller
 pub fun prepare_retirement(db: *QueryDb, roots: *QueryKey, count: usize) res[PreparedRetirement, fail.Fail] {
+    if (db == nil)                  { ret res[PreparedRetirement, fail.Fail].err{fail.message("cannot prepare query retirement during query use")}; }
+    if (roots == nil && count != 0) { ret res[PreparedRetirement, fail.Fail].err{fail.message("retirement roots are nil")}; }
+    var slots: Vector[Slot] = collections_vector.init[Slot](db.a);
+    fin { collections_vector.dnit[Slot](?slots); }
+    var i: usize = 0;
+    for (i < count) {
+        val sh: *QueryShard = shard_find(db, roots[i].kind);
+        if (sh != nil) {
+            val added: res[usize, A.Error] = collections_vector.push[Slot](?slots, Slot{kind: sh.kind, key: roots[i].key});
+            if (sel added.err) { ret res[PreparedRetirement, fail.Fail].err{fail.refused(added.err)}; }
+        }
+        i = i + 1;
+    }
+    ret prepare_slot_retirement(db, slots.data, slots.len);
+}
+
+fun prepare_slot_retirement(db: *QueryDb, roots: *Slot, count: usize) res[PreparedRetirement, fail.Fail] {
     if (db == nil || db.operation_active || db.presentation_pending) {
         ret res[PreparedRetirement, fail.Fail].err{fail.message("cannot prepare query retirement during query use")};
     }
     if (roots == nil && count != 0) { ret res[PreparedRetirement, fail.Fail].err{fail.message("retirement roots are nil")}; }
     var prepared: PreparedRetirement = PreparedRetirement{
         owner: db, operation: db.operation_sequence, revision: db.revision,
-        keys:  collections_vector.init[QueryKey](db.a), selected: map.init[QueryKey, usize](db.a)
+        keys:  collections_vector.init[Slot](db.a), selected: map.init[Slot, usize](db.a)
     };
     var complete: bool = false;
     fin {
@@ -799,22 +797,22 @@ pub fun prepare_retirement(db: *QueryDb, roots: *QueryKey, count: usize) res[Pre
     fin { collections_vector.dnit[RetireEdge](?edges); }
     var pending: Vector[usize] = collections_vector.init[usize](db.a);
     fin { collections_vector.dnit[usize](?pending); }
-    var index: Map[QueryKey, usize] = map.init[QueryKey, usize](db.a);
-    fin { map.dnit[QueryKey, usize](?index); }
+    var index: Map[Slot, usize] = map.init[Slot, usize](db.a);
+    fin { map.dnit[Slot, usize](?index); }
     var kind: u32 = 0;
     for (kind < db.kinds) {
-        val sh: *QueryShard = ?db.storage[kind];
+        val sh: *QueryShard = db.storage[kind];
         if (sh.entries.editing) { ret res[PreparedRetirement, fail.Fail].err{fail.message("query shard has an active editor")}; }
         var j: usize = 0;
         for (j < sh.index.len) {
             val indexed: QueryIndexEntry                = sh.index.data[j];
             val entry:   res[*QueryEntry, handle.Error] = handle.get[QueryEntry, QueryEntryDomain](?sh.entries, indexed.id);
             if (sel entry.err) { ret res[PreparedRetirement, fail.Fail].err{fail.message(handle.text(entry.err))}; }
-            val key:   QueryKey            = QueryKey{kind: kind::QueryKind, key: indexed.key};
+            val key:   Slot                = Slot{kind: kind::KindIndex, key: indexed.key};
             val added: res[usize, A.Error] = collections_vector.push[RetireNode](?nodes,
                 RetireNode{key: key, entry: entry.ok, first: ~(0::usize)});
             if (sel added.err) { ret res[PreparedRetirement, fail.Fail].err{fail.refused(added.err)}; }
-            val mapped: res[bool, A.Error] = map.insert[QueryKey, usize](?index, key, nodes.len - 1);
+            val mapped: res[bool, A.Error] = map.insert[Slot, usize](?index, key, nodes.len - 1);
             if (sel mapped.err) { ret res[PreparedRetirement, fail.Fail].err{fail.refused(mapped.err)}; }
             j = j + 1;
         }
@@ -822,16 +820,14 @@ pub fun prepare_retirement(db: *QueryDb, roots: *QueryKey, count: usize) res[Pre
     }
     var i: usize = 0;
     for (i < count) {
-        var key: QueryKey = roots[i];
-        if (key.kind::u32 >= db.kinds || !db.storage[key.kind::u32].registered) {
-            ret res[PreparedRetirement, fail.Fail].err{fail.message("retirement root kind is not registered")};
-        }
-        val get_r: opt[*usize] = map.get[QueryKey, usize](?index, ?key);
+        var key: Slot = roots[i];
+        if (key.kind::u32 >= db.kinds) { ret res[PreparedRetirement, fail.Fail].err{fail.message("retirement root kind is out of range")}; }
+        val get_r: opt[*usize] = map.get[Slot, usize](?index, ?key);
         if (sel get_r.none) {
             val added: res[usize, A.Error] = collections_vector.push[RetireNode](?nodes,
                 RetireNode{key: key, first: ~(0::usize)});
             if (sel added.err) { ret res[PreparedRetirement, fail.Fail].err{fail.refused(added.err)}; }
-            val mapped: res[bool, A.Error] = map.insert[QueryKey, usize](?index, key, nodes.len - 1);
+            val mapped: res[bool, A.Error] = map.insert[Slot, usize](?index, key, nodes.len - 1);
             if (sel mapped.err) { ret res[PreparedRetirement, fail.Fail].err{fail.refused(mapped.err)}; }
         }
         i = i + 1;
@@ -845,8 +841,8 @@ pub fun prepare_retirement(db: *QueryDb, roots: *QueryKey, count: usize) res[Pre
         }
         var j: u32 = 0;
         for (j < entry.dep_len) {
-            var key:   QueryKey    = QueryKey{kind: entry.deps[j].kind, key: entry.deps[j].key};
-            val found: opt[*usize] = map.get[QueryKey, usize](?index, ?key);
+            var key:   Slot        = Slot{kind: entry.deps[j].kind, key: entry.deps[j].key};
+            val found: opt[*usize] = map.get[Slot, usize](?index, ?key);
             if (sel found.some) {
                 val child: usize               = @found.some;
                 val added: res[usize, A.Error] = collections_vector.push[RetireEdge](?edges,
@@ -860,8 +856,8 @@ pub fun prepare_retirement(db: *QueryDb, roots: *QueryKey, count: usize) res[Pre
     }
     i = 0;
     for (i < count) {
-        var key:   QueryKey    = roots[i];
-        val found: opt[*usize] = map.get[QueryKey, usize](?index, ?key);
+        var key:   Slot        = roots[i];
+        val found: opt[*usize] = map.get[Slot, usize](?index, ?key);
         if (sel found.some) {
             val n: usize = @found.some;
             if (!nodes.data[n].selected) {
@@ -908,12 +904,12 @@ pub fun prepare_retirement(db: *QueryDb, roots: *QueryKey, count: usize) res[Pre
     i = 0;
     for (i < pending.len) {
         val node:  RetireNode          = nodes.data[pending.data[i]];
-        val added: res[usize, A.Error] = collections_vector.push[QueryKey](?prepared.keys, node.key);
+        val added: res[usize, A.Error] = collections_vector.push[Slot](?prepared.keys, node.key);
         if (sel added.err) { ret res[PreparedRetirement, fail.Fail].err{fail.refused(added.err)}; }
         var j: u32 = 0;
         for (node.entry != nil && j < node.entry.dep_len) {
-            var key:   QueryKey    = QueryKey{kind: node.entry.deps[j].kind, key: node.entry.deps[j].key};
-            val found: opt[*usize] = map.get[QueryKey, usize](?index, ?key);
+            var key:   Slot        = Slot{kind: node.entry.deps[j].kind, key: node.entry.deps[j].key};
+            val found: opt[*usize] = map.get[Slot, usize](?index, ?key);
             if (sel found.some) {
                 val child: usize = @found.some;
                 if (nodes.data[child].selected) {
@@ -932,13 +928,13 @@ pub fun prepare_retirement(db: *QueryDb, roots: *QueryKey, count: usize) res[Pre
     if (selected != 0 && db.revision == ~(0::Revision)) { ret res[PreparedRetirement, fail.Fail].err{fail.message("query revision sequence exhausted")}; }
     kind = 0;
     for (kind < db.kinds) {
-        val sh:       *QueryShard = ?db.storage[kind];
+        val sh:       *QueryShard = db.storage[kind];
         var removals: usize       = 0;
         i = 0;
         for (i < sh.index.len) {
             val item:  QueryIndexEntry = sh.index.data[i];
-            var key:   QueryKey        = QueryKey{kind: kind::QueryKind, key: item.key};
-            val found: opt[*usize]     = map.get[QueryKey, usize](?index, ?key);
+            var key:   Slot            = Slot{kind: kind::KindIndex, key: item.key};
+            val found: opt[*usize]     = map.get[Slot, usize](?index, ?key);
             if (sel found.some && nodes.data[@found.some].selected) {
                 if (item.id.generation == ~(0::u32)) { ret res[PreparedRetirement, fail.Fail].err{fail.message("query handle generation exhausted")}; }
                 removals = removals + 1;
@@ -952,14 +948,14 @@ pub fun prepare_retirement(db: *QueryDb, roots: *QueryKey, count: usize) res[Pre
     i = 0;
     for (i < nodes.len) {
         if (!nodes.data[i].selected) {
-            var key: QueryKey = nodes.data[i].key;
-            map.remove[QueryKey, usize](?index, ?key);
+            var key: Slot = nodes.data[i].key;
+            map.remove[Slot, usize](?index, ?key);
         }
         i = i + 1;
     }
-    map.dnit[QueryKey, usize](?prepared.selected);
+    map.dnit[Slot, usize](?prepared.selected);
     prepared.selected = index;
-    index             = map.init[QueryKey, usize](db.a);
+    index             = map.init[Slot, usize](db.a);
     complete          = true;
     ret res[PreparedRetirement, fail.Fail].ok{prepared};
 }
@@ -974,18 +970,18 @@ pub fun prepare_owned_retirement(db: *QueryDb, owned: OwnedFn, ctx: ptr) res[Pre
     if (db == nil || db.operation_active || db.presentation_pending) {
         ret res[PreparedRetirement, fail.Fail].err{fail.message("cannot prepare query retirement during query use")};
     }
-    var roots: Vector[QueryKey] = collections_vector.init[QueryKey](db.a);
-    fin { collections_vector.dnit[QueryKey](?roots); }
+    var roots: Vector[Slot] = collections_vector.init[Slot](db.a);
+    fin { collections_vector.dnit[Slot](?roots); }
     var kind: u32 = 0;
     for (kind < db.kinds) {
-        val sh:    *QueryShard = ?db.storage[kind];
-        val owner: KeyOwner    = key_owner(kind::QueryKind);
-        if (sh.registered && (owner == KEY_MODULE || owner == KEY_FILE)) {
+        val sh:    *QueryShard = db.storage[kind];
+        val owner: KeyOwner    = sh.spec.owner;
+        if (owner == KEY_MODULE || owner == KEY_FILE) {
             var j: usize = 0;
             for (j < sh.index.len) {
                 val key: u64 = sh.index.data[j].key;
                 if ((owner == KEY_MODULE || key <= 0xFFFFFFFF) && owned(ctx, owner, key::u32)) {
-                    val added: res[usize, A.Error] = collections_vector.push[QueryKey](?roots, QueryKey{kind: kind::QueryKind, key: key});
+                    val added: res[usize, A.Error] = collections_vector.push[Slot](?roots, Slot{kind: kind::KindIndex, key: key});
                     if (sel added.err) { ret res[PreparedRetirement, fail.Fail].err{fail.refused(added.err)}; }
                 }
                 j = j + 1;
@@ -993,7 +989,7 @@ pub fun prepare_owned_retirement(db: *QueryDb, owned: OwnedFn, ctx: ptr) res[Pre
         }
         kind = kind + 1;
     }
-    ret prepare_retirement(db, roots.data, roots.len);
+    ret prepare_slot_retirement(db, roots.data, roots.len);
 }
 
 pub fun validate_retirement(prepared: *PreparedRetirement) err[fail.Fail] {
@@ -1011,21 +1007,21 @@ pub fun commit_retirement(prepared: *PreparedRetirement) err[fail.Fail] {
         db.revision = db.revision + 1;
         var i: usize = 0;
         for (i < prepared.keys.len) {
-            val key:   QueryKey    = prepared.keys.data[i];
-            val sh:    *QueryShard = ?db.storage[key.kind::u32];
+            val key:   Slot        = prepared.keys.data[i];
+            val sh:    *QueryShard = db.storage[key.kind::u32];
             val entry: *QueryEntry = entry_find(sh, key.key);
             if (entry != nil) { entry_free(db, sh, entry); }
             i = i + 1;
         }
         var kind: u32 = 0;
         for (kind < db.kinds) {
-            val sh:    *QueryShard = ?db.storage[kind];
+            val sh:    *QueryShard = db.storage[kind];
             var write: usize       = 0;
             i = 0;
             for (i < sh.index.len) {
                 val item:  QueryIndexEntry = sh.index.data[i];
-                var key:   QueryKey        = QueryKey{kind: kind::QueryKind, key: item.key};
-                val get_r: opt[*usize]     = map.get[QueryKey, usize](?prepared.selected, ?key);
+                var key:   Slot            = Slot{kind: kind::KindIndex, key: item.key};
+                val get_r: opt[*usize]     = map.get[Slot, usize](?prepared.selected, ?key);
                 if (sel get_r.some) {
                     val edit_r: res[handle.HandleEditor[QueryEntry, QueryEntryDomain], handle.Error] = handle.edit[QueryEntry, QueryEntryDomain](?sh.entries);
                     if (sel edit_r.err) { ret err[fail.Fail].err{fail.message(handle.text(edit_r.err))}; }
@@ -1050,16 +1046,15 @@ pub fun commit_retirement(prepared: *PreparedRetirement) err[fail.Fail] {
     ret err[fail.Fail].ok{};
 }
 
-# successful end permits serial reads until the next begin, input mutation, or retirement
 # the current value of a product, computing or revalidating it inside the open operation
 # and recording it as a dependency of the product being computed, if any
 # ---
-# rt:   the runtime whose compute callback builds derived products
-# ctx:  the callback's context
-# kind: the registered kind
+# rt:   the runtime of the open operation
+# ctx:  the context every row's computation reads through
+# kind: the product's row
 # key:  the product's key within the kind
 # ret:  a borrowed view (QueryView's lifetime), or the product's failure
-pub fun get[T](rt: *QueryRuntime[T], ctx: *T, kind: QueryKind, key: u64) res[QueryView, fail.Fail] {
+pub fun get[T](rt: *QueryRuntime[T], ctx: *T, kind: *Kind, key: u64) res[QueryView, fail.Fail] {
     val acquired: res[*QueryEntry, fail.Fail] = acquire_entry[T](rt, ctx, kind, key);
     if (sel acquired.err) { ret res[QueryView, fail.Fail].err{acquired.err}; }
     val entry: *QueryEntry = acquired.ok;
@@ -1067,8 +1062,8 @@ pub fun get[T](rt: *QueryRuntime[T], ctx: *T, kind: QueryKind, key: u64) res[Que
 }
 
 # validation may refresh dependencies but never computes the requested product
-pub fun reusable[T](rt: *QueryRuntime[T], ctx: *T, kind: QueryKind, key: u64) res[bool, fail.Fail] {
-    if (rt == nil || rt.db == nil || ctx == nil || rt.caps.compute == nil) {
+pub fun reusable[T](rt: *QueryRuntime[T], ctx: *T, kind: *Kind, key: u64) res[bool, fail.Fail] {
+    if (rt == nil || rt.db == nil || ctx == nil) {
         ret res[bool, fail.Fail].err{fail.message("query reuse requires a complete runtime")};
     }
     val db: *QueryDb = rt.db;
@@ -1084,21 +1079,22 @@ pub fun reusable[T](rt: *QueryRuntime[T], ctx: *T, kind: QueryKind, key: u64) re
     ret result;
 }
 
-fun reusable_inner[T](rt: *QueryRuntime[T], ctx: *T, kind: QueryKind, key: u64) res[bool, fail.Fail] {
+fun reusable_inner[T](rt: *QueryRuntime[T], ctx: *T, row: *Kind, key: u64) res[bool, fail.Fail] {
     val db:    *QueryDb                    = rt.db;
-    val found: res[*QueryShard, fail.Fail] = shard_get(db, kind);
+    val found: res[*QueryShard, fail.Fail] = shard_of(db, row);
     if (sel found.err) { ret res[bool, fail.Fail].err{found.err}; }
     val sh: *QueryShard = found.ok;
-    if (sh.role != SHARD_DERIVED) { ret res[bool, fail.Fail].err{fail.message("query reuse requires a derived product")}; }
-    var pair:    QueryKey    = QueryKey{kind: kind, key: key};
-    val pending: opt[*usize] = map.get[QueryKey, usize](?db.attempt_index, ?pair);
+    if (sh.role != DERIVED) { ret res[bool, fail.Fail].err{fail.message("query reuse requires a derived product")}; }
+    val kind:    KindIndex   = sh.kind;
+    var pair:    Slot        = Slot{kind: kind, key: key};
+    val pending: opt[*usize] = map.get[Slot, usize](?db.attempt_index, ?pair);
     if (sel pending.some && (db.attempts.data[@pending.some].prepared != nil
         || db.attempts.data[@pending.some].cancelled)) {
         ret res[bool, fail.Fail].err{fail.message("query product is awaiting owner completion")};
     }
     val entry: *QueryEntry = entry_find(sh, key);
     if (entry == nil || !entry.ready) { ret res[bool, fail.Fail].ok{false}; }
-    val prior: opt[*Revision] = map.get[QueryKey, Revision](?db.validated, ?pair);
+    val prior: opt[*Revision] = map.get[Slot, Revision](?db.validated, ?pair);
     if (sel prior.some) {
         if (@prior.some != 0) {
             if (@prior.some != entry.last_changed) {
@@ -1107,7 +1103,7 @@ fun reusable_inner[T](rt: *QueryRuntime[T], ctx: *T, kind: QueryKind, key: u64) 
             ret res[bool, fail.Fail].ok{true};
         }
     }
-    val reserved: res[bool, A.Error] = map.insert[QueryKey, Revision](?db.validated, pair, 0);
+    val reserved: res[bool, A.Error] = map.insert[Slot, Revision](?db.validated, pair, 0);
     if (sel reserved.err) { ret res[bool, fail.Fail].err{fail.refused(reserved.err)}; }
     val prepared: res[usize, fail.Fail] = attempt_prepare(db, pair);
     if (sel prepared.err) { ret res[bool, fail.Fail].err{prepared.err}; }
@@ -1122,15 +1118,18 @@ fun reusable_inner[T](rt: *QueryRuntime[T], ctx: *T, kind: QueryKind, key: u64) 
     }
     entry_free(db, sh, ?evidence);
     if (!current.ok) { ret current; }
-    val slot: opt[*Revision] = map.get[QueryKey, Revision](?db.validated, ?pair);
+    entry.stale        = false;
+    entry.validated_at = db.operation_sequence;
+    val slot: opt[*Revision] = map.get[Slot, Revision](?db.validated, ?pair);
     if (sel slot.none) { ret res[bool, fail.Fail].err{fail.message("reused query lost its validation revision")}; }
     @slot.some = entry.last_changed;
     ret current;
 }
 
-pub fun prepare[T](rt: *QueryRuntime[T], ctx: *T, kind: QueryKind, key: u64,
-    compute: fun(*T, QueryKind, u64, *A.Allocator, *diagnostic.DiagnosticStore) res[QueryOutput, fail.Fail]) res[PreparedQuery, fail.Fail] {
-    val result: res[PreparedQuery, fail.Fail] = prepare_inner[T](rt, ctx, kind, key, compute);
+# compute a derived product the caller finishes outside the computation (a worker thread),
+# published by complete_prepared or dropped by cancel_prepared before the operation ends
+pub fun prepare[T](rt: *QueryRuntime[T], ctx: *T, kind: *Kind, key: u64) res[PreparedQuery, fail.Fail] {
+    val result: res[PreparedQuery, fail.Fail] = prepare_inner[T](rt, ctx, kind, key);
     if (sel result.err) {
         if (rt != nil && rt.db != nil && rt.db.operation_active) {
             ret res[PreparedQuery, fail.Fail].err{operation_fail(rt.db, result.err)};
@@ -1139,15 +1138,14 @@ pub fun prepare[T](rt: *QueryRuntime[T], ctx: *T, kind: QueryKind, key: u64,
     ret result;
 }
 
-fun prepare_inner[T](rt: *QueryRuntime[T], ctx: *T, kind: QueryKind, key: u64,
-    compute: fun(*T, QueryKind, u64, *A.Allocator, *diagnostic.DiagnosticStore) res[QueryOutput, fail.Fail]) res[PreparedQuery, fail.Fail] {
-    if (compute == nil) { ret res[PreparedQuery, fail.Fail].err{fail.message("prepared query requires a compute callback")}; }
-    val current: res[bool, fail.Fail] = reusable[T](rt, ctx, kind, key);
+fun prepare_inner[T](rt: *QueryRuntime[T], ctx: *T, row: *Kind, key: u64) res[PreparedQuery, fail.Fail] {
+    val current: res[bool, fail.Fail] = reusable[T](rt, ctx, row, key);
     if (sel current.err) { ret res[PreparedQuery, fail.Fail].err{current.err}; }
     if (current.ok)      { ret res[PreparedQuery, fail.Fail].err{fail.message("cannot prepare a query owner already acquired in this operation")}; }
     val db:       *QueryDb              = rt.db;
-    val sh:       *QueryShard           = ?db.storage[kind::u32];
-    val pair:     QueryKey              = QueryKey{kind: kind, key: key};
+    val sh:       *QueryShard           = shard_find(db, row);
+    val kind:     KindIndex             = sh.kind;
+    val pair:     Slot                  = Slot{kind: kind, key: key};
     val reserved: res[usize, fail.Fail] = attempt_prepare(db, pair);
     if (sel reserved.err) { ret res[PreparedQuery, fail.Fail].err{reserved.err}; }
     val index: usize = reserved.ok;
@@ -1169,12 +1167,12 @@ fun prepare_inner[T](rt: *QueryRuntime[T], ctx: *T, kind: QueryKind, key: u64,
         val added: res[*QueryEntry, fail.Fail] = entry_append(db, sh, key);
         if (sel added.err) { ret res[PreparedQuery, fail.Fail].err{added.err}; }
     }
-    var lookup: QueryKey           = pair;
-    val marked: res[bool, A.Error] = map.insert[QueryKey, Revision](?db.validated, lookup, 0);
+    var lookup: Slot               = pair;
+    val marked: res[bool, A.Error] = map.insert[Slot, Revision](?db.validated, lookup, 0);
     if (sel marked.err) { ret res[PreparedQuery, fail.Fail].err{fail.refused(marked.err)}; }
     val pushed: err[fail.Fail] = stack_push(db, kind, key, nil);
     if (sel pushed.err) { ret res[PreparedQuery, fail.Fail].err{pushed.err}; }
-    val computed: err[fail.Fail] = candidate_compute[T](rt, ctx, sh, key, candidate, compute);
+    val computed: err[fail.Fail] = candidate_compute[T](rt, ctx, sh, key, candidate);
     stack_pop(db);
     if (sel computed.err) {
         ret res[PreparedQuery, fail.Fail].err{operation_fail(db, computed.err)};
@@ -1191,8 +1189,8 @@ fun prepare_inner[T](rt: *QueryRuntime[T], ctx: *T, kind: QueryKind, key: u64,
 fun prepared_attempt(db: *QueryDb, prepared: PreparedQuery) res[*Attempt, fail.Fail] {
     if (db == nil || prepared.operation.owner != db::ptr || prepared.operation.sequence != db.operation_sequence
         || !db.operation_active || db.stack.len != 0) { ret res[*Attempt, fail.Fail].err{fail.message("prepared query belongs to another operation")}; }
-    var key:   QueryKey    = prepared.key;
-    val index: opt[*usize] = map.get[QueryKey, usize](?db.attempt_index, ?key);
+    var key:   Slot        = prepared.key;
+    val index: opt[*usize] = map.get[Slot, usize](?db.attempt_index, ?key);
     if (sel index.none) { ret res[*Attempt, fail.Fail].err{fail.message("prepared query is no longer owned")}; }
     val attempt: *Attempt = ?db.attempts.data[@index.some];
     if (attempt.prepared == nil) { ret res[*Attempt, fail.Fail].err{fail.message("prepared query has already been consumed")}; }
@@ -1222,9 +1220,9 @@ pub fun cancel_prepared(db: *QueryDb, prepared: PreparedQuery) err[fail.Fail] {
     if (sel owner.err) { ret err[fail.Fail].err{owner.err}; }
     val attempt:   *Attempt    = owner.ok;
     val candidate: *QueryEntry = attempt.prepared;
-    val sh:        *QueryShard = ?db.storage[prepared.key.kind::u32];
-    var key:       QueryKey    = prepared.key;
-    val index:     opt[*usize] = map.get[QueryKey, usize](?db.attempt_index, ?key);
+    val sh:        *QueryShard = db.storage[prepared.key.kind::u32];
+    var key:       Slot        = prepared.key;
+    val index:     opt[*usize] = map.get[Slot, usize](?db.attempt_index, ?key);
     if (sel index.none) { ret err[fail.Fail].err{fail.message("prepared query lost its attempt index")}; }
     attempt_preserve(db, sh, @index.some, candidate);
     A.deallocate[QueryEntry](db.a, candidate, 1);
@@ -1232,6 +1230,10 @@ pub fun cancel_prepared(db: *QueryDb, prepared: PreparedQuery) err[fail.Fail] {
     attempt.cancelled = true;
     db.prepared_count = db.prepared_count - 1;
     if (attempt.fresh) { entry_remove(db, sh, prepared.key.key); }
+    or {
+        val kept: *QueryEntry = entry_find(sh, prepared.key.key);
+        if (kept != nil) { kept.stale = true; }
+    }
     ret err[fail.Fail].ok{};
 }
 
@@ -1251,11 +1253,11 @@ pub fun complete_prepared(db: *QueryDb, prepared: PreparedQuery, result: err[fai
         ret err[fail.Fail].err{poison.some};
     }
     val attempt: *Attempt    = owner.ok;
-    val sh:      *QueryShard = ?db.storage[prepared.key.kind::u32];
+    val sh:      *QueryShard = db.storage[prepared.key.kind::u32];
     val entry:   *QueryEntry = entry_find(sh, prepared.key.key);
     if (entry == nil) { ret err[fail.Fail].err{fail.message("prepared query lost its publication slot")}; }
-    var key:      QueryKey       = prepared.key;
-    val revision: opt[*Revision] = map.get[QueryKey, Revision](?db.validated, ?key);
+    var key:      Slot           = prepared.key;
+    val revision: opt[*Revision] = map.get[Slot, Revision](?db.validated, ?key);
     if (sel revision.none) { ret err[fail.Fail].err{fail.message("prepared query lost its validation revision")}; }
     val published: res[*QueryEntry, fail.Fail] = candidate_publish(db, sh, entry, attempt.prepared);
     if (sel published.err) {
@@ -1264,14 +1266,15 @@ pub fun complete_prepared(db: *QueryDb, prepared: PreparedQuery, result: err[fai
         if (sel cancelled.err) { ret cancelled; }
         ret err[fail.Fail].err{recorded};
     }
-    @revision.some = entry.last_changed;
+    @revision.some     = entry.last_changed;
+    entry.validated_at = db.operation_sequence;
     A.deallocate[QueryEntry](db.a, attempt.prepared, 1);
     attempt.prepared  = nil;
     db.prepared_count = db.prepared_count - 1;
     ret err[fail.Fail].ok{};
 }
 
-fun acquire_entry[T](rt: *QueryRuntime[T], ctx: *T, kind: QueryKind, key: u64) res[*QueryEntry, fail.Fail] {
+fun acquire_entry[T](rt: *QueryRuntime[T], ctx: *T, kind: *Kind, key: u64) res[*QueryEntry, fail.Fail] {
     if (rt == nil || rt.db == nil) { ret res[*QueryEntry, fail.Fail].err{fail.message("query get requires a live runtime")}; }
     if (rt.db.operation_active) {
         val poison: opt[fail.Fail] = operation_poison(rt.db);
@@ -1286,22 +1289,23 @@ fun acquire_entry[T](rt: *QueryRuntime[T], ctx: *T, kind: QueryKind, key: u64) r
     ret result;
 }
 
-fun get_acquired[T](rt: *QueryRuntime[T], ctx: *T, kind: QueryKind, key: u64) res[*QueryEntry, fail.Fail] {
-    if (rt == nil || rt.db == nil || rt.caps.compute == nil || ctx == nil) {
+fun get_acquired[T](rt: *QueryRuntime[T], ctx: *T, row: *Kind, key: u64) res[*QueryEntry, fail.Fail] {
+    if (rt == nil || rt.db == nil || ctx == nil) {
         ret res[*QueryEntry, fail.Fail].err{fail.message("query get requires a complete live runtime")};
     }
-    val db:    *QueryDb    = rt.db;
+    val db:        *QueryDb                    = rt.db;
+    val res_shard: res[*QueryShard, fail.Fail] = shard_of(db, row);
+    if (sel res_shard.err) {
+        ret res[*QueryEntry, fail.Fail].err{res_shard.err};
+    }
+    val sh:    *QueryShard = res_shard.ok;
+    val kind:  KindIndex   = sh.kind;
     var owner: *QueryEntry = nil;
     if (db.stack.len != 0) { owner = db.stack.data[db.stack.len - 1].entry; }
     if (owner != nil && !stack_contains(db, kind, key)) {
         val edge: err[fail.Fail] = dep_prepare(db, owner, kind, key);
         if (sel edge.err) { ret res[*QueryEntry, fail.Fail].err{edge.err}; }
     }
-    val res_shard: res[*QueryShard, fail.Fail] = shard_get(db, kind);
-    if (sel res_shard.err) {
-        ret res[*QueryEntry, fail.Fail].err{res_shard.err};
-    }
-    val sh: *QueryShard = res_shard.ok;
 
     val inner: res[*QueryEntry, fail.Fail] = get_inner[T](rt, ctx, sh, kind, key);
     if (sel inner.err) { ret inner; }
@@ -1319,11 +1323,11 @@ fun get_acquired[T](rt: *QueryRuntime[T], ctx: *T, kind: QueryKind, key: u64) re
     ret res[*QueryEntry, fail.Fail].ok{entry};
 }
 
-fun get_inner[T](rt: *QueryRuntime[T], ctx: *T, sh: *QueryShard, kind: QueryKind, key: u64) res[*QueryEntry, fail.Fail] {
+fun get_inner[T](rt: *QueryRuntime[T], ctx: *T, sh: *QueryShard, kind: KindIndex, key: u64) res[*QueryEntry, fail.Fail] {
     val db: *QueryDb = rt.db;
     if (!db.operation_active) { ret res[*QueryEntry, fail.Fail].err{fail.message("query read requires an active operation")}; }
-    var pair:    QueryKey    = QueryKey{kind: kind, key: key};
-    val pending: opt[*usize] = map.get[QueryKey, usize](?db.attempt_index, ?pair);
+    var pair:    Slot        = Slot{kind: kind, key: key};
+    val pending: opt[*usize] = map.get[Slot, usize](?db.attempt_index, ?pair);
     if (sel pending.some && (db.attempts.data[@pending.some].prepared != nil
         || db.attempts.data[@pending.some].cancelled)) {
         ret res[*QueryEntry, fail.Fail].err{fail.message("query product is awaiting owner completion")};
@@ -1334,7 +1338,7 @@ fun get_inner[T](rt: *QueryRuntime[T], ctx: *T, sh: *QueryShard, kind: QueryKind
         db.rejections = db.rejections + 1;
         ret res[*QueryEntry, fail.Fail].err{fail.reported()};
     }
-    val prior: opt[*Revision] = map.get[QueryKey, Revision](?db.validated, ?pair);
+    val prior: opt[*Revision] = map.get[Slot, Revision](?db.validated, ?pair);
     if (sel prior.some) {
         if (@prior.some != 0) {
             val entry: *QueryEntry = entry_find(sh, key);
@@ -1345,7 +1349,7 @@ fun get_inner[T](rt: *QueryRuntime[T], ctx: *T, sh: *QueryShard, kind: QueryKind
         }
     }
     if (stack_contains(db, kind, key)) { ret res[*QueryEntry, fail.Fail].err{cycle_failure(db, kind, key)}; }
-    val reserved: res[bool, A.Error] = map.insert[QueryKey, Revision](?db.validated, pair, 0);
+    val reserved: res[bool, A.Error] = map.insert[Slot, Revision](?db.validated, pair, 0);
     if (sel reserved.err) { ret res[*QueryEntry, fail.Fail].err{fail.refused(reserved.err)}; }
     val prepared: res[usize, fail.Fail] = attempt_prepare(db, pair);
     if (sel prepared.err) { ret res[*QueryEntry, fail.Fail].err{prepared.err}; }
@@ -1357,18 +1361,19 @@ fun get_inner[T](rt: *QueryRuntime[T], ctx: *T, sh: *QueryShard, kind: QueryKind
         }
         ret refreshed;
     }
-    val revision: opt[*Revision] = map.get[QueryKey, Revision](?db.validated, ?pair);
+    val revision: opt[*Revision] = map.get[Slot, Revision](?db.validated, ?pair);
     if (sel revision.none) { ret res[*QueryEntry, fail.Fail].err{fail.message("refreshed query lost its validation revision")}; }
-    @revision.some = refreshed.ok.last_changed;
+    @revision.some            = refreshed.ok.last_changed;
+    refreshed.ok.validated_at = db.operation_sequence;
     ret refreshed;
 }
 
-fun refresh_entry[T](rt: *QueryRuntime[T], ctx: *T, sh: *QueryShard, kind: QueryKind, key: u64, attempt: usize) res[*QueryEntry, fail.Fail] {
+fun refresh_entry[T](rt: *QueryRuntime[T], ctx: *T, sh: *QueryShard, kind: KindIndex, key: u64, attempt: usize) res[*QueryEntry, fail.Fail] {
     val db: *QueryDb = rt.db;
-    if (sh.role == SHARD_METADATA) { ret res[*QueryEntry, fail.Fail].err{fail.message("get: metadata kinds have no stored value")}; }
-    if (sh.role == SHARD_INPUT) {
+    if (sh.role == METADATA) { ret res[*QueryEntry, fail.Fail].err{fail.message("get: metadata kinds have no stored value")}; }
+    if (sh.role == INPUT) {
         val entry: *QueryEntry = entry_find(sh, key);
-        if (entry == nil || !entry.ready) { ret res[*QueryEntry, fail.Fail].err{fail.message("get: input query has no value for key")}; }
+        if (entry == nil || !entry.ready) { ret res[*QueryEntry, fail.Fail].err{missing_input(db, sh, key)}; }
         ret res[*QueryEntry, fail.Fail].ok{entry};
     }
     if (stack_contains(db, kind, key)) { ret res[*QueryEntry, fail.Fail].err{cycle_failure(db, kind, key)}; }
@@ -1381,10 +1386,14 @@ fun refresh_entry[T](rt: *QueryRuntime[T], ctx: *T, sh: *QueryShard, kind: Query
         val valid:      res[bool, fail.Fail] = refresh_dependencies[T](rt, ctx, entry, ?validation);
         if (sel valid.err) {
             attempt_preserve(db, sh, attempt, ?validation);
+            entry.stale = true;
             ret res[*QueryEntry, fail.Fail].err{valid.err};
         }
         entry_free(db, sh, ?validation);
-        if (valid.ok) { ret res[*QueryEntry, fail.Fail].ok{entry}; }
+        if (valid.ok) {
+            entry.stale = false;
+            ret res[*QueryEntry, fail.Fail].ok{entry};
+        }
     }
     val fresh: bool = entry == nil;
     if (fresh) {
@@ -1393,7 +1402,11 @@ fun refresh_entry[T](rt: *QueryRuntime[T], ctx: *T, sh: *QueryShard, kind: Query
         entry = added.ok;
     }
     val computed: res[*QueryEntry, fail.Fail] = recompute[T](rt, ctx, sh, entry, key, attempt);
-    if (fresh && sel computed.err) { entry_remove(db, sh, key); }
+    if (sel computed.err) {
+        # a product whose recomputation failed is never served again until one succeeds
+        if (fresh) { entry_remove(db, sh, key); }
+        or         { entry.stale = true; }
+    }
     ret computed;
 }
 
@@ -1410,14 +1423,14 @@ fun refresh_dependencies[T](rt: *QueryRuntime[T], ctx: *T, entry: *QueryEntry, e
         val shard: res[*QueryShard, fail.Fail] = shard_get(db, dep.kind);
         if (sel shard.err) { ret res[bool, fail.Fail].err{shard.err}; }
         val sh: *QueryShard = shard.ok;
-        if (sh.role == SHARD_METADATA) {
+        if (sh.role == METADATA) {
             val sampled: res[MetadataRevision, fail.Fail] = sample_metadata(db, dep.kind, dep.key);
             if (sel sampled.err) { ret res[bool, fail.Fail].err{sampled.err}; }
             val current: MetadataRevision = sampled.ok;
             if (current.present != dep.present || current.revision != dep.last_changed) { ret res[bool, fail.Fail].ok{false}; }
         }
         or {
-            if (sh.role == SHARD_DERIVED) {
+            if (sh.role == DERIVED) {
                 val child: res[*QueryEntry, fail.Fail] = get_inner[T](rt, ctx, sh, dep.kind, dep.key);
                 if (sel child.err) { ret res[bool, fail.Fail].err{child.err}; }
             }
@@ -1428,7 +1441,7 @@ fun refresh_dependencies[T](rt: *QueryRuntime[T], ctx: *T, entry: *QueryEntry, e
     ret res[bool, fail.Fail].ok{true};
 }
 
-fun stack_push(db: *QueryDb, kind: QueryKind, key: u64, entry: *QueryEntry) err[fail.Fail] {
+fun stack_push(db: *QueryDb, kind: KindIndex, key: u64, entry: *QueryEntry) err[fail.Fail] {
     var f: StackFrame;
     f.kind  = kind;
     f.key   = key;
@@ -1442,7 +1455,7 @@ fun stack_pop(db: *QueryDb) {
     collections_vector.pop[StackFrame](?db.stack);
 }
 
-fun stack_contains(db: *QueryDb, kind: QueryKind, key: u64) bool {
+fun stack_contains(db: *QueryDb, kind: KindIndex, key: u64) bool {
     var i: usize = 0;
     for (i < db.stack.len) {
         val f: *StackFrame = ?db.stack.data[i];
@@ -1452,8 +1465,19 @@ fun stack_contains(db: *QueryDb, kind: QueryKind, key: u64) bool {
     ret false;
 }
 
-fun cycle_failure(db: *QueryDb, kind: QueryKind, key: u64) fail.Fail {
-    val built: res[str, fail.Fail] = cycle_message(db, kind, key);
+fun cycle_failure(db: *QueryDb, kind: KindIndex, key: u64) fail.Fail {
+    ret text_failure(db, cycle_message(db, kind, key));
+}
+
+# an input read before the host set it, named by its row and key
+fun missing_input(db: *QueryDb, sh: *QueryShard, key: u64) fail.Fail {
+    val built: res[str, std_format.FormatError] = std_format.sprint(db.a, "get: input `{}` has no value for key {}", sh.spec.name, key);
+    if (sel built.err) { ret operation_fail(db, fail.format_refused(built.err)); }
+    ret text_failure(db, res[str, fail.Fail].ok{built.ok});
+}
+
+# the operation's failure, its text owned by the operation; an earlier message failure stands
+fun text_failure(db: *QueryDb, built: res[str, fail.Fail]) fail.Fail {
     if (sel built.err) { ret operation_fail(db, built.err); }
     val text: str = built.ok;
     if (sel db.operation_failure.some) {
@@ -1468,7 +1492,7 @@ fun cycle_failure(db: *QueryDb, kind: QueryKind, key: u64) fail.Fail {
     ret recorded;
 }
 
-fun cycle_message(db: *QueryDb, kind: QueryKind, key: u64) res[str, fail.Fail] {
+fun cycle_message(db: *QueryDb, kind: KindIndex, key: u64) res[str, fail.Fail] {
     var b: textbuild.TextBuilder = textbuild.tb_init(db.a);
     fin { textbuild.tb_dnit(?b); }
     val prefix: err[textbuild.Error] = textbuild.tb_append(?b, "query cycle: ");
@@ -1476,7 +1500,7 @@ fun cycle_message(db: *QueryDb, kind: QueryKind, key: u64) res[str, fail.Fail] {
     var i: usize = 0;
     for (i < db.stack.len) {
         val frame:   *StackFrame                      = ?db.stack.data[i];
-        val segment: res[str, std_format.FormatError] = std_format.sprint(db.a, "{}:{} -> ", frame.kind, frame.key);
+        val segment: res[str, std_format.FormatError] = std_format.sprint(db.a, "{}:{} -> ", db.storage[frame.kind::u32].spec.name, frame.key);
         if (sel segment.err) { ret res[str, fail.Fail].err{fail.format_refused(segment.err)}; }
         val text:     str                  = segment.ok;
         val appended: err[textbuild.Error] = textbuild.tb_append(?b, text);
@@ -1484,7 +1508,7 @@ fun cycle_message(db: *QueryDb, kind: QueryKind, key: u64) res[str, fail.Fail] {
         if (sel appended.err) { ret res[str, fail.Fail].err{fail.message(textbuild.text(appended.err))}; }
         i = i + 1;
     }
-    val tail: res[str, std_format.FormatError] = std_format.sprint(db.a, "{}:{} (already computing)", kind, key);
+    val tail: res[str, std_format.FormatError] = std_format.sprint(db.a, "{}:{} (already computing)", db.storage[kind::u32].spec.name, key);
     if (sel tail.err) { ret res[str, fail.Fail].err{fail.format_refused(tail.err)}; }
     val text:     str                  = tail.ok;
     val appended: err[textbuild.Error] = textbuild.tb_append(?b, text);
@@ -1495,20 +1519,20 @@ fun cycle_message(db: *QueryDb, kind: QueryKind, key: u64) res[str, fail.Fail] {
     ret res[str, fail.Fail].ok{finished.ok};
 }
 
-pub fun revision[T](rt: *QueryRuntime[T], ctx: *T, kind: QueryKind, key: u64) res[Revision, fail.Fail] {
+pub fun revision[T](rt: *QueryRuntime[T], ctx: *T, kind: *Kind, key: u64) res[Revision, fail.Fail] {
     val read: res[QueryView, fail.Fail] = get[T](rt, ctx, kind, key);
     if (sel read.err) { ret res[Revision, fail.Fail].err{read.err}; }
     ret res[Revision, fail.Fail].ok{read.ok.last_changed};
 }
 
-pub fun depend[T](rt: *QueryRuntime[T], ctx: *T, kind: QueryKind, key: u64) err[fail.Fail] {
+pub fun depend[T](rt: *QueryRuntime[T], ctx: *T, kind: *Kind, key: u64) err[fail.Fail] {
     val observed: res[Revision, fail.Fail] = revision[T](rt, ctx, kind, key);
     if (sel observed.err) { ret err[fail.Fail].err{observed.err}; }
     ret err[fail.Fail].ok{};
 }
 
 #[testing]
-fun observe(db: *QueryDb, kind: QueryKind, key: u64) res[MetadataRevision, fail.Fail] {
+fun observe(db: *QueryDb, kind: *Kind, key: u64) res[MetadataRevision, fail.Fail] {
     val result: res[MetadataRevision, fail.Fail] = observe_inner(db, kind, key);
     if (sel result.err) {
         if (db != nil && db.operation_active) {
@@ -1519,10 +1543,13 @@ fun observe(db: *QueryDb, kind: QueryKind, key: u64) res[MetadataRevision, fail.
 }
 
 #[testing]
-fun observe_inner(db: *QueryDb, kind: QueryKind, key: u64) res[MetadataRevision, fail.Fail] {
+fun observe_inner(db: *QueryDb, row: *Kind, key: u64) res[MetadataRevision, fail.Fail] {
     if (db == nil || db.stack.len == 0 || db.stack.data[db.stack.len - 1].entry == nil) {
         ret res[MetadataRevision, fail.Fail].err{fail.message("metadata dependency requires an active computation")};
     }
+    val sh: *QueryShard = shard_find(db, row);
+    if (sh == nil) { ret res[MetadataRevision, fail.Fail].err{fail.message("metadata read requires a metadata query")}; }
+    val kind:    KindIndex                        = sh.kind;
     val sampled: res[MetadataRevision, fail.Fail] = sample_metadata(db, kind, key);
     if (sel sampled.err) { ret sampled; }
     val value:    MetadataRevision         = sampled.ok;
@@ -1532,7 +1559,7 @@ fun observe_inner(db: *QueryDb, kind: QueryKind, key: u64) res[MetadataRevision,
     ret sampled;
 }
 
-fun dep_prepare(db: *QueryDb, entry: *QueryEntry, kind: QueryKind, key: u64) err[fail.Fail] {
+fun dep_prepare(db: *QueryDb, entry: *QueryEntry, kind: KindIndex, key: u64) err[fail.Fail] {
     var i: u32 = 0;
     for (i < entry.dep_len) {
         if (entry.deps[i].kind == kind && entry.deps[i].key == key) { ret err[fail.Fail].ok{}; }
@@ -1545,7 +1572,7 @@ fun dep_prepare(db: *QueryDb, entry: *QueryEntry, kind: QueryKind, key: u64) err
     ret err[fail.Fail].ok{};
 }
 
-fun dep_upsert(db: *QueryDb, entry: *QueryEntry, dep_kind: QueryKind, dep_key: u64, rev: Revision, diagnostic_revision: Revision, present: bool) res[Revision, fail.Fail] {
+fun dep_upsert(db: *QueryDb, entry: *QueryEntry, dep_kind: KindIndex, dep_key: u64, rev: Revision, diagnostic_revision: Revision, present: bool) res[Revision, fail.Fail] {
     var i: u32 = 0;
     for (i < entry.dep_len) {
         val d: *Dep = ?entry.deps[i];
@@ -1581,7 +1608,7 @@ fun dep_upsert(db: *QueryDb, entry: *QueryEntry, dep_kind: QueryKind, dep_key: u
 
 # observation copies recorded keys without validating or exposing a cached product
 #[testing]
-pub fun cached_dependency_keys(db: *QueryDb, kind: QueryKind, key: u64,
+pub fun cached_dependency_keys(db: *QueryDb, kind: *Kind, key: u64,
     a: *A.Allocator) res[Vector[QueryKey], fail.Fail] {
     val found: res[*QueryEntry, fail.Fail] = peek(db, kind, key);
     if (sel found.err) { ret res[Vector[QueryKey], fail.Fail].err{found.err}; }
@@ -1594,7 +1621,7 @@ pub fun cached_dependency_keys(db: *QueryDb, kind: QueryKind, key: u64,
     var i: u32 = 0;
     for (i < entry.dep_len) {
         val dep:    Dep                 = entry.deps[i];
-        val copied: res[usize, A.Error] = collections_vector.push[QueryKey](?keys, QueryKey{kind: dep.kind, key: dep.key});
+        val copied: res[usize, A.Error] = collections_vector.push[QueryKey](?keys, key_of(db, Slot{kind: dep.kind, key: dep.key}));
         if (sel copied.err) { ret res[Vector[QueryKey], fail.Fail].err{fail.refused(copied.err)}; }
         i = i + 1;
     }
@@ -1602,18 +1629,96 @@ pub fun cached_dependency_keys(db: *QueryDb, kind: QueryKind, key: u64,
     ret res[Vector[QueryKey], fail.Fail].ok{keys};
 }
 
-pub fun peek_revision(db: *QueryDb, kind: QueryKind, key: u64) Revision {
-    ret last_changed_get(db, kind, key);
+# whether a product walk enters a product, visiting it and walking what it was computed from
+# reached through walk_products
+pub def ProductFilter: fun(ptr, QueryKey) bool;
+
+# what a product walk is shown of each product: its address and the store it reported into,
+# nil when it reported nothing
+# reached through walk_products
+pub def ProductVisit: fun(ptr, QueryKey, *diagnostic.DiagnosticStore);
+
+rec ProductWalk {
+    db:      *QueryDb;
+    visited: Map[Slot, u8];
+    ctx:     ptr;
+    enter:   ProductFilter;
+    visit:   ProductVisit;
+}
+
+# visit a product and every product it was computed from that the filter enters, each once
+# and its dependencies first, as presentation walks them. a product the filter refuses, or one
+# with no current value, ends its branch, so a walk costs what it enters, not the closure
+# ---
+# db:    the database, its products as the open operation or the last one left them
+# root:  the product to start from, itself subject to the filter
+# ctx:   passed to enter and visit
+# enter: whether the walk enters a product
+# visit: shown each product entered
+pub fun walk_products(db: *QueryDb, root: QueryKey, ctx: ptr, enter: ProductFilter, visit: ProductVisit) err[fail.Fail] {
+    if (db == nil || enter == nil || visit == nil) { ret err[fail.Fail].err{fail.message("a product walk requires a database, a filter and a visitor")}; }
+    val sh: *QueryShard = shard_find(db, root.kind);
+    if (sh == nil) { ret err[fail.Fail].ok{}; }
+    var walk: ProductWalk = ProductWalk{db: db, visited: map.init[Slot, u8](db.a), ctx: ctx, enter: enter, visit: visit};
+    fin { map.dnit[Slot, u8](?walk.visited); }
+    ret walk_node(?walk, Slot{kind: sh.kind, key: root.key});
+}
+
+fun walk_node(walk: *ProductWalk, key: Slot) err[fail.Fail] {
+    var lookup: Slot     = key;
+    val prior:  opt[*u8] = map.get[Slot, u8](?walk.visited, ?lookup);
+    if (sel prior.some) { ret err[fail.Fail].ok{}; }
+    val entered: res[bool, A.Error] = map.insert[Slot, u8](?walk.visited, key, 1);
+    if (sel entered.err) { ret err[fail.Fail].err{fail.refused(entered.err)}; }
+    val sh: *QueryShard = walk.db.storage[key.kind::u32];
+    if (sh.role == METADATA) { ret err[fail.Fail].ok{}; }
+    val product: QueryKey = key_of(walk.db, key);
+    if (!walk.enter(walk.ctx, product)) { ret err[fail.Fail].ok{}; }
+    val entry: *QueryEntry = entry_find(sh, key.key);
+    if (entry == nil || !entry.ready) { ret err[fail.Fail].ok{}; }
+    var i: u32 = 0;
+    for (i < entry.dep_len) {
+        val walked: err[fail.Fail] = walk_node(walk, Slot{kind: entry.deps[i].kind, key: entry.deps[i].key});
+        if (sel walked.err) { ret walked; }
+        i = i + 1;
+    }
+    if (entry.diags != nil && entry.diags.lost != 0) { ret err[fail.Fail].err{fail.message("query diagnostics contain a lost emission")}; }
+    walk.visit(walk.ctx, product, entry.diags);
+    ret err[fail.Fail].ok{};
+}
+
+# the revision a product last changed at, without validating it; 0 when it has none
+pub fun peek_revision(db: *QueryDb, kind: *Kind, key: u64) Revision {
+    val sh: *QueryShard = shard_find(db, kind);
+    if (sh == nil) { ret 0; }
+    ret last_changed_get(db, sh.kind, key);
+}
+
+# a product as its last successful computation published it, read between operations by the
+# host that ran them. none when no operation from `since` on validated or computed it, or when
+# its last validation or recomputation failed, so a failed product's previous value is never
+# served and a product the host's operations never reached is not taken for one they did
+# ---
+# db:    the database; no operation may be active
+# kind:  the product's row
+# key:   the product's key
+# since: the first operation the host's reads count; an input is current whenever it was set
+# ret:   a borrowed view, valid until the next operation, input change or retirement
+pub fun published(db: *QueryDb, kind: *Kind, key: u64, since: u64) opt[QueryView] {
+    if (db == nil || db.operation_active) { ret opt[QueryView].none{}; }
+    val sh: *QueryShard = shard_find(db, kind);
+    if (sh == nil || sh.role == METADATA) { ret opt[QueryView].none{}; }
+    val entry: *QueryEntry = entry_find(sh, key);
+    if (entry == nil || !entry.ready || entry.stale)      { ret opt[QueryView].none{}; }
+    if (sh.role == DERIVED && entry.validated_at < since) { ret opt[QueryView].none{}; }
+    ret opt[QueryView].some{QueryView{value: entry.value, value_len: entry.value_len, last_changed: entry.last_changed}};
 }
 
 #[testing]
-fun peek(db: *QueryDb, kind: QueryKind, key: u64) res[*QueryEntry, fail.Fail] {
-    val sh_r: res[*QueryShard, fail.Fail] = shard_get(db, kind);
-    if (sel sh_r.err) {
-        ret res[*QueryEntry, fail.Fail].err{sh_r.err};
-    }
-    val sh: *QueryShard = sh_r.ok;
-    if (sh.role == SHARD_METADATA) {
+fun peek(db: *QueryDb, row: *Kind, key: u64) res[*QueryEntry, fail.Fail] {
+    val sh: *QueryShard = shard_find(db, row);
+    if (sh == nil) { ret res[*QueryEntry, fail.Fail].err{fail.message("peek: query has no stored value for key")}; }
+    if (sh.role == METADATA) {
         ret res[*QueryEntry, fail.Fail].err{fail.message("peek: metadata kinds have no stored value")};
     }
     val entry: *QueryEntry = entry_find(sh, key);
@@ -1622,20 +1727,40 @@ fun peek(db: *QueryDb, kind: QueryKind, key: u64) res[*QueryEntry, fail.Fail] {
 }
 
 #[testing]
-pub fun shard_len(db: *QueryDb, kind: QueryKind) u32 {
-    if (kind::u32 >= db.kinds) { ret 0; }
-    val sh: *QueryShard = ?db.storage[kind::u32];
+pub fun shard_len(db: *QueryDb, kind: *Kind) u32 {
+    val sh: *QueryShard = shard_find(db, kind);
+    if (sh == nil) { ret 0; }
     ret sh.index.len::u32;
 }
 
-# how many products of every registered kind a module or file owns
+# how many products the database holds, of every kind
+#[testing]
+pub fun product_count(db: *QueryDb) u32 {
+    var total: u32 = 0;
+    var k:     u32 = 0;
+    for (k < db.kinds) {
+        total = total + db.storage[k].index.len::u32;
+        k     = k + 1;
+    }
+    ret total;
+}
+
+# how many products of a kind this database computed rather than reused
+#[testing]
+pub fun computes(db: *QueryDb, kind: *Kind) u64 {
+    val sh: *QueryShard = shard_find(db, kind);
+    if (sh == nil) { ret 0; }
+    ret sh.computes;
+}
+
+# how many products of every kind a module or file owns
 #[testing]
 pub fun owned_len(db: *QueryDb, owner: KeyOwner, id: u32) u32 {
     var total: u32 = 0;
     var kind:  u32 = 0;
     for (kind < db.kinds) {
-        val sh: *QueryShard = ?db.storage[kind];
-        if (sh.registered && key_owner(kind::QueryKind) == owner) {
+        val sh: *QueryShard = db.storage[kind];
+        if (sh.spec.owner == owner) {
             var j: usize = 0;
             for (j < sh.index.len) {
                 val key: u64 = sh.index.data[j].key;
@@ -1648,78 +1773,92 @@ pub fun owned_len(db: *QueryDb, owner: KeyOwner, id: u32) u32 {
     ret total;
 }
 
-fun register(db: *QueryDb, kind: QueryKind, role: ShardRole, revisions: RevisionProvider) err[fail.Fail] {
-    if (db.operation_active || db.presentation_pending) { ret err[fail.Fail].err{fail.message("cannot register a query before the operation is released")}; }
-    if (key_owner(kind) == KEY_UNDECLARED) {
-        ret err[fail.Fail].err{fail.message("register: kind declares no key owner")};
+# why a row cannot be a kind, or none when it can: every kind names its owner and its role, a
+# derived kind has a computation and an input has none, and only an owned product has equality
+fun row_refusal(kind: *Kind, role: Role) opt[str] {
+    if (kind == nil) { ret opt[str].some{"query kind row is nil"}; }
+    if (kind.owner != KEY_UNOWNED && kind.owner != KEY_MODULE && kind.owner != KEY_FILE) {
+        ret opt[str].some{"query kind declares no key owner"};
     }
-    val need: u32 = kind::u32 + 1;
-    if (need > db.kinds) {
-        val res_grow: err[fail.Fail] = storage_grow(db, need);
-        if (sel res_grow.err) { ret res_grow; }
+    if (role == DERIVED && kind.compute == nil) { ret opt[str].some{"derived query kind has no computation"}; }
+    if (role != DERIVED && (kind.compute != nil || kind.finalize != nil || kind.equal != nil)) {
+        ret opt[str].some{"only a derived query kind computes or owns its bytes"};
     }
-
-    val sh: *QueryShard = ?db.storage[kind::u32];
-    if (sh.registered) {
-        ret err[fail.Fail].err{fail.message("register: kind already registered")};
-    }
-    sh.kind       = kind;
-    sh.role       = role;
-    sh.revisions  = revisions;
-    sh.registered = true;
-    ret err[fail.Fail].ok{};
+    if (role != INPUT && role != DERIVED && role != METADATA) { ret opt[str].some{"query kind declares no role"}; }
+    if (kind.equal != nil && kind.finalize == nil)            { ret opt[str].some{"owned query equality requires a finalizer and comparator"}; }
+    ret opt[str].none{};
 }
 
-fun storage_grow(db: *QueryDb, need: u32) err[fail.Fail] {
-    if (need <= db.kinds) { ret err[fail.Fail].ok{}; }
-
-    val grown: err[A.Error] = growth.reserve[QueryShard](db.a, ?db.storage, ?db.storage_cap, need::usize);
-    if (sel grown.err) { ret err[fail.Fail].err{fail.refused(grown.err)}; }
-
-    var i: u32 = db.kinds;
-    for (i < need) {
-        val sh: *QueryShard = ?db.storage[i];
-        sh.kind       = i::QueryKind;
-        sh.role       = SHARD_INPUT;
-        sh.revisions  = RevisionProvider{};
-        sh.finalize   = nil::FinalizeFn;
-        sh.equal      = nil;
-        sh.registered = false;
-
-        val te_r: res[handle.HandleTable[QueryEntry, QueryEntryDomain], handle.Error] = handle.table_init[QueryEntry, QueryEntryDomain](db.a);
-        if (sel te_r.err) {
-            ret err[fail.Fail].err{fail.message(handle.text(te_r.err))};
-        }
-        sh.entries = te_r.ok;
-        sh.index   = collections_vector.init[QueryIndexEntry](db.a);
-        sh.by_key  = map.init[u64, handle.HandleId[QueryEntryDomain]](db.a);
-
-        db.kinds = i + 1;
-        i        = i + 1;
-    }
-
-    ret err[fail.Fail].ok{};
+# the shard a row was made into, nil before the row's first use
+fun shard_find(db: *QueryDb, kind: *Kind) *QueryShard {
+    var row:   u64             = kind::u64;
+    val found: opt[*KindIndex] = map.get[u64, KindIndex](?db.by_row, ?row);
+    if (sel found.none) { ret nil; }
+    ret db.storage[(@found.some)::u32];
 }
 
-fun shard_get(db: *QueryDb, kind: QueryKind) res[*QueryShard, fail.Fail] {
-    if (kind::u32 >= db.kinds) {
-        ret res[*QueryShard, fail.Fail].err{fail.message("query: kind out of range")};
+# make the shard of a row's first use. a shard never moves once made, so a kind first used
+# inside a computation leaves every shard its callers hold where it is
+fun shard_make(db: *QueryDb, kind: *Kind, role: Role) res[*QueryShard, fail.Fail] {
+    val refused: opt[str] = row_refusal(kind, role);
+    if (sel refused.some)            { ret res[*QueryShard, fail.Fail].err{fail.message(refused.some)}; }
+    if (shard_find(db, kind) != nil) { ret res[*QueryShard, fail.Fail].err{fail.message("query kind already has a shard")}; }
+    if (db.kinds >= 0xFFFF)          { ret res[*QueryShard, fail.Fail].err{fail.message("query kind indices are exhausted")}; }
+    val grown: err[A.Error] = growth.reserve[*QueryShard](db.a, ?db.storage, ?db.storage_cap, db.kinds::usize + 1);
+    if (sel grown.err) { ret res[*QueryShard, fail.Fail].err{fail.refused(grown.err)}; }
+    val te_r: res[handle.HandleTable[QueryEntry, QueryEntryDomain], handle.Error] = handle.table_init[QueryEntry, QueryEntryDomain](db.a);
+    if (sel te_r.err) { ret res[*QueryShard, fail.Fail].err{fail.message(handle.text(te_r.err))}; }
+    val allocated: res[*QueryShard, A.Error] = A.allocate[QueryShard](db.a, 1);
+    if (sel allocated.err) {
+        var table: handle.HandleTable[QueryEntry, QueryEntryDomain] = te_r.ok;
+        handle.table_dnit[QueryEntry, QueryEntryDomain](?table);
+        ret res[*QueryShard, fail.Fail].err{fail.refused(allocated.err)};
     }
-    val sh: *QueryShard = ?db.storage[kind::u32];
-    if (!sh.registered) {
-        ret res[*QueryShard, fail.Fail].err{fail.message("query: kind not registered")};
+    val sh:      *QueryShard        = allocated.ok;
+    val indexed: res[bool, A.Error] = map.insert[u64, KindIndex](?db.by_row, kind::u64, db.kinds::KindIndex);
+    if (sel indexed.err) {
+        var table: handle.HandleTable[QueryEntry, QueryEntryDomain] = te_r.ok;
+        handle.table_dnit[QueryEntry, QueryEntryDomain](?table);
+        A.deallocate[QueryShard](db.a, sh, 1);
+        ret res[*QueryShard, fail.Fail].err{fail.refused(indexed.err)};
     }
+    @sh = QueryShard{
+        kind:   db.kinds::KindIndex, spec: kind, role: role, revisions: RevisionProvider{}, computes: 0, entries: te_r.ok,
+        index:  collections_vector.init[QueryIndexEntry](db.a),
+        by_key: map.init[u64, handle.HandleId[QueryEntryDomain]](db.a)
+    };
+    db.storage[db.kinds] = sh;
+    db.kinds             = db.kinds + 1;
     ret res[*QueryShard, fail.Fail].ok{sh};
 }
 
-# the diagnostics a ready product carries, nil when the product is absent or has none
-pub fun product_diagnostics(db: *QueryDb, kind: QueryKind, key: u64) *diagnostic.DiagnosticStore {
-    if (db == nil || kind::u32 >= QUERY_KIND_COUNT) { ret nil; }
-    val sh: *QueryShard = ?db.storage[kind::u32];
-    if (!sh.registered) { ret nil; }
-    val entry: *QueryEntry = entry_find(sh, key);
-    if (entry == nil || !entry.ready) { ret nil; }
-    ret entry.diags;
+# the shard of a row, made on its first use
+fun shard_of(db: *QueryDb, kind: *Kind) res[*QueryShard, fail.Fail] {
+    if (kind == nil) { ret res[*QueryShard, fail.Fail].err{fail.message("query kind row is nil")}; }
+    val found: *QueryShard = shard_find(db, kind);
+    if (found != nil) { ret res[*QueryShard, fail.Fail].ok{found}; }
+    # a metadata kind is read only through the revision provider attached to it
+    if (kind.role == METADATA) { ret res[*QueryShard, fail.Fail].err{fail.message("metadata query has no revision provider")}; }
+    ret shard_make(db, kind, kind.role);
+}
+
+fun shard_get(db: *QueryDb, kind: KindIndex) res[*QueryShard, fail.Fail] {
+    if (kind::u32 >= db.kinds) {
+        ret res[*QueryShard, fail.Fail].err{fail.message("query: kind out of range")};
+    }
+    ret res[*QueryShard, fail.Fail].ok{db.storage[kind::u32]};
+}
+
+# the address of a product within this database, its kind's shard made on first use
+fun slot_of(db: *QueryDb, key: QueryKey) res[Slot, fail.Fail] {
+    val sh: res[*QueryShard, fail.Fail] = shard_of(db, key.kind);
+    if (sel sh.err) { ret res[Slot, fail.Fail].err{sh.err}; }
+    ret res[Slot, fail.Fail].ok{Slot{kind: sh.ok.kind, key: key.key}};
+}
+
+# a product's address as its row names it
+fun key_of(db: *QueryDb, slot: Slot) QueryKey {
+    ret QueryKey{kind: db.storage[slot.kind::u32].spec, key: slot.key};
 }
 
 fun entry_find(sh: *QueryShard, key: u64) *QueryEntry {
@@ -1744,6 +1883,8 @@ fun entry_append(db: *QueryDb, sh: *QueryShard, key: u64) res[*QueryEntry, fail.
     fresh.diags               = nil;
     fresh.diagnostics_changed = 0;
     fresh.ready               = false;
+    fresh.stale               = false;
+    fresh.validated_at        = 0;
 
     val ed_r: res[handle.HandleEditor[QueryEntry, QueryEntryDomain], handle.Error] = handle.edit[QueryEntry, QueryEntryDomain](?sh.entries);
     if (sel ed_r.err) {
@@ -1823,7 +1964,7 @@ fun entry_remove(db: *QueryDb, sh: *QueryShard, key: u64) {
 
 fun entry_free(db: *QueryDb, sh: *QueryShard, entry: *QueryEntry) {
     if (entry.value != nil && entry.value_len > 0) {
-        if (sh.finalize != nil) { sh.finalize(entry.value, entry.value_len, db.a); }
+        if (sh.spec.finalize != nil) { sh.spec.finalize(entry.value, entry.value_len, db.a); }
         A.deallocate[u8](db.a, entry.value, entry.value_len::usize);
     }
     if (entry.deps != nil && entry.dep_cap > 0) {
@@ -1840,6 +1981,7 @@ fun entry_free(db: *QueryDb, sh: *QueryShard, entry: *QueryEntry) {
     entry.dep_cap   = 0;
     entry.diags     = nil;
     entry.ready     = false;
+    entry.stale     = false;
 }
 
 fun shard_entries_free(db: *QueryDb, sh: *QueryShard) {
@@ -1857,10 +1999,10 @@ fun shard_entries_free(db: *QueryDb, sh: *QueryShard) {
     map.dnit[u64, handle.HandleId[QueryEntryDomain]](?sh.by_key);
 }
 
-fun last_changed_get(db: *QueryDb, kind: QueryKind, key: u64) Revision {
+fun last_changed_get(db: *QueryDb, kind: KindIndex, key: u64) Revision {
     if (kind::u32 >= db.kinds) { ret 0; }
-    val sh: *QueryShard = ?db.storage[kind::u32];
-    if (sh.role == SHARD_METADATA) { ret 0; }
+    val sh: *QueryShard = db.storage[kind::u32];
+    if (sh.role == METADATA) { ret 0; }
     val entry: *QueryEntry = entry_find(sh, key);
     if (entry == nil) { ret 0; }
     ret entry.last_changed;
@@ -1892,9 +2034,7 @@ fun has_diagnostics(entry: *QueryEntry) bool {
     ret false;
 }
 
-fun candidate_compute[T](rt: *QueryRuntime[T], ctx: *T, sh: *QueryShard, key: u64,
-    candidate: *QueryEntry,
-    compute: fun(*T, QueryKind, u64, *A.Allocator, *diagnostic.DiagnosticStore) res[QueryOutput, fail.Fail]) err[fail.Fail] {
+fun candidate_compute[T](rt: *QueryRuntime[T], ctx: *T, sh: *QueryShard, key: u64, candidate: *QueryEntry) err[fail.Fail] {
     val db:      *QueryDb                                  = rt.db;
     val diags_r: res[*diagnostic.DiagnosticStore, A.Error] = A.allocate[diagnostic.DiagnosticStore](db.a, 1);
     if (sel diags_r.err) {
@@ -1902,12 +2042,14 @@ fun candidate_compute[T](rt: *QueryRuntime[T], ctx: *T, sh: *QueryShard, key: u6
     }
     candidate.diags  = diags_r.ok;
     @candidate.diags = diagnostic.store_init(db.a);
+    diagnostic.set_origin(candidate.diags, sh.spec.origin);
     val frame: usize = db.stack.len - 1;
     db.stack.data[frame].entry = candidate;
     fin { db.stack.data[frame].entry = nil; }
     db.compute_depth = db.compute_depth + 1;
-    val rejections_before: u64                         = db.rejections;
-    val computed:          res[QueryOutput, fail.Fail] = compute(ctx, sh.kind, key, db.a, candidate.diags);
+    val rejections_before: u64 = db.rejections;
+    sh.computes = sh.computes + 1;
+    val computed: res[QueryOutput, fail.Fail] = sh.spec.compute(ctx::ptr, sh.spec, key, db.a, candidate.diags);
     db.compute_depth = db.compute_depth - 1;
     if (sel computed.err) {
         ret err[fail.Fail].err{operation_fail(db, computed.err)};
@@ -1935,8 +2077,8 @@ fun candidate_publish(db: *QueryDb, sh: *QueryShard, entry: *QueryEntry, candida
     val same_diags: bool = diag_equal.ok && diagnostic_dependencies_equal(entry, candidate);
     var same_value: bool = false;
     if (entry.ready) {
-        if (sh.equal != nil) { same_value = sh.equal(entry.value, entry.value_len, candidate.value, candidate.value_len); }
-        or (sh.finalize == nil) {
+        if (sh.spec.equal != nil) { same_value = sh.spec.equal(entry.value, entry.value_len, candidate.value, candidate.value_len); }
+        or (sh.spec.finalize == nil) {
             same_value = entry.value_len == candidate.value_len
                 && memory.raw_equal(entry.value::ptr, candidate.value::ptr, candidate.value_len::usize);
         }
@@ -1953,7 +2095,7 @@ fun candidate_publish(db: *QueryDb, sh: *QueryShard, entry: *QueryEntry, candida
         or              { candidate.diagnostics_changed = revision; }
     }
     if (same_value) {
-        if (sh.finalize != nil)                                 { sh.finalize(candidate.value, candidate.value_len, db.a); }
+        if (sh.spec.finalize != nil)                            { sh.spec.finalize(candidate.value, candidate.value_len, db.a); }
         if (candidate.value != nil && candidate.value_len != 0) { A.deallocate[u8](db.a, candidate.value, candidate.value_len::usize); }
         candidate.value     = entry.value;
         candidate.value_len = entry.value_len;
@@ -1974,7 +2116,7 @@ fun recompute[T](rt: *QueryRuntime[T], ctx: *T, sh: *QueryShard, entry: *QueryEn
         if (!committed) { attempt_preserve(db, sh, attempt, ?candidate); }
         entry_free(db, sh, ?candidate);
     }
-    val computed: err[fail.Fail] = candidate_compute[T](rt, ctx, sh, key, ?candidate, rt.caps.compute);
+    val computed: err[fail.Fail] = candidate_compute[T](rt, ctx, sh, key, ?candidate);
     if (sel computed.err) { ret res[*QueryEntry, fail.Fail].err{computed.err}; }
     val published: res[*QueryEntry, fail.Fail] = candidate_publish(db, sh, entry, ?candidate);
     if (sel published.ok) { committed = true; }
@@ -2025,6 +2167,32 @@ val T_MODE_DIRECT_TOKENIZE: TestComputeMode = 10;
 val T_MODE_BRANCH:          TestComputeMode = 11;
 #[testing]
 val T_MODE_REJECT:          TestComputeMode = 12;
+#[testing]
+val T_MODE_RETIRE:          TestComputeMode = 13;
+#[testing]
+val T_MODE_IMPORTS:         TestComputeMode = 14;
+
+#[testing]
+val T_TEXT:     Kind = Kind{name: "text", role: INPUT, owner: KEY_UNOWNED};
+#[testing]
+val T_TARGET:   Kind = Kind{name: "target", role: INPUT, owner: KEY_UNOWNED};
+#[testing]
+val T_TOKENIZE: Kind = Kind{name: "tokenize", role: DERIVED, owner: KEY_FILE, compute: t_compute};
+#[testing]
+val T_PARSE:    Kind = Kind{name: "parse", role: DERIVED, owner: KEY_FILE, compute: t_compute};
+#[testing]
+val T_SEMA:     Kind = Kind{name: "sema", role: DERIVED, owner: KEY_MODULE, compute: t_compute};
+#[testing]
+val T_LOWER:    Kind = Kind{name: "lower", role: DERIVED, owner: KEY_MODULE, compute: t_compute};
+# an owned product: its bytes hold a handle its finalizer releases
+#[testing]
+val T_OWNED:     Kind = Kind{name: "owned", role: DERIVED, owner: KEY_FILE, compute: t_compute, finalize: t_owned_finalize};
+#[testing]
+val T_EQUATABLE: Kind = Kind{
+    name: "equatable", role: DERIVED, owner: KEY_FILE, compute: t_compute, finalize: t_owned_finalize, equal: t_owned_equal
+};
+#[testing]
+val T_REVISION: Kind = Kind{name: "revision", role: METADATA, owner: KEY_UNOWNED};
 
 #[testing]
 rec TestQueryContext {
@@ -2041,7 +2209,7 @@ rec TestQueryContext {
 fun t_context_init_with(ctx: *TestQueryContext, db: *QueryDb, diag_alloc: *A.Allocator,
     mode: TestComputeMode) bool {
     ctx.diags = diagnostic.store_init(diag_alloc);
-    val rt_r: res[QueryRuntime[TestQueryContext], fail.Fail] = runtime[TestQueryContext](db, t_dispatch);
+    val rt_r: res[QueryRuntime[TestQueryContext], fail.Fail] = runtime[TestQueryContext](db);
     if (sel rt_r.err) {
         diagnostic.store_dnit(?ctx.diags);
         ret false;
@@ -2068,7 +2236,7 @@ fun t_context_dnit(ctx: *TestQueryContext) {
 }
 
 #[testing]
-fun t_present(ctx: *TestQueryContext, operation: Operation, kind: QueryKind, key: u64) err[fail.Fail] {
+fun t_present(ctx: *TestQueryContext, operation: Operation, kind: *Kind, key: u64) err[fail.Fail] {
     var root:      QueryKey                      = QueryKey{kind: kind, key: key};
     val presented: res[*Presentation, fail.Fail] = collect(ctx.runtime.db, operation, ?root, 1, ctx.diags.a);
     if (sel presented.err) { ret err[fail.Fail].err{presented.err}; }
@@ -2078,7 +2246,7 @@ fun t_present(ctx: *TestQueryContext, operation: Operation, kind: QueryKind, key
 }
 
 #[testing]
-fun t_get(ctx: *TestQueryContext, kind: QueryKind, key: u64) res[*QueryEntry, fail.Fail] {
+fun t_get(ctx: *TestQueryContext, kind: *Kind, key: u64) res[*QueryEntry, fail.Fail] {
     presentation_dnit(ctx.last_presentation);
     ctx.last_presentation = nil;
     if (ctx.runtime.db.presentation_pending) {
@@ -2098,7 +2266,7 @@ fun t_get(ctx: *TestQueryContext, kind: QueryKind, key: u64) res[*QueryEntry, fa
 }
 
 #[testing]
-fun t_reusable(ctx: *TestQueryContext, kind: QueryKind, key: u64) res[bool, fail.Fail] {
+fun t_reusable(ctx: *TestQueryContext, kind: *Kind, key: u64) res[bool, fail.Fail] {
     val opened: res[Operation, fail.Fail] = begin(ctx.runtime.db);
     if (sel opened.err) { ret res[bool, fail.Fail].err{opened.err}; }
     val result: res[bool, fail.Fail] = reusable[TestQueryContext](?ctx.runtime, ctx, kind, key);
@@ -2118,7 +2286,7 @@ fun t_always_fail(ctx: *TestQueryContext, key: u64, a: *A.Allocator, diags: *dia
 #[testing]
 fun t_tok_compute(ctx: *TestQueryContext, key: u64, a: *A.Allocator, diags: *diagnostic.DiagnosticStore) res[QueryOutput, fail.Fail] {
     val db:      *QueryDb       = ctx.runtime.db;
-    val res_dep: err[fail.Fail] = depend[TestQueryContext](?ctx.runtime, ctx, Q_FILE_TEXT, key);
+    val res_dep: err[fail.Fail] = depend[TestQueryContext](?ctx.runtime, ctx, ?T_TEXT, key);
     if (sel res_dep.err) {
         ret res[QueryOutput, fail.Fail].err{res_dep.err};
     }
@@ -2148,7 +2316,7 @@ fun t_handle_ptr(entry: *QueryEntry) ptr {
 #[testing]
 fun t_owned_compute(ctx: *TestQueryContext, key: u64, a: *A.Allocator, diags: *diagnostic.DiagnosticStore) res[QueryOutput, fail.Fail] {
     val db:      *QueryDb       = ctx.runtime.db;
-    val res_dep: err[fail.Fail] = depend[TestQueryContext](?ctx.runtime, ctx, Q_FILE_TEXT, key);
+    val res_dep: err[fail.Fail] = depend[TestQueryContext](?ctx.runtime, ctx, ?T_TEXT, key);
     if (sel res_dep.err) {
         ret res[QueryOutput, fail.Fail].err{res_dep.err};
     }
@@ -2203,59 +2371,146 @@ fun t_owned_diag_compute(ctx: *TestQueryContext, key: u64, a: *A.Allocator, diag
 }
 
 #[testing]
-fun t_dispatch(ctx: *TestQueryContext, kind: QueryKind, key: u64,
-    a: *A.Allocator, diags: *diagnostic.DiagnosticStore) res[QueryOutput, fail.Fail] {
+fun t_compute(raw: ptr, kind: *Kind, key: u64, a: *A.Allocator, diags: *diagnostic.DiagnosticStore) res[QueryOutput, fail.Fail] {
+    val ctx: *TestQueryContext = raw::*TestQueryContext;
     if (ctx.mode == T_MODE_BRANCH) { ret t_branch_compute(ctx, kind, key, a, diags); }
     if (ctx.mode == T_MODE_REJECT) {
-        if (kind == Q_SEMA)  { ret t_reject_sema_compute(ctx, key, a, diags); }
-        if (kind == Q_LOWER) { ret t_reject_lower_compute(ctx, key, a, diags); }
+        if (kind == ?T_SEMA)  { ret t_reject_sema_compute(ctx, key, a, diags); }
+        if (kind == ?T_LOWER) { ret t_reject_lower_compute(ctx, key, a, diags); }
     }
     if (ctx.mode == T_MODE_FAIL)     { ret t_always_fail(ctx, key, a, diags); }
     if (ctx.mode == T_MODE_TOKENIZE) { ret t_tok_compute(ctx, key, a, diags); }
     if (ctx.mode == T_MODE_OWNED)    { ret t_owned_compute(ctx, key, a, diags); }
     if (ctx.mode == T_MODE_DIAG) {
-        if (kind == Q_TOKENIZE) { ret t_inner_diag_compute(ctx, key, a, diags); }
-        if (kind == Q_PARSE)    { ret t_outer_diag_compute(ctx, key, a, diags); }
+        if (kind == ?T_TOKENIZE) { ret t_inner_diag_compute(ctx, key, a, diags); }
+        if (kind == ?T_PARSE)    { ret t_outer_diag_compute(ctx, key, a, diags); }
     }
     if (ctx.mode == T_MODE_DIRECT)          { ret t_direct_cycle_compute(ctx, key, a, diags); }
     if (ctx.mode == T_MODE_DIRECT_TOKENIZE) { ret t_direct_tokenize_recompute(ctx, key, a, diags); }
     if (ctx.mode == T_MODE_INDIRECT) {
-        if (kind == Q_SEMA)  { ret t_cycle_a_compute(ctx, key, a, diags); }
-        if (kind == Q_LOWER) { ret t_cycle_b_compute(ctx, key, a, diags); }
+        if (kind == ?T_SEMA)  { ret t_cycle_a_compute(ctx, key, a, diags); }
+        if (kind == ?T_LOWER) { ret t_cycle_b_compute(ctx, key, a, diags); }
     }
     if (ctx.mode == T_MODE_PARSE_DEPS) {
-        if (kind == Q_TOKENIZE) { ret t_tok_compute(ctx, key, a, diags); }
-        if (kind == Q_PARSE)    { ret t_parse_deps_on_tokenize(ctx, key, a, diags); }
+        if (kind == ?T_TOKENIZE) { ret t_tok_compute(ctx, key, a, diags); }
+        if (kind == ?T_PARSE)    { ret t_parse_deps_on_tokenize(ctx, key, a, diags); }
     }
-    if (ctx.mode == T_MODE_DEDUP)      { ret t_dedup_owner_compute(ctx, key, a, diags); }
+    if (ctx.mode == T_MODE_DEDUP) { ret t_dedup_owner_compute(ctx, key, a, diags); }
+    if (ctx.mode == T_MODE_RETIRE) {
+        if (kind == ?T_RETIRE_CHILD)  { ret t_tok_compute(ctx, key, a, diags); }
+        if (kind == ?T_RETIRE_PARENT) { ret t_retire_parent_compute(ctx, key, a, diags); }
+    }
     if (ctx.mode == T_MODE_OWNED_DIAG) { ret t_owned_diag_compute(ctx, key, a, diags); }
+    if (ctx.mode == T_MODE_IMPORTS)    { ret t_imports_compute(ctx, kind, key, a, diags); }
     if (ctx.mode == T_MODE_AUTO_DEP) {
-        if (kind == Q_TOKENIZE) { ret t_tok_compute(ctx, key, a, diags); }
-        if (kind == Q_PARSE)    { ret t_auto_dep_outer_compute(ctx, key, a, diags); }
+        if (kind == ?T_TOKENIZE) { ret t_tok_compute(ctx, key, a, diags); }
+        if (kind == ?T_PARSE)    { ret t_auto_dep_outer_compute(ctx, key, a, diags); }
     }
     ret res[QueryOutput, fail.Fail].err{fail.message("test query kind has no compute capability")};
 }
 
-test key_owner__every_kind_declares_its_owner_and_an_undeclared_one_cannot_register {
-    # every slot of the table is declared, a gap included
-    var explicit: u32 = 0;
-    var i:        u32 = 0;
-    for (i < QUERY_KIND_COUNT) {
-        val owner: KeyOwner = key_owner(i::QueryKind);
-        if (owner == KEY_UNOWNED || owner == KEY_MODULE || owner == KEY_FILE) { explicit = explicit + 1; }
-        i = i + 1;
-    }
-    if (explicit != QUERY_KIND_COUNT)                                                                                    { ret 4; }
-    if (key_owner(Q_FILE_TEXT) != KEY_UNOWNED || key_owner(Q_PARSE) != KEY_FILE || key_owner(Q_LOAD_VIEW) != KEY_MODULE) { ret 5; }
+# module k's lower reads its sema, and its sema reads the sema of module k - 1, which it imports
+#[testing]
+fun t_imports_compute(ctx: *TestQueryContext, kind: *Kind, key: u64, a: *A.Allocator, diags: *diagnostic.DiagnosticStore) res[QueryOutput, fail.Fail] {
+    var read: err[fail.Fail] = err[fail.Fail].ok{};
+    if (kind == ?T_LOWER)           { read = depend[TestQueryContext](?ctx.runtime, ctx, ?T_SEMA, key); }
+    if (kind == ?T_SEMA && key > 0) { read = depend[TestQueryContext](?ctx.runtime, ctx, ?T_SEMA, key - 1); }
+    if (sel read.err)               { ret res[QueryOutput, fail.Fail].err{read.err}; }
+    val buf: res[*u8, A.Error] = A.allocate[u8](a, 1);
+    if (sel buf.err) { ret res[QueryOutput, fail.Fail].err{fail.refused(buf.err)}; }
+    buf.ok[0] = key::u8;
+    ret res[QueryOutput, fail.Fail].ok{QueryOutput{bytes: buf.ok, len: 1}};
+}
 
+#[testing]
+rec TestWalk {
+    key:    u64;
+    all:    bool;
+    visits: u32;
+}
+
+#[testing]
+fun t_walk_enter(raw: ptr, product: QueryKey) bool {
+    val w: *TestWalk = raw::*TestWalk;
+    ret w.all || product.key == w.key;
+}
+
+#[testing]
+fun t_walk_visit(raw: ptr, product: QueryKey, store: *diagnostic.DiagnosticStore) {
+    val w: *TestWalk = raw::*TestWalk;
+    w.visits = w.visits + 1;
+}
+
+# a walk the filter keeps to one module's products visits that module's two, however many
+# modules its chain imports, while an unfiltered walk reaches every sema in the chain
+test walk_products__a_filtered_walk_does_not_grow_with_the_imports {
+    var depths: [2]u64 = [2]u64{2, 8};
+    var d:      usize  = 0;
+    for (d < 2) {
+        var alloc: A.Allocator;
+        page.make(?alloc);
+        val opened: res[QueryDb, fail.Fail] = init(?alloc);
+        if (sel opened.err) { ret 1; }
+        var db:  QueryDb = opened.ok;
+        var ctx: TestQueryContext;
+        if (!t_context_init(?ctx, ?db, T_MODE_IMPORTS)) {
+            dnit(?db);
+            ret 2;
+        }
+        val n:     u64                         = depths[d];
+        val built: res[*QueryEntry, fail.Fail] = t_get(?ctx, ?T_LOWER, n);
+        var own:   TestWalk                    = TestWalk{key: n, all: false};
+        var all:   TestWalk                    = TestWalk{key: n, all: true};
+        val root:  QueryKey                    = QueryKey{kind: ?T_LOWER, key: n};
+        val w_own: err[fail.Fail]              = walk_products(?db, root, (?own)::ptr, t_walk_enter, t_walk_visit);
+        val w_all: err[fail.Fail]              = walk_products(?db, root, (?all)::ptr, t_walk_enter, t_walk_visit);
+        t_context_dnit(?ctx);
+        dnit(?db);
+        val code: i32 = (d::i32 + 1) * 10;
+        if (sel built.err || sel w_own.err || sel w_all.err) { ret code + 1; }
+        if (all.visits::u64 != n + 2)                        { ret code + 2; }
+        if (own.visits != 2)                                 { ret code + 3; }
+        d = d + 1;
+    }
+    ret 0;
+}
+
+test kind__a_malformed_row_is_refused_on_first_use_and_leaves_no_shard {
     var alloc: A.Allocator;
     page.make(?alloc);
     val opened: res[QueryDb, fail.Fail] = init(?alloc);
-    if (sel opened.err) { ret 6; }
+    if (sel opened.err) { ret 1; }
     var db: QueryDb = opened.ok;
     fin { dnit(?db); }
-    val beyond: err[fail.Fail] = register_input(?db, QUERY_KIND_COUNT::QueryKind);
-    if (sel beyond.ok) { ret 7; }
+    var ctx: TestQueryContext;
+    if (!t_context_init(?ctx, ?db, T_MODE_TOKENIZE)) { ret 2; }
+    fin { t_context_dnit(?ctx); }
+    val unowned:     Kind                        = Kind{name: "unowned", role: DERIVED, compute: t_compute};
+    val roleless:    Kind                        = Kind{name: "roleless", owner: KEY_FILE, compute: t_compute};
+    val idle:        Kind                        = Kind{name: "idle", role: DERIVED, owner: KEY_FILE};
+    val computing:   Kind                        = Kind{name: "computing", role: INPUT, owner: KEY_FILE, compute: t_compute};
+    val unequal:     Kind                        = Kind{name: "unequal", role: DERIVED, owner: KEY_FILE, compute: t_compute, equal: t_owned_equal};
+    val r_unowned:   res[*QueryEntry, fail.Fail] = t_get(?ctx, ?unowned, 1);
+    val r_roleless:  res[*QueryEntry, fail.Fail] = t_get(?ctx, ?roleless, 1);
+    val r_idle:      res[*QueryEntry, fail.Fail] = t_get(?ctx, ?idle, 1);
+    val r_unequal:   res[*QueryEntry, fail.Fail] = t_get(?ctx, ?unequal, 1);
+    val r_computing: err[fail.Fail]              = set_input(?db, ?computing, 1, "a"::*u8, 1);
+    # a metadata row is read only through the provider attached to it
+    val r_metadata: res[*QueryEntry, fail.Fail] = t_get(?ctx, ?T_REVISION, 1);
+    if (sel r_unowned.ok)   { ret 3; }
+    if (sel r_roleless.ok)  { ret 4; }
+    if (sel r_idle.ok)      { ret 5; }
+    if (sel r_unequal.ok)   { ret 6; }
+    if (sel r_computing.ok) { ret 7; }
+    if (sel r_metadata.ok)  { ret 8; }
+    if (db.kinds != 0)      { ret 9; }
+    # a well-formed row takes its shard on first use, once
+    val text:   err[fail.Fail]              = set_input(?db, ?T_TEXT, 1, "a"::*u8, 1);
+    val first:  res[*QueryEntry, fail.Fail] = t_get(?ctx, ?T_TOKENIZE, 1);
+    val second: res[*QueryEntry, fail.Fail] = t_get(?ctx, ?T_TOKENIZE, 1);
+    if (sel text.err || sel first.err || sel second.err)   { ret 10; }
+    if (db.kinds != 2 || shard_len(?db, ?T_TOKENIZE) != 1) { ret 11; }
+    if (computes(?db, ?T_TOKENIZE) != 1)                   { ret 12; }
     ret 0;
 }
 
@@ -2270,12 +2525,9 @@ test recompute__failed_not_cached_as_success {
     if (!t_context_init(?ctx, ?db, T_MODE_FAIL)) { ret 1; }
     fin { t_context_dnit(?ctx); }
 
-    val register_derived_r: err[fail.Fail] = register_derived(?db, Q_TOKENIZE);
-    if (sel register_derived_r.err) { ret 1; }
-
-    val t_get_r: res[*QueryEntry, fail.Fail] = t_get(?ctx, Q_TOKENIZE, 42);
+    val t_get_r: res[*QueryEntry, fail.Fail] = t_get(?ctx, ?T_TOKENIZE, 42);
     if (sel t_get_r.ok) { ret 1; }
-    val t_get_r2: res[*QueryEntry, fail.Fail] = t_get(?ctx, Q_TOKENIZE, 42);
+    val t_get_r2: res[*QueryEntry, fail.Fail] = t_get(?ctx, ?T_TOKENIZE, 42);
     if (sel t_get_r2.ok) { ret 1; }
 
     ret 0;
@@ -2292,25 +2544,22 @@ test set_input__identical_bytes_early_cutoff {
     if (!t_context_init(?ctx, ?db, T_MODE_FAIL)) { ret 1; }
     fin { t_context_dnit(?ctx); }
 
-    val register_input_r: err[fail.Fail] = register_input(?db, Q_PROJECT_ROOT);
-    if (sel register_input_r.err) { ret 1; }
-
-    val set_input_r: err[fail.Fail] = set_input(?db, Q_PROJECT_ROOT, 1, "hello"::*u8, 5);
+    val set_input_r: err[fail.Fail] = set_input(?db, ?T_TEXT, 1, "hello"::*u8, 5);
     if (sel set_input_r.err) { ret 1; }
-    val res_entry_a: res[*QueryEntry, fail.Fail] = t_get(?ctx, Q_PROJECT_ROOT, 1);
+    val res_entry_a: res[*QueryEntry, fail.Fail] = t_get(?ctx, ?T_TEXT, 1);
     if (sel res_entry_a.err) { ret 1; }
     val lc_a: Revision = res_entry_a.ok.last_changed;
 
-    val set_input_r2: err[fail.Fail] = set_input(?db, Q_PROJECT_ROOT, 1, "hello"::*u8, 5);
+    val set_input_r2: err[fail.Fail] = set_input(?db, ?T_TEXT, 1, "hello"::*u8, 5);
     if (sel set_input_r2.err) { ret 1; }
-    val res_entry_b: res[*QueryEntry, fail.Fail] = t_get(?ctx, Q_PROJECT_ROOT, 1);
+    val res_entry_b: res[*QueryEntry, fail.Fail] = t_get(?ctx, ?T_TEXT, 1);
     if (sel res_entry_b.err) { ret 1; }
     val lc_b: Revision = res_entry_b.ok.last_changed;
     if (lc_b != lc_a) { ret 1; }
 
-    val set_input_r3: err[fail.Fail] = set_input(?db, Q_PROJECT_ROOT, 1, "world"::*u8, 5);
+    val set_input_r3: err[fail.Fail] = set_input(?db, ?T_TEXT, 1, "world"::*u8, 5);
     if (sel set_input_r3.err) { ret 1; }
-    val res_entry_c: res[*QueryEntry, fail.Fail] = t_get(?ctx, Q_PROJECT_ROOT, 1);
+    val res_entry_c: res[*QueryEntry, fail.Fail] = t_get(?ctx, ?T_TEXT, 1);
     if (sel res_entry_c.err) { ret 1; }
     val lc_c: Revision = res_entry_c.ok.last_changed;
     if (lc_c <= lc_a) { ret 1; }
@@ -2318,7 +2567,7 @@ test set_input__identical_bytes_early_cutoff {
     ret 0;
 }
 
-test register_derived_owned__finalizer_frees_artifacts {
+test owned__finalizer_frees_artifacts {
     var alloc: A.Allocator;
     page.make(?alloc);
     val res_db: res[QueryDb, fail.Fail] = init(?alloc);
@@ -2335,35 +2584,30 @@ test register_derived_owned__finalizer_frees_artifacts {
     }
     t_live = 0;
 
-    val register_input_r: err[fail.Fail] = register_input(?db, Q_FILE_TEXT);
-    if (sel register_input_r.err) { ret 1; }
-    val register_derived_owned_r: err[fail.Fail] = register_derived_owned(?db, Q_PARSE, t_owned_finalize);
-    if (sel register_derived_owned_r.err) { ret 1; }
-
-    val set_input_r: err[fail.Fail] = set_input(?db, Q_FILE_TEXT, 1, "a"::*u8, 1);
+    val set_input_r: err[fail.Fail] = set_input(?db, ?T_TEXT, 1, "a"::*u8, 1);
     if (sel set_input_r.err) { ret 1; }
-    val res_g1: res[*QueryEntry, fail.Fail] = t_get(?ctx, Q_PARSE, 1);
+    val res_g1: res[*QueryEntry, fail.Fail] = t_get(?ctx, ?T_OWNED, 1);
     if (sel res_g1.err) { ret 1; }
     if (t_live != 1)    { ret 1; }
     val p1: ptr = t_handle_ptr(res_g1.ok);
 
-    val set_input_r2: err[fail.Fail] = set_input(?db, Q_FILE_TEXT, 1, "a"::*u8, 1);
+    val set_input_r2: err[fail.Fail] = set_input(?db, ?T_TEXT, 1, "a"::*u8, 1);
     if (sel set_input_r2.err) { ret 1; }
-    val res_g2: res[*QueryEntry, fail.Fail] = t_get(?ctx, Q_PARSE, 1);
+    val res_g2: res[*QueryEntry, fail.Fail] = t_get(?ctx, ?T_OWNED, 1);
     if (sel res_g2.err)                { ret 1; }
     if (t_live != 1)                   { ret 1; }
     if (t_handle_ptr(res_g2.ok) != p1) { ret 1; }
 
-    val set_input_r3: err[fail.Fail] = set_input(?db, Q_FILE_TEXT, 1, "b"::*u8, 1);
+    val set_input_r3: err[fail.Fail] = set_input(?db, ?T_TEXT, 1, "b"::*u8, 1);
     if (sel set_input_r3.err) { ret 1; }
-    val res_g3: res[*QueryEntry, fail.Fail] = t_get(?ctx, Q_PARSE, 1);
+    val res_g3: res[*QueryEntry, fail.Fail] = t_get(?ctx, ?T_OWNED, 1);
     if (sel res_g3.err)                { ret 1; }
     if (t_live != 1)                   { ret 1; }
     if (t_handle_ptr(res_g3.ok) == p1) { ret 1; }
 
-    val set_input_r4: err[fail.Fail] = set_input(?db, Q_FILE_TEXT, 2, "c"::*u8, 1);
+    val set_input_r4: err[fail.Fail] = set_input(?db, ?T_TEXT, 2, "c"::*u8, 1);
     if (sel set_input_r4.err) { ret 1; }
-    val t_get_r: res[*QueryEntry, fail.Fail] = t_get(?ctx, Q_PARSE, 2);
+    val t_get_r: res[*QueryEntry, fail.Fail] = t_get(?ctx, ?T_OWNED, 2);
     if (sel t_get_r.err) { ret 1; }
     if (t_live != 2)     { ret 1; }
 
@@ -2392,7 +2636,7 @@ fun t_emit_diag(diags: *diagnostic.DiagnosticStore, message: str) err[fail.Fail]
 #[testing]
 fun t_inner_diag_compute(ctx: *TestQueryContext, key: u64, a: *A.Allocator, diags: *diagnostic.DiagnosticStore) res[QueryOutput, fail.Fail] {
     val db: *QueryDb       = ctx.runtime.db;
-    val rd: err[fail.Fail] = depend[TestQueryContext](?ctx.runtime, ctx, Q_FILE_TEXT, key);
+    val rd: err[fail.Fail] = depend[TestQueryContext](?ctx.runtime, ctx, ?T_TEXT, key);
     if (sel rd.err) { ret res[QueryOutput, fail.Fail].err{rd.err}; }
     val de: err[fail.Fail] = t_emit_diag(diags, "query diagnostic");
     if (sel de.err) { ret res[QueryOutput, fail.Fail].err{de.err}; }
@@ -2409,11 +2653,11 @@ fun t_inner_diag_compute(ctx: *TestQueryContext, key: u64, a: *A.Allocator, diag
 #[testing]
 fun t_outer_diag_compute(ctx: *TestQueryContext, key: u64, a: *A.Allocator, diags: *diagnostic.DiagnosticStore) res[QueryOutput, fail.Fail] {
     val db: *QueryDb       = ctx.runtime.db;
-    val rd: err[fail.Fail] = depend[TestQueryContext](?ctx.runtime, ctx, Q_FILE_TEXT, key);
+    val rd: err[fail.Fail] = depend[TestQueryContext](?ctx.runtime, ctx, ?T_TEXT, key);
     if (sel rd.err) { ret res[QueryOutput, fail.Fail].err{rd.err}; }
     val de: err[fail.Fail] = t_emit_diag(diags, "outer query diagnostic");
     if (sel de.err) { ret res[QueryOutput, fail.Fail].err{de.err}; }
-    val g: res[*QueryEntry, fail.Fail] = acquire_entry[TestQueryContext](?ctx.runtime, ctx, Q_TOKENIZE, key);
+    val g: res[*QueryEntry, fail.Fail] = acquire_entry[TestQueryContext](?ctx.runtime, ctx, ?T_TOKENIZE, key);
     if (sel g.err) { ret res[QueryOutput, fail.Fail].err{g.err}; }
     val rb: res[*u8, A.Error] = A.allocate[u8](a, 1);
     if (sel rb.err) { ret res[QueryOutput, fail.Fail].err{fail.refused(rb.err)}; }
@@ -2436,41 +2680,35 @@ test get__reused_entry_replays_diagnostics {
     if (!t_context_init(?ctx, ?db, T_MODE_DIAG)) { ret 1; }
     fin { t_context_dnit(?ctx); }
 
-    val register_input_r: err[fail.Fail] = register_input(?db, Q_FILE_TEXT);
-    if (sel register_input_r.err) { ret 1; }
-    val register_derived_r: err[fail.Fail] = register_derived(?db, Q_TOKENIZE);
-    if (sel register_derived_r.err) { ret 1; }
-    val register_derived_r2: err[fail.Fail] = register_derived(?db, Q_PARSE);
-    if (sel register_derived_r2.err) { ret 1; }
-    val set_input_r: err[fail.Fail] = set_input(?db, Q_FILE_TEXT, 1, "x"::*u8, 1);
+    val set_input_r: err[fail.Fail] = set_input(?db, ?T_TEXT, 1, "x"::*u8, 1);
     if (sel set_input_r.err) { ret 1; }
 
     t_diag_reset(?ctx);
-    val t_get_r: res[*QueryEntry, fail.Fail] = t_get(?ctx, Q_TOKENIZE, 1);
+    val t_get_r: res[*QueryEntry, fail.Fail] = t_get(?ctx, ?T_TOKENIZE, 1);
     if (sel t_get_r.err)                 { ret 1; }
     if (diagnostic.len(?ctx.diags) != 1) { ret 1; }
 
     t_diag_reset(?ctx);
-    val t_get_r2: res[*QueryEntry, fail.Fail] = t_get(?ctx, Q_TOKENIZE, 1);
+    val t_get_r2: res[*QueryEntry, fail.Fail] = t_get(?ctx, ?T_TOKENIZE, 1);
     if (sel t_get_r2.err)                { ret 1; }
     if (diagnostic.len(?ctx.diags) != 1) { ret 1; }
 
     t_diag_reset(?ctx);
-    val t_get_r3: res[*QueryEntry, fail.Fail] = t_get(?ctx, Q_PARSE, 1);
+    val t_get_r3: res[*QueryEntry, fail.Fail] = t_get(?ctx, ?T_PARSE, 1);
     if (sel t_get_r3.err)                { ret 1; }
     if (diagnostic.len(?ctx.diags) != 2) { ret 1; }
 
     t_diag_reset(?ctx);
-    val t_get_r4: res[*QueryEntry, fail.Fail] = t_get(?ctx, Q_PARSE, 1);
+    val t_get_r4: res[*QueryEntry, fail.Fail] = t_get(?ctx, ?T_PARSE, 1);
     if (sel t_get_r4.err)                { ret 1; }
     if (diagnostic.len(?ctx.diags) != 2) { ret 1; }
 
-    val invalidate_r: err[fail.Fail] = invalidate(?db, Q_PARSE, 1);
-    if (sel invalidate_r.err)         { ret 1; }
-    if (shard_len(?db, Q_PARSE) != 0) { ret 1; }
+    val invalidate_r: err[fail.Fail] = invalidate(?db, ?T_PARSE, 1);
+    if (sel invalidate_r.err)          { ret 1; }
+    if (shard_len(?db, ?T_PARSE) != 0) { ret 1; }
 
     t_diag_reset(?ctx);
-    val t_get_r5: res[*QueryEntry, fail.Fail] = t_get(?ctx, Q_PARSE, 1);
+    val t_get_r5: res[*QueryEntry, fail.Fail] = t_get(?ctx, ?T_PARSE, 1);
     if (sel t_get_r5.err)                { ret 1; }
     if (diagnostic.len(?ctx.diags) != 2) { ret 1; }
 
@@ -2479,7 +2717,7 @@ test get__reused_entry_replays_diagnostics {
 
 #[testing]
 fun t_direct_tokenize_recompute(ctx: *TestQueryContext, key: u64, a: *A.Allocator, diags: *diagnostic.DiagnosticStore) res[QueryOutput, fail.Fail] {
-    val g: res[*QueryEntry, fail.Fail] = acquire_entry[TestQueryContext](?ctx.runtime, ctx, Q_TOKENIZE, key);
+    val g: res[*QueryEntry, fail.Fail] = acquire_entry[TestQueryContext](?ctx.runtime, ctx, ?T_TOKENIZE, key);
     if (sel g.err) { ret res[QueryOutput, fail.Fail].err{g.err}; }
     val seen:    *QueryEntry       = g.ok;
     val res_buf: res[*u8, A.Error] = A.allocate[u8](a, 1);
@@ -2504,30 +2742,26 @@ test get__a_stale_entry_under_recomputation_is_a_cycle_not_its_old_value {
     if (!t_context_init(?ctx, ?db, T_MODE_TOKENIZE)) { ret 1; }
     fin { t_context_dnit(?ctx); }
 
-    val register_input_r: err[fail.Fail] = register_input(?db, Q_FILE_TEXT);
-    if (sel register_input_r.err) { ret 1; }
-    val register_derived_r: err[fail.Fail] = register_derived(?db, Q_TOKENIZE);
-    if (sel register_derived_r.err) { ret 1; }
-    val set_input_r: err[fail.Fail] = set_input(?db, Q_FILE_TEXT, 1, "a"::*u8, 1);
+    val set_input_r: err[fail.Fail] = set_input(?db, ?T_TEXT, 1, "a"::*u8, 1);
     if (sel set_input_r.err) { ret 1; }
 
-    val first: res[*QueryEntry, fail.Fail] = t_get(?ctx, Q_TOKENIZE, 1);
+    val first: res[*QueryEntry, fail.Fail] = t_get(?ctx, ?T_TOKENIZE, 1);
     if (sel first.err) { ret 1; }
     val complete: *QueryEntry = first.ok;
     if (complete.value == nil || complete.value[0] != 42) { ret 1; }
 
-    val set_input_r2: err[fail.Fail] = set_input(?db, Q_FILE_TEXT, 1, "b"::*u8, 1);
+    val set_input_r2: err[fail.Fail] = set_input(?db, ?T_TEXT, 1, "b"::*u8, 1);
     if (sel set_input_r2.err) { ret 1; }
-    val valid_1: res[bool, fail.Fail] = t_reusable(?ctx, Q_TOKENIZE, 1);
+    val valid_1: res[bool, fail.Fail] = t_reusable(?ctx, ?T_TOKENIZE, 1);
     if (sel valid_1.err) { ret 1; }
     if (valid_1.ok)      { ret 1; }
 
     ctx.mode = T_MODE_DIRECT_TOKENIZE;
-    val again: res[*QueryEntry, fail.Fail] = t_get(?ctx, Q_TOKENIZE, 1);
+    val again: res[*QueryEntry, fail.Fail] = t_get(?ctx, ?T_TOKENIZE, 1);
     if (sel again.ok)                                           { ret 1; }
     if (!str_contains(fail.describe(again.err), "query cycle")) { ret 1; }
     if (db.stack.len != 0)                                      { ret 1; }
-    val valid_2: res[bool, fail.Fail] = t_reusable(?ctx, Q_TOKENIZE, 1);
+    val valid_2: res[bool, fail.Fail] = t_reusable(?ctx, ?T_TOKENIZE, 1);
     if (sel valid_2.err) { ret 1; }
     if (valid_2.ok)      { ret 1; }
 
@@ -2536,7 +2770,7 @@ test get__a_stale_entry_under_recomputation_is_a_cycle_not_its_old_value {
 
 #[testing]
 fun t_direct_cycle_compute(ctx: *TestQueryContext, key: u64, a: *A.Allocator, diags: *diagnostic.DiagnosticStore) res[QueryOutput, fail.Fail] {
-    val g: res[*QueryEntry, fail.Fail] = acquire_entry[TestQueryContext](?ctx.runtime, ctx, Q_SEMA, key);
+    val g: res[*QueryEntry, fail.Fail] = acquire_entry[TestQueryContext](?ctx.runtime, ctx, ?T_SEMA, key);
     if (sel g.err) { ret res[QueryOutput, fail.Fail].err{g.err}; }
     var out: QueryOutput;
     out.bytes = nil;
@@ -2554,28 +2788,25 @@ test get__a_cycle_fails_unwinds_and_is_never_reusable {
     var ctx: TestQueryContext;
     if (!t_context_init(?ctx, ?db, T_MODE_DIRECT)) { ret 1; }
     fin { t_context_dnit(?ctx); }
-    val sema:  err[fail.Fail] = register_derived(?db, Q_SEMA);
-    val lower: err[fail.Fail] = register_derived(?db, Q_LOWER);
-    if (sel sema.err || sel lower.err) { ret 1; }
 
     # direct self recursion, twice so a failed first attempt leaves nothing behind
     var attempt: u32 = 0;
     for (attempt < 2) {
-        val direct: res[*QueryEntry, fail.Fail] = t_get(?ctx, Q_SEMA, 1);
+        val direct: res[*QueryEntry, fail.Fail] = t_get(?ctx, ?T_SEMA, 1);
         if (sel direct.ok)     { ret 2; }
         if (db.stack.len != 0) { ret 3; }
         attempt = attempt + 1;
     }
-    val direct_ready: res[bool, fail.Fail] = t_reusable(?ctx, Q_SEMA, 1);
+    val direct_ready: res[bool, fail.Fail] = t_reusable(?ctx, ?T_SEMA, 1);
     if (sel direct_ready.err) { ret 4; }
     if (direct_ready.ok)      { ret 4; }
 
     ctx.mode = T_MODE_INDIRECT;
-    val indirect: res[*QueryEntry, fail.Fail] = t_get(?ctx, Q_SEMA, 2);
+    val indirect: res[*QueryEntry, fail.Fail] = t_get(?ctx, ?T_SEMA, 2);
     if (sel indirect.ok)   { ret 5; }
     if (db.stack.len != 0) { ret 6; }
-    val sema_ready:  res[bool, fail.Fail] = t_reusable(?ctx, Q_SEMA, 2);
-    val lower_ready: res[bool, fail.Fail] = t_reusable(?ctx, Q_LOWER, 2);
+    val sema_ready:  res[bool, fail.Fail] = t_reusable(?ctx, ?T_SEMA, 2);
+    val lower_ready: res[bool, fail.Fail] = t_reusable(?ctx, ?T_LOWER, 2);
     if (sel sema_ready.err)  { ret 7; }
     if (sema_ready.ok)       { ret 7; }
     if (sel lower_ready.err) { ret 8; }
@@ -2585,7 +2816,7 @@ test get__a_cycle_fails_unwinds_and_is_never_reusable {
 
 #[testing]
 fun t_cycle_a_compute(ctx: *TestQueryContext, key: u64, a: *A.Allocator, diags: *diagnostic.DiagnosticStore) res[QueryOutput, fail.Fail] {
-    val g: res[*QueryEntry, fail.Fail] = acquire_entry[TestQueryContext](?ctx.runtime, ctx, Q_LOWER, key);
+    val g: res[*QueryEntry, fail.Fail] = acquire_entry[TestQueryContext](?ctx.runtime, ctx, ?T_LOWER, key);
     if (sel g.err) { ret res[QueryOutput, fail.Fail].err{g.err}; }
     var out: QueryOutput;
     out.bytes = nil;
@@ -2595,7 +2826,7 @@ fun t_cycle_a_compute(ctx: *TestQueryContext, key: u64, a: *A.Allocator, diags: 
 
 #[testing]
 fun t_cycle_b_compute(ctx: *TestQueryContext, key: u64, a: *A.Allocator, diags: *diagnostic.DiagnosticStore) res[QueryOutput, fail.Fail] {
-    val g: res[*QueryEntry, fail.Fail] = acquire_entry[TestQueryContext](?ctx.runtime, ctx, Q_SEMA, key);
+    val g: res[*QueryEntry, fail.Fail] = acquire_entry[TestQueryContext](?ctx.runtime, ctx, ?T_SEMA, key);
     if (sel g.err) { ret res[QueryOutput, fail.Fail].err{g.err}; }
     var out: QueryOutput;
     out.bytes = nil;
@@ -2606,7 +2837,7 @@ fun t_cycle_b_compute(ctx: *TestQueryContext, key: u64, a: *A.Allocator, diags: 
 #[testing]
 fun t_parse_deps_on_tokenize(ctx: *TestQueryContext, key: u64, a: *A.Allocator, diags: *diagnostic.DiagnosticStore) res[QueryOutput, fail.Fail] {
     val db: *QueryDb       = ctx.runtime.db;
-    val rd: err[fail.Fail] = depend[TestQueryContext](?ctx.runtime, ctx, Q_TOKENIZE, key);
+    val rd: err[fail.Fail] = depend[TestQueryContext](?ctx.runtime, ctx, ?T_TOKENIZE, key);
     if (sel rd.err) { ret res[QueryOutput, fail.Fail].err{rd.err}; }
     val res_buf: res[*u8, A.Error] = A.allocate[u8](a, 1);
     if (sel res_buf.err) { ret res[QueryOutput, fail.Fail].err{fail.refused(res_buf.err)}; }
@@ -2629,31 +2860,24 @@ test invalidate__advances_the_revision_so_a_dependent_sees_it_stale {
     if (!t_context_init(?ctx, ?db, T_MODE_PARSE_DEPS)) { ret 1; }
     fin { t_context_dnit(?ctx); }
 
-    val register_input_r: err[fail.Fail] = register_input(?db, Q_FILE_TEXT);
-    if (sel register_input_r.err) { ret 1; }
-    val register_derived_r: err[fail.Fail] = register_derived(?db, Q_TOKENIZE);
-    if (sel register_derived_r.err) { ret 1; }
-    val register_derived_r2: err[fail.Fail] = register_derived(?db, Q_PARSE);
-    if (sel register_derived_r2.err) { ret 1; }
-
-    val set_input_r: err[fail.Fail] = set_input(?db, Q_FILE_TEXT, 1, "a"::*u8, 1);
+    val set_input_r: err[fail.Fail] = set_input(?db, ?T_TEXT, 1, "a"::*u8, 1);
     if (sel set_input_r.err) { ret 1; }
-    val t_get_r: res[*QueryEntry, fail.Fail] = t_get(?ctx, Q_TOKENIZE, 1);
+    val t_get_r: res[*QueryEntry, fail.Fail] = t_get(?ctx, ?T_TOKENIZE, 1);
     if (sel t_get_r.err) { ret 1; }
-    val t_get_r2: res[*QueryEntry, fail.Fail] = t_get(?ctx, Q_PARSE, 1);
+    val t_get_r2: res[*QueryEntry, fail.Fail] = t_get(?ctx, ?T_PARSE, 1);
     if (sel t_get_r2.err) { ret 1; }
-    val valid_6: res[bool, fail.Fail] = t_reusable(?ctx, Q_PARSE, 1);
+    val valid_6: res[bool, fail.Fail] = t_reusable(?ctx, ?T_PARSE, 1);
     if (sel valid_6.err) { ret 1; }
     if (!valid_6.ok)     { ret 1; }
 
-    val r1:           Revision       = peek_revision(?db, Q_TOKENIZE, 1);
-    val invalidate_r: err[fail.Fail] = invalidate(?db, Q_TOKENIZE, 1);
+    val r1:           Revision       = peek_revision(?db, ?T_TOKENIZE, 1);
+    val invalidate_r: err[fail.Fail] = invalidate(?db, ?T_TOKENIZE, 1);
     if (sel invalidate_r.err) { ret 1; }
-    val t_get_r3: res[*QueryEntry, fail.Fail] = t_get(?ctx, Q_TOKENIZE, 1);
-    if (sel t_get_r3.err)                        { ret 1; }
-    if (peek_revision(?db, Q_TOKENIZE, 1) <= r1) { ret 1; }
+    val t_get_r3: res[*QueryEntry, fail.Fail] = t_get(?ctx, ?T_TOKENIZE, 1);
+    if (sel t_get_r3.err)                         { ret 1; }
+    if (peek_revision(?db, ?T_TOKENIZE, 1) <= r1) { ret 1; }
 
-    val valid_7: res[bool, fail.Fail] = t_reusable(?ctx, Q_PARSE, 1);
+    val valid_7: res[bool, fail.Fail] = t_reusable(?ctx, ?T_PARSE, 1);
     if (sel valid_7.err) { ret 1; }
     if (valid_7.ok)      { ret 1; }
 
@@ -2670,9 +2894,7 @@ test init__first_revision_is_never_the_absent_sentinel {
 
     if (db.revision == 0) { ret 1; }
 
-    val register_derived_r: err[fail.Fail] = register_derived(?db, Q_SEMA);
-    if (sel register_derived_r.err)         { ret 1; }
-    if (peek_revision(?db, Q_SEMA, 1) != 0) { ret 1; }
+    if (peek_revision(?db, ?T_SEMA, 1) != 0) { ret 1; }
 
     ret 0;
 }
@@ -2680,11 +2902,11 @@ test init__first_revision_is_never_the_absent_sentinel {
 #[testing]
 fun t_dedup_owner_compute(ctx: *TestQueryContext, key: u64, a: *A.Allocator, diags: *diagnostic.DiagnosticStore) res[QueryOutput, fail.Fail] {
     val db:  *QueryDb       = ctx.runtime.db;
-    val rd1: err[fail.Fail] = depend[TestQueryContext](?ctx.runtime, ctx, Q_FILE_TEXT, key);
+    val rd1: err[fail.Fail] = depend[TestQueryContext](?ctx.runtime, ctx, ?T_TEXT, key);
     if (sel rd1.err) { ret res[QueryOutput, fail.Fail].err{rd1.err}; }
-    val rd2: err[fail.Fail] = depend[TestQueryContext](?ctx.runtime, ctx, Q_FILE_TEXT, key);
+    val rd2: err[fail.Fail] = depend[TestQueryContext](?ctx.runtime, ctx, ?T_TEXT, key);
     if (sel rd2.err) { ret res[QueryOutput, fail.Fail].err{rd2.err}; }
-    val g: res[*QueryEntry, fail.Fail] = acquire_entry[TestQueryContext](?ctx.runtime, ctx, Q_FILE_TEXT, key);
+    val g: res[*QueryEntry, fail.Fail] = acquire_entry[TestQueryContext](?ctx.runtime, ctx, ?T_TEXT, key);
     if (sel g.err) { ret res[QueryOutput, fail.Fail].err{g.err}; }
     val res_buf: res[*u8, A.Error] = A.allocate[u8](a, 1);
     if (sel res_buf.err) { ret res[QueryOutput, fail.Fail].err{fail.refused(res_buf.err)}; }
@@ -2707,14 +2929,9 @@ test record_dep__manual_and_automatic_edges_to_the_same_pair_dedupe {
     if (!t_context_init(?ctx, ?db, T_MODE_DEDUP)) { ret 1; }
     fin { t_context_dnit(?ctx); }
 
-    val register_input_r: err[fail.Fail] = register_input(?db, Q_FILE_TEXT);
-    if (sel register_input_r.err) { ret 1; }
-    val register_derived_r: err[fail.Fail] = register_derived(?db, Q_PARSE);
-    if (sel register_derived_r.err) { ret 1; }
-
-    val set_input_r: err[fail.Fail] = set_input(?db, Q_FILE_TEXT, 1, "a"::*u8, 1);
+    val set_input_r: err[fail.Fail] = set_input(?db, ?T_TEXT, 1, "a"::*u8, 1);
     if (sel set_input_r.err) { ret 1; }
-    val res_g: res[*QueryEntry, fail.Fail] = t_get(?ctx, Q_PARSE, 1);
+    val res_g: res[*QueryEntry, fail.Fail] = t_get(?ctx, ?T_PARSE, 1);
     if (sel res_g.err) { ret 1; }
 
     if (res_g.ok.dep_len != 1) { ret 1; }
@@ -2729,9 +2946,9 @@ test observe__requires_a_provider_and_an_active_computation {
     if (sel initialized.err) { ret 1; }
     var db: QueryDb = initialized.ok;
     fin { dnit(?db); }
-    val register_metadata_r: err[fail.Fail] = register_metadata(?db, Q_SEMA, RevisionProvider{});
+    val register_metadata_r: err[fail.Fail] = register_metadata(?db, ?T_REVISION, RevisionProvider{});
     if (sel register_metadata_r.ok) { ret 2; }
-    val observe_r: res[MetadataRevision, fail.Fail] = observe(?db, Q_SEMA, 1);
+    val observe_r: res[MetadataRevision, fail.Fail] = observe(?db, ?T_REVISION, 1);
     if (sel observe_r.ok) { ret 3; }
     ret 0;
 }
@@ -2762,18 +2979,14 @@ test get__diag_capture_failure_after_a_successful_compute_is_fatal {
         }
         t_live = 0;
 
-        val register_input_r: err[fail.Fail] = register_input(?db, Q_FILE_TEXT);
-        if (sel register_input_r.err) { ret 1; }
-        val register_derived_owned_r: err[fail.Fail] = register_derived_owned(?db, Q_PARSE, t_owned_finalize);
-        if (sel register_derived_owned_r.err) { ret 1; }
-        val set_input_r: err[fail.Fail] = set_input(?db, Q_FILE_TEXT, 1, "x"::*u8, 1);
+        val set_input_r: err[fail.Fail] = set_input(?db, ?T_TEXT, 1, "x"::*u8, 1);
         if (sel set_input_r.err) { ret 1; }
 
         val opened: res[Operation, fail.Fail] = begin(?db);
         if (sel opened.err) { ret 2; }
         val operation: Operation = opened.ok;
         T.fail_at_ordinal(?probe, T.attempt_count(?probe) + fail_at::usize);
-        val get_r: res[*QueryEntry, fail.Fail] = acquire_entry[TestQueryContext](?ctx.runtime, ?ctx, Q_PARSE, 1);
+        val get_r: res[*QueryEntry, fail.Fail] = acquire_entry[TestQueryContext](?ctx.runtime, ?ctx, ?T_OWNED, 1);
         T.clear_failure(?probe);
         val ended: err[fail.Fail] = end(?db, operation);
         var code:  i32            = 0;
@@ -2783,21 +2996,21 @@ test get__diag_capture_failure_after_a_successful_compute_is_fatal {
         }
         if (sel get_r.err) {
             if (!fail.is_message(get_r.err)
-                || sel ended.ok || t_live != 0 || shard_len(?db, Q_PARSE) != 0) { code = 4; }
+                || sel ended.ok || t_live != 0 || shard_len(?db, ?T_OWNED) != 0) { code = 4; }
         }
         if (sel get_r.ok) {
             if (sel ended.err || t_live != 1) { code = 5; }
         }
-        val t_present_r: err[fail.Fail] = t_present(?ctx, operation, Q_PARSE, 1);
+        val t_present_r: err[fail.Fail] = t_present(?ctx, operation, ?T_OWNED, 1);
         if (sel t_present_r.err) { code = 6; }
         if (sel get_r.err) {
-            val ready: res[bool, fail.Fail] = t_reusable(?ctx, Q_PARSE, 1);
+            val ready: res[bool, fail.Fail] = t_reusable(?ctx, ?T_OWNED, 1);
             if (sel ready.err) { code = 7; }
             if (sel ready.ok) {
                 if (ready.ok) { code = 8; }
             }
             t_diag_reset(?ctx);
-            val t_get_r: res[*QueryEntry, fail.Fail] = t_get(?ctx, Q_PARSE, 1);
+            val t_get_r: res[*QueryEntry, fail.Fail] = t_get(?ctx, ?T_OWNED, 1);
             if (sel t_get_r.err)                                { code = 9; }
             if (t_live != 1 || diagnostic.len(?ctx.diags) != 1) { code = 10; }
         }
@@ -2835,20 +3048,16 @@ test get__diag_replay_failure_on_a_cache_hit_is_surfaced {
         if (!released) { t_context_dnit(?ctx); }
     }
 
-    val register_input_r: err[fail.Fail] = register_input(?db, Q_FILE_TEXT);
-    if (sel register_input_r.err) { ret 1; }
-    val register_derived_r: err[fail.Fail] = register_derived(?db, Q_TOKENIZE);
-    if (sel register_derived_r.err) { ret 1; }
-    val set_input_r: err[fail.Fail] = set_input(?db, Q_FILE_TEXT, 1, "x"::*u8, 1);
+    val set_input_r: err[fail.Fail] = set_input(?db, ?T_TEXT, 1, "x"::*u8, 1);
     if (sel set_input_r.err) { ret 1; }
-    val t_get_r: res[*QueryEntry, fail.Fail] = t_get(?ctx, Q_TOKENIZE, 1);
+    val t_get_r: res[*QueryEntry, fail.Fail] = t_get(?ctx, ?T_TOKENIZE, 1);
     if (sel t_get_r.err) { ret 1; }
 
     diagnostic.store_dnit(?ctx.diags);
     T.fail_at_ordinal(?probe, 1);
     ctx.diags = diagnostic.store_init(T.allocator_of(?probe));
 
-    val replay_r: res[*QueryEntry, fail.Fail] = t_get(?ctx, Q_TOKENIZE, 1);
+    val replay_r: res[*QueryEntry, fail.Fail] = t_get(?ctx, ?T_TOKENIZE, 1);
     if (sel replay_r.ok) {
         T.clear_failure(?probe);
         ret 1;
@@ -2863,7 +3072,7 @@ test get__diag_replay_failure_on_a_cache_hit_is_surfaced {
     }
 
     T.clear_failure(?probe);
-    val t_get_r2: res[*QueryEntry, fail.Fail] = t_get(?ctx, Q_TOKENIZE, 1);
+    val t_get_r2: res[*QueryEntry, fail.Fail] = t_get(?ctx, ?T_TOKENIZE, 1);
     if (sel t_get_r2.err)                { ret 1; }
     if (diagnostic.len(?ctx.diags) != 1) { ret 1; }
 
@@ -2876,7 +3085,7 @@ test get__diag_replay_failure_on_a_cache_hit_is_surfaced {
 
 #[testing]
 fun t_auto_dep_outer_compute(ctx: *TestQueryContext, key: u64, a: *A.Allocator, diags: *diagnostic.DiagnosticStore) res[QueryOutput, fail.Fail] {
-    val g: res[*QueryEntry, fail.Fail] = acquire_entry[TestQueryContext](?ctx.runtime, ctx, Q_TOKENIZE, key);
+    val g: res[*QueryEntry, fail.Fail] = acquire_entry[TestQueryContext](?ctx.runtime, ctx, ?T_TOKENIZE, key);
     if (sel g.err) { ret res[QueryOutput, fail.Fail].err{g.err}; }
     val res_buf: res[*u8, A.Error] = A.allocate[u8](a, 1);
     if (sel res_buf.err) { ret res[QueryOutput, fail.Fail].err{fail.refused(res_buf.err)}; }
@@ -2910,50 +3119,43 @@ test get__allocation_failure_during_automatic_dependency_capture_fails_closed {
             if (!released) { t_context_dnit(?ctx); }
         }
 
-        val register_input_r: err[fail.Fail] = register_input(?db, Q_FILE_TEXT);
-        if (sel register_input_r.err) { ret 1; }
-        val register_derived_r: err[fail.Fail] = register_derived(?db, Q_TOKENIZE);
-        if (sel register_derived_r.err) { ret 1; }
-        val register_derived_r2: err[fail.Fail] = register_derived(?db, Q_PARSE);
-        if (sel register_derived_r2.err) { ret 1; }
-
-        val set_input_r: err[fail.Fail] = set_input(?db, Q_FILE_TEXT, 1, "a"::*u8, 1);
+        val set_input_r: err[fail.Fail] = set_input(?db, ?T_TEXT, 1, "a"::*u8, 1);
         if (sel set_input_r.err) { ret 1; }
-        val t_get_r: res[*QueryEntry, fail.Fail] = t_get(?ctx, Q_TOKENIZE, 1);
+        val t_get_r: res[*QueryEntry, fail.Fail] = t_get(?ctx, ?T_TOKENIZE, 1);
         if (sel t_get_r.err) { ret 1; }
 
         val opened: res[Operation, fail.Fail] = begin(?db);
         if (sel opened.err) { ret 2; }
         val operation: Operation = opened.ok;
         T.fail_at_ordinal(?probe, T.attempt_count(?probe) + fail_at::usize);
-        val res_g: res[*QueryEntry, fail.Fail] = acquire_entry[TestQueryContext](?ctx.runtime, ?ctx, Q_PARSE, 1);
+        val res_g: res[*QueryEntry, fail.Fail] = acquire_entry[TestQueryContext](?ctx.runtime, ?ctx, ?T_PARSE, 1);
         T.clear_failure(?probe);
         val ended: err[fail.Fail] = end(?db, operation);
         var code:  i32            = 0;
         if (sel res_g.err) {
             saw_failure = true;
             if (!fail.is_message(res_g.err)
-                || sel ended.ok || shard_len(?db, Q_PARSE) != 0) { code = 3; }
+                || sel ended.ok || shard_len(?db, ?T_PARSE) != 0) { code = 3; }
         }
         if (sel res_g.ok) {
             if (sel ended.err || res_g.ok.dep_len != 1) { code = 4; }
         }
-        val t_present_r: err[fail.Fail] = t_present(?ctx, operation, Q_PARSE, 1);
+        val t_present_r: err[fail.Fail] = t_present(?ctx, operation, ?T_PARSE, 1);
         if (sel t_present_r.err) { code = 5; }
         if (sel res_g.err) {
-            val ready: res[bool, fail.Fail] = t_reusable(?ctx, Q_PARSE, 1);
+            val ready: res[bool, fail.Fail] = t_reusable(?ctx, ?T_PARSE, 1);
             if (sel ready.err) { code = 6; }
             if (sel ready.ok) {
                 if (ready.ok) { code = 7; }
             }
-            val retry: res[*QueryEntry, fail.Fail] = t_get(?ctx, Q_PARSE, 1);
+            val retry: res[*QueryEntry, fail.Fail] = t_get(?ctx, ?T_PARSE, 1);
             if (sel retry.err) { code = 8; }
             if (sel retry.ok) {
                 val entry: *QueryEntry = retry.ok;
-                if (entry.dep_len != 1 || entry.deps[0].kind != Q_TOKENIZE || entry.deps[0].key != 1
+                if (entry.dep_len != 1 || key_of(ctx.runtime.db, Slot{kind: entry.deps[0].kind, key: 1}).kind != ?T_TOKENIZE || entry.deps[0].key != 1
                     || !entry.deps[0].observed || entry.value_len != 1 || entry.value[0] != 3) { code = 9; }
             }
-            val valid: res[bool, fail.Fail] = t_reusable(?ctx, Q_PARSE, 1);
+            val valid: res[bool, fail.Fail] = t_reusable(?ctx, ?T_PARSE, 1);
             if (sel valid.err) { code = 10; }
             if (sel valid.ok) {
                 if (!valid.ok) { code = 11; }
@@ -2971,6 +3173,11 @@ test get__allocation_failure_during_automatic_dependency_capture_fails_closed {
     if (!saw_failure) { ret 1; }
     ret 0;
 }
+
+#[testing]
+val M_TOKENIZE: Kind = Kind{name: "tokenize", role: DERIVED, owner: KEY_FILE, compute: metadata_fixture_compute};
+#[testing]
+val M_PARSE:    Kind = Kind{name: "parse", role: DERIVED, owner: KEY_FILE, compute: metadata_fixture_compute};
 
 #[testing]
 rec MetadataFixture {
@@ -2994,19 +3201,20 @@ fun metadata_fixture_read(raw: ptr, key: u64) res[MetadataRevision, fail.Fail] {
 }
 
 #[testing]
-fun metadata_fixture_compute(fixture: *MetadataFixture, kind: QueryKind, key: u64,
+fun metadata_fixture_compute(raw: ptr, kind: *Kind, key: u64,
     alloc: *A.Allocator, diags: *diagnostic.DiagnosticStore) res[QueryOutput, fail.Fail] {
-    var byte: u8 = 0;
-    if (kind == Q_TOKENIZE) {
+    val fixture: *MetadataFixture = raw::*MetadataFixture;
+    var byte:    u8               = 0;
+    if (kind == ?M_TOKENIZE) {
         fixture.child_calls = fixture.child_calls + 1;
-        val state: res[MetadataRevision, fail.Fail] = observe(?fixture.db, Q_TARGET, 0);
+        val state: res[MetadataRevision, fail.Fail] = observe(?fixture.db, ?T_REVISION, 0);
         if (sel state.err) { ret res[QueryOutput, fail.Fail].err{state.err}; }
         val stamp: MetadataRevision = state.ok;
         if (stamp.present) { byte = (stamp.revision & 0x7f)::u8 | 0x80; }
     }
     or {
         fixture.parent_calls = fixture.parent_calls + 1;
-        val child: res[*QueryEntry, fail.Fail] = acquire_entry[MetadataFixture](?fixture.runtime, fixture, Q_TOKENIZE, 0);
+        val child: res[*QueryEntry, fail.Fail] = acquire_entry[MetadataFixture](?fixture.runtime, fixture, ?M_TOKENIZE, 0);
         if (sel child.err) { ret res[QueryOutput, fail.Fail].err{child.err}; }
         byte = child.ok.value[0];
         if (fixture.constant_parent) { byte = 9; }
@@ -3037,17 +3245,12 @@ fun metadata_fixture_init(fixture: *MetadataFixture, alloc: *A.Allocator) err[fa
             diagnostic.store_dnit(?fixture.diags);
         }
     }
-    val runtime_r: res[QueryRuntime[MetadataFixture], fail.Fail] = runtime[MetadataFixture](
-        ?fixture.db, metadata_fixture_compute);
+    val runtime_r: res[QueryRuntime[MetadataFixture], fail.Fail] = runtime[MetadataFixture](?fixture.db);
     if (sel runtime_r.err) { ret err[fail.Fail].err{runtime_r.err}; }
     fixture.runtime = runtime_r.ok;
-    val meta: err[fail.Fail] = register_metadata(?fixture.db, Q_TARGET,
+    val meta: err[fail.Fail] = register_metadata(?fixture.db, ?T_REVISION,
         RevisionProvider{context: fixture::ptr, read: metadata_fixture_read});
-    val child:  err[fail.Fail] = register_derived(?fixture.db, Q_TOKENIZE);
-    val parent: err[fail.Fail] = register_derived(?fixture.db, Q_PARSE);
-    if (sel meta.err)   { ret meta; }
-    if (sel child.err)  { ret child; }
-    if (sel parent.err) { ret parent; }
+    if (sel meta.err) { ret meta; }
     handed = true;
     ret err[fail.Fail].ok{};
 }
@@ -3062,7 +3265,7 @@ fun metadata_fixture_dnit(fixture: *MetadataFixture) {
 fun metadata_fixture_get(fixture: *MetadataFixture) res[*QueryEntry, fail.Fail] {
     val opened: res[Operation, fail.Fail] = begin(?fixture.db);
     if (sel opened.err) { ret res[*QueryEntry, fail.Fail].err{opened.err}; }
-    val result: res[*QueryEntry, fail.Fail] = acquire_entry[MetadataFixture](?fixture.runtime, fixture, Q_PARSE, 0);
+    val result: res[*QueryEntry, fail.Fail] = acquire_entry[MetadataFixture](?fixture.runtime, fixture, ?M_PARSE, 0);
     val closed: err[fail.Fail]              = end(?fixture.db, opened.ok);
     if (sel result.err) { ret result; }
     if (sel closed.err) { ret res[*QueryEntry, fail.Fail].err{closed.err}; }
@@ -3124,13 +3327,13 @@ test operation__sampled_metadata_is_stable_and_a_changed_final_stamp_refuses_suc
     val opened: res[Operation, fail.Fail] = begin(?fixture.db);
     if (sel opened.err) { ret 2; }
     val operation: Operation                   = opened.ok;
-    val first:     res[*QueryEntry, fail.Fail] = acquire_entry[MetadataFixture](?fixture.runtime, ?fixture, Q_PARSE, 0);
+    val first:     res[*QueryEntry, fail.Fail] = acquire_entry[MetadataFixture](?fixture.runtime, ?fixture, ?M_PARSE, 0);
     if (sel first.err) {
         end(?fixture.db, operation);
         ret 3;
     }
     fixture.stamp.revision = 2;
-    val second: res[*QueryEntry, fail.Fail] = acquire_entry[MetadataFixture](?fixture.runtime, ?fixture, Q_PARSE, 0);
+    val second: res[*QueryEntry, fail.Fail] = acquire_entry[MetadataFixture](?fixture.runtime, ?fixture, ?M_PARSE, 0);
     if (sel second.err) {
         end(?fixture.db, operation);
         ret 4;
@@ -3147,6 +3350,9 @@ test operation__sampled_metadata_is_stable_and_a_changed_final_stamp_refuses_suc
 }
 
 #[testing]
+val P_NODE: Kind = Kind{name: "node", role: DERIVED, owner: KEY_FILE, compute: provenance_compute};
+
+#[testing]
 rec ProvenanceFixture {
     db:           QueryDb;
     runtime:      QueryRuntime[ProvenanceFixture];
@@ -3157,9 +3363,10 @@ rec ProvenanceFixture {
 }
 
 #[testing]
-fun provenance_compute(f: *ProvenanceFixture, kind: QueryKind, key: u64, a: *A.Allocator,
+fun provenance_compute(raw: ptr, kind: *Kind, key: u64, a: *A.Allocator,
     diags: *diagnostic.DiagnosticStore) res[QueryOutput, fail.Fail] {
-    if (kind != Q_PARSE || key >= 5) { ret res[QueryOutput, fail.Fail].err{fail.message("unexpected provenance fixture key")}; }
+    val f: *ProvenanceFixture = raw::*ProvenanceFixture;
+    if (kind != ?P_NODE || key >= 5) { ret res[QueryOutput, fail.Fail].err{fail.message("unexpected provenance fixture key")}; }
     f.calls[key] = f.calls[key] + 1;
     var message: str   = "branch";
     var offset:  usize = 11;
@@ -3182,12 +3389,12 @@ fun provenance_compute(f: *ProvenanceFixture, kind: QueryKind, key: u64, a: *A.A
     if (key <= 2) {
         var child: u64 = 3;
         if (key == 0) { child = 1; }
-        val read: res[*QueryEntry, fail.Fail] = acquire_entry[ProvenanceFixture](?f.runtime, f, Q_PARSE, child);
+        val read: res[*QueryEntry, fail.Fail] = acquire_entry[ProvenanceFixture](?f.runtime, f, ?P_NODE, child);
         if (sel read.err) {
             if (!f.swallow) { ret res[QueryOutput, fail.Fail].err{read.err}; }
         }
         if (key == 0) {
-            val second: res[*QueryEntry, fail.Fail] = acquire_entry[ProvenanceFixture](?f.runtime, f, Q_PARSE, 2);
+            val second: res[*QueryEntry, fail.Fail] = acquire_entry[ProvenanceFixture](?f.runtime, f, ?P_NODE, 2);
             if (sel second.err) { ret res[QueryOutput, fail.Fail].err{second.err}; }
         }
     }
@@ -3214,12 +3421,11 @@ fun provenance_init(f: *ProvenanceFixture, a: *A.Allocator) err[fail.Fail] {
             diagnostic.store_dnit(?f.presentation);
         }
     }
-    val configured: res[QueryRuntime[ProvenanceFixture], fail.Fail] = runtime[ProvenanceFixture](?f.db, provenance_compute);
+    val configured: res[QueryRuntime[ProvenanceFixture], fail.Fail] = runtime[ProvenanceFixture](?f.db);
     if (sel configured.err) { ret err[fail.Fail].err{configured.err}; }
     f.runtime = configured.ok;
-    val registered: err[fail.Fail] = register_derived(?f.db, Q_PARSE);
-    handed = !(sel registered.err);
-    ret registered;
+    handed    = true;
+    ret err[fail.Fail].ok{};
 }
 
 #[testing]
@@ -3261,7 +3467,7 @@ test collect__diamond_order_and_distinct_origins_are_cold_warm_invariant {
     val provenance_init_r: err[fail.Fail] = provenance_init(?f, ?a);
     if (sel provenance_init_r.err) { ret 1; }
     fin { provenance_dnit(?f); }
-    var roots:  [2]QueryKey                   = [2]QueryKey{QueryKey{kind: Q_PARSE, key: 0}, QueryKey{kind: Q_PARSE, key: 4}};
+    var roots:  [2]QueryKey                   = [2]QueryKey{QueryKey{kind: ?P_NODE, key: 0}, QueryKey{kind: ?P_NODE, key: 4}};
     val cold_r: res[*Presentation, fail.Fail] = provenance_collect(?f, ?roots[0], 2);
     if (sel cold_r.err) { ret 2; }
     val cold: *Presentation = cold_r.ok;
@@ -3299,12 +3505,12 @@ test collect__failed_child_cannot_be_swallowed_and_attempt_evidence_is_released 
     val opened: res[Operation, fail.Fail] = begin(?f.db);
     if (sel opened.err) { ret 2; }
     val operation: Operation                   = opened.ok;
-    val read:      res[*QueryEntry, fail.Fail] = acquire_entry[ProvenanceFixture](?f.runtime, ?f, Q_PARSE, 0);
+    val read:      res[*QueryEntry, fail.Fail] = acquire_entry[ProvenanceFixture](?f.runtime, ?f, ?P_NODE, 0);
     if (sel read.ok) { ret 3; }
     val closed: err[fail.Fail] = end(?f.db, operation);
     if (sel closed.ok)                                                               { ret 4; }
-    if (shard_len(?f.db, Q_PARSE) != 0 || f.calls[2] != 0 || f.db.attempts.len != 3) { ret 5; }
-    var root:      QueryKey                      = QueryKey{kind: Q_PARSE, key: 0};
+    if (shard_len(?f.db, ?P_NODE) != 0 || f.calls[2] != 0 || f.db.attempts.len != 3) { ret 5; }
+    var root:      QueryKey                      = QueryKey{kind: ?P_NODE, key: 0};
     val presented: res[*Presentation, fail.Fail] = collect(?f.db, operation, ?root, 1, ?a);
     if (sel presented.err) { ret 6; }
     val store: *Presentation = presented.ok;
@@ -3330,7 +3536,7 @@ test collect__allocation_refusal_keeps_one_retryable_presentation_owner {
     val opened: res[Operation, fail.Fail] = begin(?f.db);
     if (sel opened.err) { ret 2; }
     val operation:       Operation                   = opened.ok;
-    val acquire_entry_r: res[*QueryEntry, fail.Fail] = acquire_entry[ProvenanceFixture](?f.runtime, ?f, Q_PARSE, 0);
+    val acquire_entry_r: res[*QueryEntry, fail.Fail] = acquire_entry[ProvenanceFixture](?f.runtime, ?f, ?P_NODE, 0);
     if (sel acquire_entry_r.err) { ret 3; }
     val end_r: err[fail.Fail] = end(?f.db, operation);
     if (sel end_r.err) { ret 4; }
@@ -3340,14 +3546,14 @@ test collect__allocation_refusal_keeps_one_retryable_presentation_owner {
     fin { T.dnit(?probe); }
     T.fail_at_ordinal(?probe, 2);
     val refusing: *A.Allocator                  = T.allocator_of(?probe);
-    var root:     QueryKey                      = QueryKey{kind: Q_PARSE, key: 0};
+    var root:     QueryKey                      = QueryKey{kind: ?P_NODE, key: 0};
     val refused:  res[*Presentation, fail.Fail] = collect(?f.db, operation, ?root, 1, refusing);
     if (sel refused.ok)                                       { ret 6; }
     if (T.leaked(?probe))                                     { ret 6; }
     if (!f.db.presentation_pending || f.db.attempts.len != 4) { ret 7; }
     val begin_r: res[Operation, fail.Fail] = begin(?f.db);
     if (sel begin_r.ok) { ret 8; }
-    val invalidate_r: err[fail.Fail] = invalidate(?f.db, Q_PARSE, 0);
+    val invalidate_r: err[fail.Fail] = invalidate(?f.db, ?P_NODE, 0);
     if (sel invalidate_r.ok) { ret 9; }
     T.clear_failure(?probe);
     val retried: res[*Presentation, fail.Fail] = collect(?f.db, operation, ?root, 1, refusing);
@@ -3377,18 +3583,14 @@ test cycle__rich_failure_transfers_to_the_presentation_without_per_attempt_growt
     fin {
         if (!released) { t_context_dnit(?ctx); }
     }
-    val register_derived_r2: err[fail.Fail] = register_derived(?db, Q_SEMA);
-    val register_derived_r:  err[fail.Fail] = register_derived(?db, Q_LOWER);
-    if (sel register_derived_r2.err) { ret 4; }
-    if (sel register_derived_r.err)  { ret 4; }
     var baseline: usize = 0;
     var i:        u32   = 0;
     for (i < 4) {
-        val result: res[*QueryEntry, fail.Fail] = t_get(?ctx, Q_SEMA, 7);
+        val result: res[*QueryEntry, fail.Fail] = t_get(?ctx, ?T_SEMA, 7);
         if (sel result.ok) { ret 5; }
         val failure: fail.Fail = result.err;
         if (!sel failure.message)                                                                { ret 6; }
-        if (!str_contains(fail.describe(failure), "9:7 -> 10:7 -> 9:7"))                         { ret 6; }
+        if (!str_contains(fail.describe(failure), "sema:7 -> lower:7 -> sema:7"))                { ret 6; }
         if (ctx.last_presentation == nil || db.operation_message != nil || db.attempts.len != 0) { ret 7; }
         presentation_dnit(ctx.last_presentation);
         ctx.last_presentation = nil;
@@ -3417,15 +3619,15 @@ test reusable__validates_transitive_inputs_without_computing_the_requested_produ
     val begun: res[Operation, fail.Fail] = begin(?fixture.db);
     if (sel begun.err) { ret 4; }
     val operation: Operation            = begun.ok;
-    val stale:     res[bool, fail.Fail] = reusable[MetadataFixture](?fixture.runtime, ?fixture, Q_PARSE, 0);
+    val stale:     res[bool, fail.Fail] = reusable[MetadataFixture](?fixture.runtime, ?fixture, ?M_PARSE, 0);
     if (sel stale.err)                                         { ret 5; }
     if (stale.ok)                                              { ret 5; }
     if (fixture.child_calls != 2 || fixture.parent_calls != 1) { ret 6; }
-    val current: res[QueryView, fail.Fail] = get[MetadataFixture](?fixture.runtime, ?fixture, Q_PARSE, 0);
+    val current: res[QueryView, fail.Fail] = get[MetadataFixture](?fixture.runtime, ?fixture, ?M_PARSE, 0);
     if (sel current.err)                                       { ret 7; }
     if (current.ok.value[0] != 0x82)                           { ret 7; }
     if (fixture.child_calls != 2 || fixture.parent_calls != 2) { ret 8; }
-    val warm: res[bool, fail.Fail] = reusable[MetadataFixture](?fixture.runtime, ?fixture, Q_PARSE, 0);
+    val warm: res[bool, fail.Fail] = reusable[MetadataFixture](?fixture.runtime, ?fixture, ?M_PARSE, 0);
     if (sel warm.err) { ret 9; }
     if (!warm.ok)     { ret 9; }
     val end_r: err[fail.Fail] = end(?fixture.db, operation);
@@ -3435,7 +3637,7 @@ test reusable__validates_transitive_inputs_without_computing_the_requested_produ
     fixture.refuse = true;
     val retry: res[Operation, fail.Fail] = begin(?fixture.db);
     if (sel retry.err) { ret 12; }
-    val refused: res[bool, fail.Fail] = reusable[MetadataFixture](?fixture.runtime, ?fixture, Q_PARSE, 0);
+    val refused: res[bool, fail.Fail] = reusable[MetadataFixture](?fixture.runtime, ?fixture, ?M_PARSE, 0);
     if (sel refused.ok)                                                       { ret 13; }
     if (!str_equals(fail.describe(refused.err), "metadata producer refused")) { ret 14; }
     val end_r2: err[fail.Fail] = end(?fixture.db, retry.ok);
@@ -3445,18 +3647,18 @@ test reusable__validates_transitive_inputs_without_computing_the_requested_produ
 }
 
 #[testing]
-fun t_branch_compute(ctx: *TestQueryContext, kind: QueryKind, key: u64,
+fun t_branch_compute(ctx: *TestQueryContext, kind: *Kind, key: u64,
     a: *A.Allocator, diags: *diagnostic.DiagnosticStore) res[QueryOutput, fail.Fail] {
-    val selected: res[QueryView, fail.Fail] = get[TestQueryContext](?ctx.runtime, ctx, Q_FILE_TEXT, key);
+    val selected: res[QueryView, fail.Fail] = get[TestQueryContext](?ctx.runtime, ctx, ?T_TEXT, key);
     if (sel selected.err) { ret res[QueryOutput, fail.Fail].err{selected.err}; }
     val branch: u8 = selected.ok.value[0];
-    if (kind == Q_TOKENIZE && branch != 0) {
+    if (kind == ?T_TOKENIZE && branch != 0) {
         ret res[QueryOutput, fail.Fail].err{fail.message("the previous branch has no current definition")};
     }
     var byte: u8 = branch;
-    if (kind == Q_TOKENIZE) { byte = 77; }
+    if (kind == ?T_TOKENIZE) { byte = 77; }
     or (branch == 0) {
-        val child: res[QueryView, fail.Fail] = get[TestQueryContext](?ctx.runtime, ctx, Q_TOKENIZE, key);
+        val child: res[QueryView, fail.Fail] = get[TestQueryContext](?ctx.runtime, ctx, ?T_TOKENIZE, key);
         if (sel child.err) { ret res[QueryOutput, fail.Fail].err{child.err}; }
         byte = child.ok.value[0];
     }
@@ -3476,21 +3678,15 @@ test get__changed_selector_does_not_validate_an_obsolete_branch {
     var ctx: TestQueryContext;
     if (!t_context_init(?ctx, ?db, T_MODE_BRANCH)) { ret 3; }
     fin { t_context_dnit(?ctx); }
-    val register_input_r: err[fail.Fail] = register_input(?db, Q_FILE_TEXT);
-    if (sel register_input_r.err) { ret 4; }
-    val register_derived_r: err[fail.Fail] = register_derived(?db, Q_TOKENIZE);
-    if (sel register_derived_r.err) { ret 5; }
-    val register_derived_r2: err[fail.Fail] = register_derived(?db, Q_PARSE);
-    if (sel register_derived_r2.err) { ret 6; }
     var turn: u32 = 0;
     for (turn < 4) {
         var branch:      u8             = (turn & 1)::u8;
-        val set_input_r: err[fail.Fail] = set_input(?db, Q_FILE_TEXT, 1, ?branch, 1);
+        val set_input_r: err[fail.Fail] = set_input(?db, ?T_TEXT, 1, ?branch, 1);
         if (sel set_input_r.err) { ret 7; }
-        val reusable_r: res[bool, fail.Fail] = t_reusable(?ctx, Q_PARSE, 1);
+        val reusable_r: res[bool, fail.Fail] = t_reusable(?ctx, ?T_PARSE, 1);
         if (sel reusable_r.err) { ret 8; }
         if (reusable_r.ok)      { ret 8; }
-        val read: res[*QueryEntry, fail.Fail] = t_get(?ctx, Q_PARSE, 1);
+        val read: res[*QueryEntry, fail.Fail] = t_get(?ctx, ?T_PARSE, 1);
         if (sel read.err) { ret 9; }
         var expected: u8 = 77;
         if (branch != 0)                  { expected = branch; }
@@ -3508,7 +3704,7 @@ fun t_owned_equal(a: *u8, a_len: u32, b: *u8, b_len: u32) bool {
     ret @x == @y;
 }
 
-test register_derived_equatable__equal_candidates_keep_identity_and_release_once {
+test equatable__equal_candidates_keep_identity_and_release_once {
     var a:      A.Allocator;
     val make_r: err[A.Error] = page.make(?a);
     if (sel make_r.err) { ret 1; }
@@ -3523,21 +3719,17 @@ test register_derived_equatable__equal_candidates_keep_identity_and_release_once
     if (!t_context_init(?ctx, ?db, T_MODE_OWNED)) { ret 3; }
     fin { t_context_dnit(?ctx); }
     t_live = 0;
-    val register_input_r:             err[fail.Fail] = register_input(?db, Q_FILE_TEXT);
-    val register_derived_equatable_r: err[fail.Fail] = register_derived_equatable(?db, Q_PARSE, t_owned_finalize, t_owned_equal);
-    if (sel register_input_r.err)             { ret 4; }
-    if (sel register_derived_equatable_r.err) { ret 4; }
     var identity: ptr      = nil;
     var revision: Revision = 0;
     var i:        u8       = 0;
     var code:     i32      = 0;
     for (i < 4) {
-        val set_input_r: err[fail.Fail] = set_input(?db, Q_FILE_TEXT, 1, ?i, 1);
+        val set_input_r: err[fail.Fail] = set_input(?db, ?T_TEXT, 1, ?i, 1);
         if (sel set_input_r.err) {
             code = 5;
             brk;
         }
-        val result: res[*QueryEntry, fail.Fail] = t_get(?ctx, Q_PARSE, 1);
+        val result: res[*QueryEntry, fail.Fail] = t_get(?ctx, ?T_EQUATABLE, 1);
         if (sel result.err) {
             code = 6;
             brk;
@@ -3558,6 +3750,15 @@ test register_derived_equatable__equal_candidates_keep_identity_and_release_once
     if (t_live != 0) { ret 8; }
     ret code;
 }
+
+#[testing]
+val C_B: Kind = Kind{name: "b", role: DERIVED, owner: KEY_FILE, compute: chain_compute};
+#[testing]
+val C_C: Kind = Kind{name: "c", role: DERIVED, owner: KEY_FILE, compute: chain_compute};
+#[testing]
+val C_D: Kind = Kind{name: "d", role: DERIVED, owner: KEY_MODULE, compute: chain_compute};
+#[testing]
+val C_T: Kind = Kind{name: "t", role: DERIVED, owner: KEY_MODULE, compute: chain_compute};
 
 #[testing]
 rec ChainFixture {
@@ -3581,13 +3782,14 @@ fun chain_byte(alloc: *A.Allocator, byte: u8) res[QueryOutput, fail.Fail] {
     ret res[QueryOutput, fail.Fail].ok{QueryOutput{bytes: bytes, len: 1}};
 }
 
-# a = Q_FILE_TEXT input, b = Q_TOKENIZE over a, c = Q_PARSE over b, t = Q_SEMA over a and the Q_TARGET input
+# a = T_TEXT input, b over a, c over b, d over c, t over a and the T_TARGET input
 #[testing]
-fun chain_compute(f: *ChainFixture, kind: QueryKind, key: u64,
+fun chain_compute(raw: ptr, kind: *Kind, key: u64,
     alloc: *A.Allocator, diags: *diagnostic.DiagnosticStore) res[QueryOutput, fail.Fail] {
-    if (kind == Q_TOKENIZE) {
+    val f: *ChainFixture = raw::*ChainFixture;
+    if (kind == ?C_B) {
         f.b_calls = f.b_calls + 1;
-        val a: res[QueryView, fail.Fail] = get[ChainFixture](?f.runtime, f, Q_FILE_TEXT, 1);
+        val a: res[QueryView, fail.Fail] = get[ChainFixture](?f.runtime, f, ?T_TEXT, 1);
         if (sel a.err) { ret res[QueryOutput, fail.Fail].err{a.err}; }
         if (f.b_diag) {
             val emitted: err[fail.Fail] = diagnostic.report(diags, diagnostic_kind.SECRET_NOT_OBLIVIOUS, lang_source.file_id(0), lang_source.Span{offset: 0, len: 1}, "b changed");
@@ -3598,22 +3800,22 @@ fun chain_compute(f: *ChainFixture, kind: QueryKind, key: u64,
         if (f.b_constant) { byte = 7; }
         ret chain_byte(alloc, byte);
     }
-    if (kind == Q_PARSE) {
+    if (kind == ?C_C) {
         f.c_calls = f.c_calls + 1;
-        val b: res[QueryView, fail.Fail] = get[ChainFixture](?f.runtime, f, Q_TOKENIZE, 1);
+        val b: res[QueryView, fail.Fail] = get[ChainFixture](?f.runtime, f, ?C_B, 1);
         if (sel b.err) { ret res[QueryOutput, fail.Fail].err{b.err}; }
         ret chain_byte(alloc, b.ok.value[0] + 1);
     }
-    if (kind == Q_SEMA) {
+    if (kind == ?C_T) {
         f.t_calls = f.t_calls + 1;
-        val a: res[QueryView, fail.Fail] = get[ChainFixture](?f.runtime, f, Q_FILE_TEXT, 1);
+        val a: res[QueryView, fail.Fail] = get[ChainFixture](?f.runtime, f, ?T_TEXT, 1);
         if (sel a.err) { ret res[QueryOutput, fail.Fail].err{a.err}; }
-        val target: res[QueryView, fail.Fail] = get[ChainFixture](?f.runtime, f, Q_TARGET, 0);
+        val target: res[QueryView, fail.Fail] = get[ChainFixture](?f.runtime, f, ?T_TARGET, 0);
         if (sel target.err) { ret res[QueryOutput, fail.Fail].err{target.err}; }
         ret chain_byte(alloc, a.ok.value[0] + target.ok.value[0]);
     }
-    if (kind == Q_LOWER) {
-        val c: res[QueryView, fail.Fail] = get[ChainFixture](?f.runtime, f, Q_PARSE, 1);
+    if (kind == ?C_D) {
+        val c: res[QueryView, fail.Fail] = get[ChainFixture](?f.runtime, f, ?C_C, 1);
         if (sel c.err) { ret res[QueryOutput, fail.Fail].err{c.err}; }
         ret chain_byte(alloc, c.ok.value[0]);
     }
@@ -3636,23 +3838,11 @@ fun chain_init(f: *ChainFixture, alloc: *A.Allocator) err[fail.Fail] {
     fin {
         if (!handed) { dnit(?f.db); }
     }
-    val configured: res[QueryRuntime[ChainFixture], fail.Fail] = runtime[ChainFixture](?f.db, chain_compute);
+    val configured: res[QueryRuntime[ChainFixture], fail.Fail] = runtime[ChainFixture](?f.db);
     if (sel configured.err) { ret err[fail.Fail].err{configured.err}; }
     f.runtime = configured.ok;
-    val register_input_r2:   err[fail.Fail] = register_input(?f.db, Q_FILE_TEXT);
-    val register_input_r:    err[fail.Fail] = register_input(?f.db, Q_TARGET);
-    val register_derived_r4: err[fail.Fail] = register_derived(?f.db, Q_TOKENIZE);
-    val register_derived_r3: err[fail.Fail] = register_derived(?f.db, Q_PARSE);
-    val register_derived_r2: err[fail.Fail] = register_derived(?f.db, Q_SEMA);
-    val register_derived_r:  err[fail.Fail] = register_derived(?f.db, Q_LOWER);
-    if (sel register_input_r2.err)   { ret err[fail.Fail].err{fail.message("chain fixture registration failed")}; }
-    if (sel register_input_r.err)    { ret err[fail.Fail].err{fail.message("chain fixture registration failed")}; }
-    if (sel register_derived_r4.err) { ret err[fail.Fail].err{fail.message("chain fixture registration failed")}; }
-    if (sel register_derived_r3.err) { ret err[fail.Fail].err{fail.message("chain fixture registration failed")}; }
-    if (sel register_derived_r2.err) { ret err[fail.Fail].err{fail.message("chain fixture registration failed")}; }
-    if (sel register_derived_r.err)  { ret err[fail.Fail].err{fail.message("chain fixture registration failed")}; }
-    handed = true;
-    ret set_input(?f.db, Q_FILE_TEXT, 1, "a"::*u8, 1);
+    handed    = true;
+    ret set_input(?f.db, ?T_TEXT, 1, "a"::*u8, 1);
 }
 
 #[testing]
@@ -3664,7 +3854,7 @@ fun chain_dnit(f: *ChainFixture) {
 
 # one operation: read the root, end, and keep its presentation for inspection
 #[testing]
-fun chain_get(f: *ChainFixture, kind: QueryKind, key: u64) res[QueryView, fail.Fail] {
+fun chain_get(f: *ChainFixture, kind: *Kind, key: u64) res[QueryView, fail.Fail] {
     presentation_dnit(f.presentation);
     f.presentation = nil;
     val opened: res[Operation, fail.Fail] = begin(?f.db);
@@ -3682,7 +3872,7 @@ fun chain_get(f: *ChainFixture, kind: QueryKind, key: u64) res[QueryView, fail.F
 }
 
 #[testing]
-fun chain_reusable(f: *ChainFixture, kind: QueryKind, key: u64) res[bool, fail.Fail] {
+fun chain_reusable(f: *ChainFixture, kind: *Kind, key: u64) res[bool, fail.Fail] {
     val opened: res[Operation, fail.Fail] = begin(?f.db);
     if (sel opened.err) { ret res[bool, fail.Fail].err{opened.err}; }
     val operation: Operation            = opened.ok;
@@ -3703,23 +3893,23 @@ test get__a_change_below_b_refreshes_c_through_b {
     val chain_init_r: err[fail.Fail] = chain_init(?f, ?alloc);
     if (sel chain_init_r.err) { ret 2; }
     fin { chain_dnit(?f); }
-    val cold: res[QueryView, fail.Fail] = chain_get(?f, Q_PARSE, 1);
+    val cold: res[QueryView, fail.Fail] = chain_get(?f, ?C_C, 1);
     if (sel cold.err)                     { ret 3; }
     if (cold.ok.value[0] != 'a'::u8 + 1)  { ret 3; }
     if (f.b_calls != 1 || f.c_calls != 1) { ret 4; }
-    val c_before:    Revision       = peek_revision(?f.db, Q_PARSE, 1);
-    val b_before:    Revision       = peek_revision(?f.db, Q_TOKENIZE, 1);
-    val set_input_r: err[fail.Fail] = set_input(?f.db, Q_FILE_TEXT, 1, "b"::*u8, 1);
+    val c_before:    Revision       = peek_revision(?f.db, ?C_C, 1);
+    val b_before:    Revision       = peek_revision(?f.db, ?C_B, 1);
+    val set_input_r: err[fail.Fail] = set_input(?f.db, ?T_TEXT, 1, "b"::*u8, 1);
     if (sel set_input_r.err) { ret 5; }
-    val stale: res[bool, fail.Fail] = chain_reusable(?f, Q_PARSE, 1);
+    val stale: res[bool, fail.Fail] = chain_reusable(?f, ?C_C, 1);
     if (sel stale.err) { ret 6; }
     if (stale.ok)      { ret 6; }
-    val warm: res[QueryView, fail.Fail] = chain_get(?f, Q_PARSE, 1);
-    if (sel warm.err)                                                                                    { ret 7; }
-    if (warm.ok.value[0] != 'b'::u8 + 1)                                                                 { ret 7; }
-    if (f.b_calls != 2 || f.c_calls != 2)                                                                { ret 8; }
-    if (peek_revision(?f.db, Q_PARSE, 1) <= c_before || peek_revision(?f.db, Q_TOKENIZE, 1) <= b_before) { ret 9; }
-    val same: res[QueryView, fail.Fail] = chain_get(?f, Q_PARSE, 1);
+    val warm: res[QueryView, fail.Fail] = chain_get(?f, ?C_C, 1);
+    if (sel warm.err)                                                                           { ret 7; }
+    if (warm.ok.value[0] != 'b'::u8 + 1)                                                        { ret 7; }
+    if (f.b_calls != 2 || f.c_calls != 2)                                                       { ret 8; }
+    if (peek_revision(?f.db, ?C_C, 1) <= c_before || peek_revision(?f.db, ?C_B, 1) <= b_before) { ret 9; }
+    val same: res[QueryView, fail.Fail] = chain_get(?f, ?C_C, 1);
     if (sel same.err)   { ret 10; }
     if (f.b_calls != 2) { ret 10; }
     if (f.c_calls != 2) { ret 10; }
@@ -3735,18 +3925,18 @@ test get__an_equal_recomputed_b_cuts_off_c {
     if (sel chain_init_r.err) { ret 2; }
     fin { chain_dnit(?f); }
     f.b_constant = true;
-    val cold: res[QueryView, fail.Fail] = chain_get(?f, Q_PARSE, 1);
+    val cold: res[QueryView, fail.Fail] = chain_get(?f, ?C_C, 1);
     if (sel cold.err)          { ret 3; }
     if (cold.ok.value[0] != 8) { ret 3; }
-    val c_before:    Revision       = peek_revision(?f.db, Q_PARSE, 1);
-    val b_before:    Revision       = peek_revision(?f.db, Q_TOKENIZE, 1);
-    val set_input_r: err[fail.Fail] = set_input(?f.db, Q_FILE_TEXT, 1, "b"::*u8, 1);
+    val c_before:    Revision       = peek_revision(?f.db, ?C_C, 1);
+    val b_before:    Revision       = peek_revision(?f.db, ?C_B, 1);
+    val set_input_r: err[fail.Fail] = set_input(?f.db, ?T_TEXT, 1, "b"::*u8, 1);
     if (sel set_input_r.err) { ret 4; }
-    val warm: res[QueryView, fail.Fail] = chain_get(?f, Q_PARSE, 1);
-    if (sel warm.err)                                                                                    { ret 5; }
-    if (warm.ok.value[0] != 8)                                                                           { ret 5; }
-    if (f.b_calls != 2 || f.c_calls != 1)                                                                { ret 6; }
-    if (peek_revision(?f.db, Q_PARSE, 1) != c_before || peek_revision(?f.db, Q_TOKENIZE, 1) != b_before) { ret 7; }
+    val warm: res[QueryView, fail.Fail] = chain_get(?f, ?C_C, 1);
+    if (sel warm.err)                                                                           { ret 5; }
+    if (warm.ok.value[0] != 8)                                                                  { ret 5; }
+    if (f.b_calls != 2 || f.c_calls != 1)                                                       { ret 6; }
+    if (peek_revision(?f.db, ?C_C, 1) != c_before || peek_revision(?f.db, ?C_B, 1) != b_before) { ret 7; }
     ret 0;
 }
 
@@ -3758,25 +3948,35 @@ test get__a_failed_b_cannot_leave_a_stale_successful_c {
     val chain_init_r: err[fail.Fail] = chain_init(?f, ?alloc);
     if (sel chain_init_r.err) { ret 2; }
     fin { chain_dnit(?f); }
-    val chain_get_r: res[QueryView, fail.Fail] = chain_get(?f, Q_PARSE, 1);
+    val chain_get_r: res[QueryView, fail.Fail] = chain_get(?f, ?C_C, 1);
     if (sel chain_get_r.err) { ret 3; }
-    val set_input_r: err[fail.Fail] = set_input(?f.db, Q_FILE_TEXT, 1, "b"::*u8, 1);
+    val set_input_r: err[fail.Fail] = set_input(?f.db, ?T_TEXT, 1, "b"::*u8, 1);
     if (sel set_input_r.err) { ret 4; }
     f.b_fail = true;
-    val failed: res[QueryView, fail.Fail] = chain_get(?f, Q_PARSE, 1);
+    val failed: res[QueryView, fail.Fail] = chain_get(?f, ?C_C, 1);
     if (sel failed.ok)                                        { ret 5; }
     if (!str_contains(fail.describe(failed.err), "b failed")) { ret 5; }
     if (f.b_calls != 2 || f.c_calls != 1)                     { ret 6; }
-    val still: res[bool, fail.Fail] = chain_reusable(?f, Q_PARSE, 1);
+    val still: res[bool, fail.Fail] = chain_reusable(?f, ?C_C, 1);
     if (sel still.ok && still.ok) { ret 7; }
-    val again: res[QueryView, fail.Fail] = chain_get(?f, Q_PARSE, 1);
+    val again: res[QueryView, fail.Fail] = chain_get(?f, ?C_C, 1);
     if (sel again.ok)   { ret 8; }
     if (f.c_calls != 1) { ret 8; }
+    # between operations neither failed product's previous value is served
+    val c_shown: opt[QueryView] = published(?f.db, ?C_C, 1, 0);
+    val b_shown: opt[QueryView] = published(?f.db, ?C_B, 1, 0);
+    if (sel c_shown.some || sel b_shown.some) { ret 11; }
     f.b_fail = false;
-    val recovered: res[QueryView, fail.Fail] = chain_get(?f, Q_PARSE, 1);
+    val recovered: res[QueryView, fail.Fail] = chain_get(?f, ?C_C, 1);
     if (sel recovered.err)                    { ret 9; }
     if (recovered.ok.value[0] != 'b'::u8 + 1) { ret 9; }
     if (f.b_calls != 5 || f.c_calls != 2)     { ret 10; }
+    val shown: opt[QueryView] = published(?f.db, ?C_C, 1, 0);
+    if (sel shown.none)                     { ret 12; }
+    if (shown.some.value[0] != 'b'::u8 + 1) { ret 12; }
+    # a host whose operations began after the last one that reached the product does not see it
+    val later: opt[QueryView] = published(?f.db, ?C_C, 1, f.db.operation_sequence + 1);
+    if (sel later.some) { ret 13; }
     ret 0;
 }
 
@@ -3789,19 +3989,19 @@ test publish__changed_diagnostics_with_equal_bytes_are_observable {
     if (sel chain_init_r.err) { ret 2; }
     fin { chain_dnit(?f); }
     f.b_constant = true;
-    val chain_get_r: res[QueryView, fail.Fail] = chain_get(?f, Q_PARSE, 1);
+    val chain_get_r: res[QueryView, fail.Fail] = chain_get(?f, ?C_C, 1);
     if (sel chain_get_r.err)                        { ret 3; }
     if (diagnostic.len(?f.presentation.diags) != 0) { ret 4; }
-    val b_before:    Revision       = peek_revision(?f.db, Q_TOKENIZE, 1);
-    val set_input_r: err[fail.Fail] = set_input(?f.db, Q_FILE_TEXT, 1, "b"::*u8, 1);
+    val b_before:    Revision       = peek_revision(?f.db, ?C_B, 1);
+    val set_input_r: err[fail.Fail] = set_input(?f.db, ?T_TEXT, 1, "b"::*u8, 1);
     if (sel set_input_r.err) { ret 5; }
     f.b_diag = true;
-    val warm: res[QueryView, fail.Fail] = chain_get(?f, Q_PARSE, 1);
+    val warm: res[QueryView, fail.Fail] = chain_get(?f, ?C_C, 1);
     if (sel warm.err)                                                                                                         { ret 6; }
     if (warm.ok.value[0] != 8)                                                                                                { ret 6; }
     if (diagnostic.len(?f.presentation.diags) != 1 || !str_contains(f.presentation.diags.items.data[0].message, "b changed")) { ret 7; }
-    if (peek_revision(?f.db, Q_TOKENIZE, 1) == b_before)                                                                      { ret 8; }
-    val replayed: res[QueryView, fail.Fail] = chain_get(?f, Q_PARSE, 1);
+    if (peek_revision(?f.db, ?C_B, 1) == b_before)                                                                            { ret 8; }
+    val replayed: res[QueryView, fail.Fail] = chain_get(?f, ?C_C, 1);
     if (sel replayed.err)                           { ret 9; }
     if (diagnostic.len(?f.presentation.diags) != 1) { ret 9; }
     if (f.b_calls != 2)                             { ret 10; }
@@ -3816,24 +4016,24 @@ test get__a_selected_target_change_invalidates_products_that_read_it {
     val chain_init_r: err[fail.Fail] = chain_init(?f, ?alloc);
     if (sel chain_init_r.err) { ret 2; }
     fin { chain_dnit(?f); }
-    val set_input_r: err[fail.Fail] = set_input(?f.db, Q_TARGET, 0, "\x01"::*u8, 1);
+    val set_input_r: err[fail.Fail] = set_input(?f.db, ?T_TARGET, 0, "\x01"::*u8, 1);
     if (sel set_input_r.err) { ret 3; }
-    val host: res[QueryView, fail.Fail] = chain_get(?f, Q_SEMA, 1);
+    val host: res[QueryView, fail.Fail] = chain_get(?f, ?C_T, 1);
     if (sel host.err)                    { ret 4; }
     if (host.ok.value[0] != 'a'::u8 + 1) { ret 4; }
-    val before:       Revision       = peek_revision(?f.db, Q_SEMA, 1);
-    val set_input_r2: err[fail.Fail] = set_input(?f.db, Q_TARGET, 0, "\x02"::*u8, 1);
+    val before:       Revision       = peek_revision(?f.db, ?C_T, 1);
+    val set_input_r2: err[fail.Fail] = set_input(?f.db, ?T_TARGET, 0, "\x02"::*u8, 1);
     if (sel set_input_r2.err) { ret 5; }
-    val stale: res[bool, fail.Fail] = chain_reusable(?f, Q_SEMA, 1);
+    val stale: res[bool, fail.Fail] = chain_reusable(?f, ?C_T, 1);
     if (sel stale.err) { ret 6; }
     if (stale.ok)      { ret 6; }
-    val other: res[QueryView, fail.Fail] = chain_get(?f, Q_SEMA, 1);
-    if (sel other.err)                                               { ret 7; }
-    if (other.ok.value[0] != 'a'::u8 + 2)                            { ret 7; }
-    if (f.t_calls != 2 || peek_revision(?f.db, Q_SEMA, 1) <= before) { ret 8; }
-    val set_input_r3: err[fail.Fail] = set_input(?f.db, Q_TARGET, 0, "\x02"::*u8, 1);
+    val other: res[QueryView, fail.Fail] = chain_get(?f, ?C_T, 1);
+    if (sel other.err)                                             { ret 7; }
+    if (other.ok.value[0] != 'a'::u8 + 2)                          { ret 7; }
+    if (f.t_calls != 2 || peek_revision(?f.db, ?C_T, 1) <= before) { ret 8; }
+    val set_input_r3: err[fail.Fail] = set_input(?f.db, ?T_TARGET, 0, "\x02"::*u8, 1);
     if (sel set_input_r3.err) { ret 9; }
-    val chain_get_r: res[QueryView, fail.Fail] = chain_get(?f, Q_SEMA, 1);
+    val chain_get_r: res[QueryView, fail.Fail] = chain_get(?f, ?C_T, 1);
     if (sel chain_get_r.err) { ret 10; }
     if (f.t_calls != 2)      { ret 10; }
     ret 0;
@@ -3848,23 +4048,23 @@ test get__validating_a_stale_dependency_records_no_incidental_edge {
     if (sel chain_init_r.err) { ret 2; }
     fin { chain_dnit(?f); }
     f.b_constant = true;
-    val chain_get_r: res[QueryView, fail.Fail] = chain_get(?f, Q_PARSE, 1);
+    val chain_get_r: res[QueryView, fail.Fail] = chain_get(?f, ?C_C, 1);
     if (sel chain_get_r.err) { ret 3; }
-    val set_input_r: err[fail.Fail] = set_input(?f.db, Q_FILE_TEXT, 1, "b"::*u8, 1);
+    val set_input_r: err[fail.Fail] = set_input(?f.db, ?T_TEXT, 1, "b"::*u8, 1);
     if (sel set_input_r.err) { ret 4; }
-    val chain_get_r2: res[QueryView, fail.Fail] = chain_get(?f, Q_LOWER, 1);
+    val chain_get_r2: res[QueryView, fail.Fail] = chain_get(?f, ?C_D, 1);
     if (sel chain_get_r2.err)             { ret 5; }
     if (f.b_calls != 2 || f.c_calls != 1) { ret 6; }
-    val root: res[Vector[QueryKey], fail.Fail] = cached_dependency_keys(?f.db, Q_LOWER, 1, ?alloc);
+    val root: res[Vector[QueryKey], fail.Fail] = cached_dependency_keys(?f.db, ?C_D, 1, ?alloc);
     if (sel root.err) { ret 7; }
     var root_keys: Vector[QueryKey] = root.ok;
     fin { collections_vector.dnit[QueryKey](?root_keys); }
-    if (root_keys.len != 1 || root_keys.data[0].kind != Q_PARSE) { ret 8; }
-    val mid: res[Vector[QueryKey], fail.Fail] = cached_dependency_keys(?f.db, Q_PARSE, 1, ?alloc);
+    if (root_keys.len != 1 || root_keys.data[0].kind != ?C_C) { ret 8; }
+    val mid: res[Vector[QueryKey], fail.Fail] = cached_dependency_keys(?f.db, ?C_C, 1, ?alloc);
     if (sel mid.err) { ret 9; }
     var mid_keys: Vector[QueryKey] = mid.ok;
     fin { collections_vector.dnit[QueryKey](?mid_keys); }
-    if (mid_keys.len != 1 || mid_keys.data[0].kind != Q_TOKENIZE) { ret 10; }
+    if (mid_keys.len != 1 || mid_keys.data[0].kind != ?C_B) { ret 10; }
     ret 0;
 }
 
@@ -3875,10 +4075,24 @@ var t_retire_order:       u32      = 0;
 #[testing]
 var t_retire_inputs_live: bool     = true;
 
+# a child over the text input and a parent over the child, each with a finalizer that
+# records the order products are released in
+#[testing]
+val T_RETIRE_CHILD:  Kind = Kind{name: "child", role: DERIVED, owner: KEY_FILE, compute: t_compute, finalize: t_retire_child};
+#[testing]
+val T_RETIRE_PARENT: Kind = Kind{name: "parent", role: DERIVED, owner: KEY_FILE, compute: t_compute, finalize: t_retire_parent};
+
+#[testing]
+fun t_retire_parent_compute(ctx: *TestQueryContext, key: u64, a: *A.Allocator, diags: *diagnostic.DiagnosticStore) res[QueryOutput, fail.Fail] {
+    val rd: err[fail.Fail] = depend[TestQueryContext](?ctx.runtime, ctx, ?T_RETIRE_CHILD, key);
+    if (sel rd.err) { ret res[QueryOutput, fail.Fail].err{rd.err}; }
+    ret chain_byte(a, 7);
+}
+
 #[testing]
 fun t_retire_parent(value: *u8, len: u32, a: *A.Allocator) {
     t_retire_order = t_retire_order * 10 + 1;
-    val child: res[*QueryEntry, fail.Fail] = peek(t_retire_db, Q_TOKENIZE, 1);
+    val child: res[*QueryEntry, fail.Fail] = peek(t_retire_db, ?T_RETIRE_CHILD, 1);
     if (!(sel child.ok && child.ok.value != nil)) {
         t_retire_inputs_live = false;
     }
@@ -3887,7 +4101,7 @@ fun t_retire_parent(value: *u8, len: u32, a: *A.Allocator) {
 #[testing]
 fun t_retire_child(value: *u8, len: u32, a: *A.Allocator) {
     t_retire_order = t_retire_order * 10 + 2;
-    val input: res[*QueryEntry, fail.Fail] = peek(t_retire_db, Q_FILE_TEXT, 1);
+    val input: res[*QueryEntry, fail.Fail] = peek(t_retire_db, ?T_TEXT, 1);
     if (!(sel input.ok && input.ok.value != nil)) {
         t_retire_inputs_live = false;
     }
@@ -3904,35 +4118,29 @@ test retirement__dependents_retire_before_inputs_and_unrelated_roots_survive {
         t_retire_db = nil;
     }
     var ctx: TestQueryContext;
-    if (!t_context_init(?ctx, ?db, T_MODE_PARSE_DEPS)) { ret 1; }
+    if (!t_context_init(?ctx, ?db, T_MODE_RETIRE)) { ret 1; }
     fin { t_context_dnit(?ctx); }
-    val register_input_r: err[fail.Fail] = register_input(?db, Q_FILE_TEXT);
-    if (sel register_input_r.err) { ret 99; }
-    val register_derived_owned_r: err[fail.Fail] = register_derived_owned(?db, Q_TOKENIZE, t_retire_child);
-    if (sel register_derived_owned_r.err) { ret 99; }
-    val register_derived_owned_r2: err[fail.Fail] = register_derived_owned(?db, Q_PARSE, t_retire_parent);
-    if (sel register_derived_owned_r2.err) { ret 99; }
-    val set_input_r: err[fail.Fail] = set_input(?db, Q_FILE_TEXT, 1, "a"::*u8, 1);
+    val set_input_r: err[fail.Fail] = set_input(?db, ?T_TEXT, 1, "a"::*u8, 1);
     if (sel set_input_r.err) { ret 99; }
-    val set_input_r2: err[fail.Fail] = set_input(?db, Q_FILE_TEXT, 2, "unrelated"::*u8, 9);
+    val set_input_r2: err[fail.Fail] = set_input(?db, ?T_TEXT, 2, "unrelated"::*u8, 9);
     if (sel set_input_r2.err) { ret 99; }
-    val t_get_r: res[*QueryEntry, fail.Fail] = t_get(?ctx, Q_PARSE, 1);
+    val t_get_r: res[*QueryEntry, fail.Fail] = t_get(?ctx, ?T_RETIRE_PARENT, 1);
     if (sel t_get_r.err) { ret 99; }
-    val unrelated: Revision = peek_revision(?db, Q_FILE_TEXT, 2);
+    val unrelated: Revision = peek_revision(?db, ?T_TEXT, 2);
     t_retire_db          = ?db;
     t_retire_order       = 0;
     t_retire_inputs_live = true;
-    var root:                 QueryKey                           = QueryKey{kind: Q_FILE_TEXT, key: 1};
+    var root:                 QueryKey                           = QueryKey{kind: ?T_TEXT, key: 1};
     val prepare_retirement_r: res[PreparedRetirement, fail.Fail] = prepare_retirement(?db, ?root, 1);
     if (sel prepare_retirement_r.err) { ret 99; }
     var prepared: PreparedRetirement = prepare_retirement_r.ok;
     fin { discard_retirement(?prepared); }
-    if (t_retire_order != 0 || shard_len(?db, Q_FILE_TEXT) != 2) { ret 2; }
+    if (t_retire_order != 0 || shard_len(?db, ?T_TEXT) != 2) { ret 2; }
     val commit_retirement_r: err[fail.Fail] = commit_retirement(?prepared);
-    if (sel commit_retirement_r.err)                                                                         { ret 99; }
-    if (t_retire_order != 12 || !t_retire_inputs_live)                                                       { ret 3; }
-    if (shard_len(?db, Q_PARSE) != 0 || shard_len(?db, Q_TOKENIZE) != 0 || shard_len(?db, Q_FILE_TEXT) != 1) { ret 4; }
-    if (peek_revision(?db, Q_FILE_TEXT, 2) != unrelated || peek_revision(?db, Q_FILE_TEXT, 1) != 0)          { ret 5; }
+    if (sel commit_retirement_r.err)                                                                                   { ret 99; }
+    if (t_retire_order != 12 || !t_retire_inputs_live)                                                                 { ret 3; }
+    if (shard_len(?db, ?T_RETIRE_PARENT) != 0 || shard_len(?db, ?T_RETIRE_CHILD) != 0 || shard_len(?db, ?T_TEXT) != 1) { ret 4; }
+    if (peek_revision(?db, ?T_TEXT, 2) != unrelated || peek_revision(?db, ?T_TEXT, 1) != 0)                            { ret 5; }
     ret 0;
 }
 
@@ -3943,22 +4151,20 @@ test retirement__input_mutation_refuses_a_stale_preparation_without_retiring_own
     if (sel init_r.err) { ret 99; }
     var db: QueryDb = init_r.ok;
     fin { dnit(?db); }
-    val register_input_r: err[fail.Fail] = register_input(?db, Q_FILE_TEXT);
-    if (sel register_input_r.err) { ret 99; }
-    val set_input_r: err[fail.Fail] = set_input(?db, Q_FILE_TEXT, 1, "a"::*u8, 1);
+    val set_input_r: err[fail.Fail] = set_input(?db, ?T_TEXT, 1, "a"::*u8, 1);
     if (sel set_input_r.err) { ret 99; }
-    var root:                 QueryKey                           = QueryKey{kind: Q_FILE_TEXT, key: 1};
+    var root:                 QueryKey                           = QueryKey{kind: ?T_TEXT, key: 1};
     val prepare_retirement_r: res[PreparedRetirement, fail.Fail] = prepare_retirement(?db, ?root, 1);
     if (sel prepare_retirement_r.err) { ret 99; }
     var prepared: PreparedRetirement = prepare_retirement_r.ok;
     fin { discard_retirement(?prepared); }
-    val set_input_r2: err[fail.Fail] = set_input(?db, Q_FILE_TEXT, 1, "b"::*u8, 1);
+    val set_input_r2: err[fail.Fail] = set_input(?db, ?T_TEXT, 1, "b"::*u8, 1);
     if (sel set_input_r2.err) { ret 99; }
-    val changed:             Revision       = peek_revision(?db, Q_FILE_TEXT, 1);
+    val changed:             Revision       = peek_revision(?db, ?T_TEXT, 1);
     val commit_retirement_r: err[fail.Fail] = commit_retirement(?prepared);
-    if (sel commit_retirement_r.ok)                                                        { ret 1; }
-    if (shard_len(?db, Q_FILE_TEXT) != 1 || peek_revision(?db, Q_FILE_TEXT, 1) != changed) { ret 2; }
-    val peek_r: res[*QueryEntry, fail.Fail] = peek(?db, Q_FILE_TEXT, 1);
+    if (sel commit_retirement_r.ok)                                                { ret 1; }
+    if (shard_len(?db, ?T_TEXT) != 1 || peek_revision(?db, ?T_TEXT, 1) != changed) { ret 2; }
+    val peek_r: res[*QueryEntry, fail.Fail] = peek(?db, ?T_TEXT, 1);
     if (sel peek_r.err)                { ret 99; }
     if (peek_r.ok.value[0] != 'b'::u8) { ret 3; }
     ret 0;
@@ -3974,7 +4180,7 @@ val T_REJECT_REJECTED: u8 = 1;
 #[testing]
 fun t_reject_sema_compute(ctx: *TestQueryContext, key: u64, a: *A.Allocator, diags: *diagnostic.DiagnosticStore) res[QueryOutput, fail.Fail] {
     ctx.sema_calls = ctx.sema_calls + 1;
-    val selected: res[QueryView, fail.Fail] = get[TestQueryContext](?ctx.runtime, ctx, Q_FILE_TEXT, key);
+    val selected: res[QueryView, fail.Fail] = get[TestQueryContext](?ctx.runtime, ctx, ?T_TEXT, key);
     if (sel selected.err) { ret res[QueryOutput, fail.Fail].err{selected.err}; }
     val outcome_byte: u8 = selected.ok.value[0];
     if (outcome_byte == T_REJECT_REJECTED) {
@@ -3991,7 +4197,7 @@ fun t_reject_sema_compute(ctx: *TestQueryContext, key: u64, a: *A.Allocator, dia
 #[testing]
 fun t_reject_lower_compute(ctx: *TestQueryContext, key: u64, a: *A.Allocator, diags: *diagnostic.DiagnosticStore) res[QueryOutput, fail.Fail] {
     ctx.lower_calls = ctx.lower_calls + 1;
-    val typed: res[QueryView, fail.Fail] = get[TestQueryContext](?ctx.runtime, ctx, Q_SEMA, key);
+    val typed: res[QueryView, fail.Fail] = get[TestQueryContext](?ctx.runtime, ctx, ?T_SEMA, key);
     if (sel typed.err) { ret res[QueryOutput, fail.Fail].err{typed.err}; }
     var byte:   u8                  = typed.ok.value[0] + 10;
     val copied: res[*u8, fail.Fail] = bytes_dup(a, ?byte, 1);
@@ -4002,13 +4208,9 @@ fun t_reject_lower_compute(ctx: *TestQueryContext, key: u64, a: *A.Allocator, di
 #[testing]
 fun t_reject_fixture(ctx: *TestQueryContext, db: *QueryDb, outcomes: *u8, n: u64) i32 {
     if (!t_context_init(ctx, db, T_MODE_REJECT)) { ret 1; }
-    val text_r:  err[fail.Fail] = register_input(db, Q_FILE_TEXT);
-    val sema_r:  err[fail.Fail] = register_derived(db, Q_SEMA);
-    val lower_r: err[fail.Fail] = register_derived(db, Q_LOWER);
-    if (sel text_r.err || sel sema_r.err || sel lower_r.err) { ret 2; }
     var i: u64 = 0;
     for (i < n) {
-        val set_r: err[fail.Fail] = set_input(db, Q_FILE_TEXT, i + 1, ?outcomes[i::usize], 1);
+        val set_r: err[fail.Fail] = set_input(db, ?T_TEXT, i + 1, ?outcomes[i::usize], 1);
         if (sel set_r.err) { ret 3; }
         i = i + 1;
     }
@@ -4035,25 +4237,25 @@ test get__a_rejected_query_leaves_the_rest_of_its_operation_computing {
     val opened: res[Operation, fail.Fail] = begin(?db);
     if (sel opened.err) { ret 6; }
 
-    val rejected: res[*QueryEntry, fail.Fail] = acquire_entry[TestQueryContext](?ctx.runtime, ?ctx, Q_SEMA, 1);
+    val rejected: res[*QueryEntry, fail.Fail] = acquire_entry[TestQueryContext](?ctx.runtime, ?ctx, ?T_SEMA, 1);
     if (sel rejected.ok)            { ret 7; }
     if (!sel rejected.err.reported) { ret 7; }
 
     # the rejection above is key 1's answer, not the operation's
-    val independent: res[*QueryEntry, fail.Fail] = acquire_entry[TestQueryContext](?ctx.runtime, ?ctx, Q_SEMA, 2);
+    val independent: res[*QueryEntry, fail.Fail] = acquire_entry[TestQueryContext](?ctx.runtime, ?ctx, ?T_SEMA, 2);
     if (sel independent.err)                        { ret 8; }
     if (independent.ok.value[0] != T_REJECT_ACCEPT) { ret 8; }
 
     # a reader of the rejected key is itself rejected, and reads the memo
-    val dependent: res[*QueryEntry, fail.Fail] = acquire_entry[TestQueryContext](?ctx.runtime, ?ctx, Q_LOWER, 1);
+    val dependent: res[*QueryEntry, fail.Fail] = acquire_entry[TestQueryContext](?ctx.runtime, ?ctx, ?T_LOWER, 1);
     if (sel dependent.ok)            { ret 9; }
     if (!sel dependent.err.reported) { ret 9; }
 
-    val derived: res[*QueryEntry, fail.Fail] = acquire_entry[TestQueryContext](?ctx.runtime, ?ctx, Q_LOWER, 2);
+    val derived: res[*QueryEntry, fail.Fail] = acquire_entry[TestQueryContext](?ctx.runtime, ?ctx, ?T_LOWER, 2);
     if (sel derived.err)           { ret 10; }
     if (derived.ok.value[0] != 10) { ret 10; }
 
-    val later: res[*QueryEntry, fail.Fail] = acquire_entry[TestQueryContext](?ctx.runtime, ?ctx, Q_SEMA, 3);
+    val later: res[*QueryEntry, fail.Fail] = acquire_entry[TestQueryContext](?ctx.runtime, ?ctx, ?T_SEMA, 3);
     if (sel later.err)                        { ret 11; }
     if (later.ok.value[0] != T_REJECT_ACCEPT) { ret 11; }
 
@@ -4065,11 +4267,11 @@ test get__a_rejected_query_leaves_the_rest_of_its_operation_computing {
     if (!sel closed.err.reported) { ret 13; }
 
     var roots: [5]QueryKey;
-    roots[0] = QueryKey{kind: Q_SEMA, key: 1};
-    roots[1] = QueryKey{kind: Q_SEMA, key: 2};
-    roots[2] = QueryKey{kind: Q_LOWER, key: 1};
-    roots[3] = QueryKey{kind: Q_LOWER, key: 2};
-    roots[4] = QueryKey{kind: Q_SEMA, key: 3};
+    roots[0] = QueryKey{kind: ?T_SEMA, key: 1};
+    roots[1] = QueryKey{kind: ?T_SEMA, key: 2};
+    roots[2] = QueryKey{kind: ?T_LOWER, key: 1};
+    roots[3] = QueryKey{kind: ?T_LOWER, key: 2};
+    roots[4] = QueryKey{kind: ?T_SEMA, key: 3};
     val presented: res[*Presentation, fail.Fail] = collect(?db, opened.ok, ?roots[0], 5, ?a);
     if (sel presented.err) { ret 14; }
     val presentation: *Presentation = presented.ok;
@@ -4099,11 +4301,11 @@ test get__an_internal_failure_still_ends_its_operation {
     val opened: res[Operation, fail.Fail] = begin(?db);
     if (sel opened.err) { ret 6; }
 
-    val failed: res[*QueryEntry, fail.Fail] = acquire_entry[TestQueryContext](?ctx.runtime, ?ctx, Q_SEMA, 1);
+    val failed: res[*QueryEntry, fail.Fail] = acquire_entry[TestQueryContext](?ctx.runtime, ?ctx, ?T_SEMA, 1);
     if (sel failed.ok)                                                              { ret 7; }
     if (!str_equals(fail.describe(failed.err), "reject fixture failed internally")) { ret 7; }
 
-    val refused: res[*QueryEntry, fail.Fail] = acquire_entry[TestQueryContext](?ctx.runtime, ?ctx, Q_SEMA, 2);
+    val refused: res[*QueryEntry, fail.Fail] = acquire_entry[TestQueryContext](?ctx.runtime, ?ctx, ?T_SEMA, 2);
     if (sel refused.ok)                                                              { ret 8; }
     if (!str_equals(fail.describe(refused.err), "reject fixture failed internally")) { ret 8; }
     if (ctx.sema_calls != 1)                                                         { ret 8; }

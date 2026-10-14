@@ -331,9 +331,9 @@ fun reference_linkage_name(ctx: *lower_context.LowerContext, sym: *resolve.Symbo
     if (sym.kind == resolve.SYM_IMPORTED || !ast_id.decl_is_nil(sym.decl)) {
         val found: res[lower_context.Declared, fail.Fail] = lower_context.declared(ctx, sym);
         if (sel found.err) { ret res[intern.StrId, fail.Fail].err{found.err}; }
-        ret mangle.declaration_linkage_name(ctx.s, sym.origin, sym.canon, ast_id.decl_index(found.ok.declaration.decl));
+        ret mangle.declaration_linkage_name(ctx.s, resolve.origin_of(ctx.s, sym), sym.canon, ast_id.decl_index(found.ok.declaration.decl));
     }
-    ret mangle.linkage_name(ctx.s, session.module_fqn(ctx.s, sym.origin), sym.canon, intern.STR_NIL);
+    ret mangle.linkage_name(ctx.s, session.module_fqn(ctx.s, resolve.origin_of(ctx.s, sym)), sym.canon, intern.STR_NIL);
 }
 
 pub fun symbol_linkage_name(ctx: *lower_context.LowerContext, eid: ast_id.ExprId) intern.StrId {
@@ -413,7 +413,7 @@ fun module_const_value(ctx: *lower_context.LowerContext, sym: *resolve.Symbol) r
     if (sel scalar.none) { ret res[opt[comptime.CTValue], fail.Fail].ok{opt[comptime.CTValue].none{}}; }
 
     if (found.ok.declaration.gated && ctx.scope.env.build.union_build) {
-        val msg_r: res[str, fail.Fail] = lower_context.gated_lower_member_const_message(ctx, sym.name, session.module_fqn(ctx.s, sym.origin));
+        val msg_r: res[str, fail.Fail] = lower_context.gated_lower_member_const_message(ctx, sym.name, session.module_fqn(ctx.s, resolve.origin_of(ctx.s, sym)));
         if (sel msg_r.err) { ret res[opt[comptime.CTValue], fail.Fail].err{msg_r.err}; }
         val msg:       str = msg_r.ok;
         var zero_span: lang_source.Span;
@@ -469,7 +469,7 @@ fun stamp_body_provider(ctx: *lower_context.LowerContext, sym: *resolve.Symbol, 
     val d: *fe_sema.interface.Declaration = found.ok.declaration;
     if (d.kind != resolve.SYM_FUN)                                                                                 { ret err[fail.Fail].err{fail.message("lower: function reference acquired a non-function declaration")}; }
     if ((d.flags & fe_sema.interface.DECLARATION_EXT) != 0 || (d.flags & fe_sema.interface.DECLARATION_BODY) == 0) { ret err[fail.Fail].ok{}; }
-    val origin: intern.StrId = session.module_fqn(ctx.s, sym.origin);
+    val origin: intern.StrId = session.module_fqn(ctx.s, resolve.origin_of(ctx.s, sym));
     if (intern.str_is_nil(origin)) { ret err[fail.Fail].err{fail.message("lower: function body has no stable module identity")}; }
     val fn: *me_ir.Function = ?ctx.m.functions[v.data.fn_ix];
     if (!intern.str_is_nil(fn.body_module) && !intern.str_same(fn.body_module, origin)) {

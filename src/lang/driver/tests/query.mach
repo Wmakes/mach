@@ -54,6 +54,7 @@ use mach.lang.driver;
 use mach.lang.driver.passes;
 use mach.lang.driver.project;
 
+use mach.lang.driver.frontend;
 use mach.lang.driver.tests.testing.UT_VIEW_CFG_OFF;
 use mach.lang.driver.tests.testing.UT_VIEW_CFG_ON;
 use mach.lang.driver.tests.testing.UtQuerySnapshot;
@@ -440,7 +441,7 @@ test qexports__firewalls_a_body_edit {
     var p1:     project.Project        = p1r.ok;
     val stable: session.StableModuleId = ut_stable(?p1, ?s, "uniontest.main");
     if (module.stable_is_nil(stable)) { bad = 1; }
-    val q1: res[UtQuerySnapshot, fail.Fail] = ut_query_snapshot(?alloc, ?p1, query.Q_EXPORTS, module.stable_index(stable)::u64);
+    val q1: res[UtQuerySnapshot, fail.Fail] = ut_query_snapshot(?alloc, ?p1, ?frontend.EXPORTS, module.stable_index(stable)::u64);
     if (sel q1.err) {
         project.dnit_project(?p1);
         fs.remove_all(?alloc, root);
@@ -473,7 +474,7 @@ test qexports__firewalls_a_body_edit {
         ret 1;
     }
     var p2: project.Project                 = p2r.ok;
-    val q2: res[UtQuerySnapshot, fail.Fail] = ut_query_snapshot(?alloc, ?p2, query.Q_EXPORTS, module.stable_index(stable)::u64);
+    val q2: res[UtQuerySnapshot, fail.Fail] = ut_query_snapshot(?alloc, ?p2, ?frontend.EXPORTS, module.stable_index(stable)::u64);
     if (sel q2.err) {
         project.dnit_project(?p2);
         A.deallocate[u8](?alloc, fp1, len1::usize);
@@ -505,7 +506,7 @@ test qexports__firewalls_a_body_edit {
         ret 1;
     }
     var p3: project.Project                 = p3r.ok;
-    val q3: res[UtQuerySnapshot, fail.Fail] = ut_query_snapshot(?alloc, ?p3, query.Q_EXPORTS, module.stable_index(stable)::u64);
+    val q3: res[UtQuerySnapshot, fail.Fail] = ut_query_snapshot(?alloc, ?p3, ?frontend.EXPORTS, module.stable_index(stable)::u64);
     if (sel q3.err) {
         project.dnit_project(?p3);
         A.deallocate[u8](?alloc, fp1, len1::usize);
@@ -527,7 +528,7 @@ test qexports__firewalls_a_body_edit {
 
 #[testing]
 fun ut_resolve_lc(s: *session.Session, stable: session.StableModuleId) query.Revision {
-    val revision: query.Revision = query.peek_revision(?s.queries, query.Q_RESOLVE, module.stable_index(stable)::u64);
+    val revision: query.Revision = query.peek_revision(?s.queries, ?frontend.RESOLVE, module.stable_index(stable)::u64);
     if (revision == 0) { ret 0xFFFFFFFFFFFFFFFF; }
     ret revision;
 }
@@ -578,7 +579,7 @@ fun rr_struct_equal(sa: *session.Session, ra: *resolve.ResolveResult, sb: *sessi
         if (xa.flags != xb.flags)                            { ret false; }
         if (!ast_id.decl_same(xa.decl, xb.decl))             { ret false; }
         if (xa.slot != xb.slot)                              { ret false; }
-        if (!module.same(xa.origin, xb.origin))              { ret false; }
+        if (!module.stable_same(xa.origin, xb.origin))       { ret false; }
         if (!ut_name_text_equal(sa, xa.name, sb, xb.name))   { ret false; }
         if (!ut_name_text_equal(sa, xa.canon, sb, xb.canon)) { ret false; }
         i = i + 1;
@@ -590,7 +591,7 @@ fun rr_struct_equal(sa: *session.Session, ra: *resolve.ResolveResult, sb: *sessi
 fun ut_rr_of(p: *project.Project, s: *session.Session, fqn: str) *resolve.ResolveResult {
     val mid: session.ModuleId = ut_mid(p, s, fqn);
     if (module.is_nil(mid)) { ret nil; }
-    ret project.module_at(p, mid::u32).resolve_result;
+    ret frontend.resolved(p, project.module_at(p, mid::u32));
 }
 
 test resolve__pub_surface_change_equals_scratch {
@@ -907,21 +908,21 @@ test resolve__reexport_two_hop_propagation {
 
 #[testing]
 fun ut_surface_lc(s: *session.Session, stable: session.StableModuleId) query.Revision {
-    val revision: query.Revision = query.peek_revision(?s.queries, query.Q_LOWERED_SURFACE, module.stable_index(stable)::u64);
+    val revision: query.Revision = query.peek_revision(?s.queries, ?passes.LOWERED_SURFACE, module.stable_index(stable)::u64);
     if (revision == 0) { ret 0xFFFFFFFFFFFFFFFF; }
     ret revision;
 }
 
 #[testing]
 fun ut_codegen_lc(s: *session.Session, stable: session.StableModuleId) query.Revision {
-    val revision: query.Revision = query.peek_revision(?s.queries, query.Q_CODEGEN, module.stable_index(stable)::u64);
+    val revision: query.Revision = query.peek_revision(?s.queries, ?passes.CODEGEN, module.stable_index(stable)::u64);
     if (revision == 0) { ret 0xFFFFFFFFFFFFFFFF; }
     ret revision;
 }
 
 #[testing]
 fun ut_lower_lc_key(s: *session.Session, key: u64) query.Revision {
-    val revision: query.Revision = query.peek_revision(?s.queries, query.Q_LOWER, key);
+    val revision: query.Revision = query.peek_revision(?s.queries, ?passes.LOWER, key);
     if (revision == 0) { ret 0xFFFFFFFFFFFFFFFF; }
     ret revision;
 }
@@ -967,7 +968,7 @@ fun ut_mod_flag_count(m: *me_ir.Module, flag: u32) u32 {
 
 #[testing]
 fun ut_link_lc(s: *session.Session) query.Revision {
-    val revision: query.Revision = query.peek_revision(?s.queries, query.Q_LINK, 0);
+    val revision: query.Revision = query.peek_revision(?s.queries, ?passes.LINK, 0);
     if (revision == 0) { ret 0xFFFFFFFFFFFFFFFF; }
     ret revision;
 }
@@ -1100,7 +1101,7 @@ fun sr_struct_equal(sa: *session.Session, sra: *fe_sema.SemaResult, sb: *session
 fun ut_sr_of(p: *project.Project, s: *session.Session, fqn: str) *fe_sema.SemaResult {
     val mid: session.ModuleId = ut_mid(p, s, fqn);
     if (module.is_nil(mid)) { ret nil; }
-    ret project.module_at(p, mid::u32).sema_result;
+    ret frontend.typed(p, project.module_at(p, mid::u32));
 }
 
 test sema__body_edit_firewall_equals_scratch {
@@ -2522,9 +2523,12 @@ test lower__a_test_build_lowers_the_build_normal_object {
         session.dnit(?sA);
         ret 1;
     }
-    var p1: project.Project = p1r.ok;
-    p1.req.goal = request.GOAL_TESTS;
-    val run_sema_pass_r: err[fail.Fail] = driver.run_sema_pass(?p1);
+    var p1:   project.Project      = p1r.ok;
+    var req1: request.BuildRequest = p1.req;
+    req1.goal = request.GOAL_TESTS;
+    val reconfigured1:   err[fail.Fail] = driver.reconfigure(?p1, req1);
+    var run_sema_pass_r: err[fail.Fail] = reconfigured1;
+    if (sel reconfigured1.ok) { run_sema_pass_r = driver.run_sema_pass(?p1); }
     if (sel run_sema_pass_r.err) {
         project.dnit_project(?p1);
         fs.remove_all(?alloc, root);
@@ -2563,9 +2567,12 @@ test lower__a_test_build_lowers_the_build_normal_object {
         session.dnit(?sA);
         ret 1;
     }
-    var p2: project.Project = p2r.ok;
-    p2.req.goal = request.GOAL_ARTIFACT;
-    val run_sema_pass_r2: err[fail.Fail] = driver.run_sema_pass(?p2);
+    var p2:   project.Project      = p2r.ok;
+    var req2: request.BuildRequest = p2.req;
+    req2.goal = request.GOAL_ARTIFACT;
+    val reconfigured2:    err[fail.Fail] = driver.reconfigure(?p2, req2);
+    var run_sema_pass_r2: err[fail.Fail] = reconfigured2;
+    if (sel reconfigured2.ok) { run_sema_pass_r2 = driver.run_sema_pass(?p2); }
     if (sel run_sema_pass_r2.err) {
         project.dnit_project(?p2);
         fs.remove_all(?alloc, root);
@@ -3700,22 +3707,22 @@ fun ut_l9_revisions(alloc: *A.Allocator, s: *session.Session, root: str, out: *U
     val main: session.StableModuleId = ut_stable(?p, s, "uniontest.main");
     if (module.stable_is_nil(dep) || module.stable_is_nil(main)) { ret 3; }
     val main_mid: session.ModuleId    = ut_mid(?p, s, "uniontest.main");
-    val sr:       *fe_sema.SemaResult = project.module_at(?p, main_mid::u32).sema_result;
+    val sr:       *fe_sema.SemaResult = frontend.typed(?p, project.module_at(?p, main_mid::u32));
     if (sr == nil || sr.decl_count < 2) { ret 4; }
     # the projection is read while the pass's installation is live: a later query phase resets it
     out.disc_bytes = type.tag_discriminator_bytes(?s.types, sr.decl_type[1]);
     out.case_count = type.field_count(?s.types, sr.decl_type[1]);
-    val typed: res[UtQuerySnapshot, fail.Fail] = ut_query_snapshot(alloc, ?p, query.Q_TYPED_EXPORTS, module.stable_index(dep)::u64);
+    val typed: res[UtQuerySnapshot, fail.Fail] = ut_query_snapshot(alloc, ?p, ?frontend.TYPED_EXPORTS, module.stable_index(dep)::u64);
     if (sel typed.err) { ret 5; }
     val typed_snapshot: UtQuerySnapshot = typed.ok;
     if (typed_snapshot.value != nil) { A.deallocate[u8](alloc, typed_snapshot.value, typed_snapshot.value_len::usize); }
     out.dep = typed_snapshot.last_changed;
-    val public: res[UtQuerySnapshot, fail.Fail] = ut_query_snapshot(alloc, ?p, query.Q_EXPORTS, module.stable_index(dep)::u64);
+    val public: res[UtQuerySnapshot, fail.Fail] = ut_query_snapshot(alloc, ?p, ?frontend.EXPORTS, module.stable_index(dep)::u64);
     if (sel public.err) { ret 6; }
     val public_snapshot: UtQuerySnapshot = public.ok;
     if (public_snapshot.value != nil) { A.deallocate[u8](alloc, public_snapshot.value, public_snapshot.value_len::usize); }
     out.dep_public = public_snapshot.last_changed;
-    val checked: res[UtQuerySnapshot, fail.Fail] = ut_query_snapshot(alloc, ?p, query.Q_SEMA, module.stable_index(main)::u64);
+    val checked: res[UtQuerySnapshot, fail.Fail] = ut_query_snapshot(alloc, ?p, ?frontend.SEMA, module.stable_index(main)::u64);
     if (sel checked.err) { ret 7; }
     val checked_snapshot: UtQuerySnapshot = checked.ok;
     if (checked_snapshot.value != nil) { A.deallocate[u8](alloc, checked_snapshot.value, checked_snapshot.value_len::usize); }
@@ -3867,11 +3874,12 @@ test gate__warm_rebuild_reuses_products_and_replays_diagnostics {
     project.dnit_project(?p);
     if (sel cold_copy.err) { ret 4; }
 
-    val warm: res[project.Project, fail.Fail] = ut_gate_rebuild(?s, root);
+    val cold_computes: u64                             = ut_frontend_computes(?s);
+    val warm:          res[project.Project, fail.Fail] = ut_gate_rebuild(?s, root);
     if (sel warm.err) { ret 6; }
     p = warm.ok;
     val warm_copy:  err[fail.Fail] = diagnostic.replay_into(?warm_diags, ?s.diags);
-    val recomputed: u32            = ut_frontend_computes(?p);
+    val recomputed: u64            = ut_frontend_computes(?s) - cold_computes;
     project.dnit_project(?p);
     if (sel warm_copy.err) { ret 7; }
     if (recomputed != 0)   { ret 12; }
@@ -3917,10 +3925,11 @@ test stage_bindings__cached_products_read_beside_a_rebuilt_load {
     if (sel name_r.err) { ret 3; }
     var round: u32 = 0;
     for (round < 2) {
-        val built: res[project.Project, fail.Fail] = ut_gate_rebuild(?s, root);
+        val before: u64                             = ut_frontend_computes(?s);
+        val built:  res[project.Project, fail.Fail] = ut_gate_rebuild(?s, root);
         if (sel built.err) { ret 10 + round::i32; }
         var p:   project.Project = built.ok;
-        val bad: i32             = ut_stage_bindings(?p, ?s, name_r.ok, round == 1);
+        val bad: i32             = ut_stage_bindings(?p, ?s, name_r.ok, round == 1 && ut_frontend_computes(?s) != before);
         project.dnit_project(?p);
         if (bad != 0) { ret 20 + round::i32 * 10 + bad; }
         round = round + 1;
@@ -3929,13 +3938,11 @@ test stage_bindings__cached_products_read_beside_a_rebuilt_load {
 }
 
 #[testing]
-fun ut_stage_bindings(p: *project.Project, s: *session.Session, name: intern.StrId, warm: bool) i32 {
-    if (warm && ut_frontend_computes(p) != 0) { ret 1; }
-    val m:        *project.ModuleEntry = project.module_at(p, ut_mid(p, s, "uniontest.main")::u32);
-    val loaded:   u32                  = ut_element_type(?m.load.ctx, name);
-    val prepared: err[fail.Fail]       = passes.lower_scope_prepare(m);
-    if (sel prepared.err) { ret 2; }
-    val scoped: res[*comptime.ComptimeCtx, fail.Fail] = passes.lower_scope_of(m);
+fun ut_stage_bindings(p: *project.Project, s: *session.Session, name: intern.StrId, recomputed: bool) i32 {
+    if (recomputed) { ret 1; }
+    val m:      *project.ModuleEntry                  = project.module_at(p, ut_mid(p, s, "uniontest.main")::u32);
+    val loaded: u32                                   = ut_element_type(?m.load.ctx, name);
+    val scoped: res[*comptime.ComptimeCtx, fail.Fail] = frontend.lowering_scope(p, m);
     if (sel scoped.err) { ret 2; }
     val typed: u32 = ut_element_type(scoped.ok, name);
     if (typed == 0 || typed == loaded) { ret 3; }
@@ -3952,11 +3959,11 @@ fun ut_element_type(c: *comptime.ComptimeCtx, name: intern.StrId) u32 {
     ret named.value.data.celem.ty;
 }
 
-# the resolve, export and sema products a build computed rather than reused
+# the resolve, export and sema products the session computed rather than reused, so far
 #[testing]
-fun ut_frontend_computes(p: *project.Project) u32 {
-    ret p.computes[query.Q_RESOLVE::u32] + p.computes[query.Q_EXPORTS::u32] + p.computes[query.Q_SEMA::u32]
-        + p.computes[query.Q_TYPED_EXPORTS::u32];
+fun ut_frontend_computes(s: *session.Session) u64 {
+    ret query.computes(?s.queries, ?frontend.RESOLVE) + query.computes(?s.queries, ?frontend.EXPORTS)
+        + query.computes(?s.queries, ?frontend.SEMA) + query.computes(?s.queries, ?frontend.TYPED_EXPORTS);
 }
 
 #[testing]
@@ -3979,8 +3986,8 @@ fun ut_view_counts(p: *project.Project, s: *session.Session) UtViewCounts {
         if (module.same(p.topo[i], extra)) { c.extra = true; }
         i = i + 1;
     }
-    c.views   = query.shard_len(?s.queries, query.Q_LOAD_VIEW);
-    c.resolve = query.shard_len(?s.queries, query.Q_RESOLVE);
+    c.views   = query.shard_len(?s.queries, ?frontend.LOAD_VIEW);
+    c.resolve = query.shard_len(?s.queries, ?frontend.RESOLVE);
     ret c;
 }
 
@@ -4072,19 +4079,12 @@ fun ut_keyed(s: *session.Session, fqn: str) u32 {
     if (sel idr.err) { ret 0; }
     val stable: session.StableModuleId = session.stable_module_id_lookup(s, idr.ok);
     if (module.stable_is_nil(stable)) { ret 0; }
-    var kinds: [7]query.QueryKind = [7]query.QueryKind{query.Q_RESOLVE, query.Q_EXPORTS,
-        query.Q_LOAD_VIEW, query.Q_SEMA, query.Q_TYPED_EXPORTS, query.Q_MODULE_NUMBER, query.Q_LOWERED_SURFACE};
+    var kinds: [7]*query.Kind = [7]*query.Kind{?frontend.RESOLVE, ?frontend.EXPORTS,
+        ?frontend.LOAD_VIEW, ?frontend.SEMA, ?frontend.TYPED_EXPORTS, ?frontend.MODULE_NUMBER, ?passes.LOWERED_SURFACE};
     var total: u32 = 0;
     var k:     u32 = 0;
     for (k < 7) {
-        if (kinds[k]::u32 < s.queries.kinds) {
-            val sh: *query.QueryShard = ?s.queries.storage[kinds[k]::u32];
-            var j:  usize             = 0;
-            for (j < sh.index.len) {
-                if (sh.index.data[j].key::u32 == stable::u32) { total = total + 1; }
-                j = j + 1;
-            }
-        }
+        if (query.peek_revision(?s.queries, kinds[k], module.stable_index(stable)::u64) != 0) { total = total + 1; }
         k = k + 1;
     }
     ret total;
@@ -4099,13 +4099,7 @@ fun ut_held(s: *session.Session, fqn: str) bool {
 
 #[testing]
 fun ut_products(s: *session.Session) u32 {
-    var total: u32 = 0;
-    var kind:  u32 = 0;
-    for (kind < s.queries.kinds) {
-        total = total + query.shard_len(?s.queries, kind::query.QueryKind);
-        kind  = kind + 1;
-    }
-    ret total;
+    ret query.product_count(?s.queries);
 }
 
 # main importing `name`, or importing nothing for an empty name
@@ -4161,12 +4155,13 @@ test retention__a_module_that_leaves_releases_its_products {
 
     # it comes back: resolve computes it again, beside the edited main, rather than finding a stale product
     if (!ut_write_source(?alloc, root, "main.mach", ut_retained_main(?alloc, "a"))) { ret 11; }
-    val back: res[project.Project, fail.Fail] = ut_gate_rebuild(?s, root);
+    val resolved: u64                             = query.computes(?s.queries, ?frontend.RESOLVE);
+    val back:     res[project.Project, fail.Fail] = ut_gate_rebuild(?s, root);
     if (sel back.err) { ret 12; }
     p = back.ok;
     var bad: i32 = 0;
-    if (p.computes[query.Q_RESOLVE::u32] < 2)         { bad = 13; }
-    if (module.is_nil(ut_mid(?p, ?s, "uniontest.a"))) { bad = 14; }
+    if (query.computes(?s.queries, ?frontend.RESOLVE) - resolved < 2) { bad = 13; }
+    if (module.is_nil(ut_mid(?p, ?s, "uniontest.a")))                 { bad = 14; }
     project.dnit_project(?p);
     if (bad != 0)                         { ret bad; }
     if (ut_owned(?s, "uniontest.a") == 0) { ret 15; }
@@ -4235,5 +4230,36 @@ test retention__a_run_of_rejected_loads_holds_what_the_first_one_held {
     # the last accepted build's modules stay, an earlier rejection's go
     if (ut_owned(?s, "uniontest.a") == 0)                                        { ret 8; }
     if (ut_held(?s, "uniontest.p") || !ut_held(?s, "uniontest.package_manifes")) { ret 9; }
+    ret 0;
+}
+
+# a loaded project's request changed behind the frozen build context is refused rather than
+# read, and the same change announced through reconfigure is read
+test context__a_change_after_the_freeze_is_refused_unless_reconfigured {
+    var alloc:  A.Allocator;
+    val make_r: err[A.Error] = page.make(?alloc);
+    if (sel make_r.err) { ret 1; }
+    var names:  [1]str              = [1]str{"main.mach"};
+    var texts:  [1]str              = [1]str{"fun main() i32 { ret 0; }\n"};
+    var s:      session.Session;
+    val root_r: res[str, fail.Fail] = ut_gate_session(?alloc, ?names[0], ?texts[0], 1, ?s);
+    if (sel root_r.err) { ret 2; }
+    val root: str = root_r.ok;
+    fin {
+        fs.remove_all(?alloc, root);
+        session.dnit(?s);
+    }
+    val built: res[project.Project, fail.Fail] = ut_gate_rebuild(?s, root);
+    if (sel built.err) { ret 3; }
+    var p: project.Project = built.ok;
+    fin { project.dnit_project(?p); }
+    p.req.debug = !p.req.debug;
+    val refused: err[fail.Fail] = driver.run_sema_pass(?p);
+    if (sel refused.ok)                                                                           { ret 4; }
+    if (!str_equals(fail.describe(refused.err), "the build context changed after it was frozen")) { ret 5; }
+    val reconfigured: err[fail.Fail] = driver.reconfigure(?p, p.req);
+    if (sel reconfigured.err) { ret 6; }
+    val read: err[fail.Fail] = driver.run_sema_pass(?p);
+    if (sel read.err) { ret 7; }
     ret 0;
 }

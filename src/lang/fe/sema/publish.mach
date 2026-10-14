@@ -63,7 +63,7 @@ fun interface_fill(sc: *sema_context.SemaContext, iface: *interface.Interface) e
     for (i < rr.pub_count) {
         val sym:   *resolve.Symbol = ?rr.symbols[i];
         val added: err[fail.Fail]  = interface.exported_add(iface, interface.Exported{
-            kind:          sym.kind, name: sym.name, canon: sym.canon, origin: sym.origin_stable, module: sym.slot_stable,
+            kind:          sym.kind, name: sym.name, canon: sym.canon, origin: sym.origin, module: resolve.use_stable(sym),
             generic_arity: sym.generic_arity, has_comptime_params: sym.has_comptime_params, has_pack_param: sym.has_pack_param
         });
         if (sel added.err) { ret added; }
@@ -98,9 +98,9 @@ fun template_capture(sc: *sema_context.SemaContext, iface: *interface.Interface)
 
 # a module-level function, `val` or `var` the module itself declares
 fun declares(sc: *sema_context.SemaContext, sym: *resolve.Symbol) bool {
-    if (!module.same(sym.origin, sc.view.own_module) || ast_id.decl_is_nil(sym.decl)) { ret false; }
-    if (ast_id.decl_index(sym.decl) >= sc.view.a.decls.len::u32)                      { ret false; }
-    if (sym.kind == resolve.SYM_FUN)                                                  { ret true; }
+    if (!module.same(resolve.origin_of(sc.s, sym), sc.view.own_module) || ast_id.decl_is_nil(sym.decl)) { ret false; }
+    if (ast_id.decl_index(sym.decl) >= sc.view.a.decls.len::u32)                                        { ret false; }
+    if (sym.kind == resolve.SYM_FUN)                                                                    { ret true; }
     ret (sym.kind == resolve.SYM_VAL || sym.kind == resolve.SYM_VAR) && (sym.flags & resolve.SYM_FLAG_MODULE) != 0;
 }
 

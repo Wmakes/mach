@@ -65,6 +65,10 @@ an artifact entry the union walk loads: the entry module and the artifact it is 
 pub rec ModuleEntry;
 ```
 
+a module the project loaded: its identity, what the load decided for it, and the codegen
+staging of its objects. its front-end products are the query engine's, keyed by its file and
+its stable id, and read through mach.lang.driver.frontend
+
 ## rec TestObject
 
 ```mach
@@ -81,42 +85,25 @@ fields mirror the normal object's on ModuleEntry
 pub rec RawLowerCapture;
 ```
 
+a lowering in flight on the serial path: the raw module an inline-bodies computation lowered
+for it, and whether its caller optimizes it outside the computation
+
+key: the lowering's back-half key
+output: the raw lowering the inline-bodies product handed over, nil until it does
+available: the bodies a deferred lowering's optimization may inline (release only)
+deferred: the caller optimizes the lowering on its workers and completes the prepared product
+
 ## rec Project
 
 ```mach
 pub rec Project;
 ```
 
-## fun note_compute
 
-```mach
-pub fun note_compute(p: *Project, kind: query.QueryKind);
-```
-
-## fun begin_query_phase
-
-```mach
-pub fun begin_query_phase(p: *Project) res[query.Operation, fail.Fail];
-```
-
-## fun refresh_diagnostics
-
-```mach
-pub fun refresh_diagnostics(p: *Project) err[fail.Fail];
-```
-
-the session's store is rebuilt from the project's and the query presentation's,
-dropping the warnings a declaration's `#[expect]` acknowledges and the ones the
-profile's `allow` silences, then reporting each judged expectation nothing
-fulfilled. a warning replayed from the cache passes through here as a fresh one does
-
-## fun finish_query_phase
-
-```mach
-pub fun finish_query_phase(p: *Project, operation: query.Operation,
-roots: *query.QueryKey, count: usize,
-result: err[fail.Fail]) err[fail.Fail];
-```
+since: the first query operation this project ran; a product read between its
+                operations counts only when one of them reached it
+context_digest: the fingerprint of the build context, once frozen
+context_frozen: the build context is frozen, so a change to it is refused
 
 ## fun link_name_for
 
@@ -143,6 +130,17 @@ pub fun release_staged_test(p: *Project, m: *ModuleEntry);
 ```mach
 pub fun release_all_staged(p: *Project);
 ```
+
+## fun release_fresh_staged
+
+```mach
+pub fun release_fresh_staged(p: *Project);
+```
+
+a restored product stays staged across operations: it is keyed by the key
+it was read under and the next load discards it if that changed. a freshly
+generated image staged by a codegen worker belongs to the operation that
+generated it and leaves with it
 
 ## fun lower_scope_drop
 
@@ -265,10 +263,4 @@ arrive as file ids and the table is small beside the work a refresh saves
 p: the project
 fid: the file
 ret: the module's id, or none when no loaded module reads that file
-
-## fun drop_surface
-
-```mach
-pub fun drop_surface(a: *A.Allocator, slot: **fe_sema.ModuleSema);
-```
 

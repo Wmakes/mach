@@ -36,6 +36,8 @@ use lang_source: mach.lang.source;
 use mach.lang.build.engine;
 use mach.lang.driver;
 
+use mach.lang.driver.frontend;
+use mach.lang.driver.passes;
 use mach.lang.driver.tests.testing.ut_cc3;
 use mach.lang.driver.tests.testing.ut_entry_symbol;
 use mach.lang.driver.tests.testing.ut_manifest;
@@ -52,7 +54,7 @@ fun ut_manifest_mixed_targets() str {
 }
 
 #[testing]
-fun ut_shard_len(s: *session.Session, kind: query.QueryKind) u32 {
+fun ut_shard_len(s: *session.Session, kind: *query.Kind) u32 {
     ret query.shard_len(?s.queries, kind);
 }
 
@@ -97,8 +99,8 @@ test execute__artifact_build_roots_at_reachable_modules {
     if (module.stable_is_nil(st_shader))                                                              { bad = 1; }
     if (!module.stable_is_nil(st_host))                                                               { bad = 1; }
     if (!module.stable_is_nil(st_other))                                                              { bad = 1; }
-    if (query.peek_revision(?w.s.queries, query.Q_SEMA, module.stable_index(st_shader)::u64) == 0)    { bad = 1; }
-    if (query.peek_revision(?w.s.queries, query.Q_CODEGEN, module.stable_index(st_shader)::u64) == 0) { bad = 1; }
+    if (query.peek_revision(?w.s.queries, ?frontend.SEMA, module.stable_index(st_shader)::u64) == 0)  { bad = 1; }
+    if (query.peek_revision(?w.s.queries, ?passes.CODEGEN, module.stable_index(st_shader)::u64) == 0) { bad = 1; }
 
     ret bad;
 }
@@ -288,35 +290,35 @@ test execute_warm__unchanged_rebuild_reuses_and_stays_bounded {
     val st_b:    session.StableModuleId = ut_stable_of(?w.s, "uniontest.b");
     if (module.stable_is_nil(st_main) || module.stable_is_nil(st_a) || module.stable_is_nil(st_b)) { bad = 1; }
 
-    val sema_a_1: query.Revision = query.peek_revision(?w.s.queries, query.Q_SEMA, module.stable_index(st_a)::u64);
-    val low_a_1:  query.Revision = query.peek_revision(?w.s.queries, query.Q_LOWER, module.stable_index(st_a)::u64);
-    val cg_m_1:   query.Revision = query.peek_revision(?w.s.queries, query.Q_CODEGEN, module.stable_index(st_main)::u64);
-    val cg_a_1:   query.Revision = query.peek_revision(?w.s.queries, query.Q_CODEGEN, module.stable_index(st_a)::u64);
-    val cg_b_1:   query.Revision = query.peek_revision(?w.s.queries, query.Q_CODEGEN, module.stable_index(st_b)::u64);
-    val lk_1:     query.Revision = query.peek_revision(?w.s.queries, query.Q_LINK, 0);
+    val sema_a_1: query.Revision = query.peek_revision(?w.s.queries, ?frontend.SEMA, module.stable_index(st_a)::u64);
+    val low_a_1:  query.Revision = query.peek_revision(?w.s.queries, ?passes.LOWER, module.stable_index(st_a)::u64);
+    val cg_m_1:   query.Revision = query.peek_revision(?w.s.queries, ?passes.CODEGEN, module.stable_index(st_main)::u64);
+    val cg_a_1:   query.Revision = query.peek_revision(?w.s.queries, ?passes.CODEGEN, module.stable_index(st_a)::u64);
+    val cg_b_1:   query.Revision = query.peek_revision(?w.s.queries, ?passes.CODEGEN, module.stable_index(st_b)::u64);
+    val lk_1:     query.Revision = query.peek_revision(?w.s.queries, ?passes.LINK, 0);
     if (sema_a_1 == 0 || low_a_1 == 0 || cg_m_1 == 0 || cg_a_1 == 0 || cg_b_1 == 0 || lk_1 == 0) { bad = 1; }
     val interned_1: usize = intern.count(?w.s.interner);
     val sources_1:  usize = lang_source.count(?w.s.sources);
-    val n_parse_1:  u32   = ut_shard_len(?w.s, query.Q_PARSE);
-    val n_sema_1:   u32   = ut_shard_len(?w.s, query.Q_SEMA);
-    val n_low_1:    u32   = ut_shard_len(?w.s, query.Q_LOWER);
-    val n_cg_1:     u32   = ut_shard_len(?w.s, query.Q_CODEGEN);
+    val n_parse_1:  u32   = ut_shard_len(?w.s, ?frontend.PARSE);
+    val n_sema_1:   u32   = ut_shard_len(?w.s, ?frontend.SEMA);
+    val n_low_1:    u32   = ut_shard_len(?w.s, ?passes.LOWER);
+    val n_cg_1:     u32   = ut_shard_len(?w.s, ?passes.CODEGEN);
 
     val r2: res[outcome.BuildOutcome, fail.Fail] = engine.execute_warm(?w.plan, 0, ?w.s, ?w.alloc, nil);
     if (sel r2.err)                                                                                      { ret 1; }
     if (r2.ok.severity != outcome.BUILD_OK)                                                              { bad = 1; }
-    if (query.peek_revision(?w.s.queries, query.Q_SEMA, module.stable_index(st_a)::u64) != sema_a_1)     { bad = 1; }
-    if (query.peek_revision(?w.s.queries, query.Q_LOWER, module.stable_index(st_a)::u64) != low_a_1)     { bad = 1; }
-    if (query.peek_revision(?w.s.queries, query.Q_CODEGEN, module.stable_index(st_main)::u64) != cg_m_1) { bad = 1; }
-    if (query.peek_revision(?w.s.queries, query.Q_CODEGEN, module.stable_index(st_a)::u64) != cg_a_1)    { bad = 1; }
-    if (query.peek_revision(?w.s.queries, query.Q_CODEGEN, module.stable_index(st_b)::u64) != cg_b_1)    { bad = 1; }
-    if (query.peek_revision(?w.s.queries, query.Q_LINK, 0) != lk_1)                                      { bad = 1; }
+    if (query.peek_revision(?w.s.queries, ?frontend.SEMA, module.stable_index(st_a)::u64) != sema_a_1)   { bad = 1; }
+    if (query.peek_revision(?w.s.queries, ?passes.LOWER, module.stable_index(st_a)::u64) != low_a_1)     { bad = 1; }
+    if (query.peek_revision(?w.s.queries, ?passes.CODEGEN, module.stable_index(st_main)::u64) != cg_m_1) { bad = 1; }
+    if (query.peek_revision(?w.s.queries, ?passes.CODEGEN, module.stable_index(st_a)::u64) != cg_a_1)    { bad = 1; }
+    if (query.peek_revision(?w.s.queries, ?passes.CODEGEN, module.stable_index(st_b)::u64) != cg_b_1)    { bad = 1; }
+    if (query.peek_revision(?w.s.queries, ?passes.LINK, 0) != lk_1)                                      { bad = 1; }
     if (intern.count(?w.s.interner) != interned_1)                                                       { bad = 1; }
     if (lang_source.count(?w.s.sources) != sources_1)                                                    { bad = 1; }
-    if (ut_shard_len(?w.s, query.Q_PARSE) != n_parse_1)                                                  { bad = 1; }
-    if (ut_shard_len(?w.s, query.Q_SEMA) != n_sema_1)                                                    { bad = 1; }
-    if (ut_shard_len(?w.s, query.Q_LOWER) != n_low_1)                                                    { bad = 1; }
-    if (ut_shard_len(?w.s, query.Q_CODEGEN) != n_cg_1)                                                   { bad = 1; }
+    if (ut_shard_len(?w.s, ?frontend.PARSE) != n_parse_1)                                                { bad = 1; }
+    if (ut_shard_len(?w.s, ?frontend.SEMA) != n_sema_1)                                                  { bad = 1; }
+    if (ut_shard_len(?w.s, ?passes.LOWER) != n_low_1)                                                    { bad = 1; }
+    if (ut_shard_len(?w.s, ?passes.CODEGEN) != n_cg_1)                                                   { bad = 1; }
 
     val src_dir:       str             = ut_cc3(?w.alloc, w.root, "/", "src");
     val a_path:        str             = ut_cc3(?w.alloc, src_dir, "/", "a.mach");
@@ -327,14 +329,14 @@ test execute_warm__unchanged_rebuild_reuses_and_stays_bounded {
     val r3: res[outcome.BuildOutcome, fail.Fail] = engine.execute_warm(?w.plan, 0, ?w.s, ?w.alloc, nil);
     if (sel r3.err)                                                                                   { ret 1; }
     if (r3.ok.severity != outcome.BUILD_OK)                                                           { bad = 1; }
-    if (query.peek_revision(?w.s.queries, query.Q_CODEGEN, module.stable_index(st_a)::u64) == cg_a_1) { bad = 1; }
-    if (query.peek_revision(?w.s.queries, query.Q_CODEGEN, module.stable_index(st_b)::u64) != cg_b_1) { bad = 1; }
-    if (query.peek_revision(?w.s.queries, query.Q_LINK, 0) == lk_1)                                   { bad = 1; }
+    if (query.peek_revision(?w.s.queries, ?passes.CODEGEN, module.stable_index(st_a)::u64) == cg_a_1) { bad = 1; }
+    if (query.peek_revision(?w.s.queries, ?passes.CODEGEN, module.stable_index(st_b)::u64) != cg_b_1) { bad = 1; }
+    if (query.peek_revision(?w.s.queries, ?passes.LINK, 0) == lk_1)                                   { bad = 1; }
     if (lang_source.count(?w.s.sources) != sources_1)                                                 { bad = 1; }
-    if (ut_shard_len(?w.s, query.Q_PARSE) != n_parse_1)                                               { bad = 1; }
-    if (ut_shard_len(?w.s, query.Q_SEMA) != n_sema_1)                                                 { bad = 1; }
-    if (ut_shard_len(?w.s, query.Q_LOWER) != n_low_1)                                                 { bad = 1; }
-    if (ut_shard_len(?w.s, query.Q_CODEGEN) != n_cg_1)                                                { bad = 1; }
+    if (ut_shard_len(?w.s, ?frontend.PARSE) != n_parse_1)                                             { bad = 1; }
+    if (ut_shard_len(?w.s, ?frontend.SEMA) != n_sema_1)                                               { bad = 1; }
+    if (ut_shard_len(?w.s, ?passes.LOWER) != n_low_1)                                                 { bad = 1; }
+    if (ut_shard_len(?w.s, ?passes.CODEGEN) != n_cg_1)                                                { bad = 1; }
 
     ret bad;
 }
@@ -375,7 +377,7 @@ test execute_warm__tampered_artifact_forces_relink_not_silent_reuse {
     }
     val artifact: str = bo1.artifacts.data[0].path;
 
-    val lk_1: query.Revision = query.peek_revision(?w.s.queries, query.Q_LINK, 0);
+    val lk_1: query.Revision = query.peek_revision(?w.s.queries, ?passes.LINK, 0);
     if (lk_1 == 0) { bad = 1; }
 
     val marker:        str             = "TAMPERED-DEFECT-B-MARKER-NOT-A-REAL-BINARY";
@@ -387,7 +389,7 @@ test execute_warm__tampered_artifact_forces_relink_not_silent_reuse {
     val bo2: outcome.BuildOutcome = r2.ok;
     if (bo2.severity != outcome.BUILD_OK) { bad = 1; }
 
-    val lk_2: query.Revision = query.peek_revision(?w.s.queries, query.Q_LINK, 0);
+    val lk_2: query.Revision = query.peek_revision(?w.s.queries, ?passes.LINK, 0);
     if (lk_2 != lk_1) { bad = 1; }
 
     val rr: res[Vector[u8], fs.FsError] = fs.read_bytes(?w.alloc, artifact);
@@ -455,7 +457,7 @@ test execute_warm__failed_link_retries_at_unchanged_revision {
         if (bo1.severity == outcome.BUILD_OK) { bad = 1; }
     }
 
-    val lk_1: query.Revision = query.peek_revision(?w.s.queries, query.Q_LINK, 0);
+    val lk_1: query.Revision = query.peek_revision(?w.s.queries, ?passes.LINK, 0);
     if (lk_1 == 0) { bad = 1; }
     fs.remove_file(artifact);
 
@@ -465,7 +467,7 @@ test execute_warm__failed_link_retries_at_unchanged_revision {
         val bo2: outcome.BuildOutcome = r2.ok;
         if (bo2.severity != outcome.BUILD_OK) { bad = 1; }
     }
-    if (query.peek_revision(?w.s.queries, query.Q_LINK, 0) != lk_1) { bad = 1; }
+    if (query.peek_revision(?w.s.queries, ?passes.LINK, 0) != lk_1) { bad = 1; }
     val is_file_r: res[bool, io_error.Error] = fs.is_file(artifact);
     if (sel is_file_r.err)                   { ret 99; }
     if (!(sel is_file_r.ok && is_file_r.ok)) { bad = 1; }
@@ -519,20 +521,20 @@ test execute_warm__parallel_pool_rebuilds_only_stale_modules {
     if (module.stable_is_nil(st_main) || module.stable_is_nil(st_a)
         || module.stable_is_nil(st_b) || module.stable_is_nil(st_c)) { bad = 1; }
 
-    val cg_m_1: query.Revision = query.peek_revision(?w.s.queries, query.Q_CODEGEN, module.stable_index(st_main)::u64);
-    val cg_a_1: query.Revision = query.peek_revision(?w.s.queries, query.Q_CODEGEN, module.stable_index(st_a)::u64);
-    val cg_b_1: query.Revision = query.peek_revision(?w.s.queries, query.Q_CODEGEN, module.stable_index(st_b)::u64);
-    val cg_c_1: query.Revision = query.peek_revision(?w.s.queries, query.Q_CODEGEN, module.stable_index(st_c)::u64);
-    val lk_1:   query.Revision = query.peek_revision(?w.s.queries, query.Q_LINK, 0);
+    val cg_m_1: query.Revision = query.peek_revision(?w.s.queries, ?passes.CODEGEN, module.stable_index(st_main)::u64);
+    val cg_a_1: query.Revision = query.peek_revision(?w.s.queries, ?passes.CODEGEN, module.stable_index(st_a)::u64);
+    val cg_b_1: query.Revision = query.peek_revision(?w.s.queries, ?passes.CODEGEN, module.stable_index(st_b)::u64);
+    val cg_c_1: query.Revision = query.peek_revision(?w.s.queries, ?passes.CODEGEN, module.stable_index(st_c)::u64);
+    val lk_1:   query.Revision = query.peek_revision(?w.s.queries, ?passes.LINK, 0);
     if (cg_m_1 == 0 || cg_a_1 == 0 || cg_b_1 == 0 || cg_c_1 == 0 || lk_1 == 0) { bad = 1; }
-    val n_cg_1: u32 = ut_shard_len(?w.s, query.Q_CODEGEN);
+    val n_cg_1: u32 = ut_shard_len(?w.s, ?passes.CODEGEN);
 
     val r2: res[outcome.BuildOutcome, fail.Fail] = engine.execute_warm(?w.plan, 0, ?w.s, ?w.alloc, nil);
     if (sel r2.err)                                                                                   { ret 1; }
     if (r2.ok.severity != outcome.BUILD_OK)                                                           { bad = 1; }
-    if (query.peek_revision(?w.s.queries, query.Q_CODEGEN, module.stable_index(st_a)::u64) != cg_a_1) { bad = 1; }
-    if (query.peek_revision(?w.s.queries, query.Q_CODEGEN, module.stable_index(st_c)::u64) != cg_c_1) { bad = 1; }
-    if (query.peek_revision(?w.s.queries, query.Q_LINK, 0) != lk_1)                                   { bad = 1; }
+    if (query.peek_revision(?w.s.queries, ?passes.CODEGEN, module.stable_index(st_a)::u64) != cg_a_1) { bad = 1; }
+    if (query.peek_revision(?w.s.queries, ?passes.CODEGEN, module.stable_index(st_c)::u64) != cg_c_1) { bad = 1; }
+    if (query.peek_revision(?w.s.queries, ?passes.LINK, 0) != lk_1)                                   { bad = 1; }
 
     val src_dir:       str             = ut_cc3(?w.alloc, w.root, "/", "src");
     val a_path:        str             = ut_cc3(?w.alloc, src_dir, "/", "a.mach");
@@ -554,12 +556,12 @@ test execute_warm__parallel_pool_rebuilds_only_stale_modules {
         if (sel is_file_r2.err)                    { ret 99; }
         if (!(sel is_file_r2.ok && is_file_r2.ok)) { bad = 1; }
     }
-    if (query.peek_revision(?w.s.queries, query.Q_CODEGEN, module.stable_index(st_a)::u64) == cg_a_1)    { bad = 1; }
-    if (query.peek_revision(?w.s.queries, query.Q_CODEGEN, module.stable_index(st_c)::u64) == cg_c_1)    { bad = 1; }
-    if (query.peek_revision(?w.s.queries, query.Q_CODEGEN, module.stable_index(st_main)::u64) != cg_m_1) { bad = 1; }
-    if (query.peek_revision(?w.s.queries, query.Q_CODEGEN, module.stable_index(st_b)::u64) != cg_b_1)    { bad = 1; }
-    if (query.peek_revision(?w.s.queries, query.Q_LINK, 0) == lk_1)                                      { bad = 1; }
-    if (ut_shard_len(?w.s, query.Q_CODEGEN) != n_cg_1)                                                   { bad = 1; }
+    if (query.peek_revision(?w.s.queries, ?passes.CODEGEN, module.stable_index(st_a)::u64) == cg_a_1)    { bad = 1; }
+    if (query.peek_revision(?w.s.queries, ?passes.CODEGEN, module.stable_index(st_c)::u64) == cg_c_1)    { bad = 1; }
+    if (query.peek_revision(?w.s.queries, ?passes.CODEGEN, module.stable_index(st_main)::u64) != cg_m_1) { bad = 1; }
+    if (query.peek_revision(?w.s.queries, ?passes.CODEGEN, module.stable_index(st_b)::u64) != cg_b_1)    { bad = 1; }
+    if (query.peek_revision(?w.s.queries, ?passes.LINK, 0) == lk_1)                                      { bad = 1; }
+    if (ut_shard_len(?w.s, ?passes.CODEGEN) != n_cg_1)                                                   { bad = 1; }
 
     ret bad;
 }

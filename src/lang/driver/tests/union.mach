@@ -38,6 +38,7 @@ use mach.lang.driver;
 use mach.lang.driver.passes;
 use mach.lang.driver.project;
 
+use mach.lang.driver.frontend;
 use mach.lang.driver.tests.testing.ut_analyze_lessons;
 use mach.lang.driver.tests.testing.ut_ast;
 use mach.lang.driver.tests.testing.ut_build;
@@ -141,8 +142,8 @@ test union_analysis__resolves_artifact_requirements_project_wide {
     val clean: res[project.Project, fail.Fail] = ut_analyze_lessons(?s, ?mf, root, project.ROOT_UNION);
     if (sel clean.err) { ret 12; }
     var cp: project.Project = clean.ok;
-    if (ut_count_errors(?s.diags) != 0)                 { bad = 13; }
-    if (!fail.is_accepted(passes.frontend_status(?cp))) { bad = 14; }
+    if (ut_count_errors(?s.diags) != 0)                   { bad = 13; }
+    if (!fail.is_accepted(frontend.frontend_status(?cp))) { bad = 14; }
     project.dnit_project(?cp);
     if (bad != 0) { ret bad; }
 
@@ -198,7 +199,7 @@ test union_analysis__attributes_bin_name_to_the_reaching_artifact {
     if (sel wide.err) { ret 5; }
     var wp: project.Project = wide.ok;
     if (ut_count_errors(?s.diags) != 0)                                       { bad = 6; }
-    if (!fail.is_accepted(passes.frontend_status(?wp)))                       { bad = 7; }
+    if (!fail.is_accepted(frontend.frontend_status(?wp)))                     { bad = 7; }
     if (!str_equals(ut_module_bin_name(?wp, ?s, "lessons.hello"), "hello"))   { bad = 8; }
     if (!str_equals(ut_module_bin_name(?wp, ?s, "lessons.shaded"), "shaded")) { bad = 9; }
     project.dnit_project(?wp);
@@ -263,7 +264,7 @@ fun ut_body_gate_reports(text: str, as_union: bool) i32 {
     or            { pr = driver.build_project(?s, root, ?tsel); }
     if (sel pr.ok) {
         var p: project.Project = pr.ok;
-        if (fail.is_accepted(passes.frontend_status(?p))) { passes.run_sema_pass(?p); }
+        if (fail.is_accepted(frontend.frontend_status(?p))) { passes.run_sema_pass(?p); }
         project.dnit_project(?p);
     }
     var bits: i32 = 0;
@@ -1252,7 +1253,7 @@ test tuple_frame__gates_follow_an_imported_constant {
     p = flipped.ok;
     fin { project.dnit_project(?p); }
     val m:    *project.ModuleEntry = project.module_at(?p, ut_mid(?p, ?s, "uniontest.main")::u32);
-    val cond: ast_id.ExprId        = ut_first_gate_cond(m.a);
+    val cond: ast_id.ExprId        = ut_first_gate_cond(frontend.syntax(?p, m));
     if (m.load.bindings.len == 0 || !m.load.bindings.data[0].constant)       { ret 6; }
     if (comptime.gate_state(?m.load.ctx, cond) != comptime.GATE_STATE_FALSE) { ret 7; }
     var reached: u32 = 0;
@@ -1363,7 +1364,7 @@ fun ut_page_frames(p: *project.Project, s: *session.Session) i32 {
         i = i + 1;
     }
     if (seen == 0) { ret 9; }
-    val cond: ast_id.ExprId = ut_first_gate_cond_after(m.a, 1);
+    val cond: ast_id.ExprId = ut_first_gate_cond_after(frontend.syntax(p, m), 1);
     if (ast_id.expr_is_nil(cond))                                                        { ret 10; }
     if (comptime.gate_state(?m.load.ctx, cond) != comptime.GATE_STATE_TRUE)              { ret 11; }
     if (comptime.gate_state(?m.load.frames[native], cond) != comptime.GATE_STATE_TRUE)   { ret 12; }

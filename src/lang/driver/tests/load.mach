@@ -37,6 +37,8 @@ use driver_load: mach.lang.driver.load;
 use mach.lang.driver.passes;
 use mach.lang.driver.project;
 
+use mach.lang.driver.context;
+use mach.lang.driver.frontend;
 use mach.lang.driver.tests.testing.UT_VIEW_CFG_OFF;
 use mach.lang.driver.tests.testing.UT_VIEW_CFG_ON;
 use mach.lang.driver.tests.testing.ut_analyze_lessons;
@@ -112,8 +114,8 @@ test layout_gate__a_later_ext_keeps_its_link_name {
     val m:     *project.ModuleEntry = project.module_at(?p, mid::u32);
     var found: bool                 = false;
     var di:    u32                  = 0;
-    for (di < m.a.decls.len::u32) {
-        val d: *ast_decl.Decl = ?m.a.decls.data[di];
+    for (di < frontend.syntax(?p, m).decls.len::u32) {
+        val d: *ast_decl.Decl = ?frontend.syntax(?p, m).decls.data[di];
         if (d.kind == ast_decl.DECL_KIND_FUN && (d.flags & ast_decl.DECL_FLAG_EXT) != 0) {
             found = true;
             val link: intern.StrId = session.export_name(?s, mid, di);
@@ -193,8 +195,8 @@ test analyze_project__retains_the_selected_frontend {
     or {
         val bm: *project.ModuleEntry = project.module_at(?p, beta::u32);
         val mm: *project.ModuleEntry = project.module_at(?p, model::u32);
-        if (!bm.resolved || bm.resolve_result == nil || bm.sema_result == nil) { bad = 7; }
-        if (!mm.resolved || mm.resolve_result == nil || mm.sema_result == nil) { bad = 8; }
+        if (frontend.resolved(?p, bm) == nil || frontend.typed(?p, bm) == nil) { bad = 7; }
+        if (frontend.resolved(?p, mm) == nil || frontend.typed(?p, mm) == nil) { bad = 8; }
         if (bm.ir_module != nil || bm.object_image != nil)                     { bad = 9; }
         if (mm.ir_module != nil || mm.object_image != nil)                     { bad = 10; }
 
@@ -306,8 +308,8 @@ test analyze_project__loads_an_overlay_extra_root_through_a_pub_const_gate {
     or {
         val em: *project.ModuleEntry = project.module_at(?p, extra_mid::u32);
         val mm: *project.ModuleEntry = project.module_at(?p, model_mid::u32);
-        if (!em.resolved || em.resolve_result == nil || em.sema_result == nil) { bad = 8; }
-        if (!mm.resolved || mm.resolve_result == nil || mm.sema_result == nil) { bad = 9; }
+        if (frontend.resolved(?p, em) == nil || frontend.typed(?p, em) == nil) { bad = 8; }
+        if (frontend.resolved(?p, mm) == nil || frontend.typed(?p, mm) == nil) { bad = 9; }
         val eid_r: res[intern.StrId, A.Error] = intern.add(?s.interner, "ENABLE");
         if (sel eid_r.ok) {
             val enabled: opt[comptime.NamedConst] = comptime.lookup(
@@ -366,7 +368,7 @@ test analyze_project__target_change_invalidates_typed_products {
         ret 4;
     }
     project.dnit_project(?host);
-    val target_1: query.Revision = query.peek_revision(?s.queries, query.Q_TARGET, 0);
+    val target_1: query.Revision = query.peek_revision(?s.queries, ?context.TARGET, 0);
     val sema_1:   query.Revision = ut_sema_lc(?s, stable);
     if (target_1 == 0 || sema_1 == 0) { ret 5; }
 
@@ -377,7 +379,7 @@ test analyze_project__target_change_invalidates_typed_products {
     val os_2:  u32             = project.module_at(?other, ut_mid(?other, ?s, "uniontest.main")::u32).load.ctx.env.target.os_id;
     project.dnit_project(?other);
     if (os_2 != catalog_os.WINDOWS::u32) { ret 7; }
-    val target_2: query.Revision = query.peek_revision(?s.queries, query.Q_TARGET, 0);
+    val target_2: query.Revision = query.peek_revision(?s.queries, ?context.TARGET, 0);
     val sema_2:   query.Revision = ut_sema_lc(?s, stable);
     if (target_2 == target_1 || sema_2 == sema_1) { ret 8; }
 
@@ -385,7 +387,7 @@ test analyze_project__target_change_invalidates_typed_products {
     if (sel again_r.err) { ret 9; }
     var again: project.Project = again_r.ok;
     project.dnit_project(?again);
-    if (query.peek_revision(?s.queries, query.Q_TARGET, 0) != target_2 || ut_sema_lc(?s, stable) != sema_2) { ret 10; }
+    if (query.peek_revision(?s.queries, ?context.TARGET, 0) != target_2 || ut_sema_lc(?s, stable) != sema_2) { ret 10; }
     ret 0;
 }
 
@@ -441,8 +443,8 @@ test analyze_project__replays_cached_diagnostics {
         session.dnit(?s);
         ret 1;
     }
-    val resolve_rev: query.Revision = query.peek_revision(?s.queries, query.Q_RESOLVE, module.stable_index(stable)::u64);
-    val sema_rev:    query.Revision = query.peek_revision(?s.queries, query.Q_SEMA, module.stable_index(stable)::u64);
+    val resolve_rev: query.Revision = query.peek_revision(?s.queries, ?frontend.RESOLVE, module.stable_index(stable)::u64);
+    val sema_rev:    query.Revision = query.peek_revision(?s.queries, ?frontend.SEMA, module.stable_index(stable)::u64);
     if (resolve_rev == 0 || sema_rev == 0) {
         manifest.dnit(?mf, ?alloc);
         fs.remove_all(?alloc, root);
@@ -468,9 +470,9 @@ test analyze_project__replays_cached_diagnostics {
         ret 1;
     }
     var bad: i32 = 0;
-    if (!ut_diag_list_eq(?s.diags, snapshot))                                                              { bad = 1; }
-    if (query.peek_revision(?s.queries, query.Q_RESOLVE, module.stable_index(stable)::u64) != resolve_rev) { bad = 1; }
-    if (query.peek_revision(?s.queries, query.Q_SEMA, module.stable_index(stable)::u64) != sema_rev)       { bad = 1; }
+    if (!ut_diag_list_eq(?s.diags, snapshot))                                                                { bad = 1; }
+    if (query.peek_revision(?s.queries, ?frontend.RESOLVE, module.stable_index(stable)::u64) != resolve_rev) { bad = 1; }
+    if (query.peek_revision(?s.queries, ?frontend.SEMA, module.stable_index(stable)::u64) != sema_rev)       { bad = 1; }
 
     diagnostic.store_dnit(snapshot);
     A.deallocate[diagnostic.DiagnosticStore](?alloc, snapshot, 1::usize);
@@ -534,7 +536,7 @@ test analyze_project__failure_cleans_partial_state {
             if (module.is_nil(mid)) { bad = 1; }
             or {
                 val me: *project.ModuleEntry = project.module_at(?p, mid::u32);
-                if (!me.resolved || me.resolve_result == nil || me.sema_result == nil) { bad = 1; }
+                if (frontend.resolved(?p, me) == nil || frontend.typed(?p, me) == nil) { bad = 1; }
             }
             if (p.queries.db != ?s.queries) { bad = 1; }
             project.dnit_project(?p);
@@ -588,13 +590,13 @@ fun ut_tolerant_pair(names: *str, texts: *str, defs_sema: bool, main_sema: bool)
         or {
             val dm: *project.ModuleEntry = project.module_at(?p, defs::u32);
             val mm: *project.ModuleEntry = project.module_at(?p, main::u32);
-            if (dm.a == nil || mm.a == nil)                           { bad = 5; }
-            if (dm.resolve_result == nil || mm.resolve_result == nil) { bad = 6; }
-            if ((dm.sema_result != nil) != defs_sema)                 { bad = 7; }
-            if ((mm.sema_result != nil) != main_sema)                 { bad = 8; }
+            if (frontend.syntax(?p, dm) == nil || frontend.syntax(?p, mm) == nil)     { bad = 5; }
+            if (frontend.resolved(?p, dm) == nil || frontend.resolved(?p, mm) == nil) { bad = 6; }
+            if ((frontend.typed(?p, dm) != nil) != defs_sema)                         { bad = 7; }
+            if ((frontend.typed(?p, mm) != nil) != main_sema)                         { bad = 8; }
         }
-        if (!fail.is_rejected(passes.frontend_status(?p))) { bad = 9; }
-        if (ut_count_errors(?s.diags) == 0)                { bad = 10; }
+        if (!fail.is_rejected(frontend.frontend_status(?p))) { bad = 9; }
+        if (ut_count_errors(?s.diags) == 0)                  { bad = 10; }
         project.dnit_project(?p);
     }
 
@@ -639,10 +641,10 @@ test load__unbound_use_is_reported_once_and_the_module_still_resolves {
     if (sel kept.err) { ret 3; }
     var p: project.Project = kept.ok;
     fin { project.dnit_project(?p); }
-    if (!fail.is_rejected(passes.frontend_status(?p))) { ret 4; }
-    if (!ut_in_topo(?p, ?s, "uniontest.main"))         { ret 5; }
+    if (!fail.is_rejected(frontend.frontend_status(?p))) { ret 4; }
+    if (!ut_in_topo(?p, ?s, "uniontest.main"))           { ret 5; }
     val m: *project.ModuleEntry = project.module_at(?p, ut_mid(?p, ?s, "uniontest.main")::u32);
-    if (!m.resolved || m.resolve_result == nil || m.sema_result == nil) { ret 6; }
+    if (frontend.resolved(?p, m) == nil || frontend.typed(?p, m) == nil) { ret 6; }
 
     var named: u32   = 0;
     var i:     usize = 0;
@@ -730,13 +732,13 @@ test analyze_project_tolerant__types_past_a_rejected_module {
         if (module.is_nil(ma) || module.is_nil(mb) || module.is_nil(mc)) { bad = 4; }
         or {
             # the case only bites when the rejected module is typed first
-            if (ut_topo_index(?p, mb) >= ut_topo_index(?p, mc))    { bad = 5; }
-            if (project.module_at(?p, ma::u32).sema_result == nil) { bad = 6; }
-            if (project.module_at(?p, mb::u32).sema_result == nil) { bad = 7; }
-            if (project.module_at(?p, mc::u32).sema_result == nil) { bad = 8; }
+            if (ut_topo_index(?p, mb) >= ut_topo_index(?p, mc))            { bad = 5; }
+            if (frontend.typed(?p, project.module_at(?p, ma::u32)) == nil) { bad = 6; }
+            if (frontend.typed(?p, project.module_at(?p, mb::u32)) == nil) { bad = 7; }
+            if (frontend.typed(?p, project.module_at(?p, mc::u32)) == nil) { bad = 8; }
         }
-        if (!fail.is_rejected(passes.frontend_status(?p))) { bad = 9; }
-        if (ut_count_errors(?s.diags) != 1)                { bad = 10; }
+        if (!fail.is_rejected(frontend.frontend_status(?p))) { bad = 9; }
+        if (ut_count_errors(?s.diags) != 1)                  { bad = 10; }
         project.dnit_project(?p);
     }
 
@@ -1094,7 +1096,7 @@ fun ut_def_chain_gate(flags: str, want_diag: str) i32 {
     val mid: session.ModuleId = ut_mid(?p, ?s, "uniontest.main");
     if (module.is_nil(mid)) { ret 5; }
     val m: *project.ModuleEntry = project.module_at(?p, mid::u32);
-    if (comptime.gate_state(?m.load.ctx, ut_first_gate_cond(m.a)) == comptime.GATE_STATE_UNKNOWN) { ret 6; }
+    if (comptime.gate_state(?m.load.ctx, ut_first_gate_cond(frontend.syntax(?p, m))) == comptime.GATE_STATE_UNKNOWN) { ret 6; }
     val se: err[fail.Fail] = driver.run_sema_pass(?p);
     if (sel se.err)                     { ret 7; }
     if (ut_count_errors(?s.diags) != 0) { ret 8; }

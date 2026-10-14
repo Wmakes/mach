@@ -13,8 +13,10 @@ use cache_key: mach.lang.build.cache.key;
 use mach.lang.build.request;
 use mach.lang.diagnostic;
 use diagnostic_kind: mach.lang.diagnostic.kind;
+use mach.lang.driver.frontend;
 use mach.lang.driver.project;
 use mach.lang.fail;
+use mach.lang.fe.ast;
 use mach.lang.intern;
 use session_embed: mach.lang.session.embed;
 use lang_source:   mach.lang.source;
@@ -230,8 +232,10 @@ pub fun test_object_path(p: *project.Project, m: *project.ModuleEntry, a: *A.All
 # the module gets a test object in this build: a test build, and a module whose
 # source declares a test or a `#[testing]` declaration
 pub fun has_test_object(p: *project.Project, m: *project.ModuleEntry) bool {
-    if (!request.test_goal(p.req.goal) || m.a == nil) { ret false; }
-    ret testrunner.declares_tests(m.a);
+    if (!request.test_goal(p.req.goal)) { ret false; }
+    val syn: *ast.Ast = frontend.syntax(p, m);
+    if (syn == nil) { ret false; }
+    ret testrunner.declares_tests(syn);
 }
 
 # the digest memo in the cell's compiler-only state: `<out>/.cache/digests`,
@@ -500,15 +504,15 @@ val SURFACE_BARE:   u8 = 0;
 val SURFACE_PLACED: u8 = 1;
 val SURFACE_WHOLE:  u8 = 2;
 
-fun compute_digests(k: *Keying, m: *project.ModuleEntry, text: str, out: *memo.Digests) err[fail.Fail] {
+fun compute_digests(k: *Keying, syn: *ast.Ast, text: str, out: *memo.Digests) err[fail.Fail] {
     sha256.hash(text::*u8, str_len(text), ?out.content[0]);
     collections_vector.clear[lang_source.Span](?k.spans);
-    val found: err[fail.Fail] = surface.omitted(m.a, text, ?k.spans);
+    val found: err[fail.Fail] = surface.omitted(syn, text, ?k.spans);
     if (sel found.err) { ret found; }
     surface.digest(text, ?k.spans, false, ?out.surface);
     surface.digest(text, ?k.spans, true, ?out.placed);
     collections_vector.clear[lang_source.Span](?k.spans);
-    val tested: err[fail.Fail] = surface.tests(m.a, text, ?k.spans);
+    val tested: err[fail.Fail] = surface.tests(syn, text, ?k.spans);
     if (sel tested.err) { ret tested; }
     surface.digest(text, ?k.spans, false, ?out.normal);
     surface.digest(text, ?k.spans, true, ?out.normal_placed);
@@ -523,10 +527,10 @@ fun bytes_equal(a: *u8, a_len: usize, text: str) bool {
 # the digests of the module's text: from the memo when the file still looks
 # as it did when it was hashed, else hashed now and remembered when the file
 # provably holds the text that was hashed
-fun source_digests(k: *Keying, m: *project.ModuleEntry, file: str, text: str, out: *memo.Digests) res[bool, fail.Fail] {
+fun source_digests(k: *Keying, syn: *ast.Ast, file: str, text: str, out: *memo.Digests) res[bool, fail.Fail] {
     val observed: opt[memo.Stamp] = memo.stamp(file);
     if (sel observed.none) {
-        val computed: err[fail.Fail] = compute_digests(k, m, text, out);
+        val computed: err[fail.Fail] = compute_digests(k, syn, text, out);
         if (sel computed.err) { ret res[bool, fail.Fail].err{computed.err}; }
         ret res[bool, fail.Fail].ok{true};
     }
@@ -538,7 +542,7 @@ fun source_digests(k: *Keying, m: *project.ModuleEntry, file: str, text: str, ou
             ret res[bool, fail.Fail].ok{true};
         }
     }
-    val computed: err[fail.Fail] = compute_digests(k, m, text, out);
+    val computed: err[fail.Fail] = compute_digests(k, syn, text, out);
     if (sel computed.err) { ret res[bool, fail.Fail].err{computed.err}; }
     if (sel k.now.none)   { ret res[bool, fail.Fail].ok{true}; }
     val read: res[Vector[u8], fs.FsError] = fs.read_bytes(k.scratch, file);
@@ -615,8 +619,9 @@ fun key_imports(b: *cache_key.Builder, k: *Keying, p: *project.Project, m: *proj
 # a module without a current source, or one importing a module that has no
 # surface yet, stays unkeyed and is always built
 fun key_module(k: *Keying, p: *project.Project, mid: u32) err[fail.Fail] {
-    val m: *project.ModuleEntry = project.module_at(p, mid);
-    if (m.a == nil || lang_source.file_is_nil(m.file_id)) { ret err[fail.Fail].ok{}; }
+    val m:   *project.ModuleEntry = project.module_at(p, mid);
+    val syn: *ast.Ast             = frontend.syntax(p, m);
+    if (syn == nil || lang_source.file_is_nil(m.file_id)) { ret err[fail.Fail].ok{}; }
     val file_o: opt[*lang_source.SourceFile] = lang_source.get(?p.s.sources, m.file_id);
     if (sel file_o.none) { ret err[fail.Fail].ok{}; }
     val f: *lang_source.SourceFile = file_o.some;
@@ -630,7 +635,7 @@ fun key_module(k: *Keying, p: *project.Project, mid: u32) err[fail.Fail] {
     val canon: res[str, fail.Fail] = canonical(k.scratch, k.cwd, f.path);
     if (sel canon.err) { ret err[fail.Fail].err{canon.err}; }
     var digests: memo.Digests;
-    val known:   res[bool, fail.Fail] = source_digests(k, m, canon.ok, f.text, ?digests);
+    val known:   res[bool, fail.Fail] = source_digests(k, syn, canon.ok, f.text, ?digests);
     str_free(k.scratch, canon.ok);
     if (sel known.err) { ret err[fail.Fail].err{fail.placed(p.s.alloc, known.err, f.path, f.text)}; }
     if (!known.ok)     { ret err[fail.Fail].ok{}; }
@@ -730,6 +735,9 @@ fun key_modules(p: *project.Project, scratch: *A.Allocator, config: *u8, config_
 # a module's test object is keyed in the query database by its stable id and this bit
 pub val TEST_KEY_BIT: u64 = 0x100000000;
 
+# the key a module's reused object was built under, keyed by its stable id and the test bit
+pub val OBJECT_KEY: query.Kind = query.Kind{name: "object key", role: query.INPUT, owner: query.KEY_MODULE};
+
 # the query key of a module's test object products and its object key input
 pub fun test_input_key(m: *project.ModuleEntry) u64 {
     ret module.stable_index(m.stable_id)::u64 | TEST_KEY_BIT;
@@ -738,10 +746,6 @@ pub fun test_input_key(m: *project.ModuleEntry) u64 {
 # every key goes into the query database, so a product restored under one
 # key recomputes in a session that later keys the module differently
 fun publish_keys(p: *project.Project) err[fail.Fail] {
-    if (!query.is_registered(?p.s.queries, query.Q_OBJECT_KEY)) {
-        val registered: err[fail.Fail] = query.register_input(?p.s.queries, query.Q_OBJECT_KEY);
-        if (sel registered.err) { ret registered; }
-    }
     var i: u32 = 0;
     for (i < p.emit_len) {
         val m: *project.ModuleEntry = project.module_at(p, p.topo[i]::u32);
@@ -749,13 +753,13 @@ fun publish_keys(p: *project.Project) err[fail.Fail] {
             var digest: [32]u8;
             val keyed:  err[fail.Fail] = object_key(p, m, ?digest);
             if (sel keyed.err) { ret keyed; }
-            val set: err[fail.Fail] = query.set_input(?p.s.queries, query.Q_OBJECT_KEY, module.stable_index(m.stable_id)::u64, ?digest[0], 32);
+            val set: err[fail.Fail] = query.set_input(?p.s.queries, ?OBJECT_KEY, module.stable_index(m.stable_id)::u64, ?digest[0], 32);
             if (sel set.err) { ret set; }
             if (has_test_object(p, m)) {
                 var tested:     [32]u8;
                 val test_keyed: err[fail.Fail] = test_object_key(p, m, ?tested);
                 if (sel test_keyed.err) { ret test_keyed; }
-                val set_test: err[fail.Fail] = query.set_input(?p.s.queries, query.Q_OBJECT_KEY, test_input_key(m), ?tested[0], 32);
+                val set_test: err[fail.Fail] = query.set_input(?p.s.queries, ?OBJECT_KEY, test_input_key(m), ?tested[0], 32);
                 if (sel set_test.err) { ret set_test; }
             }
         }
@@ -930,6 +934,19 @@ fun recorded_file(ctx: ptr, path: str) res[lang_source.FileId, fail.Fail] {
     ret res[lang_source.FileId, fail.Fail].ok{lang_source.FILE_NIL};
 }
 
+# the walk enters only the object's module's own products: another module's warnings belong to
+# its own object, and acyclic imports mean none of them leads back to this module's products
+fun warning_enter(raw: ptr, product: query.QueryKey) bool {
+    val sink: *WarningSink = raw::*WarningSink;
+    ret product.kind.owner == query.KEY_MODULE && product.key == sink.key;
+}
+
+fun warning_visit(raw: ptr, product: query.QueryKey, store: *diagnostic.DiagnosticStore) {
+    val sink: *WarningSink = raw::*WarningSink;
+    if (store == nil) { ret; }
+    put_warnings(sink.w, sink.p, store, product.kind.replay);
+}
+
 # a product store's warnings: the cache records a module only when it built,
 # so its stores hold no error
 fun put_warnings(w: *wire.Sink, p: *project.Project, store: *diagnostic.DiagnosticStore, back: bool) {
@@ -941,23 +958,22 @@ fun put_warnings(w: *wire.Sink, p: *project.Project, store: *diagnostic.Diagnost
     diagnostic.encode(w, store, ?sources);
 }
 
-# the warnings module m's products reported: its front end keyed by its
-# stable id, its back half by back_key
-fun gather_warnings(p: *project.Project, m: *project.ModuleEntry, front_too: bool, back_key: u64, scratch: *A.Allocator, facts: *cache_record.Facts) err[fail.Fail] {
+# where a product walk records an object's warnings
+rec WarningSink {
+    w:   *wire.Sink;
+    p:   *project.Project;
+    key: u64;
+}
+
+# the warnings an object's record carries: those of every product the object was built from that
+# belongs to it, keyed by the module under the object's own key. a test object's key carries the
+# test bit, so its record leaves the front end's warnings to the normal object's
+fun gather_warnings(p: *project.Project, object: query.QueryKey, scratch: *A.Allocator, facts: *cache_record.Facts) err[fail.Fail] {
     var w: wire.Sink = wire.grown(scratch);
     fin { wire.dnit(?w); }
-    val front: [4]query.QueryKind = [4]query.QueryKind{query.Q_RESOLVE, query.Q_EXPORTS, query.Q_SEMA, query.Q_TYPED_EXPORTS};
-    val back:  [3]query.QueryKind = [3]query.QueryKind{query.Q_INLINE_BODIES, query.Q_LOWER, query.Q_CODEGEN};
-    var i:     usize              = 0;
-    for (i < 4 && front_too) {
-        put_warnings(?w, p, query.product_diagnostics(?p.s.queries, front[i], module.stable_index(m.stable_id)::u64), false);
-        i = i + 1;
-    }
-    i = 0;
-    for (i < 3) {
-        put_warnings(?w, p, query.product_diagnostics(?p.s.queries, back[i], back_key), true);
-        i = i + 1;
-    }
+    var sink:   WarningSink    = WarningSink{w: ?w, p: p, key: object.key};
+    val walked: err[fail.Fail] = query.walk_products(?p.s.queries, object, (?sink)::ptr, warning_enter, warning_visit);
+    if (sel walked.err)     { ret walked; }
     if (w.failed)           { ret err[fail.Fail].err{fail.message("out of memory recording a module's warnings")}; }
     if (w.len == 0)         { ret err[fail.Fail].ok{}; }
     if (w.len > 0xFFFFFFF0) { ret err[fail.Fail].err{fail.message("a module's warnings exceed the cache record")}; }
@@ -1040,32 +1056,32 @@ fun gather_facts(scratch: *A.Allocator, irmod: *me_ir.Module, facts: *cache_reco
 
 # a generated image carries its record into `obj/`: the key it was built
 # under, the facts its lowered ir holds, and the image itself
-pub fun publish(p: *project.Project, m: *project.ModuleEntry, image: *target_of.ObjectImage, back_key: u64) err[fail.Fail] {
+pub fun publish(p: *project.Project, m: *project.ModuleEntry, image: *target_of.ObjectImage, object: query.QueryKey) err[fail.Fail] {
     if (!p.cache_ready || !m.cache_keyed || restored(p, m)) { ret err[fail.Fail].ok{}; }
     var digest: [32]u8;
     val keyed:  err[fail.Fail] = object_key(p, m, ?digest);
     if (sel keyed.err) { ret keyed; }
-    ret publish_record(p, m, m.ir_module, true, back_key, ?digest, image);
+    ret publish_record(p, m, m.ir_module, object, ?digest, image);
 }
 
 # the same for the module's test object, which records only its own back half's
 # warnings: the normal object carries the front end's
-pub fun publish_test(p: *project.Project, m: *project.ModuleEntry, image: *target_of.ObjectImage, back_key: u64) err[fail.Fail] {
+pub fun publish_test(p: *project.Project, m: *project.ModuleEntry, image: *target_of.ObjectImage, object: query.QueryKey) err[fail.Fail] {
     if (!p.cache_ready || !m.cache_keyed || test_restored(p, m)) { ret err[fail.Fail].ok{}; }
     var digest: [32]u8;
     val keyed:  err[fail.Fail] = test_object_key(p, m, ?digest);
     if (sel keyed.err) { ret keyed; }
-    ret publish_record(p, m, m.test.ir_module, false, back_key, ?digest, image);
+    ret publish_record(p, m, m.test.ir_module, object, ?digest, image);
 }
 
-fun publish_record(p: *project.Project, m: *project.ModuleEntry, irmod: *me_ir.Module, front_too: bool,
-    back_key: u64, digest: *[32]u8, image: *target_of.ObjectImage) err[fail.Fail] {
+fun publish_record(p: *project.Project, m: *project.ModuleEntry, irmod: *me_ir.Module,
+    object: query.QueryKey, digest: *[32]u8, image: *target_of.ObjectImage) err[fail.Fail] {
     if (irmod == nil) { ret err[fail.Fail].err{fail.message("cache publication requires the module's lowered ir")}; }
     var facts: cache_record.Facts = cache_record.Facts{source: m.source_digest};
     fin { cache_record.facts_dnit(p.s.backing, ?facts); }
     val gathered: err[fail.Fail] = gather_facts(p.s.backing, irmod, ?facts);
     if (sel gathered.err) { ret gathered; }
-    val warned: err[fail.Fail] = gather_warnings(p, m, front_too, back_key, p.s.backing, ?facts);
+    val warned: err[fail.Fail] = gather_warnings(p, object, p.s.backing, ?facts);
     if (sel warned.err) { ret warned; }
     var bytes:   *u8            = nil;
     var len:     u32            = 0;

@@ -148,6 +148,12 @@ pub val SYM_VECTOR: SymKind = 12
 pub val SYM_TAG:    SymKind = 13
 ```
 
+## fun sym_kind_valid
+
+```mach
+pub fun sym_kind_valid(kind: SymKind) bool;
+```
+
 ## val SYM_FLAG_PUB
 
 ```mach
@@ -185,6 +191,8 @@ pub rec PublicSymbol;
 ```mach
 pub rec ModuleExports;
 ```
+
+what a module exports to an importer, every module it names by stable id
 
 ## rec ExportConstant
 
@@ -246,11 +254,29 @@ pub fun stable_of_module(s: *session.Session, mid: session.ModuleId) session.Sta
 pub fun type_owner(s: *session.Session, mid: session.ModuleId, file: lang_source.FileId) type.TypeOwner;
 ```
 
-## fun remap_result
+## fun origin_of
 
 ```mach
-pub fun remap_result(r: *ResolveResult, s: *session.Session);
+pub fun origin_of(s: *session.Session, sym: *Symbol) session.ModuleId;
 ```
+
+the module a symbol is defined in, as the current operation numbers it
+
+## fun use_target
+
+```mach
+pub fun use_target(s: *session.Session, sym: *Symbol) session.ModuleId;
+```
+
+the module a `use` symbol names, as the current operation numbers it
+
+## fun use_stable
+
+```mach
+pub fun use_stable(sym: *Symbol) session.StableModuleId;
+```
+
+the stable id of the module a `use` symbol names, nil for any other symbol
 
 ## rec Exporters
 
@@ -259,13 +285,26 @@ pub rec Exporters;
 ```
 
 the modules an importer's resolution reads: how many are loaded, with ids below that count,
-each one's resolution, nil when it has none, whether that resolution is current, and the
-path it is imported by
+what each one exports, and the path it is imported by
+
+exports: what a module exports to an importer, its symbols allocated from the allocator given;
+         reading it is what makes the importer's resolution depend on the exporter's surface
+
+## fun result_exports
+
+```mach
+pub fun result_exports(alloc: *A.Allocator, rr: *ResolveResult, path: intern.StrId,
+stable: session.StableModuleId) res[ModuleExports, fail.Fail];
+```
+
+what a finished resolution of module `stable` exports to an importer
+
+alloc: owns the returned symbols, released with the ModuleExports they are in
 
 ## fun deps_of
 
 ```mach
-pub fun deps_of(alloc: *A.Allocator, l: *fe_load.Loader, m: *fe_load.Module, from: *Exporters) res[ResolveDeps, fail.Fail];
+pub fun deps_of(alloc: *A.Allocator, s: *session.Session, l: *fe_load.Loader, m: *fe_load.Module, from: *Exporters) res[ResolveDeps, fail.Fail];
 ```
 
 the exports module `m` of loader `l` reads: each loaded module it imports and every module a
@@ -302,6 +341,7 @@ a: *ast.Ast,
 deps: *ResolveDeps,
 load: *comptime.ComptimeCtx,
 own_module: session.ModuleId,
+own_stable: session.StableModuleId,
 diags: *diagnostic.DiagnosticStore) res[ResolveResult, fail.Fail];
 ```
 

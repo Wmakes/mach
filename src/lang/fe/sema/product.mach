@@ -229,19 +229,20 @@ pub fun acquire_definition(reader: *DefinitionReader, origin: session.ModuleId,
     ret res[Definition, fail.Fail].ok{current};
 }
 
-pub fun acquire_symbol(reader: *DefinitionReader, requested: *resolve.Symbol,
+# the current definition of `requested`, which module `origin` defines as this operation numbers it
+pub fun acquire_symbol(reader: *DefinitionReader, requested: *resolve.Symbol, origin: session.ModuleId,
     phase: DefinitionPhase) res[DefinedSymbol, fail.Fail] {
     if (requested == nil || phase < DEFINITION_RESOLVED) {
         ret res[DefinedSymbol, fail.Fail].err{fail.message("symbol definition requires resolved acquisition")};
     }
-    val acquired: res[Definition, fail.Fail] = acquire_definition(reader, requested.origin, phase);
+    val acquired: res[Definition, fail.Fail] = acquire_definition(reader, origin, phase);
     if (sel acquired.err) { ret res[DefinedSymbol, fail.Fail].err{acquired.err}; }
     val current: Definition       = acquired.ok;
     var found:   resolve.SymbolId = resolve.SYMBOL_NIL;
     var i:       u32              = 0;
     for (i < current.rr.symbol_count) {
         val symbol: *resolve.Symbol = ?current.rr.symbols[i];
-        if (module.same(symbol.origin, requested.origin) && symbol.kind == requested.definition_kind
+        if (module.stable_same(symbol.origin, requested.origin) && symbol.kind == requested.definition_kind
             && intern.str_same(symbol.canon, requested.canon) && !ast_id.decl_is_nil(symbol.decl)) {
             if (!resolve.symbol_is_nil(found) && !ast_id.decl_same(current.rr.symbols[resolve.symbol_index(found)].decl, symbol.decl)) {
                 ret res[DefinedSymbol, fail.Fail].err{fail.message("current canonical definition is ambiguous")};
@@ -348,7 +349,7 @@ test acquire_definition__reads_each_origin_once_per_reader_and_upgrades_the_phas
     rr1.status     = fail.accepted();
     sm1.status     = fail.accepted();
     val mid:                        session.ModuleId = module.id(0);
-    val register_module_identity_r: err[fail.Fail]   = session.register_module_identity(?s, mid, ?a1, intern.str_id(7), module.stable_id(5));
+    val register_module_identity_r: err[fail.Fail]   = session.register_module_identity(?s, mid, intern.str_id(7), module.stable_id(5));
     if (sel register_module_identity_r.err) { ret 1; }
 
     var probe: CountingDefinition = CountingDefinition{

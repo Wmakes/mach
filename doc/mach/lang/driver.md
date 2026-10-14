@@ -64,29 +64,61 @@ fwd project.link_name_for
 
 forwards [`mach.lang.driver.project.link_name_for`](driver/project.md#fun-link_name_for)
 
-## fwd project.begin_query_phase
+## fwd frontend.begin_query_phase
 
 ```mach
-fwd project.begin_query_phase
+fwd frontend.begin_query_phase
 ```
 
-forwards [`mach.lang.driver.project.begin_query_phase`](driver/project.md#fun-begin_query_phase)
+forwards [`mach.lang.driver.frontend.begin_query_phase`](driver/frontend.md#fun-begin_query_phase)
 
-## fwd project.finish_query_phase
+## fwd frontend.finish_query_phase
 
 ```mach
-fwd project.finish_query_phase
+fwd frontend.finish_query_phase
 ```
 
-forwards [`mach.lang.driver.project.finish_query_phase`](driver/project.md#fun-finish_query_phase)
+forwards [`mach.lang.driver.frontend.finish_query_phase`](driver/frontend.md#fun-finish_query_phase)
 
-## fwd project.refresh_diagnostics
+## fwd frontend.refresh_diagnostics
 
 ```mach
-fwd project.refresh_diagnostics
+fwd frontend.refresh_diagnostics
 ```
 
-forwards [`mach.lang.driver.project.refresh_diagnostics`](driver/project.md#fun-refresh_diagnostics)
+forwards [`mach.lang.driver.frontend.refresh_diagnostics`](driver/frontend.md#fun-refresh_diagnostics)
+
+## fwd frontend.frontend_status
+
+```mach
+fwd frontend.frontend_status
+```
+
+forwards [`mach.lang.driver.frontend.frontend_status`](driver/frontend.md#fun-frontend_status)
+
+## fwd frontend.syntax
+
+```mach
+fwd frontend.syntax
+```
+
+forwards [`mach.lang.driver.frontend.syntax`](driver/frontend.md#fun-syntax)
+
+## fwd frontend.resolved
+
+```mach
+fwd frontend.resolved
+```
+
+forwards [`mach.lang.driver.frontend.resolved`](driver/frontend.md#fun-resolved)
+
+## fwd frontend.typed
+
+```mach
+fwd frontend.typed
+```
+
+forwards [`mach.lang.driver.frontend.typed`](driver/frontend.md#fun-typed)
 
 ## fwd passes.codegen_reusable
 
@@ -136,14 +168,6 @@ fwd passes.debug_info_of
 
 forwards [`mach.lang.driver.passes.debug_info_of`](driver/passes.md#fun-debug_info_of)
 
-## fwd passes.frontend_status
-
-```mach
-fwd passes.frontend_status
-```
-
-forwards [`mach.lang.driver.passes.frontend_status`](driver/passes.md#fun-frontend_status)
-
 ## fwd driver_load.entry_module_fqn
 
 ```mach
@@ -191,6 +215,15 @@ result: err[fail.Fail]) err[fail.Fail];
 
 a phase the query engine does not run is published as one it does: the
 project's diagnostics are refreshed beside its result
+
+## fun reconfigure
+
+```mach
+pub fun reconfigure(p: *project.Project, req: request.BuildRequest) err[fail.Fail];
+```
+
+a loaded project under another request from its host: the build context is frozen again, so
+what read the old one is computed again, and nothing reads a context no freeze captured
 
 ## fun project_failure
 
@@ -301,7 +334,7 @@ frontend analysis for tools: the project comes back whenever the frontend
 ran, whatever its phases decided, so a consumer can read the trees, resolve
 results and sema results beside the diagnostics. every module that reached
 a phase carries that phase's product on its ModuleEntry even when the
-module's own query was rejected; the standing is passes.frontend_status(p).
+module's own query was rejected; the standing is frontend.frontend_status(p).
 a rejected phase ends the analysis at that phase; err is an operational
 failure only (an unreadable manifest, allocation, I/O)
 

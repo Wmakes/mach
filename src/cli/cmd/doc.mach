@@ -288,8 +288,8 @@ fun write_forwarded(w: *io_writer.Writer, page: *PageCtx, did: ast_id.DeclId) {
     if (resolve.symbol_is_nil(sid)) { ret; }
     val sym:    *resolve.Symbol = ?rr.symbols[resolve.symbol_index(sid)];
     val whole:  bool            = sym.kind == resolve.SYM_USE;
-    var target: u32             = sym.origin::u32;
-    if (whole)                                 { target = sym.slot; }
+    var target: u32             = resolve.origin_of(page.p.s, sym)::u32;
+    if (whole)                                 { target = resolve.use_target(page.p.s, sym)::u32; }
     if (target >= driver.module_count(page.p)) { ret; }
     val tm:    *driver.ModuleEntry = driver.module_at(page.p, target);
     val tfqn:  opt[str]            = intern.get(?page.p.s.interner, tm.fqn);
@@ -502,11 +502,11 @@ fun document_module(alloc: *A.Allocator, out_path: *u8, fqn: *u8, p: *driver.Pro
     if (sel ensure_parents_r.err) { ret res[i64, fail.Fail].err{ensure_parents_r.err}; }
 
     var ctx: PageCtx;
-    ctx.a          = m.a;
+    ctx.a          = driver.syntax(p, m);
     ctx.source     = source;
     ctx.fqn        = fqn;
     ctx.p          = p;
-    ctx.resolved   = m.resolve_result;
+    ctx.resolved   = driver.resolved(p, m);
     ctx.documented = 0;
 
     val published: err[fail.Fail] = publish_page[PageCtx](alloc, out_path::str, ?ctx, write_page);

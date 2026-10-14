@@ -1,11 +1,9 @@
 use std.allocator.page;
 use std.collections.map;
 use std.system.panic.panic;
-use std.text.string.str_dup;
 use std.text.string.str_free;
 use std.types.bool.bool;
 use std.types.bool.false;
-use std.types.bool.true;
 use std.types.error.err;
 use std.types.option.opt;
 use std.types.result.res;
@@ -146,24 +144,19 @@ pub rec ArtifactEntry {
     artifact: intern.StrId;
 }
 
+# a module the project loaded: its identity, what the load decided for it, and the codegen
+# staging of its objects. its front-end products are the query engine's, keyed by its file and
+# its stable id, and read through mach.lang.driver.frontend
 pub rec ModuleEntry {
-    fqn:            intern.StrId;
-    file_id:        lang_source.FileId;
-    a:              *ast.Ast;
-    parse_status:   fail.PhaseStatus;
-    resolve_result: *resolve.ResolveResult;
-    resolved:       bool;
-    # the public surface each importer reads, decoded once per typed-exports revision
-    typed_surface:     *fe_sema.ModuleSema;
-    typed_surface_rev: query.Revision;
-    sema_result:       *fe_sema.SemaResult;
-    ir_module:         *me_ir.Module;
-    object_image:      *target_of.ObjectImage;
-    staged_image:      *target_of.ObjectImage;
-    staged_facts:      cache_record.Facts;
-    cache_checked:     bool;
-    cache_hit:         bool;
-    cache_under:       [32]u8;
+    fqn:           intern.StrId;
+    file_id:       lang_source.FileId;
+    ir_module:     *me_ir.Module;
+    object_image:  *target_of.ObjectImage;
+    staged_image:  *target_of.ObjectImage;
+    staged_facts:  cache_record.Facts;
+    cache_checked: bool;
+    cache_hit:     bool;
+    cache_under:   [32]u8;
     # the key this load built for the module's object, when it has one. the key
     # leaves the module's tests out, so the digest of its whole source keys its
     # test object and says whether the object's recorded warnings still stand
@@ -195,12 +188,25 @@ pub rec TestObject {
     cache_under:   [32]u8;
 }
 
+# a lowering in flight on the serial path: the raw module an inline-bodies computation lowered
+# for it, and whether its caller optimizes it outside the computation
+# ---
+# key:       the lowering's back-half key
+# output:    the raw lowering the inline-bodies product handed over, nil until it does
+# available: the bodies a deferred lowering's optimization may inline (release only)
+# deferred:  the caller optimizes the lowering on its workers and completes the prepared product
 pub rec RawLowerCapture {
     key:       u64;
     output:    query.QueryOutput;
     available: *body.Available;
+    deferred:  bool;
 }
 
+# ---
+# since:          the first query operation this project ran; a product read between its
+#                 operations counts only when one of them reached it
+# context_digest: the fingerprint of the build context, once frozen
+# context_frozen: the build context is frozen, so a change to it is refused
 pub rec Project {
     s:                 *session.Session;
     alloc:             *A.Allocator;
@@ -263,188 +269,9 @@ pub rec Project {
     # the unit's phase rows, nil when nothing reads them
     progress: *readout.Progress;
 
-    # how many products of each query kind this project computed rather than reused
-    computes: [QUERY_KIND_SLOTS]u32;
-}
-
-val QUERY_KIND_SLOTS: u32 = 32;
-
-pub fun note_compute(p: *Project, kind: query.QueryKind) {
-    if (kind::u32 < QUERY_KIND_SLOTS) { p.computes[kind::u32] = p.computes[kind::u32] + 1; }
-}
-
-pub fun begin_query_phase(p: *Project) res[query.Operation, fail.Fail] {
-    val reset: err[fail.Fail] = session.reset_type_projection(p.s);
-    if (sel reset.err) {
-        ret res[query.Operation, fail.Fail].err{reset.err};
-    }
-    val begun: res[query.Operation, fail.Fail] = query.begin(?p.s.queries);
-    if (sel begun.err) {
-        ret res[query.Operation, fail.Fail].err{begun.err};
-    }
-    release_fresh_staged(p);
-    ret res[query.Operation, fail.Fail].ok{begun.ok};
-}
-
-# the session's store is rebuilt from the project's and the query presentation's,
-# dropping the warnings a declaration's `#[expect]` acknowledges and the ones the
-# profile's `allow` silences, then reporting each judged expectation nothing
-# fulfilled. a warning replayed from the cache passes through here as a fresh one does
-pub fun refresh_diagnostics(p: *Project) err[fail.Fail] {
-    var staged: diagnostic.DiagnosticStore = diagnostic.store_init(p.s.alloc);
-    var handed: bool                       = false;
-    fin {
-        if (!handed) { diagnostic.store_dnit(?staged); }
-    }
-    diagnostic.silence(?staged, p.req.allow);
-    var expects:  collections_vector.Vector[diagnostic.Expectation] = collections_vector.init[diagnostic.Expectation](p.s.alloc);
-    val gathered: err[fail.Fail]                                    = gather_expectations(p, ?expects);
-    diagnostic.expect(?staged, expects);
-    if (sel gathered.err) { ret err[fail.Fail].err{gathered.err}; }
-    var copied:    err[fail.Fail] = diagnostic.replay_into(?staged, ?p.diags);
-    val copied_ok: bool           = sel copied.ok && p.s.query_presentation != nil;
-    if (copied_ok) {
-        copied = diagnostic.replay_into(?staged, ?p.s.query_presentation.diags);
-    }
-    if (sel copied.err) { ret err[fail.Fail].err{copied.err}; }
-    diagnostic.report_unfulfilled(?staged);
-    diagnostic.set_origin(?staged, p.s.diags.origin);
-    diagnostic.store_dnit(?p.s.diags);
-    p.s.diags = staged;
-    handed    = true;
-    ret err[fail.Fail].ok{};
-}
-
-# every loaded module's `#[expect]` keys. a module's are judged once its
-# warnings are all in: it was type checked this build, or its front end was
-# skipped and its recorded warnings replayed
-fun gather_expectations(p: *Project, out: *collections_vector.Vector[diagnostic.Expectation]) err[fail.Fail] {
-    var i: u32 = 0;
-    for (i < module_count(p)) {
-        val mid: u32          = i;
-        val m:   *ModuleEntry = module_at(p, mid);
-        i = i + 1;
-        if (m.a == nil) { cnt; }
-        val checked:   bool                 = m.sema_result != nil || m.frontend_skipped;
-        var typed:     comptime.ComptimeCtx = typed_scope(m);
-        val collected: err[fail.Fail]       = expect.collect(p.s, m.a, ?typed, checked, out);
-        comptime.dnit(?typed);
-        if (sel collected.err) { ret collected; }
-    }
-    ret err[fail.Fail].ok{};
-}
-
-pub fun finish_query_phase(p: *Project, operation: query.Operation,
-    roots: *query.QueryKey, count: usize,
-    result: err[fail.Fail]) err[fail.Fail] {
-    val db:    *query.QueryDb = ?p.s.queries;
-    val ended: err[fail.Fail] = query.end(db, operation);
-    if (!db.operation_active) { release_fresh_staged(p); }
-    var final_result:      err[fail.Fail] = result;
-    var operation_failure: bool           = false;
-    var message:           str            = nil;
-    var held_places:       fail.Fail      = fail.reported();
-    var lost:              bool           = false;
-    if (sel ended.err) {
-        val failure:   fail.Fail = ended.err;
-        var displaces: bool      = sel result.ok;
-        if (sel result.err) {
-            if (sel failure.message && !fail.is_message(result.err)) { displaces = true; }
-        }
-        if (displaces) {
-            final_result      = err[fail.Fail].err{failure};
-            operation_failure = true;
-        }
-    }
-    if (!operation_failure) {
-        if (sel result.err) {
-            var failure: fail.Fail = result.err;
-            val carried: opt[str]  = fail.text(failure);
-            if (sel carried.some) {
-                val copied: res[str, A.Error] = str_dup(db.a, carried.some);
-                if (sel copied.err) {
-                    failure = fail.with_text(failure, lang_alloc.text(copied.err));
-                    lost    = true;
-                }
-                if (sel copied.ok) {
-                    message = copied.ok;
-                    failure = fail.with_text(failure, message);
-                }
-                val places_r: res[fail.Fail, A.Error] = fail.places_retain(db.a, failure);
-                if (sel places_r.err) {
-                    failure = fail.without_places(failure);
-                    lost    = true;
-                }
-                if (sel places_r.ok) {
-                    failure     = places_r.ok;
-                    held_places = failure;
-                }
-                final_result = err[fail.Fail].err{failure};
-            }
-        }
-    }
-
-    val collected: res[*query.Presentation, fail.Fail] = query.collect(db, operation, roots, count, p.s.alloc);
-    if (sel collected.err) {
-        val taken: res[str, fail.Fail] = query.take_failure_message(db, operation);
-        if (sel taken.ok) {
-            if (taken.ok != nil) {
-                if (operation_failure) { message = taken.ok; }
-                or                     { str_free(db.a, taken.ok); }
-            }
-        }
-        if (sel taken.err) { lost = true; }
-        val discarded: err[fail.Fail] = query.discard(db, operation);
-        if (sel discarded.err) { lost = true; }
-        val no_result: bool = sel final_result.ok;
-        if (no_result) {
-            final_result = err[fail.Fail].err{collected.err};
-        }
-        lost = true;
-    }
-    if (sel collected.ok) {
-        val presentation: *query.Presentation = collected.ok;
-        if (p.s.query_presentation != nil) { query.presentation_dnit(p.s.query_presentation); }
-        p.s.query_presentation = presentation;
-        val refreshed: err[fail.Fail] = refresh_diagnostics(p);
-        if (sel refreshed.err) {
-            val final_result_ok: bool = sel final_result.ok;
-            if (final_result_ok) { final_result = refreshed; }
-            lost = true;
-        }
-    }
-    session.drop_query_failure(p.s);
-    p.s.query_failure_message = message;
-    p.s.query_failure_places  = held_places;
-    if (lost) {
-        diagnostic.note_lost(?p.diags);
-        diagnostic.note_lost(?p.s.diags);
-    }
-    # a rejected operation leaves its published products as live as an
-    # accepted one does, so the entries keep them; any other failure drops
-    # every borrowed product pointer
-    var products_stand: bool = sel ended.ok;
-    if (sel ended.err) { products_stand = sel ended.err.reported; }
-    if (!products_stand) {
-        var i: u32 = 0;
-        for (i < module_count(p)) {
-            val m: *ModuleEntry = module_at(p, i);
-            m.a                 = nil;
-            m.resolve_result    = nil;
-            m.sema_result       = nil;
-            m.ir_module         = nil;
-            m.object_image      = nil;
-            m.test.ir_module    = nil;
-            m.test.object_image = nil;
-            i                   = i + 1;
-        }
-        i = 0;
-        for (i < p.s.module_ast_count) {
-            p.s.module_asts[i] = nil;
-            i                  = i + 1;
-        }
-    }
-    ret final_result;
+    since:          u64;
+    context_digest: [32]u8;
+    context_frozen: bool;
 }
 
 pub fun link_name_for(p: *Project, bare: intern.StrId) res[intern.StrId, fail.Fail] {
@@ -506,7 +333,7 @@ pub fun release_all_staged(p: *Project) {
 # it was read under and the next load discards it if that changed. a freshly
 # generated image staged by a codegen worker belongs to the operation that
 # generated it and leaves with it
-fun release_fresh_staged(p: *Project) {
+pub fun release_fresh_staged(p: *Project) {
     var i: u32 = 0;
     for (i < module_count(p)) {
         val m: *ModuleEntry = module_at(p, i);
@@ -514,15 +341,6 @@ fun release_fresh_staged(p: *Project) {
         if (m.test.staged_image != nil && !m.test.cache_hit) { release_staged_test(p, m); }
         i = i + 1;
     }
-}
-
-# what the front end bound over a module, to read: the load's bindings, and resolve's and sema's
-# where they ran
-fun typed_scope(m: *ModuleEntry) comptime.ComptimeCtx {
-    var typed: comptime.ComptimeCtx = comptime.stage_init(?m.load.ctx, comptime.STAGE_LOWER, m.load.ctx.own.alloc);
-    if (m.resolve_result != nil) { comptime.layer_set(?typed, comptime.STAGE_RESOLVE, ?m.resolve_result.constants); }
-    if (m.sema_result != nil)    { comptime.layer_set(?typed, comptime.STAGE_SEMA, ?m.sema_result.constants); }
-    ret typed;
 }
 
 # release the scope lowering bound a module's constants in
@@ -540,7 +358,6 @@ pub fun dnit_project(p: *Project) {
         val m: *ModuleEntry = module_at(p, i);
         lower_scope_drop(m);
         fe_load.module_dnit(p.alloc, ?m.load);
-        drop_surface(p.alloc, ?m.typed_surface);
         i = i + 1;
     }
     handle.chunk_dnit[ModuleEntry](?p.modules);
@@ -584,8 +401,9 @@ pub fun init_project(p: *Project, s: *session.Session) {
     p.req                   = request.defaults();
     p.raw_lower_capture     = nil;
     p.lowering_workers      = false;
-    p.queries.db            = nil;
-    p.queries.caps.compute  = nil;
+    p.queries               = query.QueryRuntime[Project]{db: ?s.queries};
+    p.since                 = s.queries.operation_sequence + 1;
+    p.context_frozen        = false;
     p.diags                 = diagnostic.store_init(p.alloc);
     p.target_entry          = nil;
     p.union_entries         = nil;
@@ -615,41 +433,36 @@ pub fun init_project(p: *Project, s: *session.Session) {
     p.object_dir                    = nil;
     p.cache_dir                     = nil;
     p.out_dir                       = nil;
-    var ki: u32 = 0;
-    for (ki < QUERY_KIND_SLOTS) {
-        p.computes[ki] = 0;
-        ki             = ki + 1;
-    }
-    p.config.id                = intern.STR_NIL;
-    p.config.version           = intern.STR_NIL;
-    p.config.bin_name          = intern.STR_NIL;
-    p.config.icon              = intern.STR_NIL;
-    p.config.app_manifest      = intern.STR_NIL;
-    p.config.module            = intern.STR_NIL;
-    p.config.targets           = nil;
-    p.config.target_count      = 0;
-    p.config.deps              = nil;
-    p.config.dep_count         = 0;
-    p.config.cascade_libs      = nil;
-    p.config.cascade_lib_count = 0;
-    p.config.art_reqs          = nil;
-    p.config.art_req_count     = 0;
-    p.config.req_scopes        = nil;
-    p.config.req_scope_count   = 0;
-    p.config.home_root         = intern.STR_NIL;
-    p.config.dependency_owned  = false;
-    p.modules                  = handle.chunk_init[ModuleEntry](p.alloc);
-    p.loader                   = fe_load.init(s, p.alloc);
-    p.disk                     = disk.init(p.alloc, ?s.interner);
-    p.topo                     = nil;
-    p.topo_len                 = 0;
-    p.topo_cap                 = 0;
-    p.lower_visit_gen          = nil;
-    p.lower_visit_cap          = 0;
-    p.lower_visit_epoch        = 0;
-    p.emit_len                 = 0;
-    p.roots                    = ROOT_ARTIFACT;
-    p.progress                 = nil;
+    p.config.id                     = intern.STR_NIL;
+    p.config.version                = intern.STR_NIL;
+    p.config.bin_name               = intern.STR_NIL;
+    p.config.icon                   = intern.STR_NIL;
+    p.config.app_manifest           = intern.STR_NIL;
+    p.config.module                 = intern.STR_NIL;
+    p.config.targets                = nil;
+    p.config.target_count           = 0;
+    p.config.deps                   = nil;
+    p.config.dep_count              = 0;
+    p.config.cascade_libs           = nil;
+    p.config.cascade_lib_count      = 0;
+    p.config.art_reqs               = nil;
+    p.config.art_req_count          = 0;
+    p.config.req_scopes             = nil;
+    p.config.req_scope_count        = 0;
+    p.config.home_root              = intern.STR_NIL;
+    p.config.dependency_owned       = false;
+    p.modules                       = handle.chunk_init[ModuleEntry](p.alloc);
+    p.loader                        = fe_load.init(s, p.alloc);
+    p.disk                          = disk.init(p.alloc, ?s.interner);
+    p.topo                          = nil;
+    p.topo_len                      = 0;
+    p.topo_cap                      = 0;
+    p.lower_visit_gen               = nil;
+    p.lower_visit_cap               = 0;
+    p.lower_visit_epoch             = 0;
+    p.emit_len                      = 0;
+    p.roots                         = ROOT_ARTIFACT;
+    p.progress                      = nil;
     set_origin(p, diagnostic.ORIGIN_BUILD);
 }
 
@@ -835,13 +648,6 @@ pub fun module_by_file(p: *Project, fid: lang_source.FileId) opt[session.ModuleI
         i = i + 1;
     }
     ret opt[session.ModuleId].none{};
-}
-
-pub fun drop_surface(a: *A.Allocator, slot: **fe_sema.ModuleSema) {
-    if (@slot == nil) { ret; }
-    fe_sema.module_sema_dnit(@slot);
-    A.deallocate[fe_sema.ModuleSema](a, @slot, 1::usize);
-    @slot = nil;
 }
 
 test module_by_fqn__pointer_stays_valid_across_growth {

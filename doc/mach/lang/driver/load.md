@@ -63,30 +63,6 @@ pub fun decorators_record(p: *project.Project, mid: session.ModuleId) err[fail.F
 
 record the strings a module's decorator arguments evaluate to
 
-## fun parsed_definition
-
-```mach
-pub fun parsed_definition(ctx: ptr, mid: session.ModuleId) res[resolve.ParsedDefinition, fail.Fail];
-```
-
-## fun q_parse_compute
-
-```mach
-pub fun q_parse_compute(p: *project.Project, key: u64, alloc: *A.Allocator, diags: *diagnostic.DiagnosticStore) res[query.QueryOutput, fail.Fail];
-```
-
-## fun q_parse_finalize
-
-```mach
-pub fun q_parse_finalize(value: *u8, value_len: u32, alloc: *A.Allocator);
-```
-
-## fun q_exports_compute
-
-```mach
-pub fun q_exports_compute(p: *project.Project, key: u64, alloc: *A.Allocator, diags: *diagnostic.DiagnosticStore) res[query.QueryOutput, fail.Fail];
-```
-
 ## fun rebuild_topo
 
 ```mach

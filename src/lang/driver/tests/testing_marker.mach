@@ -108,7 +108,10 @@ fun ut_testing_objects(test_mode: bool, seen: *u32) i32 {
     if (sel pr.err) { ret 5; }
     var p: project.Project = pr.ok;
     fin { project.dnit_project(?p); }
-    if (test_mode) { p.req.goal = request.GOAL_TESTS; }
+    var req: request.BuildRequest = p.req;
+    if (test_mode) { req.goal = request.GOAL_TESTS; }
+    val reconfigured: err[fail.Fail] = driver.reconfigure(?p, req);
+    if (sel reconfigured.err) { ret 5; }
     val checked: err[fail.Fail] = driver.run_sema_pass(?p);
     if (sel checked.err) { ret 6; }
     val lowered: err[fail.Fail] = driver.run_lower_pass(?p);
