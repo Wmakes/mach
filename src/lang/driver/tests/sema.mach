@@ -47,6 +47,7 @@ use mach.lang.driver.passes;
 use mach.lang.driver.project;
 use session_embed: mach.lang.session.embed;
 
+use mach.lang.driver.frontend;
 use mach.lang.driver.tests.testing.ut_back_half;
 use mach.lang.driver.tests.testing.ut_cc3;
 use mach.lang.driver.tests.testing.ut_count_errors;
@@ -203,9 +204,9 @@ test bracket__reinterprets_without_rewriting_the_tree {
         fin { project.dnit_project(?p); }
         val mid: session.ModuleId = ut_mid(?p, ?s, "uniontest.main");
         if (module.is_nil(mid)) { ret 8; }
-        val parsed: *ast.Ast = project.module_at(?p, mid::u32).a;
+        val parsed: *ast.Ast = frontend.syntax(?p, project.module_at(?p, mid::u32));
         if (parsed == nil) { ret 9; }
-        val current: query.Revision = query.peek_revision(?s.queries, query.Q_PARSE, lang_source.file_index(project.module_at(?p, mid::u32).file_id)::u64);
+        val current: query.Revision = query.peek_revision(?s.queries, ?frontend.PARSE, lang_source.file_index(project.module_at(?p, mid::u32).file_id)::u64);
         if (round == 0) {
             owner       = parsed;
             incarnation = parsed.incarnation;
@@ -236,7 +237,7 @@ test bracket__reinterprets_without_rewriting_the_tree {
             }
             ret 14;
         }
-        val interpreted: res[ast_expr.Expr, fail.Fail] = resolve.expression(project.module_at(?p, mid::u32).resolve_result, parsed, selected);
+        val interpreted: res[ast_expr.Expr, fail.Fail] = resolve.expression(frontend.resolved(?p, project.module_at(?p, mid::u32)), parsed, selected);
         if (sel interpreted.err) { ret 15; }
         val node: ast_expr.Expr = interpreted.ok;
         if (node.kind != ast_expr.EXPR_KIND_CALL || !ast_id.expr_is_nil(node.data.call.index_callee))                                                                   { ret 16; }
@@ -277,7 +278,7 @@ test instance__lowers_from_the_exporter_interface_not_its_tree {
     val typed: err[fail.Fail] = driver.run_sema_pass(?p);
     if (sel typed.err) { ret 3; }
 
-    val lib: *ast.Ast = project.module_at(?p, ut_mid(?p, ?s, "uniontest.lib")::u32).a;
+    val lib: *ast.Ast = frontend.syntax(?p, project.module_at(?p, ut_mid(?p, ?s, "uniontest.lib")::u32));
     if (lib == nil || lib.exprs.len == 0) { ret 4; }
     var i: usize = 0;
     for (i < lib.exprs.len) {
@@ -332,10 +333,10 @@ test global_init__cycle_is_refused_with_no_lower_product {
     val mid: session.ModuleId = ut_mid(?p, ?s, "uniontest.main");
     if (module.is_nil(mid) || project.module_at(?p, mid::u32).ir_module != nil) { ret 9; }
     val stable: session.StableModuleId          = ut_stable(?p, ?s, "uniontest.main");
-    val begun:  res[query.Operation, fail.Fail] = project.begin_query_phase(?p);
+    val begun:  res[query.Operation, fail.Fail] = frontend.begin_query_phase(?p);
     if (sel begun.err) { ret 10; }
     val operation: query.Operation                 = begun.ok;
-    val acquired:  res[query.QueryView, fail.Fail] = query.get[project.Project](?p.queries, ?p, query.Q_LOWER, passes.back_half_key(stable, false));
+    val acquired:  res[query.QueryView, fail.Fail] = query.get[project.Project](?p.queries, ?p, ?passes.LOWER, passes.back_half_key(stable, false));
     val ended:     err[fail.Fail]                  = query.end(?s.queries, operation);
     val discarded: err[fail.Fail]                  = query.discard(?s.queries, operation);
     if (sel acquired.ok)                                  { ret 11; }
@@ -374,13 +375,16 @@ test linkage_name__test_declaration {
         session.dnit(?s);
         ret 1;
     }
-    var p: project.Project = pr.ok;
-    p.req.goal = request.GOAL_TESTS;
+    var p:   project.Project      = pr.ok;
+    var req: request.BuildRequest = p.req;
+    req.goal = request.GOAL_TESTS;
+    val reconfigured:       err[fail.Fail] = driver.reconfigure(?p, req);
     val run_sema_pass_r:    err[fail.Fail] = driver.run_sema_pass(?p);
     val run_lower_pass_r:   err[fail.Fail] = driver.run_lower_pass(?p);
     val run_codegen_pass_r: err[fail.Fail] = driver.run_codegen_pass(?p);
     val run_test_pass_r:    err[fail.Fail] = driver.run_test_pass(?p);
-    if (sel run_sema_pass_r.err)    { bad = 1; }
+    if (sel reconfigured.err)       { bad = 1; }
+    or (sel run_sema_pass_r.err)    { bad = 1; }
     or (sel run_lower_pass_r.err)   { bad = 2; }
     or (sel run_codegen_pass_r.err) { bad = 3; }
     or (sel run_test_pass_r.err)    { bad = 4; }

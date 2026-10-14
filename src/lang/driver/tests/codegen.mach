@@ -57,6 +57,7 @@ use build_plan: mach.lang.build.plan;
 use mach.lang.driver;
 use mach.lang.driver.project;
 
+use mach.lang.driver.frontend;
 use mach.lang.driver.tests.testing.CODEGEN_CASE_NONE;
 use mach.lang.driver.tests.testing.CODEGEN_CASE_PUBLIC_MUL;
 use mach.lang.driver.tests.testing.CODEGEN_CASE_PUBLIC_SHIFT;
@@ -1080,7 +1081,10 @@ fun ut_inline_text_bytes(alloc: *A.Allocator, root: str, fn: str, debug: bool, o
     if (sel opened.err) { ret 3; }
     var p: project.Project = opened.ok;
     fin { project.dnit_project(?p); }
-    p.req.debug = debug;
+    var req: request.BuildRequest = p.req;
+    req.debug = debug;
+    val reconfigured: err[fail.Fail] = driver.reconfigure(?p, req);
+    if (sel reconfigured.err) { ret 4; }
     val run_sema_pass_r: err[fail.Fail] = driver.run_sema_pass(?p);
     if (sel run_sema_pass_r.err) { ret 4; }
     val run_lower_pass_r: err[fail.Fail] = driver.run_lower_pass(?p);
@@ -1479,7 +1483,7 @@ fun ut_export_named(target_name: str, src: str, want: str) i32 {
 
     val mid: session.ModuleId = ut_mid(?p, ?s, "uniontest.main");
     if (module.is_nil(mid)) { ret 3; }
-    val a:  *ast.Ast = project.module_at(?p, mid::u32).a;
+    val a:  *ast.Ast = frontend.syntax(?p, project.module_at(?p, mid::u32));
     var di: usize    = 0;
     for (di < a.decls.len) {
         val named: intern.StrId = session.export_name(?s, mid, di::u32);
@@ -2305,7 +2309,10 @@ test rv32_debug__wide_local_has_piece_locations {
     var p:   project.Project = pr.ok;
     var bad: i32             = 0;
     if (p.target.debug == nil || p.target.debug.id != target_of.DBG_DWARF) { bad = 2; }
-    p.req.debug = true;
+    var req: request.BuildRequest = p.req;
+    req.debug = true;
+    val reconfigured: err[fail.Fail] = driver.reconfigure(?p, req);
+    if (sel reconfigured.err)                   { bad = 3; }
     if (bad == 0 && ut_run_codegen_ok(?p) != 0) { bad = 3; }
     val mid: session.ModuleId = ut_mid(?p, ?s, "lanedbg.main");
     if (bad == 0 && module.is_nil(mid)) { bad = 4; }
@@ -2493,7 +2500,10 @@ fun ut_clobbered_register_loclists(target_name: str) i32 {
     var p: project.Project = pr.ok;
     fin { project.dnit_project(?p); }
     if (p.target.debug == nil || p.target.debug.id != target_of.DBG_DWARF) { ret 2; }
-    p.req.debug = true;
+    var req: request.BuildRequest = p.req;
+    req.debug = true;
+    val reconfigured: err[fail.Fail] = driver.reconfigure(?p, req);
+    if (sel reconfigured.err)       { ret 3; }
     if (ut_run_codegen_ok(?p) != 0) { ret 3; }
     val mid: session.ModuleId = ut_mid(?p, ?s, "clobdbg.main");
     if (module.is_nil(mid)) { ret 4; }
@@ -3186,7 +3196,10 @@ test debug_info__windows_is_dwarf_with_secrel_offsets {
     var p:   project.Project = pr.ok;
     var bad: i32             = 0;
     if (p.target.debug == nil || p.target.debug.id != target_of.DBG_DWARF) { bad = 1; }
-    p.req.debug = true;
+    var req: request.BuildRequest = p.req;
+    req.debug = true;
+    val reconfigured: err[fail.Fail] = driver.reconfigure(?p, req);
+    if (sel reconfigured.err)                   { bad = 2; }
     if (bad == 0 && ut_run_codegen_ok(?p) != 0) { bad = 2; }
     val mid: session.ModuleId = ut_mid(?p, ?s, "nodbg.main");
     if (bad == 0 && module.is_nil(mid)) { bad = 3; }

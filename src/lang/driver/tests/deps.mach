@@ -42,6 +42,7 @@ use mach.lang.driver.project;
 use package_verify: mach.lang.package.verify;
 use lang_version:   mach.lang.version;
 
+use mach.lang.driver.frontend;
 use mach.lang.driver.tests.testing.UtQuerySnapshot;
 use mach.lang.driver.tests.testing.ut_cc3;
 use mach.lang.driver.tests.testing.ut_count_errors;
@@ -528,7 +529,7 @@ fun ut_path_copy_revision(s: *session.Session, root: str, expected: str) res[que
     for (i < project.module_count(?p)) {
         val file: opt[*lang_source.SourceFile] = lang_source.get(?s.sources, project.module_at(?p, i).file_id);
         if (sel file.some && str_equals(file.some.text, expected)) {
-            val qr: res[UtQuerySnapshot, fail.Fail] = ut_query_snapshot(p.alloc, ?p, query.Q_FILE_TEXT, lang_source.file_index(project.module_at(?p, i).file_id)::u64);
+            val qr: res[UtQuerySnapshot, fail.Fail] = ut_query_snapshot(p.alloc, ?p, ?session.FILE_TEXT, lang_source.file_index(project.module_at(?p, i).file_id)::u64);
             if (sel qr.err) { ret res[query.Revision, fail.Fail].err{qr.err}; }
             val q: UtQuerySnapshot = qr.ok;
             fin {
@@ -1137,7 +1138,7 @@ test use_root__undeclared_names_the_missing_dependency {
     # the tolerant load keeps the project standing rejected; the report is what is checked
     if (sel pr.ok) {
         var p:        project.Project  = pr.ok;
-        val standing: fail.PhaseStatus = passes.frontend_status(?p);
+        val standing: fail.PhaseStatus = frontend.frontend_status(?p);
         if (!sel standing.kind.rejected) { bad = 1; }
         project.dnit_project(?p);
     }
@@ -1283,7 +1284,7 @@ test comptime_identity__a_dependency_reads_its_own_project {
     val pr: res[project.Project, fail.Fail] = driver.build_project_union(?s, root);
     if (sel pr.err) { ret 2; }
     var p:        project.Project  = pr.ok;
-    val standing: fail.PhaseStatus = passes.frontend_status(?p);
+    val standing: fail.PhaseStatus = frontend.frontend_status(?p);
     project.dnit_project(?p);
     if (sel standing.kind.rejected)     { ret 3; }
     if (ut_count_errors(?s.diags) != 0) { ret 4; }
@@ -1824,7 +1825,7 @@ fun ut_bare_import(alias: str, dep_manifest: str, dep_names: *str, dep_texts: *s
     # the tolerant load keeps the project standing rejected; the report is what is checked
     if (sel pr.ok) {
         var p:        project.Project  = pr.ok;
-        val standing: fail.PhaseStatus = passes.frontend_status(?p);
+        val standing: fail.PhaseStatus = frontend.frontend_status(?p);
         project.dnit_project(?p);
         if (!sel standing.kind.rejected) { ret 2; }
     }

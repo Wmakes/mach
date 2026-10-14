@@ -40,6 +40,7 @@ use lang_source: mach.lang.source;
 use mach.lang.stack;
 use mach.lang.type;
 
+use mach.lang.driver.frontend;
 use mach.lang.driver.tests.testing.TAG_CORPUS;
 use mach.lang.driver.tests.testing.TagFixture;
 use mach.lang.driver.tests.testing.ut_cc3;
@@ -168,7 +169,7 @@ test alloc_failure__sema_neither_leaks_nor_half_commits_a_fix {
     val real_alloc: *A.Allocator = s.alloc;
 
     s.alloc = T.allocator_of(?t);
-    val r0: res[sema_product.SemaResult, fail.Fail] = fe_sema.sema(?s, m.a, m.resolve_result, ?deps, ?m.load.ctx, mid, ?s.diags);
+    val r0: res[sema_product.SemaResult, fail.Fail] = fe_sema.sema(?s, frontend.syntax(?p, m), frontend.resolved(?p, m), ?deps, ?m.load.ctx, mid, ?s.diags);
     if (sel r0.ok) {
         var res0: sema_product.SemaResult = r0.ok;
         fe_sema.result_dnit(?res0);
@@ -185,7 +186,7 @@ test alloc_failure__sema_neither_leaks_nor_half_commits_a_fix {
         refuse_after(?t, fail_at);
         val pre_len: usize = diagnostic.len(?s.diags);
         s.alloc = T.allocator_of(?t);
-        val r: res[sema_product.SemaResult, fail.Fail] = fe_sema.sema(?s, m.a, m.resolve_result, ?deps, ?m.load.ctx, mid, ?s.diags);
+        val r: res[sema_product.SemaResult, fail.Fail] = fe_sema.sema(?s, frontend.syntax(?p, m), frontend.resolved(?p, m), ?deps, ?m.load.ctx, mid, ?s.diags);
         if (sel r.ok) {
             var sema_result: sema_product.SemaResult = r.ok;
             fe_sema.result_dnit(?sema_result);
@@ -255,7 +256,7 @@ test alloc_failure__report_marks_the_status_internal {
     if (diagnostic.has_errors(?s.diags)) { ret 1; }
 
     var view: sema_context.ModuleView = sema_context.ModuleView{};
-    view.a = m.a;
+    view.a = frontend.syntax(?p, m);
     var sc: sema_context.SemaContext = sema_context.init(?s, ?s.diags, sema_context.Typing{}, view, sema_context.instance_none());
 
     var span: lang_source.Span;
@@ -326,7 +327,7 @@ test alloc_failure__real_error_still_rejects_the_module {
     s.diags = diagnostic.store_init(T.allocator_of(?t));
     fin { s.diags = diagnostic.store_init(?backing); }
     val base: usize                                   = T.attempt_count(?t);
-    val r0:   res[sema_product.SemaResult, fail.Fail] = fe_sema.sema(?s, m.a, m.resolve_result, ?deps, ?m.load.ctx, mid, ?s.diags);
+    val r0:   res[sema_product.SemaResult, fail.Fail] = fe_sema.sema(?s, frontend.syntax(?p, m), frontend.resolved(?p, m), ?deps, ?m.load.ctx, mid, ?s.diags);
     if (sel r0.ok) {
         var res0: sema_product.SemaResult = r0.ok;
         fe_sema.result_dnit(?res0);
@@ -341,7 +342,7 @@ test alloc_failure__real_error_still_rejects_the_module {
     for (fail_at <= total) {
         s.diags = diagnostic.store_init(T.allocator_of(?t));
         val start: usize                                   = refuse_after(?t, fail_at);
-        val r:     res[sema_product.SemaResult, fail.Fail] = fe_sema.sema(?s, m.a, m.resolve_result, ?deps, ?m.load.ctx, mid, ?s.diags);
+        val r:     res[sema_product.SemaResult, fail.Fail] = fe_sema.sema(?s, frontend.syntax(?p, m), frontend.resolved(?p, m), ?deps, ?m.load.ctx, mid, ?s.diags);
         T.clear_failure(?t);
         if (sel r.ok) {
             var sema_result: sema_product.SemaResult = r.ok;
@@ -360,7 +361,7 @@ test alloc_failure__real_error_still_rejects_the_module {
 }
 
 #[testing]
-fun ut_sweep_registration_failure(s: *session.Session, m: *project.ModuleEntry, mid: session.ModuleId,
+fun ut_sweep_registration_failure(p: *project.Project, s: *session.Session, m: *project.ModuleEntry, mid: session.ModuleId,
     target: *map.Map[type.TypeId, type.Decoration], backing: *A.Allocator) bool {
     var deps: fe_sema.SemaDeps = fe_sema.SemaDeps{};
     deps.entries = nil;
@@ -380,7 +381,7 @@ fun ut_sweep_registration_failure(s: *session.Session, m: *project.ModuleEntry, 
         @target = map.init[type.TypeId, type.Decoration](backing);
     }
     val base: usize                                   = T.attempt_count(?t);
-    val r0:   res[sema_product.SemaResult, fail.Fail] = fe_sema.sema(s, m.a, m.resolve_result, ?deps, ?m.load.ctx, mid, ?s.diags);
+    val r0:   res[sema_product.SemaResult, fail.Fail] = fe_sema.sema(s, frontend.syntax(p, m), frontend.resolved(p, m), ?deps, ?m.load.ctx, mid, ?s.diags);
     if (sel r0.ok) {
         var res0: sema_product.SemaResult = r0.ok;
         fe_sema.result_dnit(?res0);
@@ -396,7 +397,7 @@ fun ut_sweep_registration_failure(s: *session.Session, m: *project.ModuleEntry, 
         map.dnit[type.TypeId, type.Decoration](target);
         @target = map.init[type.TypeId, type.Decoration](T.allocator_of(?t));
         val start: usize                                   = refuse_after(?t, fail_at);
-        val r:     res[sema_product.SemaResult, fail.Fail] = fe_sema.sema(s, m.a, m.resolve_result, ?deps, ?m.load.ctx, mid, ?s.diags);
+        val r:     res[sema_product.SemaResult, fail.Fail] = fe_sema.sema(s, frontend.syntax(p, m), frontend.resolved(p, m), ?deps, ?m.load.ctx, mid, ?s.diags);
         T.clear_failure(?t);
         if (sel r.ok) {
             var outcome: sema_product.SemaResult = r.ok;
@@ -438,7 +439,7 @@ fun ut_registration_sweep(src: str) i32 {
     val m:   *project.ModuleEntry = ut_module(?p, ?s, "semaharness.main");
     if (m == nil || module.is_nil(mid)) { ret 1; }
 
-    val ok: bool = ut_sweep_registration_failure(?s, m, mid, ?s.types.fields.decorations, ?backing);
+    val ok: bool = ut_sweep_registration_failure(?p, ?s, m, mid, ?s.types.fields.decorations, ?backing);
 
     if (!ok) { ret 1; }
     ret 0;
@@ -480,17 +481,17 @@ test generic_param_type_for__respects_the_declaring_module {
         val m:   *project.ModuleEntry = ut_module(?p, ?s, owners[i]);
         if (m == nil || module.is_nil(mid)) { ret 1; }
         var view: sema_context.ModuleView = sema_context.ModuleView{};
-        view.a          = m.a;
+        view.a          = frontend.syntax(?p, m);
         view.own_module = mid;
         var sc:  sema_context.SemaContext = sema_context.init(?s, ?s.diags, sema_context.Typing{}, view, sema_context.instance_none());
         var sym: resolve.Symbol;
         sym.name   = name_r.ok;
-        sym.origin = mid;
+        sym.origin = m.stable_id;
         sym.slot   = 0;
         sym.decl   = ast_id.DECL_NIL;
         var di: usize = 0;
-        for (di < m.a.decls.len) {
-            if (m.a.decls.data[di].kind == ast_decl.DECL_KIND_FUN && m.a.decls.data[di].data.fun_.generics_len == 1) {
+        for (di < frontend.syntax(?p, m).decls.len) {
+            if (frontend.syntax(?p, m).decls.data[di].kind == ast_decl.DECL_KIND_FUN && frontend.syntax(?p, m).decls.data[di].data.fun_.generics_len == 1) {
                 sym.decl = ast_id.decl(di::u32);
             }
             di = di + 1;
@@ -551,7 +552,7 @@ fun ut_sweep_for(text: str, target: str, src: str, forbidden: str) i32 {
 
     s.alloc = T.allocator_of(?t);
     val pre0: usize                                   = diagnostic.len(?s.diags);
-    val r0:   res[sema_product.SemaResult, fail.Fail] = fe_sema.sema(?s, m.a, m.resolve_result, ?deps, ?m.load.ctx, mid, ?s.diags);
+    val r0:   res[sema_product.SemaResult, fail.Fail] = fe_sema.sema(?s, frontend.syntax(?p, m), frontend.resolved(?p, m), ?deps, ?m.load.ctx, mid, ?s.diags);
     if (sel r0.ok) {
         var res0: sema_product.SemaResult = r0.ok;
         fe_sema.result_dnit(?res0);
@@ -579,7 +580,7 @@ fun ut_sweep_for(text: str, target: str, src: str, forbidden: str) i32 {
         # of a report, so a repeat run would add nothing to it
         var run: diagnostic.DiagnosticStore = diagnostic.store_init(real_alloc);
         s.alloc = T.allocator_of(?t);
-        val r:        res[sema_product.SemaResult, fail.Fail] = fe_sema.sema(?s, m.a, m.resolve_result, ?deps, ?m.load.ctx, mid, ?run);
+        val r:        res[sema_product.SemaResult, fail.Fail] = fe_sema.sema(?s, frontend.syntax(?p, m), frontend.resolved(?p, m), ?deps, ?m.load.ctx, mid, ?run);
         val accepted: bool                                    = sel r.ok;
         if (sel r.ok) {
             var sema_result: sema_product.SemaResult = r.ok;
@@ -716,7 +717,7 @@ fun ut_sema_diag_has_for(text: str, target: str, src: str, needle: str) bool {
     deps.entries = nil;
     deps.count   = 0;
 
-    val r: res[sema_product.SemaResult, fail.Fail] = fe_sema.sema(?s, m.a, m.resolve_result, ?deps, ?m.load.ctx, mid, ?s.diags);
+    val r: res[sema_product.SemaResult, fail.Fail] = fe_sema.sema(?s, frontend.syntax(?p, m), frontend.resolved(?p, m), ?deps, ?m.load.ctx, mid, ?s.diags);
     if (sel r.ok) {
         var sema_result: sema_product.SemaResult = r.ok;
         fe_sema.result_dnit(?sema_result);
@@ -990,7 +991,7 @@ test alloc_failure__diagnostic_store_is_internal {
         diagnostic.store_dnit(?s.diags);
         s.diags = diagnostic.store_init(T.allocator_of(?failing));
 
-        val r: res[sema_product.SemaResult, fail.Fail] = fe_sema.sema(?s, m.a, m.resolve_result, ?deps, ?m.load.ctx, mid, ?s.diags);
+        val r: res[sema_product.SemaResult, fail.Fail] = fe_sema.sema(?s, frontend.syntax(?p, m), frontend.resolved(?p, m), ?deps, ?m.load.ctx, mid, ?s.diags);
         if (sel r.ok) {
             var sema_result: sema_product.SemaResult = r.ok;
             fe_sema.result_dnit(?sema_result);
@@ -1048,7 +1049,7 @@ fun ut_sema_error_free(src: str) bool {
     var deps: fe_sema.SemaDeps = fe_sema.SemaDeps{};
     deps.entries = nil;
     deps.count   = 0;
-    val r: res[sema_product.SemaResult, fail.Fail] = fe_sema.sema(?s, m.a, m.resolve_result, ?deps, ?m.load.ctx, mid, ?s.diags);
+    val r: res[sema_product.SemaResult, fail.Fail] = fe_sema.sema(?s, frontend.syntax(?p, m), frontend.resolved(?p, m), ?deps, ?m.load.ctx, mid, ?s.diags);
     if (sel r.ok) {
         var sema_result: sema_product.SemaResult = r.ok;
         fe_sema.result_dnit(?sema_result);
@@ -1244,14 +1245,14 @@ fun t_binding_outcome(mode: u8) i32 {
     var p: project.Project = pr.ok;
     fin { driver.dnit_project(?p); }
     val m: *project.ModuleEntry = ut_module(?p, ?s, "semaharness.main");
-    if (m == nil || m.resolve_result == nil) { ret 4; }
-    val rr: *resolve.ResolveResult = m.resolve_result;
+    if (m == nil || frontend.resolved(?p, m) == nil) { ret 4; }
+    val rr: *resolve.ResolveResult = frontend.resolved(?p, m);
     if (!sel rr.status.kind.rejected) { ret 5; }
     var rejected: ast_id.ExprId = ast_id.EXPR_NIL;
     var bound:    ast_id.ExprId = ast_id.EXPR_NIL;
     var i:        u32           = 0;
     for (i < rr.expr_count) {
-        val eo: opt[*ast_expr.Expr] = ast.get_expr(m.a, i::ast_id.ExprId);
+        val eo: opt[*ast_expr.Expr] = ast.get_expr(frontend.syntax(?p, m), i::ast_id.ExprId);
         if (sel eo.some) {
             if (eo.some.kind == ast_expr.EXPR_KIND_IDENT) {
                 if (resolve.symbol_is_rejected(rr.expr_resolved[i]))             { rejected = i::ast_id.ExprId; }
@@ -1262,7 +1263,7 @@ fun t_binding_outcome(mode: u8) i32 {
     }
     if (ast_id.expr_is_nil(rejected) || ast_id.expr_is_nil(bound)) { ret 6; }
     var view: sema_context.ModuleView = sema_context.ModuleView{};
-    view.a  = m.a;
+    view.a  = frontend.syntax(?p, m);
     view.rr = rr;
     var sc: sema_context.SemaContext = sema_context.init(?s, ?s.diags, sema_context.Typing{}, view, sema_context.instance_none());
     sc.walk.silent = mode == 2;

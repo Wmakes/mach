@@ -26,7 +26,7 @@ fun t_register_attempt(ordinal: usize, finished: *bool) i32 {
     var s:   session.Session = sr.ok;
     var bad: i32             = 0;
     T.fail_at_ordinal(?failing, T.attempt_count(?failing) + ordinal);
-    val r: err[fail.Fail] = session.register_module_identity(?s, module.id(3), nil, intern.str_id(9), module.stable_id(5));
+    val r: err[fail.Fail] = session.register_module_identity(?s, module.id(3), intern.str_id(9), module.stable_id(5));
     if (sel r.err) {
         if (session.module_count(?s) != 0 || !intern.str_is_nil(session.module_fqn(?s, module.id(3)))
             || !module.is_nil(session.module_id_for_stable(?s, module.stable_id(5)))) { bad = 5; }

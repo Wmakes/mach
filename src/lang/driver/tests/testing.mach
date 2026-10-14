@@ -61,6 +61,8 @@ use mach.lang.type;
 use mach.lang.build.engine;
 use build_plan: mach.lang.build.plan;
 use mach.lang.driver;
+use mach.lang.driver.frontend;
+use mach.lang.driver.passes;
 use mach.lang.driver.project;
 use ir_id: mach.lang.me.ir.id;
 use mach.lang.module;
@@ -396,7 +398,7 @@ pub fun ut_ast(p: *project.Project, s: *session.Session, fqn: str) *ast.Ast {
     val mr: opt[*session.ModuleId] = map.get[intern.StrId, session.ModuleId](?p.loader.by_name, ?id);
     if (sel mr.none) { ret nil; }
     val mid: session.ModuleId = @mr.some;
-    ret project.module_at(p, mid::u32).a;
+    ret frontend.syntax(p, project.module_at(p, mid::u32));
 }
 
 #[testing]
@@ -1247,11 +1249,14 @@ pub fun ut_vec_lower_req(s: *session.Session, alloc: *A.Allocator, src: str, tar
     fin {
         if (!handed) { project.dnit_project(?p); }
     }
-    p.req.opt = found;
+    var req: request.BuildRequest = p.req;
+    req.opt = found;
     if (!vectorize) {
         val at: opt[usize] = pipeline.pass_named("vectorize");
-        if (sel at.some) { pipeline.set_add(?p.req.skips, at.some); }
+        if (sel at.some) { pipeline.set_add(?req.skips, at.some); }
     }
+    val reconfigured: err[fail.Fail] = driver.reconfigure(?p, req);
+    if (sel reconfigured.err) { ret res[project.Project, fail.Fail].err{reconfigured.err}; }
     val se: err[fail.Fail] = driver.run_sema_pass(?p);
     if (sel se.err) { ret res[project.Project, fail.Fail].err{se.err}; }
     val le: err[fail.Fail] = driver.run_lower_pass(?p);
@@ -1371,8 +1376,8 @@ pub rec UtQuerySnapshot {
 }
 
 #[testing]
-pub fun ut_query_snapshot(a: *A.Allocator, p: *project.Project, kind: query.QueryKind, key: u64) res[UtQuerySnapshot, fail.Fail] {
-    val begun: res[query.Operation, fail.Fail] = project.begin_query_phase(p);
+pub fun ut_query_snapshot(a: *A.Allocator, p: *project.Project, kind: *query.Kind, key: u64) res[UtQuerySnapshot, fail.Fail] {
+    val begun: res[query.Operation, fail.Fail] = frontend.begin_query_phase(p);
     if (sel begun.err) { ret res[UtQuerySnapshot, fail.Fail].err{begun.err}; }
     val operation: query.Operation                 = begun.ok;
     var snapshot:  UtQuerySnapshot;
@@ -1447,14 +1452,14 @@ pub fun ut_diag_list_eq(x: *diagnostic.DiagnosticStore, y: *diagnostic.Diagnosti
 
 #[testing]
 pub fun ut_sema_lc(s: *session.Session, stable: session.StableModuleId) query.Revision {
-    val revision: query.Revision = query.peek_revision(?s.queries, query.Q_SEMA, module.stable_index(stable)::u64);
+    val revision: query.Revision = query.peek_revision(?s.queries, ?frontend.SEMA, module.stable_index(stable)::u64);
     if (revision == 0) { ret 0xFFFFFFFFFFFFFFFF; }
     ret revision;
 }
 
 #[testing]
 pub fun ut_lower_lc(s: *session.Session, stable: session.StableModuleId) query.Revision {
-    val revision: query.Revision = query.peek_revision(?s.queries, query.Q_LOWER, module.stable_index(stable)::u64);
+    val revision: query.Revision = query.peek_revision(?s.queries, ?passes.LOWER, module.stable_index(stable)::u64);
     if (revision == 0) { ret 0xFFFFFFFFFFFFFFFF; }
     ret revision;
 }
@@ -1469,7 +1474,10 @@ pub fun ut_inline_prepare(s: *session.Session, root: str, jobs: u32) res[project
     fin {
         if (!handed) { project.dnit_project(?p); }
     }
-    p.req.jobs = jobs;
+    var req: request.BuildRequest = p.req;
+    req.jobs = jobs;
+    val reconfigured: err[fail.Fail] = driver.reconfigure(?p, req);
+    if (sel reconfigured.err) { ret res[project.Project, fail.Fail].err{reconfigured.err}; }
     val typed: err[fail.Fail] = driver.run_sema_pass(?p);
     if (sel typed.err) { ret res[project.Project, fail.Fail].err{typed.err}; }
     val lowered: err[fail.Fail] = driver.run_lower_pass(?p);
@@ -1566,7 +1574,10 @@ pub fun ut_back_half_opt(s: *session.Session, root: str, found: pipeline.OptLeve
     fin {
         if (!handed) { project.dnit_project(?p); }
     }
-    p.req.opt = found;
+    var req: request.BuildRequest = p.req;
+    req.opt = found;
+    val reconfigured: err[fail.Fail] = driver.reconfigure(?p, req);
+    if (sel reconfigured.err) { ret res[project.Project, fail.Fail].err{reconfigured.err}; }
     val rs: err[fail.Fail] = driver.run_sema_pass(?p);
     if (sel rs.err) { ret res[project.Project, fail.Fail].err{rs.err}; }
     val rl: err[fail.Fail] = driver.run_lower_pass(?p);
@@ -2477,7 +2488,10 @@ pub fun ut_spv_lower_debug(s: *session.Session, alloc: *A.Allocator,
     fin {
         if (!handed) { project.dnit_project(?p); }
     }
-    p.req.debug = debug;
+    var req: request.BuildRequest = p.req;
+    req.debug = debug;
+    val reconfigured: err[fail.Fail] = driver.reconfigure(?p, req);
+    if (sel reconfigured.err) { ret res[project.Project, fail.Fail].err{reconfigured.err}; }
 
     val sr2: err[fail.Fail] = driver.run_sema_pass(?p);
     if (sel sr2.err) { ret res[project.Project, fail.Fail].err{sr2.err}; }

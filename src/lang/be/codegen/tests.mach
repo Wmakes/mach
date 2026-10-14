@@ -1,3 +1,4 @@
+use mach.lang.build.request;
 use mach.lang.fail;
 use std.allocator.page;
 use fs: std.filesystem;
@@ -251,7 +252,10 @@ test produce__describes_a_generic_and_a_plain_tag {
     if (sel pr.err) { ret 1; }
     var p: project.Project = pr.ok;
     fin { project.dnit_project(?p); }
-    p.req.debug = true;
+    var req: request.BuildRequest = p.req;
+    req.debug = true;
+    val reconfigured: err[fail.Fail] = driver.reconfigure(?p, req);
+    if (sel reconfigured.err) { ret 2; }
 
     val sema:  err[fail.Fail] = driver.run_sema_pass(?p);
     val lower: err[fail.Fail] = driver.run_lower_pass(?p);
