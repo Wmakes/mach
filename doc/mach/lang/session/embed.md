@@ -115,6 +115,15 @@ pub fun escapes_root(alloc: *A.Allocator, c: *EmbedCache, resolved: str) res[boo
 pub fun refresh(c: *EmbedCache, db: *query.QueryDb, itn: *intern.Interner, p: str) res[intern.StrId, fail.Fail];
 ```
 
+## val EMBED_FILE
+
+```mach
+pub val EMBED_FILE: query.Kind = query.Kind;
+```
+
+a file a module embeds, as the cache last saw it: its status and digest, keyed by the interned
+path. the cache watches the path for the session, so no released module takes it
+
 ## fun count
 
 ```mach

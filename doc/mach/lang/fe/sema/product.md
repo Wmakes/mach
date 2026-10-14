@@ -144,9 +144,11 @@ phase: DefinitionPhase) res[Definition, fail.Fail];
 ## fun acquire_symbol
 
 ```mach
-pub fun acquire_symbol(reader: *DefinitionReader, requested: *resolve.Symbol,
+pub fun acquire_symbol(reader: *DefinitionReader, requested: *resolve.Symbol, origin: session.ModuleId,
 phase: DefinitionPhase) res[DefinedSymbol, fail.Fail];
 ```
+
+the current definition of `requested`, which module `origin` defines as this operation numbers it
 
 ## rec SemaDeps
 

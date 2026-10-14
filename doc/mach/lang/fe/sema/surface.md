@@ -17,8 +17,8 @@ the module whose surface is built: its ids and its load scope
 pub rec Origins;
 ```
 
-where the surfaces of the modules a surface forwards from are read: the stable id of a
-loaded module, nil when it is not loaded, and its published surface, owned by the caller
+where the surfaces of the modules a surface forwards from are read: a loaded module's
+published surface, owned by the caller
 
 ## fun exports
 

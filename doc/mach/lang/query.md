@@ -1,129 +1,17 @@
 # mach.lang.query
 
-the query database: every language product is one registered kind. a
-product declares how its bytes are owned (an input the host sets, derived
-bytes the database owns, an owned handle released by its finalizer, or a
-metadata revision sampled from outside), records its dependencies by reading
-them inside its compute (`get`, `depend`, `observe`), and owns the diagnostic
-store its compute wrote into. validation is transitive and depth first; equal
-bytes on recomputation keep the previous revision and stop propagation; a
-failed dependency fails the product and the previous value is never served.
-all reads happen inside one operation, and `end` refuses success when a
-sampled metadata revision moved
-
-## def QueryKind
-
-```mach
-pub def QueryKind: u16
-```
-
-## val Q_PROJECT_ROOT
-
-```mach
-pub val Q_PROJECT_ROOT:    QueryKind = 0
-```
-
-## val Q_TARGET
-
-```mach
-pub val Q_TARGET:          QueryKind = 1
-```
-
-## val Q_FILE_TEXT
-
-```mach
-pub val Q_FILE_TEXT:       QueryKind = 2
-```
-
-## val Q_PARSE
-
-```mach
-pub val Q_PARSE:           QueryKind = 4
-```
-
-## val Q_RESOLVE
-
-```mach
-pub val Q_RESOLVE:         QueryKind = 7
-```
-
-## val Q_EXPORTS
-
-```mach
-pub val Q_EXPORTS:         QueryKind = 8
-```
-
-## val Q_SEMA
-
-```mach
-pub val Q_SEMA:            QueryKind = 9
-```
-
-## val Q_LOWER
-
-```mach
-pub val Q_LOWER:           QueryKind = 10
-```
-
-## val Q_CODEGEN
-
-```mach
-pub val Q_CODEGEN:         QueryKind = 11
-```
-
-## val Q_LINK
-
-```mach
-pub val Q_LINK:            QueryKind = 12
-```
-
-## val Q_TYPED_EXPORTS
-
-```mach
-pub val Q_TYPED_EXPORTS:   QueryKind = 13
-```
-
-## val Q_MODULE_NUMBER
-
-```mach
-pub val Q_MODULE_NUMBER:   QueryKind = 14
-```
-
-## val Q_LINK_CONFIG
-
-```mach
-pub val Q_LINK_CONFIG:     QueryKind = 15
-```
-
-## val Q_LOWERED_SURFACE
-
-```mach
-pub val Q_LOWERED_SURFACE: QueryKind = 17
-```
-
-## val Q_EMBED_FILE
-
-```mach
-pub val Q_EMBED_FILE:      QueryKind = 18
-```
-
-## val Q_LOAD_VIEW
-
-```mach
-pub val Q_LOAD_VIEW:       QueryKind = 20
-```
-
-## val Q_INLINE_BODIES
-
-```mach
-pub val Q_INLINE_BODIES:   QueryKind = 21
-```
-
-## val Q_OBJECT_KEY
-
-```mach
-pub val Q_OBJECT_KEY:      QueryKind = 22
-```
+the query database: every product is of one kind, a `Kind` row its owner
+declares beside the computation. a row says how its bytes are owned (an input
+the host sets, derived bytes the database owns, an owned handle released by its
+finalizer, or a metadata revision sampled from outside), what its keys name and
+how a derived product is computed; the database takes a row on its first use and
+knows no kind of its own. a product records its dependencies by reading them
+inside its compute (`get`, `depend`, `observe`), and owns the diagnostic store
+its compute wrote into. validation is transitive and depth first; equal bytes
+on recomputation keep the previous revision and stop propagation; a failed
+dependency fails the product and the previous value is never served. all reads
+happen inside one operation, and `end` refuses success when a sampled metadata
+revision moved
 
 ## def KeyOwner
 
@@ -133,8 +21,14 @@ pub def KeyOwner: u8
 
 what a kind's keys name, so a session can release every product a module or file left behind.
 a kind keyed by a module carries its stable module id in the key's low 32 bits, whatever the
-higher bits add (a test build), and a kind keyed by a file is keyed
-by its file id alone. file text is the source map's and the editor's input, released with them
+higher bits add (a test build), and a kind keyed by a file is keyed by its file id alone. a row
+left at KEY_UNDECLARED is refused on its first use, so a kind cannot leak by omission
+
+## val KEY_UNOWNED
+
+```mach
+pub val KEY_UNOWNED:    KeyOwner = 1
+```
 
 ## val KEY_MODULE
 
@@ -154,11 +48,80 @@ pub val KEY_FILE:       KeyOwner = 3
 pub def Revision: u64
 ```
 
+## def Role
+
+```mach
+pub def Role: u8
+```
+
+how a kind's products come to be: set by the host, computed, or sampled from outside
+reached through Kind.role
+
+## val INPUT
+
+```mach
+pub val INPUT:           Role = 1
+```
+
+## val DERIVED
+
+```mach
+pub val DERIVED:         Role = 2
+```
+
+## def FinalizeFn
+
+```mach
+pub def FinalizeFn: fun(*u8, u32, *A.Allocator)
+```
+
+releases what an owned product's bytes hold
+reached through Kind.finalize
+
+## def EqualFn
+
+```mach
+pub def EqualFn: fun(*u8, u32, *u8, u32) bool
+```
+
+whether two owned products are the same
+reached through Kind.equal
+
+## def ComputeFn
+
+```mach
+pub def ComputeFn: fun(ptr, *Kind, u64, *A.Allocator, *diagnostic.DiagnosticStore) res[QueryOutput, fail.Fail]
+```
+
+a derived product's computation: the context the operation's runtime carries, the row it
+computes, the key, the allocator its bytes come from and the store it reports into
+reached through Kind.compute
+
+## rec Kind
+
+```mach
+pub rec Kind;
+```
+
+one kind of product, declared once beside the computation that owns it. the database takes
+the row on its first use; a row's address is its identity, so two rows never share a shard
+
+name: how failures and cycles name the kind
+role: INPUT or DERIVED
+owner: what the kind's keys name
+origin: the phase a derived product's diagnostics belong to
+compute: a derived product's computation; an input has none
+finalize: releases what an owned derived product's bytes hold; nil when the bytes own nothing
+equal: whether two owned products are the same, so an equal recomputation keeps the revision;
+          requires finalize
+
 ## rec QueryKey
 
 ```mach
 pub rec QueryKey;
 ```
+
+a product's address: the row of its kind and its key
 
 ## rec Operation
 
@@ -214,12 +177,6 @@ value: the bytes the product published, owned by the db or the product's finaliz
 value_len: their length
 last_changed: the revision the bytes last changed at
 
-## rec QueryShard
-
-```mach
-pub rec QueryShard;
-```
-
 ## rec QueryDb
 
 ```mach
@@ -232,14 +189,17 @@ pub rec QueryDb;
 pub rec QueryRuntime[T];
 ```
 
+the database as an operation's computations see it: each product is computed with the
+runtime's context, a `T` the computations of every kind read through
+
 ## fun init
 
 ```mach
 pub fun init(a: *A.Allocator) res[QueryDb, fail.Fail];
 ```
 
-a database over a caller-owned allocator; register every kind before the first begin
-and tear down with dnit, which runs every owned product's finalizer
+a database over a caller-owned allocator, holding no kind until a row is first used;
+torn down with dnit, which runs every owned product's finalizer
 
 a: owns the db, its shards and every derived product's bytes
 
@@ -252,35 +212,10 @@ pub fun dnit(db: *QueryDb);
 tear the database down: every owned product's finalizer runs on its bytes, every shard
 and the operation state are released. nil is a no-op
 
-## fun register_input
-
-```mach
-pub fun register_input(db: *QueryDb, kind: QueryKind) err[fail.Fail];
-```
-
-## fun register_derived
-
-```mach
-pub fun register_derived(db: *QueryDb, kind: QueryKind) err[fail.Fail];
-```
-
-## fun register_derived_owned
-
-```mach
-pub fun register_derived_owned(db: *QueryDb, kind: QueryKind, finalize: FinalizeFn) err[fail.Fail];
-```
-
-## fun register_derived_equatable
-
-```mach
-pub fun register_derived_equatable(db: *QueryDb, kind: QueryKind, finalize: FinalizeFn,
-equal: fun(*u8, u32, *u8, u32) bool) err[fail.Fail];
-```
-
 ## fun runtime
 
 ```mach
-pub fun runtime[T](db: *QueryDb, compute: fun(*T, QueryKind, u64, *A.Allocator, *diagnostic.DiagnosticStore) res[QueryOutput, fail.Fail]) res[QueryRuntime[T], fail.Fail];
+pub fun runtime[T](db: *QueryDb) res[QueryRuntime[T], fail.Fail];
 ```
 
 ## fun begin
@@ -361,17 +296,15 @@ pub fun presentation_dnit(p: *Presentation);
 
 release a presentation, its store and its failure text; nil is a no-op
 
-## fun is_registered
-
-```mach
-pub fun is_registered(db: *QueryDb, kind: QueryKind) bool;
-```
-
 ## fun set_input
 
 ```mach
-pub fun set_input(db: *QueryDb, kind: QueryKind, key: u64, value: *u8, value_len: u32) err[fail.Fail];
+pub fun set_input(db: *QueryDb, kind: *Kind, key: u64, value: *u8, value_len: u32) err[fail.Fail];
 ```
+
+set an input product's bytes, copied into the database. equal bytes keep the revision
+
+kind: an INPUT row
 
 ## rec PreparedRetirement
 
@@ -390,6 +323,14 @@ pub fun discard_retirement(prepared: *PreparedRetirement);
 ```mach
 pub fun prepare_retirement(db: *QueryDb, roots: *QueryKey, count: usize) res[PreparedRetirement, fail.Fail];
 ```
+
+a retirement rooted at the given products and every product that depends on them. a root
+whose kind was never used has nothing to retire
+
+db: the database; no operation may be active
+roots: the products to retire; nil only with count 0
+count: how many roots
+ret: the prepared retirement, committed or discarded by the caller
 
 ## fun prepare_owned_retirement
 
@@ -419,23 +360,22 @@ pub fun commit_retirement(prepared: *PreparedRetirement) err[fail.Fail];
 ## fun get
 
 ```mach
-pub fun get[T](rt: *QueryRuntime[T], ctx: *T, kind: QueryKind, key: u64) res[QueryView, fail.Fail];
+pub fun get[T](rt: *QueryRuntime[T], ctx: *T, kind: *Kind, key: u64) res[QueryView, fail.Fail];
 ```
 
-successful end permits serial reads until the next begin, input mutation, or retirement
 the current value of a product, computing or revalidating it inside the open operation
 and recording it as a dependency of the product being computed, if any
 
-rt: the runtime whose compute callback builds derived products
-ctx: the callback's context
-kind: the registered kind
+rt: the runtime of the open operation
+ctx: the context every row's computation reads through
+kind: the product's row
 key: the product's key within the kind
 ret: a borrowed view (QueryView's lifetime), or the product's failure
 
 ## fun reusable
 
 ```mach
-pub fun reusable[T](rt: *QueryRuntime[T], ctx: *T, kind: QueryKind, key: u64) res[bool, fail.Fail];
+pub fun reusable[T](rt: *QueryRuntime[T], ctx: *T, kind: *Kind, key: u64) res[bool, fail.Fail];
 ```
 
 validation may refresh dependencies but never computes the requested product
@@ -443,9 +383,11 @@ validation may refresh dependencies but never computes the requested product
 ## fun prepare
 
 ```mach
-pub fun prepare[T](rt: *QueryRuntime[T], ctx: *T, kind: QueryKind, key: u64,
-compute: fun(*T, QueryKind, u64, *A.Allocator, *diagnostic.DiagnosticStore) res[QueryOutput, fail.Fail]) res[PreparedQuery, fail.Fail];
+pub fun prepare[T](rt: *QueryRuntime[T], ctx: *T, kind: *Kind, key: u64) res[PreparedQuery, fail.Fail];
 ```
+
+compute a derived product the caller finishes outside the computation (a worker thread),
+published by complete_prepared or dropped by cancel_prepared before the operation ends
 
 ## fun prepared_view
 
@@ -478,25 +420,44 @@ pub fun complete_prepared(db: *QueryDb, prepared: PreparedQuery, result: err[fai
 ## fun revision
 
 ```mach
-pub fun revision[T](rt: *QueryRuntime[T], ctx: *T, kind: QueryKind, key: u64) res[Revision, fail.Fail];
+pub fun revision[T](rt: *QueryRuntime[T], ctx: *T, kind: *Kind, key: u64) res[Revision, fail.Fail];
 ```
 
 ## fun depend
 
 ```mach
-pub fun depend[T](rt: *QueryRuntime[T], ctx: *T, kind: QueryKind, key: u64) err[fail.Fail];
+pub fun depend[T](rt: *QueryRuntime[T], ctx: *T, kind: *Kind, key: u64) err[fail.Fail];
 ```
 
 ## fun peek_revision
 
 ```mach
-pub fun peek_revision(db: *QueryDb, kind: QueryKind, key: u64) Revision;
+pub fun peek_revision(db: *QueryDb, kind: *Kind, key: u64) Revision;
 ```
+
+the revision a product last changed at, without validating it; 0 when it has none
+
+## fun published
+
+```mach
+pub fun published(db: *QueryDb, kind: *Kind, key: u64, since: u64) opt[QueryView];
+```
+
+a product as its last successful computation published it, read between operations by the
+host that ran them. none when no operation from `since` on validated or computed it, or when
+its last validation or recomputation failed, so a failed product's previous value is never
+served and a product the host's operations never reached is not taken for one they did
+
+db: the database; no operation may be active
+kind: the product's row
+key: the product's key
+since: the first operation the host's reads count; an input is current whenever it was set
+ret: a borrowed view, valid until the next operation, input change or retirement
 
 ## fun product_diagnostics
 
 ```mach
-pub fun product_diagnostics(db: *QueryDb, kind: QueryKind, key: u64) *diagnostic.DiagnosticStore;
+pub fun product_diagnostics(db: *QueryDb, kind: *Kind, key: u64) *diagnostic.DiagnosticStore;
 ```
 
 the diagnostics a ready product carries, nil when the product is absent or has none

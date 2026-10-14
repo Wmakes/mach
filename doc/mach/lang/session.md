@@ -32,6 +32,15 @@ fwd module.STABLE_MODULE_NIL
 
 forwards [`mach.lang.module.STABLE_MODULE_NIL`](module.md#val-stable_module_nil)
 
+## val FILE_TEXT
+
+```mach
+pub val FILE_TEXT: query.Kind = query.Kind;
+```
+
+a file's text as the session loaded it, keyed by the file's index. the source map and the
+editor hold it across builds, so no released module takes it
+
 ## rec LinkProvider
 
 ```mach
@@ -58,6 +67,22 @@ pub fun drop_query_failure(s: *Session);
 
 release the text and the places of the last query failure the session holds
 
+## fun hold_failure
+
+```mach
+pub fun hold_failure(s: *Session, failure: fail.Fail, lost: *bool) fail.Fail;
+```
+
+hold a failure where the session presents it: its text and the places it points at are
+copied into the session's slot, replacing what the slot held, and the failure returned reads
+the held copies. text the presentation already owns stays there. a copy the allocator
+refused leaves the failure without that part and sets `lost`
+
+s: the session
+failure: the failure to hold; one with no text or places empties the slot
+lost: set when part of the failure could not be held
+ret: the failure as the session holds it
+
 ## fun dnit
 
 ```mach
@@ -70,17 +95,13 @@ pub fun dnit(s: *Session);
 pub fun reset_module_registry(s: *Session);
 ```
 
-## fun register_module_ast
-
-```mach
-pub fun register_module_ast(s: *Session, mid: module.ModuleId, a: *ast.Ast) err[fail.Fail];
-```
-
 ## fun module_count
 
 ```mach
 pub fun module_count(s: *Session) u32;
 ```
+
+one past the highest module id the session has an identity for
 
 ## fun register_module_root_project
 
@@ -229,8 +250,7 @@ the digest the link at `revision` published to `path`, none when it published no
 ## fun register_module_identity
 
 ```mach
-pub fun register_module_identity(s: *Session, mid: module.ModuleId, a: *ast.Ast,
-fqn: intern.StrId, stable: module.StableModuleId) err[fail.Fail];
+pub fun register_module_identity(s: *Session, mid: module.ModuleId, fqn: intern.StrId, stable: module.StableModuleId) err[fail.Fail];
 ```
 
 ## fun unregister_module_identity

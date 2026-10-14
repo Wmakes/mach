@@ -37,6 +37,15 @@ pub fun public_surface_encode(s: *wire.Sink, rr: *resolve.ResolveResult, origin:
 definition_revision: query.Revision) err[fail.Fail];
 ```
 
+## fun public_symbols_decode
+
+```mach
+pub fun public_symbols_decode(a: *A.Allocator, s: *session.Session, bytes: *u8, len: u32,
+path: intern.StrId, stable: session.StableModuleId) res[resolve.ModuleExports, fail.Fail];
+```
+
+what the exports product of module `stable` says an importer reads, its symbols allocated from `a`
+
 ## fun typed_surface_encode
 
 ```mach

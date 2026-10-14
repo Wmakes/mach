@@ -145,6 +145,14 @@ pub val TEST_KEY_BIT: u64 = 0x100000000
 
 a module's test object is keyed in the query database by its stable id and this bit
 
+## val OBJECT_KEY
+
+```mach
+pub val OBJECT_KEY: query.Kind = query.Kind;
+```
+
+the key a module's reused object was built under, keyed by its stable id and the test bit
+
 ## fun test_input_key
 
 ```mach
@@ -186,10 +194,18 @@ pub fun collect_tests(p: *project.Project, m: *project.ModuleEntry, mid: u32, c:
 
 a module's tests, from its lowered test ir or from the facts its restored test object carries
 
+## rec BackHalf
+
+```mach
+pub rec BackHalf;
+```
+
+the products of an object's back half whose warnings its record carries, all keyed by one key
+
 ## fun publish
 
 ```mach
-pub fun publish(p: *project.Project, m: *project.ModuleEntry, image: *target_of.ObjectImage, back_key: u64) err[fail.Fail];
+pub fun publish(p: *project.Project, m: *project.ModuleEntry, image: *target_of.ObjectImage, back: BackHalf) err[fail.Fail];
 ```
 
 a generated image carries its record into `obj/`: the key it was built
@@ -198,7 +214,7 @@ under, the facts its lowered ir holds, and the image itself
 ## fun publish_test
 
 ```mach
-pub fun publish_test(p: *project.Project, m: *project.ModuleEntry, image: *target_of.ObjectImage, back_key: u64) err[fail.Fail];
+pub fun publish_test(p: *project.Project, m: *project.ModuleEntry, image: *target_of.ObjectImage, back: BackHalf) err[fail.Fail];
 ```
 
 the same for the module's test object, which records only its own back half's
