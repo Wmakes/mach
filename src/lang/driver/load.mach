@@ -54,11 +54,6 @@ pub fun entry_module_fqn(p: *project.Project, t: *project.TargetEntry) res[inter
     ret module.compose_fqn(p.alloc, ?p.s.interner, id_opt.some, ep_text);
 }
 
-# `prefix`, the text of `name_id`, then `suffix`, interned
-pub fun diag_join_named(s: *session.Session, prefix: str, name_id: intern.StrId, suffix: str) res[str, fail.Fail] {
-    ret fail.format_intern(?s.interner, s.alloc, "{}{}{}", prefix, intern.text(?s.interner, name_id), suffix);
-}
-
 pub fun join_path(alloc: *A.Allocator, a: str, b: str) res[str, fail.Fail] {
     val join_r: res[types_path.Path, A.Error] = types_path.join(alloc, a, b);
     if (sel join_r.err) { ret res[str, fail.Fail].err{fail.refused(join_r.err)}; }
