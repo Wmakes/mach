@@ -1628,6 +1628,7 @@ pub fun cached_dependency_keys(db: *QueryDb, kind: *Kind, key: u64,
 
 # what a product walk is shown of each product: its address and the store it reported into,
 # nil when it reported nothing
+# reached through walk_products
 pub def ProductVisit: fun(ptr, QueryKey, *diagnostic.DiagnosticStore);
 
 # visit a product and every product it was computed from, each once and its dependencies
@@ -1839,16 +1840,6 @@ fun slot_of(db: *QueryDb, key: QueryKey) res[Slot, fail.Fail] {
 # a product's address as its row names it
 fun key_of(db: *QueryDb, slot: Slot) QueryKey {
     ret QueryKey{kind: db.storage[slot.kind::u32].spec, key: slot.key};
-}
-
-# the diagnostics a ready product carries, nil when the product is absent or has none
-pub fun product_diagnostics(db: *QueryDb, kind: *Kind, key: u64) *diagnostic.DiagnosticStore {
-    if (db == nil) { ret nil; }
-    val sh: *QueryShard = shard_find(db, kind);
-    if (sh == nil) { ret nil; }
-    val entry: *QueryEntry = entry_find(sh, key);
-    if (entry == nil || !entry.ready) { ret nil; }
-    ret entry.diags;
 }
 
 fun entry_find(sh: *QueryShard, key: u64) *QueryEntry {
