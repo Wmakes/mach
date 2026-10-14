@@ -431,6 +431,15 @@ pub fun revision[T](rt: *QueryRuntime[T], ctx: *T, kind: *Kind, key: u64) res[Re
 pub fun depend[T](rt: *QueryRuntime[T], ctx: *T, kind: *Kind, key: u64) err[fail.Fail];
 ```
 
+## def ProductFilter
+
+```mach
+pub def ProductFilter: fun(ptr, QueryKey) bool
+```
+
+whether a product walk enters a product, visiting it and walking what it was computed from
+reached through walk_products
+
 ## def ProductVisit
 
 ```mach
@@ -444,16 +453,18 @@ reached through walk_products
 ## fun walk_products
 
 ```mach
-pub fun walk_products(db: *QueryDb, root: QueryKey, ctx: ptr, visit: ProductVisit) err[fail.Fail];
+pub fun walk_products(db: *QueryDb, root: QueryKey, ctx: ptr, enter: ProductFilter, visit: ProductVisit) err[fail.Fail];
 ```
 
-visit a product and every product it was computed from, each once and its dependencies
-first, as presentation walks them; a product with no current value ends its branch
+visit a product and every product it was computed from that the filter enters, each once
+and its dependencies first, as presentation walks them. a product the filter refuses, or one
+with no current value, ends its branch, so a walk costs what it enters, not the closure
 
 db: the database, its products as the open operation or the last one left them
-root: the product to start from
-ctx: passed to visit
-visit: shown each product reached
+root: the product to start from, itself subject to the filter
+ctx: passed to enter and visit
+enter: whether the walk enters a product
+visit: shown each product entered
 
 ## fun peek_revision
 
