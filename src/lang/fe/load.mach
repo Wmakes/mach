@@ -23,9 +23,10 @@ use mach.lang.diagnostic;
 use diagnostic_kind: mach.lang.diagnostic.kind;
 use mach.lang.fail;
 use mach.lang.fe.ast;
-use ast_decl:   mach.lang.fe.ast.decl;
-use ast_expr:   mach.lang.fe.ast.expr;
-use ast_id:     mach.lang.fe.ast.id;
+use ast_decl: mach.lang.fe.ast.decl;
+use ast_expr: mach.lang.fe.ast.expr;
+use ast_id:   mach.lang.fe.ast.id;
+use mach.lang.fe.ast.interpretation;
 use ast_module: mach.lang.fe.ast.module;
 use ast_type:   mach.lang.fe.ast.type;
 use mach.lang.fe.comptime;
@@ -1003,7 +1004,7 @@ fun decide_gate(l: *Loader, mid: session.ModuleId, cond: ast_id.ExprId, source: 
     var lc: LoadMemberCtx;
     lc.l   = l;
     lc.mid = mid;
-    val caps_r: res[comptime.PhaseCapabilities[LoadMemberCtx], fail.Fail] = comptime.loading_capabilities[LoadMemberCtx](resolve_module_member_const_load, load_cast);
+    val caps_r: res[comptime.PhaseCapabilities[LoadMemberCtx], fail.Fail] = comptime.loading_capabilities[LoadMemberCtx](resolve_module_member_const_load, load_cast, load_head);
     if (sel caps_r.err) { ret res[GateChoice, fail.Fail].err{caps_r.err}; }
     val vr: res[comptime_gate.GateVerdict, fail.Fail] = comptime_gate.evaluate_gate[LoadMemberCtx](
         ctx, ?lc, caps_r.ok, syntax_of(l, mid), source, cond, ?l.s.interner, comptime_gate.GATE_SCOPE_DECL, true);
@@ -1645,34 +1646,54 @@ fun bind_val(l: *Loader, mid: session.ModuleId, d: *ast_decl.Decl, source: str, 
 }
 
 # whether a constant's value is a case literal of a type declared in its own module, `T.c{...}`:
-# the head is split into type and case as name resolution splits it, so a gate reads the case now
+# the head reads as type and case as name resolution reads it, so a gate reads the case now
 fun constant_tag(l: *Loader, mid: session.ModuleId, init: ast_id.ExprId, source: str) res[bool, fail.Fail] {
-    val a:     *ast.Ast            = syntax_of(l, mid);
-    val e_opt: opt[*ast_expr.Expr] = ast.get_expr(a, init);
+    val e_opt: opt[*ast_expr.Expr] = ast.get_expr(syntax_of(l, mid), init);
     if (sel e_opt.none) { ret res[bool, fail.Fail].ok{false}; }
-    val e:   *ast_expr.Expr = e_opt.some;
-    var tid: ast_id.TypeId  = ast_id.TYPE_NIL;
-    if (e.kind == ast_expr.EXPR_KIND_STRUCT_LIT) { tid = e.data.struct_lit.ty; }
-    if (e.kind == ast_expr.EXPR_KIND_VECTOR_LIT) { tid = e.data.vector_lit.ty; }
-    if (ast_id.type_is_nil(tid))                 { ret res[bool, fail.Fail].ok{false}; }
-    val t_opt: opt[*ast_type.Type] = ast.get_type(a, tid);
-    if (sel t_opt.none) { ret res[bool, fail.Fail].ok{false}; }
-    val t: *ast_type.Type = t_opt.some;
-    if (t.kind != ast_type.TYPE_KIND_NAMED)                                             { ret res[bool, fail.Fail].ok{false}; }
-    if (!ast_id.expr_is_nil(t.data.named.case_desc) || t.data.named.case_name.len != 0) { ret res[bool, fail.Fail].ok{comptime.is_case_literal(a, init)}; }
+    val tid: ast_id.TypeId = comptime.literal_head_type(e_opt.some);
+    if (ast_id.type_is_nil(tid)) { ret res[bool, fail.Fail].ok{false}; }
+    val head: res[opt[ast_type.Type], fail.Fail] = constant_head(l, mid, tid, source);
+    if (sel head.err)     { ret res[bool, fail.Fail].err{head.err}; }
+    if (sel head.ok.none) { ret res[bool, fail.Fail].ok{false}; }
+    ret res[bool, fail.Fail].ok{comptime.names_case(head.ok.some)};
+}
+
+# the head `tid` of a literal as the load reads it: the parser's case, or a bare `T.c` whose prefix
+# is a single name this module declares as a type, split into that type and case; none for a
+# head that names no case. the parsed tree is never rewritten
+fun constant_head(l: *Loader, mid: session.ModuleId, tid: ast_id.TypeId, source: str) res[opt[ast_type.Type], fail.Fail] {
+    val t_opt: opt[*ast_type.Type] = ast.get_type(syntax_of(l, mid), tid);
+    if (sel t_opt.none) { ret res[opt[ast_type.Type], fail.Fail].ok{opt[ast_type.Type].none{}}; }
+    val t: ast_type.Type = @t_opt.some;
+    if (t.kind != ast_type.TYPE_KIND_NAMED) { ret res[opt[ast_type.Type], fail.Fail].ok{opt[ast_type.Type].none{}}; }
+    if (comptime.names_case(t))             { ret res[opt[ast_type.Type], fail.Fail].ok{opt[ast_type.Type].some{t}}; }
     val path: lang_source.Span = t.data.named.name;
     val pre:  lang_source.Span = fe_path.prefix(source, path);
-    if (pre.len == 0 || pre.len >= path.len || fe_path.prefix(source, pre).len != 0) { ret res[bool, fail.Fail].ok{false}; }
+    if (pre.len == 0 || pre.len >= path.len || fe_path.prefix(source, pre).len != 0) { ret res[opt[ast_type.Type], fail.Fail].ok{opt[ast_type.Type].none{}}; }
     val leaf: lang_source.Span = fe_path.leaf(source, path);
-    if (leaf.len == 0) { ret res[bool, fail.Fail].ok{false}; }
+    if (leaf.len == 0) { ret res[opt[ast_type.Type], fail.Fail].ok{opt[ast_type.Type].none{}}; }
     val pre_r: res[intern.StrId, A.Error] = intern.range_add(?l.s.interner, source, pre.offset, pre.len);
-    if (sel pre_r.err) { ret res[bool, fail.Fail].err{fail.refused(pre_r.err)}; }
+    if (sel pre_r.err) { ret res[opt[ast_type.Type], fail.Fail].err{fail.refused(pre_r.err)}; }
     val b_r: res[Meaning, fail.Fail] = module_meaning(l, mid, pre_r.ok, true);
-    if (sel b_r.err)                                                  { ret res[bool, fail.Fail].err{b_r.err}; }
-    if (b_r.ok.kind != MEANING_NOMINAL && b_r.ok.kind != MEANING_DEF) { ret res[bool, fail.Fail].ok{false}; }
-    t.data.named.name      = pre;
-    t.data.named.case_name = leaf;
-    ret res[bool, fail.Fail].ok{true};
+    if (sel b_r.err)                                                  { ret res[opt[ast_type.Type], fail.Fail].err{b_r.err}; }
+    if (b_r.ok.kind != MEANING_NOMINAL && b_r.ok.kind != MEANING_DEF) { ret res[opt[ast_type.Type], fail.Fail].ok{opt[ast_type.Type].none{}}; }
+    val split: res[ast_type.Type, fail.Fail] = interpretation.split(t, source);
+    if (sel split.err) { ret res[opt[ast_type.Type], fail.Fail].err{split.err}; }
+    ret res[opt[ast_type.Type], fail.Fail].ok{opt[ast_type.Type].some{split.ok}};
+}
+
+# a type node as a load evaluation reads it: a constant tag's head split as `constant_head` splits
+# it, any other as parsed
+fun load_head(lc: *LoadMemberCtx, a: *ast.Ast, tid: ast_id.TypeId) res[ast_type.Type, comptime.EvalFail] {
+    if (lc == nil || syntax_of(lc.l, lc.mid) != a) { ret res[ast_type.Type, comptime.EvalFail].err{comptime.eval_error(comptime.EVAL_FAIL_INTERNAL, diagnostic_kind.COMPILER_INTERNAL, "load type belongs to a different parsed owner")}; }
+    val t_opt: opt[*ast_type.Type] = ast.get_type(a, tid);
+    if (sel t_opt.none) { ret res[ast_type.Type, comptime.EvalFail].err{comptime.eval_error(comptime.EVAL_FAIL_INTERNAL, diagnostic_kind.COMPILER_INTERNAL, "load type identity is out of range")}; }
+    val source_r: res[str, fail.Fail] = module_source(lc.l, lc.mid);
+    if (sel source_r.err) { ret res[ast_type.Type, comptime.EvalFail].err{comptime.eval_error(comptime.EVAL_FAIL_INTERNAL, diagnostic_kind.COMPILER_INTERNAL, fail.describe(source_r.err))}; }
+    val head: res[opt[ast_type.Type], fail.Fail] = constant_head(lc.l, lc.mid, tid, source_r.ok);
+    if (sel head.err)     { ret res[ast_type.Type, comptime.EvalFail].err{comptime.eval_error(comptime.EVAL_FAIL_INTERNAL, diagnostic_kind.COMPILER_INTERNAL, fail.describe(head.err))}; }
+    if (sel head.ok.some) { ret res[ast_type.Type, comptime.EvalFail].ok{head.ok.some}; }
+    ret res[ast_type.Type, comptime.EvalFail].ok{@t_opt.some};
 }
 
 # a cast the load can evaluate: to the integer primitive its destination names, directly or through
@@ -2140,7 +2161,7 @@ pub fun decorators_record(l: *Loader, mid: session.ModuleId) err[fail.Fail] {
     var lc: LoadMemberCtx;
     lc.l   = l;
     lc.mid = mid;
-    val caps_r: res[comptime.PhaseCapabilities[LoadMemberCtx], fail.Fail] = comptime.loading_capabilities[LoadMemberCtx](resolve_module_member_const_load, load_cast);
+    val caps_r: res[comptime.PhaseCapabilities[LoadMemberCtx], fail.Fail] = comptime.loading_capabilities[LoadMemberCtx](resolve_module_member_const_load, load_cast, load_head);
     if (sel caps_r.err) { ret err[fail.Fail].err{caps_r.err}; }
     comptime.decorators_clear(?m.ctx);
     val strings: err[fail.Fail] = decorator.strings_record[LoadMemberCtx](?l.s.interner, ?m.ctx, a, source_r.ok, ?m.ctx, ?lc, caps_r.ok, m.walked);
@@ -2232,7 +2253,7 @@ fun eval_for_load(
     lc.l   = l;
     lc.mid = mid;
     val lcp:    *LoadMemberCtx                                            = ?lc;
-    val caps_r: res[comptime.PhaseCapabilities[LoadMemberCtx], fail.Fail] = comptime.loading_capabilities[LoadMemberCtx](resolve_module_member_const_load, load_cast);
+    val caps_r: res[comptime.PhaseCapabilities[LoadMemberCtx], fail.Fail] = comptime.loading_capabilities[LoadMemberCtx](resolve_module_member_const_load, load_cast, load_head);
     if (sel caps_r.err) {
         var f: comptime.EvalFail;
         f.kind    = comptime.EVAL_FAIL_INTERNAL;

@@ -413,6 +413,37 @@ pub fun comptime_expression(sc: *SemaContext, a: *ast.Ast, eid: ast_id.ExprId) r
     ret res[ast_expr.Expr, comptime.EvalFail].ok{result.ok};
 }
 
+# the type node `tid` as name resolution read it, a literal head it split naming the type by its
+# path's prefix and the case by the last segment; none, with the walk failed, when it cannot be read
+pub fun type_node(sc: *SemaContext, tid: ast_id.TypeId) opt[ast_type.Type] {
+    val result: res[ast_type.Type, fail.Fail] = resolve.type_node(sc.view.rr, sc.view.a, sc.view.source, tid);
+    if (sel result.err) {
+        fail.internal(?sc.status, fail.describe(result.err));
+        ret opt[ast_type.Type].none{};
+    }
+    ret opt[ast_type.Type].some{result.ok};
+}
+
+pub fun comptime_head(sc: *SemaContext, a: *ast.Ast, tid: ast_id.TypeId) res[ast_type.Type, comptime.EvalFail] {
+    if (sc == nil || sc.view.a != a) { ret res[ast_type.Type, comptime.EvalFail].err{comptime.eval_error(comptime.EVAL_FAIL_INTERNAL, diagnostic_kind.COMPILER_INTERNAL, "semantic type belongs to a different parsed owner")}; }
+    val result: res[ast_type.Type, fail.Fail] = resolve.type_node(sc.view.rr, a, sc.view.source, tid);
+    if (sel result.err) {
+        ret res[ast_type.Type, comptime.EvalFail].err{comptime.eval_error(comptime.EVAL_FAIL_INTERNAL, diagnostic_kind.COMPILER_INTERNAL, fail.describe(result.err))};
+    }
+    ret res[ast_type.Type, comptime.EvalFail].ok{result.ok};
+}
+
+# whether the literal `eid` constructs a tag case, its head read as name resolution read it
+pub fun is_case_literal(sc: *SemaContext, eid: ast_id.ExprId) bool {
+    val e_opt: opt[*ast_expr.Expr] = ast.get_expr(sc.view.a, eid);
+    if (!sel e_opt.some) { ret false; }
+    val tid: ast_id.TypeId = comptime.literal_head_type(e_opt.some);
+    if (ast_id.type_is_nil(tid)) { ret false; }
+    val head: opt[ast_type.Type] = type_node(sc, tid);
+    if (!sel head.some) { ret false; }
+    ret comptime.names_case(head.some);
+}
+
 pub fun apply_subst(sc: *SemaContext, tid: type.TypeId) type.TypeId {
     if (sc.instance.subst == nil || sc.instance.subst_len == 0 || sc.typing.subst_fn == nil) { ret tid; }
     ret type_result(sc, sc.typing.subst_fn(sc.s, tid, ?sc.instance.subst_owner, sc.instance.subst, sc.instance.subst_len));

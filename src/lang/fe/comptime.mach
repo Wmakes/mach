@@ -958,24 +958,17 @@ fun node_member[T](ev: *Evaluation[T], eid: ast_id.ExprId, ov: comptime_value.CT
     ret field_zero[T](ev, ov.data.node.ty, name);
 }
 
-# a literal is a case literal when its head names a tag case, `T.c{...}` or `T.[c]{...}`; the
-# parser records the case only for a head with generic arguments, name resolution splits the
+# a literal head names a tag case, `T.c{...}` or `T.[c]{...}`, read as its phase reads it: the
+# parser records the case only for a head with generic arguments, and name resolution splits the
 # others, so the answer is complete once the literal's head has been bound
-pub fun is_case_literal(a: *ast.Ast, eid: ast_id.ExprId) bool {
-    val e_opt: opt[*ast_expr.Expr] = ast.get_expr(a, eid);
-    if (!sel e_opt.some) { ret false; }
-    val tid: ast_id.TypeId = literal_head_type(e_opt.some);
-    if (ast_id.type_is_nil(tid)) { ret false; }
-    val t_opt: opt[*ast_type.Type] = ast.get_type(a, tid);
-    if (!sel t_opt.some) { ret false; }
-    val t: *ast_type.Type = t_opt.some;
-    if (t.kind != ast_type.TYPE_KIND_NAMED) { ret false; }
-    ret !ast_id.expr_is_nil(t.data.named.case_desc) || t.data.named.case_name.len != 0;
+pub fun names_case(head: ast_type.Type) bool {
+    if (head.kind != ast_type.TYPE_KIND_NAMED) { ret false; }
+    ret !ast_id.expr_is_nil(head.data.named.case_desc) || head.data.named.case_name.len != 0;
 }
 
 # the head type of a literal in either parsed spelling: the parser emits a positional `T.c{x}` as a
-# lane list until name resolution learns the head names a case and rewrites it to a struct literal
-fun literal_head_type(e: *ast_expr.Expr) ast_id.TypeId {
+# lane list, which name resolution reads as a case construction once it learns the head names a case
+pub fun literal_head_type(e: *ast_expr.Expr) ast_id.TypeId {
     if (e.kind == ast_expr.EXPR_KIND_STRUCT_LIT) { ret e.data.struct_lit.ty; }
     if (e.kind == ast_expr.EXPR_KIND_VECTOR_LIT) { ret e.data.vector_lit.ty; }
     ret ast_id.TYPE_NIL;
@@ -1010,9 +1003,10 @@ pub fun literal_case[T](
 fun case_literal_head[T](ev: *Evaluation[T], lit: *ast_expr.Expr) res[intern.StrId, comptime_failure.EvalFail] {
     val tid: ast_id.TypeId = literal_head_type(lit);
     if (ast_id.type_is_nil(tid)) { ret res[intern.StrId, comptime_failure.EvalFail].ok{intern.STR_NIL}; }
-    val t_opt: opt[*ast_type.Type] = ast.get_type(ev.a, tid);
-    if (sel t_opt.none) { ret res[intern.StrId, comptime_failure.EvalFail].ok{intern.STR_NIL}; }
-    val t: *ast_type.Type = t_opt.some;
+    val t_r: res[ast_type.Type, comptime_failure.EvalFail] = comptime_capability.read_head[T](ev.cap_ctx, ev.caps, ev.a, tid);
+    if (sel t_r.err) { ret res[intern.StrId, comptime_failure.EvalFail].err{t_r.err}; }
+    var head: ast_type.Type  = t_r.ok;
+    val t:    *ast_type.Type = ?head;
     if (t.kind != ast_type.TYPE_KIND_NAMED) { ret res[intern.StrId, comptime_failure.EvalFail].ok{intern.STR_NIL}; }
     if (!ast_id.expr_is_nil(t.data.named.case_desc)) {
         ret descriptor_case_name[T](ev, t.data.named.case_desc);
@@ -1411,7 +1405,7 @@ fun t_capability_nested(state: *comptime_capability.TCapabilityNested, eid: ast_
 
 test capabilities__mismatched_phase_does_not_dispatch {
     var calls:  u32                                                        = 0;
-    val caps_r: res[comptime_capability.PhaseCapabilities[u32], fail.Fail] = comptime_capability.loading_capabilities[u32](comptime_value.t_capability_member, nil);
+    val caps_r: res[comptime_capability.PhaseCapabilities[u32], fail.Fail] = comptime_capability.loading_capabilities[u32](comptime_value.t_capability_member, nil, comptime_capability.parsed_head[u32]);
     if (sel caps_r.err) { ret 1; }
     var caps:     comptime_capability.PhaseCapabilities[u32]             = caps_r.ok;
     val accepted: res[comptime_value.CTValue, comptime_failure.EvalFail] = eval_module_member[u32](?calls, caps, ast_id.EXPR_NIL);
@@ -1427,7 +1421,7 @@ test capabilities__mismatched_phase_does_not_dispatch {
     val nil_context: res[comptime_value.CTValue, comptime_failure.EvalFail] = eval_module_member[u32](nil, caps, ast_id.EXPR_NIL);
     if (sel nil_context.ok) { ret 1; }
     if (calls != 1)         { ret 1; }
-    val loading_capabilities_1: res[comptime_capability.PhaseCapabilities[u32], fail.Fail] = comptime_capability.loading_capabilities[u32](nil, nil);
+    val loading_capabilities_1: res[comptime_capability.PhaseCapabilities[u32], fail.Fail] = comptime_capability.loading_capabilities[u32](nil, nil, comptime_capability.parsed_head[u32]);
     if (sel loading_capabilities_1.ok) { ret 1; }
     caps.kind  = comptime_capability.PHASE_CAP_LOADING;
     caps.ident = t_capability_ident;
@@ -1441,9 +1435,9 @@ test capabilities__nested_sessions_keep_their_phase_value {
     var state: comptime_capability.TCapabilityNested;
     state.outer_calls = 0;
     state.inner_calls = 0;
-    val inner_r: res[comptime_capability.PhaseCapabilities[u32], fail.Fail]                                   = comptime_capability.loading_capabilities[u32](comptime_value.t_capability_member, nil);
+    val inner_r: res[comptime_capability.PhaseCapabilities[u32], fail.Fail]                                   = comptime_capability.loading_capabilities[u32](comptime_value.t_capability_member, nil, comptime_capability.parsed_head[u32]);
     val outer_r: res[comptime_capability.PhaseCapabilities[comptime_capability.TCapabilityNested], fail.Fail] =
-        comptime_capability.loading_capabilities[comptime_capability.TCapabilityNested](t_capability_nested, nil);
+        comptime_capability.loading_capabilities[comptime_capability.TCapabilityNested](t_capability_nested, nil, comptime_capability.parsed_head[comptime_capability.TCapabilityNested]);
     if (sel inner_r.err) { ret 1; }
     if (sel outer_r.err) { ret 1; }
     state.inner = inner_r.ok;
@@ -1872,7 +1866,7 @@ test capabilities__callback_allocation_failure_preserves_internal_kind {
     val make_1: err[A.Error] = T.make(?t);
     if (sel make_1.err) { ret 1; }
     fin { T.dnit(?t); }
-    val cr: res[comptime_capability.PhaseCapabilities[A.Allocator], fail.Fail] = comptime_capability.loading_capabilities[A.Allocator](comptime_value.t_capability_refusing, nil);
+    val cr: res[comptime_capability.PhaseCapabilities[A.Allocator], fail.Fail] = comptime_capability.loading_capabilities[A.Allocator](comptime_value.t_capability_refusing, nil, comptime_capability.parsed_head[A.Allocator]);
     if (sel cr.err) { ret 2; }
     val caps: comptime_capability.PhaseCapabilities[A.Allocator] = cr.ok;
     T.fail_at_ordinal(?t, 1);

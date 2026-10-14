@@ -966,7 +966,7 @@ fun infer_binding_init(sc: *sema_context.SemaContext, did: ast_id.DeclId, d: *as
     val expected: type.TypeId = sc.view.decl_type[ast_id.decl_index(did)];
     if (!type.is_nil(expected) && !type.is_error(expected) && !type.is_error(actual)) {
         sema_stmt.check_binding(sc, expected, d.data.bind.init, actual, d.span);
-        if (d.kind == ast_decl.DECL_KIND_VAL && comptime.is_case_literal(sc.view.a, d.data.bind.init)) {
+        if (d.kind == ast_decl.DECL_KIND_VAL && sema_context.is_case_literal(sc, d.data.bind.init)) {
             ret rebind_constant_tag(sc, d, expected);
         }
     }

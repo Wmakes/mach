@@ -23,7 +23,9 @@ pub rec TypeNamed {
     args_start: u32;
     args_len:   u32;
     operand:    bool;
-    # in a literal head, the tag case this path selects; length zero when the path names a type
+    # in a literal head after generic arguments, `T[A].c{...}`, the tag case written; length zero
+    # otherwise. a bare `T.c` keeps its whole path in `name`, and name resolution's head
+    # interpretation reads it as type and case
     case_name: lang_source.Span;
     # in a literal head `T.[c]{...}`, the comptime case descriptor; EXPR_NIL otherwise
     case_desc: ast_id.ExprId;

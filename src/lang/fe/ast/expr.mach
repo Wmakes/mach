@@ -182,6 +182,8 @@ pub rec ExprStructLit {
     fields_len:   u32;
 }
 
+# a typed literal with only positional elements, `T{a, b}`: a vector's lanes as written, or a tag
+# case's payload when name resolution finds the head names a case (interpretation.CASE_LITERAL)
 pub rec ExprVectorLit {
     ty:          ast_id.TypeId;
     elems_start: u32;
