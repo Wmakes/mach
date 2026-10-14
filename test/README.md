@@ -39,12 +39,21 @@ bash test/run.sh --link [--qemu]          # the link cases instead of the corpus
 bash test/run.sh --incremental            # warm rebuilds of the compiler and a manifest fixture match clean builds
 bash test/run.sh --docs [--case <page>]   # the mach code blocks of doc/language compile, are fmt-canonical, and the ones with a main run
 bash test/run.sh --docs --target <t>      # the same blocks compiled for one other hosted target, run only natively
-bash test/run.sh --f16proof [--qemu] [--shard <i>/<n>]   # every f16 operation against a correctly rounded reference (hours; in CI only on dispatch with lane=f16proof)
+bash test/run.sh --f16proof [--qemu] [--shard <i>/<n>]   # every f16 operation against a correctly rounded reference (hours)
 ```
 
 `MACH` names the compiler under test; the default is the checkout's
-`out/<host>/debug/bin/mach` and the run prints what it used. Exit is nonzero on
-any failure, one `FAIL` line per cell and a one-line total.
+`out/<host>/debug/bin/mach` and the run prints what it used. One `FAIL` line per
+cell and a one-line total. The exit status is 0 only when at least one cell
+passed and none failed: 1 on any failure and when nothing was checked, 2 for a
+usage error, a missing tool or a host that is not linux, darwin or windows on
+x86_64 or aarch64. CI does not run this driver, so a local run is the gate.
+
+`CASE_TIMEOUT` (seconds, default 120, stated once in `run.sh`) bounds every
+command a case runs: its build, its program, a doc block's program. A command
+that exceeds it fails its case with `timed out after <n>s: <command>`, and the
+run goes on to the next case and still reports. The link cases and the f16
+proof are not bounded by it.
 
 The corpus is a differential against C. Per case and target the driver builds
 in release (spirv: then `spirv-val`). On a target the host executes it also
@@ -64,7 +73,7 @@ with `--emit-asm`, and the listings of the case's module and of the fold are
 assembled by GNU as (`as --64`), as is every std module's listing once per
 column and profile. Each `.text` must equal the `.text` of mach's
 own object byte for byte. A relocated field is zero in both, since the addend
-lives in the relocation. CI runs it in those two columns.
+lives in the relocation. Run it in those two columns.
 
 `--qemu` adds the targets this host does not run natively: `aarch64-linux` under
 `qemu-aarch64` on a host that is not aarch64 linux, `riscv64-linux` under
@@ -77,7 +86,7 @@ checksum through raw linux syscalls) and re-lays the freestanding image with
 `lib/elf_loadable.py` into one `PT_LOAD` at file offset 0, which is the only shape
 qemu-user's loader maps. Every byte the program sees is the linker's. A missing
 emulator is announced and its column is only built. qemu is compute evidence,
-never ABI evidence: CI runs aarch64-linux on a native runner, and the link cases
+never ABI evidence: a native aarch64-linux host proves it, and the link cases
 emulate only riscv64-linux, the one leg no native runner proves.
 
 A case that admits a secret multiply (`ct/mul_secret`, `ct/mul_secret128`) links
@@ -211,6 +220,9 @@ is. An example that stopped compiling is a doc bug to fix, not a block to mark.
 
 ## Link cases
 
+The link cases leave with the linker, for mink. Until they do, `--link` runs
+them here, locally.
+
 A link case asks what a checksum cannot: does mach produce a correct image and
 link it against what the platform provides. Its fact is a cross-compiled format
 read host-side (a PE import table, a Mach-O bind table, a raw image), what the
@@ -301,5 +313,4 @@ binary32 is not a mutation: it is exactly the binary32 form.
 `--shard i/n` takes the i-th of n equal slices of every mode's domain, and each
 slice runs as `JOBS` pieces at once (default: every processor). A column this
 host cannot execute fails, so the riscv64 columns need `--qemu`. At 2^32 cases
-per operation per column it is long, and runs in CI only when dispatched as
-`heavy=f16proof`, four shards per column.
+per operation per column it is long, so run it a shard at a time.
