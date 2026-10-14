@@ -12,12 +12,12 @@ use std.types.string.str_len;
 use A: std.allocator;
 use std.data.toml;
 
+use mach.lang.driver.toolchain;
 use mach.lang.fuzz.verdict;
 use mach.lang.intern;
 use mach.lang.manifest;
 use mach.lang.manifest.template;
 use lang_target: mach.lang.target;
-use mach.lang.toolchain;
 
 #[testing]
 pub fun answer(alloc: *A.Allocator, data: *u8, len: usize) verdict.Verdict {

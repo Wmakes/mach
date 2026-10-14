@@ -34,10 +34,10 @@ use std.runtime.native.view.Unit;
 use std.system.file_identity;
 use system_os: std.system.os;
 
-use lang_alloc:        mach.lang.alloc;
-use build_fingerprint: mach.lang.build.fingerprint;
-use diagnostic_kind:   mach.lang.diagnostic.kind;
+use lang_alloc:      mach.lang.alloc;
+use diagnostic_kind: mach.lang.diagnostic.kind;
 use mach.lang.fail;
+use lang_fingerprint: mach.lang.fingerprint;
 use mach.lang.target.of.bin;
 use mach.lang.target.of.buildid;
 
@@ -652,7 +652,7 @@ fun io_failure(error: io_error.Error) Fault {
 }
 
 fun hash_held(held: fs.File, out: *u8) err[Fault] {
-    val hashed: err[fail.Fail] = build_fingerprint.held_file_sha256(held, out);
+    val hashed: err[fail.Fail] = lang_fingerprint.held_file_sha256(held, out);
     if (sel hashed.err) { ret err[Fault].err{internal(fail.describe(hashed.err))}; }
     ret err[Fault].ok{};
 }

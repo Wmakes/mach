@@ -41,11 +41,11 @@ use manifest_version: mach.lang.manifest.version;
 use mach.lang.session;
 
 use driver_closure: mach.lang.driver.closure;
+use mach.lang.driver.toolchain;
 use mach.lang.listing;
 use mach.lang.package;
 use mach.lang.package.git;
 use git_checkout: mach.lang.package.git.checkout;
-use mach.lang.toolchain;
 
 fun symlink_seen(links: *Vector[str], rel: str) bool {
     var i: usize = 0;

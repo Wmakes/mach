@@ -20,9 +20,9 @@ use std.types.string.str_len;
 use A: std.allocator;
 
 use mach.lang.build.outcome;
-use mach.lang.build.request;
 use mach.lang.diagnostic;
 use diagnostic_kind: mach.lang.diagnostic.kind;
+use mach.lang.driver.request;
 use mach.lang.fe.ast;
 use ast_expr: mach.lang.fe.ast.expr;
 use ast_id:   mach.lang.fe.ast.id;
@@ -63,9 +63,9 @@ use mach.lang.driver.tests.testing.ut_sema_build;
 use mach.lang.driver.tests.testing.ut_stable;
 use mach.lang.driver.tests.testing.ut_target_sel;
 use mach.lang.driver.tests.testing.ut_vec_sema_n;
+use mach.lang.driver.toolchain;
 use ir_id: mach.lang.me.ir.id;
 use mach.lang.module;
-use mach.lang.toolchain;
 use mach.lang.type.query.deep;
 
 # a grouped literal and a grouped assignment target keep their values in a built program

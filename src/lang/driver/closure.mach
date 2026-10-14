@@ -29,6 +29,7 @@ use A: std.allocator;
 use diagnostic_kind: mach.lang.diagnostic.kind;
 use driver_load:     mach.lang.driver.load;
 use mach.lang.driver.project;
+use mach.lang.driver.toolchain;
 use mach.lang.fail;
 use mach.lang.intern;
 use mach.lang.manifest;
@@ -36,8 +37,7 @@ use mach.lang.manifest.template;
 use manifest_version: mach.lang.manifest.version;
 use mach.lang.output.remove;
 use mach.lang.session;
-use lang_target: mach.lang.target;
-use mach.lang.toolchain;
+use lang_target:  mach.lang.target;
 use lang_version: mach.lang.version;
 
 # whether `id` names the project `owner`; an unnamed project names none

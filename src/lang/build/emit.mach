@@ -30,6 +30,7 @@ use build_plan:      mach.lang.build.plan;
 use diagnostic_kind: mach.lang.diagnostic.kind;
 use mach.lang.driver;
 use mach.lang.driver.cache;
+use mach.lang.driver.toolchain;
 use mach.lang.fail;
 use mach.lang.growth;
 use mach.lang.intern;
@@ -47,7 +48,6 @@ use mach.lang.target.input;
 use target_of: mach.lang.target.of;
 use mach.lang.target.of.ar;
 use of_destination: mach.lang.target.of.destination;
-use mach.lang.toolchain;
 
 rec AsmWriteContext {
     p:   *driver.Project;

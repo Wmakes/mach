@@ -33,8 +33,8 @@ use A: std.allocator;
 
 use mach.lang.be.linker;
 use mach.lang.build.outcome;
-use mach.lang.build.request;
 use mach.lang.diagnostic;
+use mach.lang.driver.request;
 use mach.lang.fe.ast;
 use ast_decl:   mach.lang.fe.ast.decl;
 use ast_id:     mach.lang.fe.ast.id;
@@ -64,11 +64,11 @@ use mach.lang.driver;
 use mach.lang.driver.frontend;
 use mach.lang.driver.passes;
 use mach.lang.driver.project;
+use mach.lang.driver.toolchain;
 use ir_id: mach.lang.me.ir.id;
 use mach.lang.module;
 use mach.lang.step;
 use mach.lang.target.isa.riscv.refcore;
-use mach.lang.toolchain;
 use mach.lang.type.query.extent;
 
 #[testing]

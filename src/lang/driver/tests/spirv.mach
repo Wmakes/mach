@@ -1,4 +1,4 @@
-use mach.lang.build.request;
+use mach.lang.driver.request;
 use mach.lang.fail;
 use mach.lang.host;
 use std.allocator.page;
@@ -69,10 +69,10 @@ use mach.lang.driver.tests.testing.ut_str_ends_with;
 use mach.lang.driver.tests.testing.ut_target_sel;
 use mach.lang.driver.tests.testing.ut_vec_lower;
 use mach.lang.driver.tests.testing.ut_write_node_multi;
+use mach.lang.driver.toolchain;
 use mach.lang.module;
 use mach.lang.step;
 use lang_target: mach.lang.target;
-use mach.lang.toolchain;
 
 # the error carrying `needle` is located somewhere in the file whose path ends
 # with `path_suffix`

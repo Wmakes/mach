@@ -62,9 +62,9 @@ use mach.lang.driver.tests.testing.ut_union_gate_result_n;
 use mach.lang.driver.tests.testing.ut_union_native_os_id;
 use mach.lang.driver.tests.testing.ut_union_native_text;
 use mach.lang.driver.tests.testing.ut_write_source;
+use mach.lang.driver.toolchain;
 use mach.lang.module;
 use mach.lang.step;
-use mach.lang.toolchain;
 
 #[testing]
 fun ut_ctx(p: *project.Project, s: *session.Session, fqn: str) *comptime.ComptimeCtx {

@@ -22,9 +22,9 @@ use A: std.allocator;
 
 use mach.lang.build.outcome;
 use build_plan: mach.lang.build.plan;
-use mach.lang.build.request;
 use mach.lang.diagnostic;
 use diagnostic_kind: mach.lang.diagnostic.kind;
+use mach.lang.driver.request;
 use mach.lang.intern;
 use mach.lang.manifest;
 use mach.lang.me.pipeline;
@@ -43,10 +43,10 @@ use mach.lang.driver.tests.testing.ut_entry_symbol;
 use mach.lang.driver.tests.testing.ut_manifest;
 use mach.lang.driver.tests.testing.ut_scaffold_m;
 use mach.lang.driver.tests.testing.ut_str_contains;
+use mach.lang.driver.toolchain;
 use mach.lang.manifest.target.on_host;
 use mach.lang.module;
 use lang_target: mach.lang.target;
-use mach.lang.toolchain;
 
 #[testing]
 fun ut_manifest_mixed_targets() str {

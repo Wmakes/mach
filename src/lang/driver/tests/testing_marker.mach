@@ -14,9 +14,9 @@ use std.types.string.str_len;
 use A: std.allocator;
 
 use mach.lang.build.outcome;
-use mach.lang.build.request;
 use mach.lang.diagnostic;
 use diagnostic_kind: mach.lang.diagnostic.kind;
+use mach.lang.driver.request;
 use mach.lang.intern;
 use mach.lang.manifest;
 use mach.lang.session;
@@ -38,9 +38,9 @@ use mach.lang.driver.tests.testing.ut_manifest_x64_linux;
 use mach.lang.driver.tests.testing.ut_mid;
 use mach.lang.driver.tests.testing.ut_scaffold_m;
 use mach.lang.driver.tests.testing.ut_target_sel;
+use mach.lang.driver.toolchain;
 use mach.lang.module;
 use lang_target: mach.lang.target;
-use mach.lang.toolchain;
 
 #[testing]
 val UT_TESTING_HELPER: u32 = 1;

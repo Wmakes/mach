@@ -33,7 +33,7 @@ use mach.lang.be.codegen;
 use mir_lower: mach.lang.be.codegen.mir.lower;
 use mach.lang.be.linker;
 use mach.lang.build.outcome;
-use mach.lang.build.request;
+use mach.lang.driver.request;
 use mach.lang.fe.ast;
 use mach.lang.intern;
 use mach.lang.manifest;
@@ -132,11 +132,11 @@ use mach.lang.driver.tests.testing.ut_vec_codegen_defined;
 use mach.lang.driver.tests.testing.ut_vec_diag;
 use mach.lang.driver.tests.testing.ut_vec_lower;
 use mach.lang.driver.tests.testing.ut_vec_sema;
+use mach.lang.driver.toolchain;
 use ir_id: mach.lang.me.ir.id;
 use mach.lang.module;
 use mach.lang.step;
 use lang_target: mach.lang.target;
-use mach.lang.toolchain;
 
 # the same oracle on one named target of the union manifest
 #[testing]

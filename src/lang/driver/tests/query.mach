@@ -24,9 +24,9 @@ use T: std.allocator.testing;
 
 use mach.lang.be.linker;
 use mach.lang.build.outcome;
-use mach.lang.build.request;
 use mach.lang.diagnostic;
 use diagnostic_kind: mach.lang.diagnostic.kind;
+use mach.lang.driver.request;
 use mach.lang.fe.ast;
 use ast_id: mach.lang.fe.ast.id;
 use mach.lang.fe.comptime;
@@ -84,9 +84,9 @@ use mach.lang.driver.tests.testing.ut_stable;
 use mach.lang.driver.tests.testing.ut_str_contains;
 use mach.lang.driver.tests.testing.ut_target_sel;
 use mach.lang.driver.tests.testing.ut_write_source;
+use mach.lang.driver.toolchain;
 use mach.lang.module;
 use lang_target: mach.lang.target;
-use mach.lang.toolchain;
 
 # a rebuild reuses an unchanged module's ast and reparses an edited one
 test qparse__reuses_unchanged_and_reparses_edited {

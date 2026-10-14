@@ -30,10 +30,11 @@ use cli_diagnostic: mach.cli.diagnostic;
 use mach.cli.exit;
 use mach.cli.fixture;
 use mach.cli.util;
-use mach.lang.build.request;
 use mach.lang.diagnostic;
 use diagnostic_kind: mach.lang.diagnostic.kind;
 use mach.lang.driver;
+use mach.lang.driver.request;
+use mach.lang.driver.toolchain;
 use mach.lang.fe.ast;
 use ast_decl:   mach.lang.fe.ast.decl;
 use ast_id:     mach.lang.fe.ast.id;
@@ -46,7 +47,6 @@ use mach.lang.manifest.target.on_host;
 use mach.lang.output;
 use mach.lang.session;
 use lang_source: mach.lang.source;
-use mach.lang.toolchain;
 
 val FILE_MODE: i32 = 420;
 

@@ -17,9 +17,9 @@ use std.types.string.str_len;
 use A: std.allocator;
 use T: std.allocator.testing;
 
-use mach.lang.build.request;
 use mach.lang.diagnostic;
 use diagnostic_kind: mach.lang.diagnostic.kind;
+use mach.lang.driver.request;
 use mach.lang.fe.ast;
 use ast_decl: mach.lang.fe.ast.decl;
 use ast_id:   mach.lang.fe.ast.id;
@@ -79,8 +79,8 @@ use mach.lang.driver.tests.testing.ut_vec_diag;
 use mach.lang.driver.tests.testing.ut_vec_sema;
 use mach.lang.driver.tests.testing.ut_vec_sema_n;
 use mach.lang.driver.tests.testing.ut_write_source;
+use mach.lang.driver.toolchain;
 use mach.lang.module;
-use mach.lang.toolchain;
 
 # a module's load walks past a gate only layout decides, so an `ext` declared after it
 # keeps its C name and its library

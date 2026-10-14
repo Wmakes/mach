@@ -32,7 +32,6 @@ use std.text.string.str_free;
 use A: std.allocator;
 use T: std.allocator.testing;
 
-use mach.lang.build.request;
 use mach.lang.diagnostic;
 use diagnostic_kind: mach.lang.diagnostic.kind;
 use mach.lang.driver;
@@ -41,6 +40,8 @@ use mach.lang.driver.frontend;
 use driver_load: mach.lang.driver.load;
 use mach.lang.driver.passes;
 use mach.lang.driver.project;
+use mach.lang.driver.request;
+use mach.lang.driver.toolchain;
 use mach.lang.fail;
 use mach.lang.fe.ast;
 use ast_decl: mach.lang.fe.ast.decl;
@@ -73,7 +74,6 @@ use mach.lang.stack;
 use mach.lang.step;
 use lang_target:       mach.lang.target;
 use catalog_subsystem: mach.lang.target.catalog.subsystem;
-use mach.lang.toolchain;
 use mach.lang.type;
 
 # one reusable slot for a currently open file

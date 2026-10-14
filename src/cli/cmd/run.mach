@@ -33,12 +33,12 @@ use mach.lang.diagnostic;
 use diagnostic_kind: mach.lang.diagnostic.kind;
 use mach.lang.driver;
 use mach.lang.driver.config;
+use mach.lang.driver.toolchain;
 use mach.lang.duration;
 use mach.lang.host;
 use mach.lang.manifest;
 use mach.lang.subprocess;
 use lang_target: mach.lang.target;
-use mach.lang.toolchain;
 
 # SEL rows run accepts: every row but `--all`, since run executes one artifact
 val SEL_ACCEPTED: [args.SEL_N]bool = [args.SEL_N]bool{true, true, true, true, true, true, false, true};

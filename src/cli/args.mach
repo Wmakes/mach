@@ -26,9 +26,9 @@ use std_format: std.format;
 
 use mach.cli.exit;
 use mach.cli.util;
-use mach.lang.build.request;
 use mach.lang.diagnostic;
 use diagnostic_kind: mach.lang.diagnostic.kind;
+use mach.lang.driver.request;
 use mach.lang.manifest;
 use ir_printer: mach.lang.me.ir.printer;
 use mach.lang.target.input;

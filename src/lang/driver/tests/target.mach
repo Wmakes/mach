@@ -55,8 +55,8 @@ use mach.lang.driver.tests.testing.ut_str_contains;
 use mach.lang.driver.tests.testing.ut_target_sel;
 use mach.lang.driver.tests.testing.ut_vec_diag;
 use mach.lang.driver.tests.testing.ut_vec_lower;
+use mach.lang.driver.toolchain;
 use mach.lang.module;
-use mach.lang.toolchain;
 
 # an instruction set that declares no assembly capability refuses `asm` in source at the
 # block, before anything reaches its emitter

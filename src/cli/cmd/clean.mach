@@ -37,13 +37,13 @@ use mach.cli.exit;
 use mach.cli.util;
 use mach.lang.diagnostic;
 use diagnostic_kind: mach.lang.diagnostic.kind;
+use mach.lang.driver.toolchain;
 use mach.lang.intern;
 use mach.lang.listing;
 use mach.lang.manifest;
 use mach.lang.output.remove;
 use output_testing: mach.lang.output.testing;
 use lang_target:    mach.lang.target;
-use mach.lang.toolchain;
 
 # what a clean entry names
 def EntryKind: u8;

@@ -43,8 +43,8 @@ use target_model: mach.lang.target.model;
 use mach.lang.driver.frontend;
 use driver_load: mach.lang.driver.load;
 use mach.lang.driver.project;
+use mach.lang.driver.toolchain;
 use mach.lang.target.resolved;
-use mach.lang.toolchain;
 
 fun warn_union_target_skipped(p: *project.Project, os_name: str, isa_name: str, why: str) {
     val res_msg: res[str, std_format.FormatError] = std_format.sprint(p.alloc, "target '{}-{}' is not supported by this build; skipped in multi-target analysis: {}", os_name, isa_name, why);

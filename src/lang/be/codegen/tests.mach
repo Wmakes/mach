@@ -1,4 +1,4 @@
-use mach.lang.build.request;
+use mach.lang.driver.request;
 use mach.lang.fail;
 use std.allocator.page;
 use fs: std.filesystem;
@@ -32,9 +32,9 @@ use mach.lang.driver.tests.testing.ut_manifest_x64_linux;
 use mach.lang.driver.tests.testing.ut_mid;
 use mach.lang.driver.tests.testing.ut_scaffold_m;
 use mach.lang.driver.tests.testing.ut_target_sel;
+use mach.lang.driver.toolchain;
 use mach.lang.module;
 use lang_target: mach.lang.target;
-use mach.lang.toolchain;
 
 #[testing]
 fun ut_manifest_riscv_pair() str {

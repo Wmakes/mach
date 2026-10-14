@@ -57,11 +57,11 @@ use mach.lang.driver.tests.testing.ut_std_tags;
 use mach.lang.driver.tests.testing.ut_std_tags_free;
 use mach.lang.driver.tests.testing.ut_vec_diag;
 use mach.lang.driver.tests.testing.ut_vec_note;
+#[testing]
+use mach.lang.driver.toolchain;
 use mach.lang.manifest.target.on_host;
 use mach.lang.module;
 use mach.lang.step;
-#[testing]
-use mach.lang.toolchain;
 use mach.lang.type.query.deep;
 use mach.lang.type.query.subst;
 

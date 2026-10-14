@@ -17,9 +17,9 @@ use std.types.string.str_len;
 use A: std.allocator;
 
 use mach.lang.be.linker;
-use mach.lang.build.request;
 use mach.lang.diagnostic;
 use diagnostic_kind: mach.lang.diagnostic.kind;
+use mach.lang.driver.request;
 use mach.lang.manifest;
 use mach.lang.me.pipeline;
 use mach.lang.session;
@@ -42,9 +42,9 @@ use mach.lang.driver.tests.testing.ut_str_contains;
 use mach.lang.driver.tests.testing.ut_target_sel;
 use mach.lang.driver.tests.testing.ut_write_gitmodules;
 use mach.lang.driver.tests.testing.ut_write_node;
+use mach.lang.driver.toolchain;
 use mach.lang.manifest.target.on_host;
 use lang_target: mach.lang.target;
-use mach.lang.toolchain;
 
 #[testing]
 fun ut_manifest_notargets() str {

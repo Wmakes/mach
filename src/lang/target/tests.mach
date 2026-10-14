@@ -506,7 +506,7 @@ fun layer_of(name: str) u32 {
     if (is_contract(name))                                                                   { ret 4; }
     if (is_backend(name))                                                                    { ret 5; }
     if (str_region_equals(name, 0, 16, "mach.lang.driver") || str_region_equals(name, 0, 16, "mach.lang.build.")
-        || str_equals(name, "mach.lang.toolchain") || str_equals(name, "mach.lang.step")
+        || str_equals(name, "mach.lang.step")
         || str_equals(name, "mach.lang.editor") || str_region_equals(name, 0, 8, "mach.cli")) {
         ret 6;
     }

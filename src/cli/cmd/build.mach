@@ -41,15 +41,15 @@ use mach.cli.util;
 use mach.lang.build.engine;
 use mach.lang.build.outcome;
 use build_plan: mach.lang.build.plan;
-use mach.lang.build.request;
 use mach.lang.diagnostic;
 use diagnostic_kind: mach.lang.diagnostic.kind;
 use mach.lang.driver;
+use mach.lang.driver.request;
+use mach.lang.driver.toolchain;
 use mach.lang.manifest;
 use mach.lang.readout;
 use mach.lang.session;
 use lang_target: mach.lang.target;
-use mach.lang.toolchain;
 
 # length of BUILD_TABLES
 val BUILD_TABLES_N: usize = 12;

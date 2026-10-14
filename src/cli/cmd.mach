@@ -37,7 +37,7 @@ use cli_diagnostic: mach.cli.diagnostic;
 use mach.cli.exit;
 use mach.cli.fixture;
 use mach.cli.util;
-use mach.lang.build.request;
+use mach.lang.driver.request;
 
 # length of COMMANDS; the compiler refuses a COMMANDS literal of any other length
 val COMMANDS_N: usize = 11;

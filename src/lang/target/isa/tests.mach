@@ -31,6 +31,7 @@ use fs:         std.filesystem;
 use io_error:   std.io.error;
 use types_path: std.types.path;
 
+use mach.lang.driver.toolchain;
 use mach.lang.reference;
 use lang_source: mach.lang.source;
 use lang_target: mach.lang.target;
@@ -38,7 +39,6 @@ use mach.lang.target.abi;
 use isa_environment: mach.lang.target.isa.environment;
 use target_of:       mach.lang.target.of;
 use lang_target_os:  mach.lang.target.os;
-use mach.lang.toolchain;
 
 # the exit code of a test that could not read what it checks
 #[testing]

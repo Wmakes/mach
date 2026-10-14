@@ -10,9 +10,9 @@ use std.types.string.str;
 
 use A: std.allocator;
 
-use cache_record: mach.lang.build.cache.record;
-use mach.lang.build.request;
 use mach.lang.diagnostic;
+use cache_record: mach.lang.driver.cache.record;
+use mach.lang.driver.request;
 use mach.lang.fe.ast;
 use mach.lang.fe.comptime;
 use comptime_path: mach.lang.fe.comptime.path;

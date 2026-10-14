@@ -26,20 +26,21 @@ use sync_thread: std.sync.thread;
 
 use mach.lang.be.codegen;
 use mach.lang.be.linker;
-use build_emit:        mach.lang.build.emit;
-use build_fingerprint: mach.lang.build.fingerprint;
+use build_emit: mach.lang.build.emit;
 use mach.lang.build.outcome;
-use build_plan: mach.lang.build.plan;
-use mach.lang.build.request;
+use build_plan:    mach.lang.build.plan;
 use build_testing: mach.lang.build.testing;
 use mach.lang.diagnostic;
 use diagnostic_kind: mach.lang.diagnostic.kind;
 use mach.lang.driver;
 use mach.lang.driver.cache;
+use mach.lang.driver.codec;
 use mach.lang.driver.passes;
 use mach.lang.driver.project;
-use driver_query: mach.lang.driver.query;
+use mach.lang.driver.request;
+use mach.lang.driver.toolchain;
 use mach.lang.fail;
+use lang_fingerprint: mach.lang.fingerprint;
 use mach.lang.intern;
 use mach.lang.manifest;
 use me_ir: mach.lang.me.ir;
@@ -53,7 +54,6 @@ use lang_target:       mach.lang.target;
 use catalog_artifact:  mach.lang.target.catalog.artifact;
 use catalog_subsystem: mach.lang.target.catalog.subsystem;
 use target_of:         mach.lang.target.of;
-use mach.lang.toolchain;
 use mach.lang.wire;
 
 rec UnitState {
@@ -871,7 +871,7 @@ fun emit_phase(p: *driver.Project, unit: *build_plan.BuildUnit, st: *UnitState,
 }
 
 fun artifact_digest(path: *u8, out: *u8) err[fail.Fail] {
-    val rr: err[fail.Fail] = build_fingerprint.file_sha256(path::str, out);
+    val rr: err[fail.Fail] = lang_fingerprint.file_sha256(path::str, out);
     if (sel rr.err) {
         ret err[fail.Fail].err{rr.err};
     }
@@ -1237,7 +1237,7 @@ pub fun set_link_config_input(p: *driver.Project, out_path: *u8, product: *u8, o
 
 # the link configuration a sink holds, as the link's query input
 fun set_link_config(p: *driver.Project, fb: *wire.Sink) err[fail.Fail] {
-    val taken: res[query.QueryOutput, fail.Fail] = driver_query.output(fb);
+    val taken: res[query.QueryOutput, fail.Fail] = codec.output(fb);
     if (sel taken.err) { ret err[fail.Fail].err{taken.err}; }
     val si: err[fail.Fail] = query.set_input(?p.s.queries, ?passes.LINK_CONFIG, 0, taken.ok.bytes, taken.ok.len);
     if (taken.ok.bytes != nil) { A.deallocate[u8](p.alloc, taken.ok.bytes, taken.ok.len::usize); }
@@ -1252,38 +1252,38 @@ fun write_link_config(fb: *wire.Sink, p: *driver.Project, out_path: *u8, product
     var pie_axis: u32 = 0;
     if (p.req.pie) { pie_axis = 1; }
     wire.put_u32(fb, pie_axis);
-    build_fingerprint.put_text(fb, out_path::str);
-    build_fingerprint.put_text(fb, product::str);
-    build_fingerprint.put_domain_u8(fb, build_fingerprint.DOMAIN_SUBSYSTEM,
+    lang_fingerprint.put_text(fb, out_path::str);
+    lang_fingerprint.put_text(fb, product::str);
+    lang_fingerprint.put_domain_u8(fb, lang_fingerprint.DOMAIN_SUBSYSTEM,
         catalog_subsystem.VERSION, catalog_subsystem.fingerprint_tag(p.req.subsystem));
 
     var has_resources: u32 = 0;
     if (image != nil && image.resource != nil) { has_resources = 1; }
     wire.put_u32(fb, has_resources);
     if (has_resources != 0) {
-        build_fingerprint.put_text(fb, image.icon_path);
-        build_fingerprint.put_content(fb, image.icon_bytes.data, image.icon_bytes.len);
-        build_fingerprint.put_text(fb, image.manifest_path);
-        build_fingerprint.put_content(fb, image.manifest_bytes.data, image.manifest_bytes.len);
-        build_fingerprint.put_text(fb, image.resource.version);
-        build_fingerprint.put_text(fb, image.resource.internal_name);
-        build_fingerprint.put_text(fb, image.resource.original_filename);
-        build_fingerprint.put_text(fb, image.resource.product_name);
+        lang_fingerprint.put_text(fb, image.icon_path);
+        lang_fingerprint.put_content(fb, image.icon_bytes.data, image.icon_bytes.len);
+        lang_fingerprint.put_text(fb, image.manifest_path);
+        lang_fingerprint.put_content(fb, image.manifest_bytes.data, image.manifest_bytes.len);
+        lang_fingerprint.put_text(fb, image.resource.version);
+        lang_fingerprint.put_text(fb, image.resource.internal_name);
+        lang_fingerprint.put_text(fb, image.resource.original_filename);
+        lang_fingerprint.put_text(fb, image.resource.product_name);
     }
 
     wire.put_u32(fb, ext_count);
     var i: u32 = 0;
     for (i < ext_count) {
-        build_fingerprint.put_text(fb, ext[i].path::str);
-        build_fingerprint.put_file(fb, ext[i].path::str);
+        lang_fingerprint.put_text(fb, ext[i].path::str);
+        lang_fingerprint.put_file(fb, ext[i].path::str);
         i = i + 1;
     }
     wire.put_u32(fb, dynlib_count);
     var j: u32 = 0;
     for (j < dynlib_count) {
-        build_fingerprint.put_name(fb, ?p.s.interner, dynlibs[j].name);
-        build_fingerprint.put_name(fb, ?p.s.interner, dynlibs[j].soname);
-        build_fingerprint.put_name(fb, ?p.s.interner, dynlibs[j].rpath);
+        lang_fingerprint.put_name(fb, ?p.s.interner, dynlibs[j].name);
+        lang_fingerprint.put_name(fb, ?p.s.interner, dynlibs[j].soname);
+        lang_fingerprint.put_name(fb, ?p.s.interner, dynlibs[j].rpath);
         var referenced: u8 = 0;
         if (dynlibs[j].include_referenced) { referenced = 1; }
         wire.put_u8(fb, referenced);

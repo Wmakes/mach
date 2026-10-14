@@ -15,7 +15,7 @@ use std.types.string.str_empty;
 use A: std.allocator;
 
 use mach.lang.build.outcome;
-use mach.lang.build.request;
+use mach.lang.driver.request;
 use mach.lang.manifest;
 use me_ir:          mach.lang.me.ir;
 use ir_id:          mach.lang.me.ir.id;
@@ -44,8 +44,8 @@ use mach.lang.driver.tests.testing.ut_tag_native_case;
 use mach.lang.driver.tests.testing.ut_tag_native_case_files;
 use mach.lang.driver.tests.testing.ut_tag_start_stub;
 use mach.lang.driver.tests.testing.ut_vec_sema_n;
+use mach.lang.driver.toolchain;
 use lang_target: mach.lang.target;
-use mach.lang.toolchain;
 
 # tag locals, globals, array elements, record fields, nested tags and pointer receivers: reads, writes, `?` addresses and whole copies
 #[testing]

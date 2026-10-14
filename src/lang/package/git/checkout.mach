@@ -41,13 +41,13 @@ use manifest_version: mach.lang.manifest.version;
 use mach.lang.session;
 
 use driver_closure: mach.lang.driver.closure;
+use mach.lang.driver.toolchain;
 use mach.lang.package;
 use mach.lang.package.git;
 use git_gitlink: mach.lang.package.git.gitlink;
 use package_pin: mach.lang.package.pin;
 use mach.lang.package.report;
 use package_source: mach.lang.package.source;
-use mach.lang.toolchain;
 
 fun realize_checkout_target(alloc: *A.Allocator, ref: str) res[str, fail.Fail] {
     if (str_starts_with(ref, "branch/")) {

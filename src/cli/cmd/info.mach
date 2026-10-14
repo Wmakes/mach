@@ -20,6 +20,7 @@ use mach.cli.args;
 use cli_diagnostic: mach.cli.diagnostic;
 use mach.cli.exit;
 use mach.lang.driver;
+use mach.lang.driver.toolchain;
 use mach.lang.me.pass;
 use mach.lang.me.pipeline;
 use lang_target: mach.lang.target;
@@ -32,7 +33,6 @@ use lang_target_os:  mach.lang.target.os;
 use target_registry: mach.lang.target.registry;
 use mach.lang.target.tuple;
 use mach.lang.textbuild;
-use mach.lang.toolchain;
 use lang_version: mach.lang.version;
 
 # `--version`, which `mach --version` gives in place of a command word

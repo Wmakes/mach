@@ -28,8 +28,8 @@ use A:          std.allocator;
 use T:          std.allocator.testing;
 use std.text.string.str_free;
 
-use build_fingerprint: mach.lang.build.fingerprint;
 use mach.lang.ct;
+use lang_fingerprint: mach.lang.fingerprint;
 use mach.lang.intern;
 use lang_mir:  mach.lang.mir;
 use mir_debug: mach.lang.mir.debug;

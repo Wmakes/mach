@@ -8,13 +8,13 @@
 # whole source is its surface. a module whose `obj/` object carries its key
 # is reused, and when nothing the build still compiles imports it, it is not
 # resolved, typed or lowered at all. source digests come from the per-file
-# digest memo in the cell's `.cache` directory (build/cache/memo)
-use cache_key: mach.lang.build.cache.key;
-use mach.lang.build.request;
+# digest memo in the cell's `.cache` directory (driver/cache/memo)
+use cache_key: mach.lang.driver.cache.key;
 use mach.lang.diagnostic;
 use diagnostic_kind: mach.lang.diagnostic.kind;
 use mach.lang.driver.frontend;
 use mach.lang.driver.project;
+use mach.lang.driver.request;
 use mach.lang.fail;
 use mach.lang.fe.ast;
 use mach.lang.intern;
@@ -35,10 +35,11 @@ use std.types.string.str;
 use std.types.string.str_join;
 use std.types.string.str_len;
 
-use mach.lang.build.cache.compiler;
-use mach.lang.build.cache.memo;
-use cache_record: mach.lang.build.cache.record;
+use mach.lang.driver.cache.compiler;
+use mach.lang.driver.cache.memo;
+use cache_record: mach.lang.driver.cache.record;
 use mach.lang.driver.surface;
+use mach.lang.driver.toolchain;
 use mach.lang.driver.union;
 use me_ir: mach.lang.me.ir;
 use mach.lang.me.lower.testrunner;
@@ -51,7 +52,6 @@ use mach.lang.readout;
 use mach.lang.session;
 use mach.lang.target.isa;
 use target_of: mach.lang.target.of;
-use mach.lang.toolchain;
 use mach.lang.wire;
 use std.allocator.page;
 use std.chrono.time;

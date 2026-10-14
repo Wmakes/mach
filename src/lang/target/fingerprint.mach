@@ -11,7 +11,7 @@ use std.types.string.str;
 
 use A: std.allocator;
 
-use build_fingerprint: mach.lang.build.fingerprint;
+use lang_fingerprint: mach.lang.fingerprint;
 use mach.lang.target.abi;
 use mach.lang.target.abi.aapcs64;
 use mach.lang.target.binding;
@@ -38,57 +38,57 @@ fun b2u8(b: bool) u8 {
 }
 
 pub fun put(t: *binding.Binding, s: *wire.Sink) {
-    build_fingerprint.put_domain_str(s, build_fingerprint.DOMAIN_ARCH, VERSION, t.target.env_name);
+    lang_fingerprint.put_domain_str(s, lang_fingerprint.DOMAIN_ARCH, VERSION, t.target.env_name);
 
-    build_fingerprint.put_domain_u8(s, build_fingerprint.DOMAIN_ARCH, catalog_arch.VERSION, catalog_arch.fingerprint_tag(t.target.arch_id));
-    build_fingerprint.put_domain_str(s, build_fingerprint.DOMAIN_ARCH, VERSION, t.isa.name);
+    lang_fingerprint.put_domain_u8(s, lang_fingerprint.DOMAIN_ARCH, catalog_arch.VERSION, catalog_arch.fingerprint_tag(t.target.arch_id));
+    lang_fingerprint.put_domain_str(s, lang_fingerprint.DOMAIN_ARCH, VERSION, t.isa.name);
 
-    build_fingerprint.put_domain_u8(s, build_fingerprint.DOMAIN_ABI, catalog_abi.VERSION, catalog_abi.fingerprint_tag(t.target.abi_id));
-    build_fingerprint.put_domain_str(s, build_fingerprint.DOMAIN_ABI, VERSION, t.abi.name);
-    build_fingerprint.put_domain_u8(s, build_fingerprint.DOMAIN_ABI, VERSION, t.abi.passing);
+    lang_fingerprint.put_domain_u8(s, lang_fingerprint.DOMAIN_ABI, catalog_abi.VERSION, catalog_abi.fingerprint_tag(t.target.abi_id));
+    lang_fingerprint.put_domain_str(s, lang_fingerprint.DOMAIN_ABI, VERSION, t.abi.name);
+    lang_fingerprint.put_domain_u8(s, lang_fingerprint.DOMAIN_ABI, VERSION, t.abi.passing);
 
-    build_fingerprint.put_domain_u8(s, build_fingerprint.DOMAIN_OS, catalog_os.VERSION, catalog_os.fingerprint_tag(t.target.os_id));
-    build_fingerprint.put_domain_str(s, build_fingerprint.DOMAIN_OS, VERSION, t.os.name);
+    lang_fingerprint.put_domain_u8(s, lang_fingerprint.DOMAIN_OS, catalog_os.VERSION, catalog_os.fingerprint_tag(t.target.os_id));
+    lang_fingerprint.put_domain_str(s, lang_fingerprint.DOMAIN_OS, VERSION, t.os.name);
 
-    build_fingerprint.put_domain_u8(s, build_fingerprint.DOMAIN_OF, target_of.FINGERPRINT_VERSION, t.of.fingerprint_tag);
-    build_fingerprint.put_domain_str(s, build_fingerprint.DOMAIN_OF, VERSION, t.of.name);
+    lang_fingerprint.put_domain_u8(s, lang_fingerprint.DOMAIN_OF, target_of.FINGERPRINT_VERSION, t.of.fingerprint_tag);
+    lang_fingerprint.put_domain_str(s, lang_fingerprint.DOMAIN_OF, VERSION, t.of.name);
 
-    build_fingerprint.put_domain_u32(s, build_fingerprint.DOMAIN_DEBUG, VERSION, t.target.debug_id);
+    lang_fingerprint.put_domain_u32(s, lang_fingerprint.DOMAIN_DEBUG, VERSION, t.target.debug_id);
 
     var backend_kind: u8 = 0;
     if (isa.emits_whole_module(t.isa)) { backend_kind = 1; }
-    build_fingerprint.put_domain_u8(s, build_fingerprint.DOMAIN_BACKEND, VERSION, backend_kind);
+    lang_fingerprint.put_domain_u8(s, lang_fingerprint.DOMAIN_BACKEND, VERSION, backend_kind);
 
-    build_fingerprint.put_domain_u64(s, build_fingerprint.DOMAIN_IMAGE, VERSION, t.target.base);
-    build_fingerprint.put_domain_u64(s, build_fingerprint.DOMAIN_IMAGE, VERSION, t.target.page_size);
-    build_fingerprint.put_domain_u64(s, build_fingerprint.DOMAIN_IMAGE, VERSION, t.target.stack_reserve);
-    build_fingerprint.put_domain_u64(s, build_fingerprint.DOMAIN_IMAGE, VERSION, t.target.stack_commit);
-    build_fingerprint.put_domain_u8(s, build_fingerprint.DOMAIN_IMAGE, VERSION, b2u8(t.target.variadic_args_on_stack));
-    build_fingerprint.put_domain_u8(s, build_fingerprint.DOMAIN_IMAGE, VERSION, b2u8(t.target.fixed_args_natural_size));
-    build_fingerprint.put_domain_u32(s, build_fingerprint.DOMAIN_IMAGE, VERSION, t.target.reg_arg_align);
-    build_fingerprint.put_domain_u32(s, build_fingerprint.DOMAIN_IMAGE, VERSION, t.target.reg_arg_extend);
-    build_fingerprint.put_domain_u8(s, build_fingerprint.DOMAIN_IMAGE, VERSION, b2u8(t.target.agg_arg_natural_align));
-    build_fingerprint.put_domain_u8(s, build_fingerprint.DOMAIN_IMAGE, VERSION, t.abi.half);
-    build_fingerprint.put_domain_u32(s, build_fingerprint.DOMAIN_IMAGE, VERSION, t.target.va_list_size);
-    build_fingerprint.put_domain_u32(s, build_fingerprint.DOMAIN_IMAGE, VERSION, t.target.va_list_align);
+    lang_fingerprint.put_domain_u64(s, lang_fingerprint.DOMAIN_IMAGE, VERSION, t.target.base);
+    lang_fingerprint.put_domain_u64(s, lang_fingerprint.DOMAIN_IMAGE, VERSION, t.target.page_size);
+    lang_fingerprint.put_domain_u64(s, lang_fingerprint.DOMAIN_IMAGE, VERSION, t.target.stack_reserve);
+    lang_fingerprint.put_domain_u64(s, lang_fingerprint.DOMAIN_IMAGE, VERSION, t.target.stack_commit);
+    lang_fingerprint.put_domain_u8(s, lang_fingerprint.DOMAIN_IMAGE, VERSION, b2u8(t.target.variadic_args_on_stack));
+    lang_fingerprint.put_domain_u8(s, lang_fingerprint.DOMAIN_IMAGE, VERSION, b2u8(t.target.fixed_args_natural_size));
+    lang_fingerprint.put_domain_u32(s, lang_fingerprint.DOMAIN_IMAGE, VERSION, t.target.reg_arg_align);
+    lang_fingerprint.put_domain_u32(s, lang_fingerprint.DOMAIN_IMAGE, VERSION, t.target.reg_arg_extend);
+    lang_fingerprint.put_domain_u8(s, lang_fingerprint.DOMAIN_IMAGE, VERSION, b2u8(t.target.agg_arg_natural_align));
+    lang_fingerprint.put_domain_u8(s, lang_fingerprint.DOMAIN_IMAGE, VERSION, t.abi.half);
+    lang_fingerprint.put_domain_u32(s, lang_fingerprint.DOMAIN_IMAGE, VERSION, t.target.va_list_size);
+    lang_fingerprint.put_domain_u32(s, lang_fingerprint.DOMAIN_IMAGE, VERSION, t.target.va_list_align);
 
     model_put(?t.target.model, s);
     fs_policy_put(?t.target.fs_policy, s);
 }
 
 fun fs_policy_put(p: *catalog_os.FsPolicy, s: *wire.Sink) {
-    val d: build_fingerprint.Domain = build_fingerprint.DOMAIN_FS_POLICY;
-    val v: u8                       = VERSION;
+    val d: lang_fingerprint.Domain = lang_fingerprint.DOMAIN_FS_POLICY;
+    val v: u8                      = VERSION;
 
-    build_fingerprint.put_domain_str(s, d, v, p.sysroot);
-    build_fingerprint.put_domain_str(s, d, v, p.toolchain_root);
-    build_fingerprint.put_domain_str(s, d, v, p.dynamic_interpreter);
-    build_fingerprint.put_domain_str(s, d, v, p.platform_lib);
-    build_fingerprint.put_domain_u32(s, d, v, p.libdir_len);
+    lang_fingerprint.put_domain_str(s, d, v, p.sysroot);
+    lang_fingerprint.put_domain_str(s, d, v, p.toolchain_root);
+    lang_fingerprint.put_domain_str(s, d, v, p.dynamic_interpreter);
+    lang_fingerprint.put_domain_str(s, d, v, p.platform_lib);
+    lang_fingerprint.put_domain_u32(s, d, v, p.libdir_len);
 
     var li: u32 = 0;
     for (li < p.libdir_len) {
-        build_fingerprint.put_domain_str(s, d, v, p.libdirs[li]);
+        lang_fingerprint.put_domain_str(s, d, v, p.libdirs[li]);
         li = li + 1;
     }
 }
@@ -98,7 +98,7 @@ fun fs_policy_put(p: *catalog_os.FsPolicy, s: *wire.Sink) {
 # the template and the convention are named above, so the selection is what
 # tells two models of one compiler apart, and no field of the model is mirrored
 fun model_put(m: *target_model.Machine, s: *wire.Sink) {
-    build_fingerprint.put_domain_u64(s, build_fingerprint.DOMAIN_TARGET_MODEL, VERSION, m.extensions);
+    lang_fingerprint.put_domain_u64(s, lang_fingerprint.DOMAIN_TARGET_MODEL, VERSION, m.extensions);
 }
 
 test fs_policy_put__isolated_to_declared_policy_fields {

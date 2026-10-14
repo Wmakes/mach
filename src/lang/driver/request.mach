@@ -19,9 +19,9 @@ use std.types.string.str_len;
 use A:         std.allocator;
 use system_os: std.system.os;
 
-use build_fingerprint: mach.lang.build.fingerprint;
-use diagnostic_kind:   mach.lang.diagnostic.kind;
+use diagnostic_kind: mach.lang.diagnostic.kind;
 use mach.lang.fail;
+use lang_fingerprint: mach.lang.fingerprint;
 use mach.lang.intern;
 use mach.lang.manifest;
 use ir_printer: mach.lang.me.ir.printer;
@@ -642,20 +642,20 @@ fun write_goal(s: *wire.Sink, goal: BuildGoal) {
         wire.refuse(s, fail.message("build request names an unknown goal"));
         ret;
     }
-    build_fingerprint.put_domain_u8(s, build_fingerprint.DOMAIN_BUILD_GOAL, BUILD_GOAL_CATALOG_VERSION, spec.fingerprint_tag);
+    lang_fingerprint.put_domain_u8(s, lang_fingerprint.DOMAIN_BUILD_GOAL, BUILD_GOAL_CATALOG_VERSION, spec.fingerprint_tag);
 }
 
 #[testing]
 fun write_request_extra(s: *wire.Sink, r: *BuildRequest) {
     wire.put_u32(s, r.jobs);
     put_flag(s, r.emit_ir);
-    build_fingerprint.put_domain_u8(s, build_fingerprint.DOMAIN_IR_FORM,
+    lang_fingerprint.put_domain_u8(s, lang_fingerprint.DOMAIN_IR_FORM,
         ir_printer.IR_FORM_CATALOG_VERSION, ir_printer.ir_form_fingerprint_tag(r.ir_form));
     put_flag(s, r.emit_asm);
     put_flag(s, r.no_cache);
     put_flag(s, r.object_cache);
     put_text(s, r.out);
-    build_fingerprint.put_domain_u8(s, build_fingerprint.DOMAIN_SUBSYSTEM,
+    lang_fingerprint.put_domain_u8(s, lang_fingerprint.DOMAIN_SUBSYSTEM,
         catalog_subsystem.VERSION, catalog_subsystem.fingerprint_tag(r.subsystem));
     wire.put_u32(s, r.link_tokens.len::u32);
     var ti: usize = 0;

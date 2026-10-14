@@ -9,7 +9,7 @@ use A: std.allocator;
 
 use mach.lang.build.outcome;
 use build_plan: mach.lang.build.plan;
-use mach.lang.build.request;
+use mach.lang.driver.request;
 use mach.lang.manifest;
 use mach.lang.readout;
 use mach.lang.session;
@@ -20,8 +20,8 @@ use mach.lang.driver;
 use mach.lang.driver.tests.testing.ut_cc3;
 use mach.lang.driver.tests.testing.ut_entry_symbol;
 use mach.lang.driver.tests.testing.ut_scaffold;
+use mach.lang.driver.toolchain;
 use lang_target: mach.lang.target;
-use mach.lang.toolchain;
 
 #[testing]
 fun ut_ro_mod_text() str {

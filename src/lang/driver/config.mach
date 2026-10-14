@@ -29,8 +29,8 @@ use T: std.allocator.testing;
 use std.filesystem.native;
 use std.process.env;
 
-use mach.lang.build.request;
 use diagnostic_kind: mach.lang.diagnostic.kind;
+use mach.lang.driver.request;
 use mach.lang.intern;
 use mach.lang.manifest;
 use mach.lang.manifest.template;
@@ -41,9 +41,9 @@ use catalog_artifact: mach.lang.target.catalog.artifact;
 use driver_closure: mach.lang.driver.closure;
 use driver_load:    mach.lang.driver.load;
 use mach.lang.driver.project;
+use mach.lang.driver.toolchain;
 use mach.lang.driver.union;
 use mach.lang.output;
-use mach.lang.toolchain;
 
 #[testing]
 pub fun resolve_artifact_path(alloc: *A.Allocator, reg: *lang_target.TargetRegistry, project_root: str, selectors: *manifest.Selectors) res[str, fail.Fail] {
