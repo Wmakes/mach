@@ -926,35 +926,41 @@ fun report_immutable_assign(sc: *sema_context.SemaContext, span: lang_source.Spa
         "a `val` binds its value once, at its declaration; declare it `var` if it must be assigned. a module-level `val` is emitted in read-only storage, so the store would fault at runtime");
 }
 
+# a store is judged by the storage it writes: a field or an element of a binding is the
+# binding's, and one reached through a pointer read out of a binding is the pointer target's
 fun check_readonly_binding(sc: *sema_context.SemaContext, eid: ast_id.ExprId, span: lang_source.Span) {
-    if (ast_id.expr_is_nil(eid)) { ret; }
-    if (expr_names_binding(sc, eid, decorator.SPEC, nil)) {
-        sema_context.report(sc, diagnostic_kind.ASSIGN_READONLY_STORAGE, span, "cannot store to a `#[spec(id)]` var: a specialization constant is supplied by the host at pipeline creation and is a constant from then on. copy the value into a local to change it");
-        ret;
+    var cur: ast_id.ExprId = eid;
+    for (!ast_id.expr_is_nil(cur)) {
+        if (expr_names_binding(sc, cur, decorator.SPEC, nil)) {
+            sema_context.report(sc, diagnostic_kind.ASSIGN_READONLY_STORAGE, span, "cannot store to a `#[spec(id)]` var: a specialization constant is supplied by the host at pipeline creation and is a constant from then on. copy the value into a local to change it");
+            ret;
+        }
+        if (expr_names_binding(sc, cur, decorator.PUSH, nil)) {
+            sema_context.report(sc, diagnostic_kind.ASSIGN_READONLY_STORAGE, span, "cannot store through a `#[push]` block: a push-constant block is written by the host with the command that records the dispatch or draw, and a shader only reads it. copy the value into a local to change it");
+            ret;
+        }
+        if (expr_names_binding(sc, cur, decorator.STORAGE, "readonly")) {
+            sema_context.report(sc, diagnostic_kind.ASSIGN_READONLY_STORAGE, span, "cannot store through a `#[storage(set, binding, \"readonly\")]` binding: the qualifier declares that no stage writes it, which is what lets the emitter mark it `NonWritable` and a vertex stage read it without `vertexPipelineStoresAndAtomics`. drop the `\"readonly\"` qualifier to write it");
+            ret;
+        }
+        val obj: res[ast_id.ExprId, fail.Fail] = place_object(sc, cur);
+        if (sel obj.err) { ret; }
+        cur = obj.ok;
     }
-    if (expr_names_binding(sc, eid, decorator.PUSH, nil)) {
-        sema_context.report(sc, diagnostic_kind.ASSIGN_READONLY_STORAGE, span, "cannot store through a `#[push]` block: a push-constant block is written by the host with the command that records the dispatch or draw, and a shader only reads it. copy the value into a local to change it");
-        ret;
-    }
-    if (expr_names_binding(sc, eid, decorator.STORAGE, "readonly")) {
-        sema_context.report(sc, diagnostic_kind.ASSIGN_READONLY_STORAGE, span, "cannot store through a `#[storage(set, binding, \"readonly\")]` binding: the qualifier declares that no stage writes it, which is what lets the emitter mark it `NonWritable` and a vertex stage read it without `vertexPipelineStoresAndAtomics`. drop the `\"readonly\"` qualifier to write it");
-        ret;
-    }
+}
+
+# the object whose own storage holds the field or element `eid` names; nil for any other
+# expression, and for an object that is a pointer, since what it points at is not the
+# storage the pointer was read from
+fun place_object(sc: *sema_context.SemaContext, eid: ast_id.ExprId) res[ast_id.ExprId, fail.Fail] {
     val e_opt: res[ast_expr.Expr, fail.Fail] = sema_context.expression(sc, eid);
-    if (sel e_opt.err) { ret; }
-    var e_value: ast_expr.Expr  = e_opt.ok;
-    val e:       *ast_expr.Expr = ?e_value;
-    if (e.kind == ast_expr.EXPR_KIND_MEMBER) {
-        check_readonly_binding(sc, e.data.member.object, span);
-        ret;
-    }
-    if (e.kind == ast_expr.EXPR_KIND_INDEX) {
-        check_readonly_binding(sc, e.data.index.object, span);
-        ret;
-    }
-    if (e.kind == ast_expr.EXPR_KIND_UNARY && e.data.unary.op == ast_expr.UN_DEREF) {
-        check_readonly_binding(sc, e.data.unary.operand, span);
-    }
+    if (sel e_opt.err) { ret res[ast_id.ExprId, fail.Fail].err{e_opt.err}; }
+    var obj: ast_id.ExprId = ast_id.EXPR_NIL;
+    if (e_opt.ok.kind == ast_expr.EXPR_KIND_MEMBER)                                                   { obj = e_opt.ok.data.member.object; }
+    or (e_opt.ok.kind == ast_expr.EXPR_KIND_INDEX)                                                    { obj = e_opt.ok.data.index.object; }
+    if (ast_id.expr_is_nil(obj))                                                                      { ret res[ast_id.ExprId, fail.Fail].ok{obj}; }
+    if (type.is_pointer_like(?sc.s.types, type.strip_secret(?sc.s.types, target_expr_type(sc, obj)))) { ret res[ast_id.ExprId, fail.Fail].ok{ast_id.EXPR_NIL}; }
+    ret res[ast_id.ExprId, fail.Fail].ok{obj};
 }
 
 # a read of a `"writeonly"` binding's memory: a place a store writes, and an address taken, read none
@@ -982,12 +988,9 @@ fun check_writeonly_lane_write(sc: *sema_context.SemaContext, eid: ast_id.ExprId
             sema_context.report(sc, diagnostic_kind.READ_WRITEONLY_STORAGE, span, "cannot write one lane of a vector in a `#[storage(set, binding, \"writeonly\")]` binding: a lane write loads the whole vector and stores it back, and the qualifier declares that no stage reads the binding. store the whole vector instead");
             ret;
         }
-        val c_opt: res[ast_expr.Expr, fail.Fail] = sema_context.expression(sc, cur);
-        if (sel c_opt.err) { ret; }
-        val k: ast_expr.ExprKind = c_opt.ok.kind;
-        if (k == ast_expr.EXPR_KIND_MEMBER) { cur = c_opt.ok.data.member.object; }
-        or (k == ast_expr.EXPR_KIND_INDEX)  { cur = c_opt.ok.data.index.object; }
-        or                                  { ret; }
+        val obj: res[ast_id.ExprId, fail.Fail] = place_object(sc, cur);
+        if (sel obj.err) { ret; }
+        cur = obj.ok;
     }
 }
 
@@ -1012,7 +1015,30 @@ fun infer_place(sc: *sema_context.SemaContext, eid: ast_id.ExprId) type.TypeId {
     sc.walk.write_place = eid;
     val t: type.TypeId = infer_expr(sc, eid);
     sema_context.walk_close(sc, outer);
+    check_reads_behind_pointer(sc, eid);
     ret t;
+}
+
+# the place is typed as written all the way down, before its objects have types; below the
+# first object that is a pointer, the place is the pointer's target and the pointer itself
+# is read, so the bindings it was read out of are checked as read once the types are known
+fun check_reads_behind_pointer(sc: *sema_context.SemaContext, place: ast_id.ExprId) {
+    var cur: ast_id.ExprId = place;
+    var cut: bool          = false;
+    for (!ast_id.expr_is_nil(cur)) {
+        val e_opt: res[ast_expr.Expr, fail.Fail] = sema_context.expression(sc, cur);
+        if (sel e_opt.err) { ret; }
+        val k: ast_expr.ExprKind = e_opt.ok.kind;
+        if (cut && (k == ast_expr.EXPR_KIND_IDENT || k == ast_expr.EXPR_KIND_MEMBER)) {
+            check_writeonly_read(sc, cur, target_expr_type(sc, cur), e_opt.ok.span);
+        }
+        var obj: ast_id.ExprId = ast_id.EXPR_NIL;
+        if (k == ast_expr.EXPR_KIND_MEMBER)                                                                       { obj = e_opt.ok.data.member.object; }
+        or (k == ast_expr.EXPR_KIND_INDEX)                                                                        { obj = e_opt.ok.data.index.object; }
+        if (ast_id.expr_is_nil(obj))                                                                              { ret; }
+        if (!cut && type.is_pointer_like(?sc.s.types, type.strip_secret(?sc.s.types, target_expr_type(sc, obj)))) { cut = true; }
+        cur = obj;
+    }
 }
 
 # `eid` names a module binding carrying the decorator `id`, with the qualifier `want` among its string arguments unless `want` is nil
