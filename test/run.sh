@@ -1267,5 +1267,5 @@ fi
 
 tail=; [ "$unruns" -eq 0 ] || tail=", $unruns differential not run"
 echo "run.sh: $passes pass, $fails fail, $skips skip$tail"
-[ "$passes" -gt 0 ] || { echo "run.sh: nothing was checked" >&2; exit 1; }
+[ "$passes" -gt 0 ] || [ "$fails" -gt 0 ] || { echo "run.sh: nothing was checked" >&2; exit 1; }
 [ "$fails" -eq 0 ]
