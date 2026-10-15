@@ -9,7 +9,8 @@ use A: std.allocator;
 
 use mach.lang.build.outcome;
 use build_plan: mach.lang.build.plan;
-use mach.lang.build.request;
+use mach.lang.build.publication;
+use mach.lang.driver.request;
 use mach.lang.manifest;
 use mach.lang.readout;
 use mach.lang.session;
@@ -20,8 +21,8 @@ use mach.lang.driver;
 use mach.lang.driver.tests.testing.ut_cc3;
 use mach.lang.driver.tests.testing.ut_entry_symbol;
 use mach.lang.driver.tests.testing.ut_scaffold;
+use mach.lang.driver.toolchain;
 use lang_target: mach.lang.target;
-use mach.lang.toolchain;
 
 #[testing]
 fun ut_ro_mod_text() str {
@@ -97,7 +98,7 @@ fun ut_readout_rows_case(jobs: u32) i32 {
     var rq: request.BuildRequest = request.defaults();
     rq.project_root = root;
     rq.jobs         = jobs;
-    val pr_r: res[build_plan.BuildPlan, fail.Fail] = build_plan.plan(?alloc, ?s.interner, toolchain.t_registry(), ?m, rq);
+    val pr_r: res[build_plan.BuildPlan, fail.Fail] = build_plan.plan_to_run(?alloc, ?s, toolchain.t_registry(), ?m, rq);
     if (sel pr_r.err) { ret 1; }
     var bp: build_plan.BuildPlan = pr_r.ok;
 
@@ -105,7 +106,9 @@ fun ut_readout_rows_case(jobs: u32) i32 {
     readout.recording_init(?rd, ?alloc, readout.LEVEL_ITEMS);
     fin { readout.recording_dnit(?rd); }
 
-    val r: res[outcome.BuildOutcome, fail.Fail] = engine.execute_warm(?bp, 0, ?s, ?alloc, ?rd.sink);
+    var published: publication.Publications = publication.init(?alloc);
+    fin { publication.dnit(?published); }
+    val r: res[outcome.BuildOutcome, fail.Fail] = engine.execute_warm(?bp, 0, ?s, ?published, ?alloc, ?rd.sink);
 
     var bad: i32 = 0;
     if (sel r.err) { bad = 1; }

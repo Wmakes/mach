@@ -26,14 +26,32 @@ use std_format: std.format;
 
 use mach.cli.exit;
 use mach.cli.util;
-use mach.lang.build.request;
 use mach.lang.diagnostic;
 use diagnostic_kind: mach.lang.diagnostic.kind;
+use mach.lang.driver.request;
 use mach.lang.manifest;
 use ir_printer: mach.lang.me.ir.printer;
 use mach.lang.target.input;
 
-fwd request.CliArgs;
+# the typed options of a build-shaped command: what it reports and selects, and
+# what it sets over the profile it builds
+# ---
+# verbosity: 0, 1 or 2 from `-v` and `-vv`
+# quiet:     `--quiet`
+# selectors: the `-a`, `-t` and `-p` patterns and `--all`
+# overrides: everything else the command sets, typed
+pub rec CliArgs {
+    verbosity: u8;
+    quiet:     bool;
+    selectors: manifest.Selectors;
+    overrides: request.Overrides;
+}
+
+# `--emit`'s help text
+val EMIT_HELP: str = "obj | exe (default exe; obj stops at the objects)";
+
+# the refusal of an `--emit` value no goal is named by
+pub val EMIT_ERROR: str = "--emit expects 'obj' or 'exe'";
 
 # whether an option is a bare flag, takes the next argv token, or takes a value
 # attached to its own token after `=`
@@ -190,8 +208,8 @@ fun removed_use(tok: str) str {
     ret nil;
 }
 
-# `--emit <kind>`; its help text is request.EMIT_HELP
-pub val EMIT: FlagSpec = FlagSpec{name: "--emit", value: "kind", arity: ARITY_VALUE, doc: request.EMIT_HELP, default: "", repeatable: false, alias_of: nil};
+# `--emit <kind>`
+pub val EMIT: FlagSpec = FlagSpec{name: "--emit", value: "kind", arity: ARITY_VALUE, doc: EMIT_HELP, default: "", repeatable: false, alias_of: nil};
 
 # row count of EMITS
 pub val EMITS_N: usize = 1;
@@ -1519,71 +1537,78 @@ fun lever(inv: *ParsedInvocation, on: *FlagSpec, off: *FlagSpec) request.Lever {
     ret request.LEVER_PROFILE;
 }
 
-# the typed request.CliArgs of a build-shaped command: verbosity 0, 1, or 2 from `-v` and `-vv`,
-# quiet, the CGEN flags, the selectors, `-o` and `-w` as raw argv pointers or nil, the LEVERS as
-# given, `--jobs` as a count or 0 when absent. include_deps is false for the command to set, and
-# link_tokens and lib_dirs are left empty for collect_link_inputs
+# the typed CliArgs of a build-shaped command: verbosity, quiet, the selectors,
+# and the overrides, each typed as the request reads it: `-o` and `-w` as raw argv
+# pointers or nil, the LEVERS as given, `--jobs` as a count or 0 when absent.
+# include_deps is false for the command to set, and link_tokens and lib_dirs are
+# left empty for collect_link_inputs
 # ---
-# a:    backs the selector patterns
+# a:    backs the selector patterns and the name lists
 # inv:  the parsed invocation
 # argv: the argument vector inv was parsed from
-# ret:  the arguments; err when a vector cannot grow or `--jobs` is no count
-pub fun build_cli_invocation(a: *A.Allocator, inv: *ParsedInvocation, argv: **u8) res[request.CliArgs, fail.Fail] {
-    var c: request.CliArgs;
+# ret:  the arguments; err when a vector cannot grow or a value names nothing its flag takes
+pub fun build_cli_invocation(a: *A.Allocator, inv: *ParsedInvocation, argv: **u8) res[CliArgs, fail.Fail] {
+    var c: CliArgs;
 
     c.verbosity = 0;
     if (given(inv, ?VERBOSE))      { c.verbosity = 1; }
     if (given(inv, ?VERBOSE_FULL)) { c.verbosity = 2; }
-    c.quiet        = given(inv, ?QUIET);
-    c.emit_asm     = given(inv, ?EMIT_ASM);
-    c.emit_ir      = given(inv, ?EMIT_IR);
-    c.emit_ir_form = value_or_nil(inv, argv, ?EMIT_IR);
-    c.pie          = given(inv, ?PIE);
-    c.subsystem    = value_or_nil(inv, argv, ?SUBSYSTEM);
-    c.output       = value_or_nil(inv, argv, ?OUTPUT);
-    c.work         = value_or_nil(inv, argv, ?WORK);
-    c.simd         = value_or_nil(inv, argv, ?SIMD);
-    c.optimize     = lever(inv, ?OPTIMIZE, ?NO_OPTIMIZE);
-    c.debug        = lever(inv, ?DEBUG, ?NO_DEBUG);
+    c.quiet = given(inv, ?QUIET);
+
+    var o: request.Overrides = request.overrides_init(nil);
+    o.emit_asm = given(inv, ?EMIT_ASM);
+    o.emit_ir  = given(inv, ?EMIT_IR);
+    val form: *u8 = value_or_nil(inv, argv, ?EMIT_IR);
+    if (form != nil) {
+        val named: opt[ir_printer.IrForm] = ir_printer.ir_form_from_name(form::str);
+        if (sel named.none) { ret res[CliArgs, fail.Fail].err{fail.user(diagnostic_kind.CLI_FLAG_VALUE, ir_printer.IR_FORM_ERROR)}; }
+        o.ir_form = named.some;
+    }
+    o.pie = given(inv, ?PIE);
+    val subsystem: *u8 = value_or_nil(inv, argv, ?SUBSYSTEM);
+    if (subsystem != nil) {
+        val flag: opt[request.SubsystemFlag] = request.subsystem_flag_from_name(subsystem::str);
+        if (sel flag.none) { ret res[CliArgs, fail.Fail].err{fail.user(diagnostic_kind.CLI_FLAG_VALUE, "--subsystem expects \"console\" or \"gui\"")}; }
+        o.subsystem = flag.some;
+    }
+    o.output = value_or_nil(inv, argv, ?OUTPUT);
+    o.work   = value_or_nil(inv, argv, ?WORK);
+    val simd: *u8 = value_or_nil(inv, argv, ?SIMD);
+    if (simd != nil) {
+        val mode: opt[manifest.SimdMode] = manifest.simd_named(simd::str);
+        if (sel mode.none) { ret res[CliArgs, fail.Fail].err{fail.user(diagnostic_kind.CLI_FLAG_VALUE, "--simd expects \"scalarize\" or \"require\"")}; }
+        o.simd = opt[manifest.SimdMode].some{mode.some};
+    }
+    o.optimize = lever(inv, ?OPTIMIZE, ?NO_OPTIMIZE);
+    o.debug    = lever(inv, ?DEBUG, ?NO_DEBUG);
     val pass: res[Vector[str], fail.Fail] = values(a, inv, argv, ?PASS);
-    if (sel pass.err) { ret res[request.CliArgs, fail.Fail].err{pass.err}; }
-    c.pass = pass.ok;
+    if (sel pass.err) { ret res[CliArgs, fail.Fail].err{pass.err}; }
+    o.pass = pass.ok;
     val skip: res[Vector[str], fail.Fail] = values(a, inv, argv, ?SKIP);
-    if (sel skip.err) { ret res[request.CliArgs, fail.Fail].err{skip.err}; }
-    c.skip = skip.ok;
+    if (sel skip.err) { ret res[CliArgs, fail.Fail].err{skip.err}; }
+    o.skip = skip.ok;
     val relax: res[Vector[str], fail.Fail] = values(a, inv, argv, ?RELAX);
-    if (sel relax.err) { ret res[request.CliArgs, fail.Fail].err{relax.err}; }
-    c.relax = relax.ok;
+    if (sel relax.err) { ret res[CliArgs, fail.Fail].err{relax.err}; }
+    o.relax = relax.ok;
     val unrelax: res[Vector[str], fail.Fail] = values(a, inv, argv, ?NO_RELAX);
-    if (sel unrelax.err) { ret res[request.CliArgs, fail.Fail].err{unrelax.err}; }
-    c.unrelax = unrelax.ok;
+    if (sel unrelax.err) { ret res[CliArgs, fail.Fail].err{unrelax.err}; }
+    o.unrelax = unrelax.ok;
     val selectors: res[manifest.Selectors, fail.Fail] = collect_selectors(a, inv, argv);
-    if (sel selectors.err) { ret res[request.CliArgs, fail.Fail].err{selectors.err}; }
+    if (sel selectors.err) { ret res[CliArgs, fail.Fail].err{selectors.err}; }
     c.selectors = selectors.ok;
 
-    c.jobs = 0;
     val jobs: opt[*u8] = value(inv, argv, ?JOBS);
     if (sel jobs.some) {
         val counted: opt[u32] = worker_count(jobs.some::str);
-        if (sel counted.none) { ret res[request.CliArgs, fail.Fail].err{fail.user(diagnostic_kind.CLI_FLAG_VALUE, "--jobs expects a positive integer")}; }
-        c.jobs = counted.some;
+        if (sel counted.none) { ret res[CliArgs, fail.Fail].err{fail.user(diagnostic_kind.CLI_FLAG_VALUE, "--jobs expects a positive integer")}; }
+        o.jobs = counted.some;
     }
-    c.include_deps = false;
-    c.no_cache     = given(inv, ?NO_CACHE);
-
-    c.link_tokens.a    = nil;
-    c.link_tokens.data = nil;
-    c.link_tokens.len  = 0;
-    c.link_tokens.cap  = 0;
-    c.lib_dirs.a       = nil;
-    c.lib_dirs.data    = nil;
-    c.lib_dirs.len     = 0;
-    c.lib_dirs.cap     = 0;
-
-    ret res[request.CliArgs, fail.Fail].ok{c};
+    o.no_cache  = given(inv, ?NO_CACHE);
+    c.overrides = o;
+    ret res[CliArgs, fail.Fail].ok{c};
 }
 
-# fill c.link_tokens and c.lib_dirs in command-line order: every `-l` value and every bare
+# fill c.overrides.link_tokens and c.overrides.lib_dirs in command-line order: every `-l` value and every bare
 # positional after the first that input.token_is_path accepts go to link_tokens, every `-L`
 # value to lib_dirs. Both vectors are reinitialised with a first
 # ---
@@ -1592,9 +1617,9 @@ pub fun build_cli_invocation(a: *A.Allocator, inv: *ParsedInvocation, argv: **u8
 # inv:  the parsed invocation
 # argv: the argument vector inv was parsed from
 # ret:  ok, or err when a push fails
-pub fun collect_link_inputs(a: *A.Allocator, c: *request.CliArgs, inv: *ParsedInvocation, argv: **u8) err[fail.Fail] {
-    c.link_tokens = collections_vector.init[*u8](a);
-    c.lib_dirs    = collections_vector.init[*u8](a);
+pub fun collect_link_inputs(a: *A.Allocator, c: *CliArgs, inv: *ParsedInvocation, argv: **u8) err[fail.Fail] {
+    c.overrides.link_tokens = collections_vector.init[*u8](a);
+    c.overrides.lib_dirs    = collections_vector.init[*u8](a);
 
     var oi: usize = 0;
     var pi: usize = 1;
@@ -1610,7 +1635,7 @@ pub fun collect_link_inputs(a: *A.Allocator, c: *request.CliArgs, inv: *ParsedIn
             if (pi < inv.positional_count && inv.positional_idxs[pi] < o.idx) {
                 val tok: *u8 = argv[inv.positional_idxs[pi]];
                 if (input.token_is_path(tok)) {
-                    val pr: res[usize, A.Error] = collections_vector.push[*u8](?c.link_tokens, tok);
+                    val pr: res[usize, A.Error] = collections_vector.push[*u8](?c.overrides.link_tokens, tok);
                     if (sel pr.err) { ret err[fail.Fail].err{fail.refused(pr.err)}; }
                 }
                 pi = pi + 1;
@@ -1618,11 +1643,11 @@ pub fun collect_link_inputs(a: *A.Allocator, c: *request.CliArgs, inv: *ParsedIn
             }
             if (o.has_value) {
                 if (is_lib_dir) {
-                    val dr: res[usize, A.Error] = collections_vector.push[*u8](?c.lib_dirs, argv[o.value_idx]);
+                    val dr: res[usize, A.Error] = collections_vector.push[*u8](?c.overrides.lib_dirs, argv[o.value_idx]);
                     if (sel dr.err) { ret err[fail.Fail].err{fail.refused(dr.err)}; }
                 }
                 or {
-                    val lr: res[usize, A.Error] = collections_vector.push[*u8](?c.link_tokens, argv[o.value_idx]);
+                    val lr: res[usize, A.Error] = collections_vector.push[*u8](?c.overrides.link_tokens, argv[o.value_idx]);
                     if (sel lr.err) { ret err[fail.Fail].err{fail.refused(lr.err)}; }
                 }
             }
@@ -1631,7 +1656,7 @@ pub fun collect_link_inputs(a: *A.Allocator, c: *request.CliArgs, inv: *ParsedIn
         }
         val tok: *u8 = argv[inv.positional_idxs[pi]];
         if (input.token_is_path(tok)) {
-            val pr: res[usize, A.Error] = collections_vector.push[*u8](?c.link_tokens, tok);
+            val pr: res[usize, A.Error] = collections_vector.push[*u8](?c.overrides.link_tokens, tok);
             if (sel pr.err) { ret err[fail.Fail].err{fail.refused(pr.err)}; }
         }
         pi = pi + 1;
@@ -1882,5 +1907,21 @@ test selection_hint__a_value_naming_a_path_is_an_unquoted_wildcard {
     var absent: manifest.Selectors = manifest.t_selectors("", "no-such-path-here", "");
     val plain:  fail.Fail          = fail.user(diagnostic_kind.SELECTION_UNKNOWN, "mach.toml: no target named 'no-such-path-here' (declared: lin)");
     if (fail.kind_of(selection_hint(?alloc, ?absent, plain)) != diagnostic_kind.SELECTION_UNKNOWN) { ret 3; }
+    ret 0;
+}
+
+# `--emit`'s help and refusal name every goal it can select
+test emit__help_and_refusal_name_every_emitted_goal {
+    var goal:  request.BuildGoal = request.GOAL_ARTIFACT;
+    var named: usize             = 0;
+    for (goal <= request.GOAL_CHECK) {
+        val name: str = request.goal_emit_name(goal);
+        if (str_len(name) > 0) {
+            if (!str_contains(EMIT_HELP, name) || !str_contains(EMIT_ERROR, name)) { ret 1; }
+            named = named + 1;
+        }
+        goal = goal + 1;
+    }
+    if (named != 2) { ret 2; }
     ret 0;
 }

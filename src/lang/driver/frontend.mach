@@ -16,7 +16,6 @@ use std.types.string.str;
 use A:                  std.allocator;
 use collections_vector: std.collections.vector;
 
-use build_fingerprint: mach.lang.build.fingerprint;
 use mach.lang.diagnostic;
 use mach.lang.fail;
 use mach.lang.fe.ast;
@@ -28,7 +27,8 @@ use fe_load:   mach.lang.fe.load;
 use fe_parser: mach.lang.fe.parser;
 use mach.lang.fe.parser.state;
 use mach.lang.fe.resolve;
-use fe_sema: mach.lang.fe.sema;
+use fe_sema:          mach.lang.fe.sema;
+use lang_fingerprint: mach.lang.fingerprint;
 use mach.lang.growth;
 use mach.lang.intern;
 use mach.lang.module;
@@ -39,9 +39,9 @@ use session_embed: mach.lang.session.embed;
 use lang_source:   mach.lang.source;
 use mach.lang.wire;
 
+use mach.lang.driver.codec;
 use mach.lang.driver.context;
 use mach.lang.driver.project;
-use driver_query: mach.lang.driver.query;
 
 # a file's parse: the syntax tree and how the parse stood, keyed by the file
 pub val PARSE: query.Kind = query.Kind{
@@ -88,7 +88,7 @@ pub fun parse(p: *project.Project, m: *project.ModuleEntry) res[ParsedModule, fa
 pub fun resolution(p: *project.Project, m: *project.ModuleEntry) res[*resolve.ResolveResult, fail.Fail] {
     val acquired: res[query.QueryView, fail.Fail] = query.get[project.Project](?p.queries, p, ?RESOLVE, module.stable_index(m.stable_id)::u64);
     if (sel acquired.err) { ret res[*resolve.ResolveResult, fail.Fail].err{acquired.err}; }
-    val rr: *resolve.ResolveResult = driver_query.resolve_handle_decode(acquired.ok);
+    val rr: *resolve.ResolveResult = codec.resolve_handle_decode(acquired.ok);
     if (rr == nil) { ret res[*resolve.ResolveResult, fail.Fail].err{fail.message("resolve query produced no result")}; }
     ret res[*resolve.ResolveResult, fail.Fail].ok{rr};
 }
@@ -124,7 +124,7 @@ pub fun resolved(p: *project.Project, m: *project.ModuleEntry) *resolve.ResolveR
     if (m.frontend_skipped) { ret nil; }
     val shown: opt[query.QueryView] = query.published(?p.s.queries, ?RESOLVE, module.stable_index(m.stable_id)::u64, p.since);
     if (sel shown.none) { ret nil; }
-    ret driver_query.resolve_handle_decode(shown.some);
+    ret codec.resolve_handle_decode(shown.some);
 }
 
 # a module's types as this project's operations last published them, nil when none did or its
@@ -265,7 +265,7 @@ fun exports_compute(raw: ptr, kind: *query.Kind, key: u64, alloc: *A.Allocator, 
     val p:   *project.Project                = raw::*project.Project;
     val e_r: res[query.QueryView, fail.Fail] = query.get[project.Project](?p.queries, p, ?RESOLVE, key);
     if (sel e_r.err) { ret res[query.QueryOutput, fail.Fail].err{e_r.err}; }
-    val rr: *resolve.ResolveResult = driver_query.resolve_handle_decode(e_r.ok);
+    val rr: *resolve.ResolveResult = codec.resolve_handle_decode(e_r.ok);
     if (rr == nil) { ret res[query.QueryOutput, fail.Fail].err{fail.message("exports: the module has no resolve result")}; }
 
     var definition_revision: query.Revision = 0;
@@ -284,9 +284,9 @@ fun exports_compute(raw: ptr, kind: *query.Kind, key: u64, alloc: *A.Allocator, 
     }
     var fb: wire.Sink = wire.grown(alloc);
     fin { wire.dnit(?fb); }
-    val wr: err[fail.Fail] = driver_query.public_surface_encode(?fb, rr, key::u32::session.StableModuleId, definition_revision);
+    val wr: err[fail.Fail] = codec.public_surface_encode(?fb, rr, key::u32::session.StableModuleId, definition_revision);
     if (sel wr.err) { ret res[query.QueryOutput, fail.Fail].err{wr.err}; }
-    ret driver_query.output(?fb);
+    ret codec.output(?fb);
 }
 
 rec LowerClosure {
@@ -398,7 +398,7 @@ fun resolve_compute(raw: ptr, kind: *query.Kind, key: u64, alloc: *A.Allocator, 
     }
     val box: *resolve.ResolveResult = br.ok;
     box[0] = result;
-    ret driver_query.resolve_handle_encode(alloc, box);
+    ret codec.resolve_handle_encode(alloc, box);
 }
 
 fun resolve_finalize(value: *u8, value_len: u32, alloc: *A.Allocator) {
@@ -417,7 +417,7 @@ fun exporter_exports(raw: ptr, mid: session.ModuleId, a: *A.Allocator) res[resol
     val m:       *project.ModuleEntry            = project.module_at(p, mid::u32);
     val surface: res[query.QueryView, fail.Fail] = query.get[project.Project](?p.queries, p, ?EXPORTS, module.stable_index(m.stable_id)::u64);
     if (sel surface.err) { ret res[resolve.ModuleExports, fail.Fail].err{surface.err}; }
-    ret driver_query.public_symbols_decode(a, p.s, surface.ok.value, surface.ok.value_len, m.fqn, m.stable_id);
+    ret codec.public_symbols_decode(a, p.s, surface.ok.value, surface.ok.value_len, m.fqn, m.stable_id);
 }
 
 fun exporter_path(raw: ptr, mid: session.ModuleId) intern.StrId {
@@ -595,7 +595,7 @@ fun typed_surface_compute(raw: ptr, kind: *query.Kind, key: u64, alloc: *A.Alloc
     if (module.is_nil(mid)) { ret res[query.QueryOutput, fail.Fail].err{fail.message("typed surface: the stable id is not loaded this build")}; }
     val acquired: res[query.QueryView, fail.Fail] = query.get[project.Project](?p.queries, p, ?TYPED_EXPORTS, key);
     if (sel acquired.err) { ret res[query.QueryOutput, fail.Fail].err{acquired.err}; }
-    val decoded: res[fe_sema.ModuleSema, fail.Fail] = driver_query.typed_surface_decode(?p.s.interner, alloc, acquired.ok.value, acquired.ok.value_len,
+    val decoded: res[fe_sema.ModuleSema, fail.Fail] = codec.typed_surface_decode(?p.s.interner, alloc, acquired.ok.value, acquired.ok.value_len,
         project.module_at(p, mid::u32).fqn, session.MODULE_NIL);
     if (sel decoded.err) { ret res[query.QueryOutput, fail.Fail].err{decoded.err}; }
     var owned: fe_sema.ModuleSema                = decoded.ok;
@@ -640,7 +640,7 @@ fun read_typed_surface(p: *project.Project, mid: session.ModuleId, a: *A.Allocat
 }
 
 fun surface_from_bytes(p: *project.Project, mid: session.ModuleId, bytes: *u8, len: u32, a: *A.Allocator) res[fe_sema.ModuleSema, fail.Fail] {
-    val decoded: res[fe_sema.ModuleSema, fail.Fail] = driver_query.typed_surface_decode(?p.s.interner, a, bytes, len, project.module_at(p, mid::u32).fqn, mid);
+    val decoded: res[fe_sema.ModuleSema, fail.Fail] = codec.typed_surface_decode(?p.s.interner, a, bytes, len, project.module_at(p, mid::u32).fqn, mid);
     if (sel decoded.err) { ret decoded; }
     var owned:     fe_sema.ModuleSema = decoded.ok;
     val installed: err[fail.Fail]     = fe_sema.fields.install(p.s, ?owned.graph);
@@ -667,7 +667,7 @@ fun parse_revision(p: *project.Project, m: *project.ModuleEntry) query.Revision 
 fun fold_bound_const(p: *project.Project, m: *project.ModuleEntry, entry: *comptime.NamedConst, fb: *wire.Sink) err[fail.Fail] {
     wire.put_u32(fb, entry.name::u32);
     wire.put_u8(fb, bool_byte(entry.gated));
-    ret driver_query.ct_value_encode(fb, ?entry.value, m.stable_id, parse_revision(p, m));
+    ret codec.ct_value_encode(fb, ?entry.value, m.stable_id, parse_revision(p, m));
 }
 
 # a bound element may name an element of the exporter's definition, so its revision is folded then
@@ -680,7 +680,7 @@ fun fold_const_import(p: *project.Project, exporter: *project.ModuleEntry, eleme
 fun fold_load_view(p: *project.Project, m: *project.ModuleEntry, fb: *wire.Sink) err[fail.Fail] {
     # the artifact the walk attributed the module to is what its gates and bodies read as
     # `$bin.name`, so a module another artifact reaches first is typed again
-    build_fingerprint.put_name(fb, ?p.s.interner, m.load.artifact);
+    lang_fingerprint.put_name(fb, ?p.s.interner, m.load.artifact);
     wire.put_u32(fb, project.dep_count(m));
     var i: u32 = 0;
     for (i < project.dep_count(m)) {
@@ -777,9 +777,9 @@ fun typed_exports_compute(raw: ptr, kind: *query.Kind, key: u64, alloc: *A.Alloc
     surface.graph = graph.ok;
     var fb: wire.Sink = wire.grown(alloc);
     fin { wire.dnit(?fb); }
-    val wr: err[fail.Fail] = driver_query.typed_surface_encode(?fb, ?surface);
+    val wr: err[fail.Fail] = codec.typed_surface_encode(?fb, ?surface);
     if (sel wr.err) { ret res[query.QueryOutput, fail.Fail].err{wr.err}; }
-    ret driver_query.output(?fb);
+    ret codec.output(?fb);
 }
 
 fun lower_visit_reserve(p: *project.Project, needed: u32) err[fail.Fail] {

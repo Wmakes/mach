@@ -6,8 +6,8 @@
 # bytes enters it. the byte layouts live here so the writers and the run-time
 # reader share one definition.
 
-use mach.lang.target.of.bin;
 use std.crypto.hash.sha256;
+use std.encoding.binary;
 use std.types.bool.bool;
 use std.types.size.usize;
 use std.types.string.str;
@@ -24,9 +24,9 @@ pub val ELF_NOTE_ALIGN:   usize = 4;
 pub val ELF_NOTE_SECTION: str   = ".note.gnu.build-id";
 
 pub fun write_elf_note_header(buf: *u8, off: usize) {
-    bin.write_u32_le(buf, off, ELF_NOTE_NAMESZ);
-    bin.write_u32_le(buf, off + 4, DIGEST_LEN::u32);
-    bin.write_u32_le(buf, off + 8, ELF_NOTE_TYPE);
+    binary.put_uint(?buf[off], ELF_NOTE_NAMESZ::u64, 4, binary.LITTLE);
+    binary.put_uint(?buf[off + 4], DIGEST_LEN::u64, 4, binary.LITTLE);
+    binary.put_uint(?buf[off + 8], ELF_NOTE_TYPE::u64, 4, binary.LITTLE);
     buf[off + 12] = 'G';
     buf[off + 13] = 'N';
     buf[off + 14] = 'U';
@@ -34,9 +34,9 @@ pub fun write_elf_note_header(buf: *u8, off: usize) {
 }
 
 pub fun elf_note_header_valid(note: *u8) bool {
-    ret bin.read_u32_le(note, 0) == ELF_NOTE_NAMESZ
-        && bin.read_u32_le(note, 4) == DIGEST_LEN::u32
-        && bin.read_u32_le(note, 8) == ELF_NOTE_TYPE
+    ret binary.get_uint(?note[0], 4, binary.LITTLE)::u32 == ELF_NOTE_NAMESZ
+        && binary.get_uint(?note[4], 4, binary.LITTLE)::u32 == DIGEST_LEN::u32
+        && binary.get_uint(?note[8], 4, binary.LITTLE)::u32 == ELF_NOTE_TYPE
         && note[12] == 'G' && note[13] == 'N' && note[14] == 'U' && note[15] == 0;
 }
 
@@ -64,14 +64,14 @@ pub val PE_BUILDID_SECTION:     str   = ".buildid";
 # the directory entry names the record that follows it; both offsets are the
 # entry's own position translated into an rva and a file offset
 pub fun write_pe_debug_directory(buf: *u8, off: usize, record_rva: u32, record_file_off: u32) {
-    bin.write_u32_le(buf, off, 0);
-    bin.write_u32_le(buf, off + 4, 0);
-    bin.write_u16_le(buf, off + 8, 0);
-    bin.write_u16_le(buf, off + 10, 0);
-    bin.write_u32_le(buf, off + 12, PE_DEBUG_TYPE_CODEVIEW);
-    bin.write_u32_le(buf, off + 16, PE_CODEVIEW_SIZE::u32);
-    bin.write_u32_le(buf, off + 20, record_rva);
-    bin.write_u32_le(buf, off + 24, record_file_off);
+    binary.put_uint(?buf[off], 0::u64, 4, binary.LITTLE);
+    binary.put_uint(?buf[off + 4], 0::u64, 4, binary.LITTLE);
+    binary.put_uint(?buf[off + 8], 0::u64, 2, binary.LITTLE);
+    binary.put_uint(?buf[off + 10], 0::u64, 2, binary.LITTLE);
+    binary.put_uint(?buf[off + 12], PE_DEBUG_TYPE_CODEVIEW::u64, 4, binary.LITTLE);
+    binary.put_uint(?buf[off + 16], PE_CODEVIEW_SIZE::u64, 4, binary.LITTLE);
+    binary.put_uint(?buf[off + 20], record_rva::u64, 4, binary.LITTLE);
+    binary.put_uint(?buf[off + 24], record_file_off::u64, 4, binary.LITTLE);
 }
 
 pub fun write_pe_codeview(buf: *u8, off: usize, uuid: *u8) {
@@ -84,7 +84,7 @@ pub fun write_pe_codeview(buf: *u8, off: usize, uuid: *u8) {
         buf[off + PE_CODEVIEW_GUID + i] = uuid[i];
         i                               = i + 1;
     }
-    bin.write_u32_le(buf, off + 20, 1);
+    binary.put_uint(?buf[off + 20], 1::u64, 4, binary.LITTLE);
     buf[off + 24] = 0;
 }
 
@@ -150,16 +150,16 @@ test pe_record__layout {
     }
     write_pe_debug_directory(?block[0], 0, 0x2000 + 28, 0x600 + 28);
     write_pe_codeview(?block[0], PE_DEBUG_DIR_SIZE, ?uuid[0]);
-    if (bin.read_u32_le(?block[0], 12) != PE_DEBUG_TYPE_CODEVIEW)                            { ret 1; }
-    if (bin.read_u32_le(?block[0], 16) != 25)                                                { ret 2; }
-    if (bin.read_u32_le(?block[0], 20) != 0x201C || bin.read_u32_le(?block[0], 24) != 0x61C) { ret 3; }
-    if (!pe_codeview_valid(?block[PE_DEBUG_DIR_SIZE]))                                       { ret 4; }
+    if (binary.get_uint(?block[12], 4, binary.LITTLE)::u32 != PE_DEBUG_TYPE_CODEVIEW)                                                { ret 1; }
+    if (binary.get_uint(?block[16], 4, binary.LITTLE)::u32 != 25)                                                                    { ret 2; }
+    if (binary.get_uint(?block[20], 4, binary.LITTLE)::u32 != 0x201C || binary.get_uint(?block[24], 4, binary.LITTLE)::u32 != 0x61C) { ret 3; }
+    if (!pe_codeview_valid(?block[PE_DEBUG_DIR_SIZE]))                                                                               { ret 4; }
     i = 0;
     for (i < 16) {
         if (block[PE_DEBUG_DIR_SIZE + 4 + i] != (0x10 + i)::u8) { ret 5; }
         i = i + 1;
     }
-    if (bin.read_u32_le(?block[0], PE_DEBUG_DIR_SIZE + 20) != 1 || block[52] != 0) { ret 6; }
-    if (PE_DEBUG_DIR_SIZE + PE_CODEVIEW_SIZE != PE_BUILDID_SIZE)                   { ret 7; }
+    if (binary.get_uint(?block[PE_DEBUG_DIR_SIZE + 20], 4, binary.LITTLE)::u32 != 1 || block[52] != 0) { ret 6; }
+    if (PE_DEBUG_DIR_SIZE + PE_CODEVIEW_SIZE != PE_BUILDID_SIZE)                                       { ret 7; }
     ret 0;
 }

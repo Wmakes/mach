@@ -1,0 +1,226 @@
+# what a build declares about linkage, owned by the build's project and read
+# by the lowering that names declarations and the linker that binds imports:
+# each declaration's export name and library, the library each imported
+# symbol is pinned to, and the libraries the link is offered in the order the
+# build first named them
+use std.collections.map;
+use collections_vector: std.collections.vector;
+use std.collections.vector.Vector;
+use std.types.bool.bool;
+use std.types.bool.false;
+use std.types.bool.true;
+use std.types.error.err;
+use std.types.option.opt;
+use std.types.result.res;
+use std.types.size.usize;
+
+use A: std.allocator;
+use std.allocator.page;
+
+use mach.lang.fail;
+use mach.lang.intern;
+use mach.lang.module;
+
+# a library the link is offered, and whether only its static form is
+pub rec Provider {
+    name:      intern.StrId;
+    is_static: bool;
+}
+
+# keyed by declaration: a module's index in the high 32 bits, its declaration
+# index in the low
+pub rec Linkage {
+    export_names:     map.Map[u64, intern.StrId];
+    export_libraries: map.Map[u64, intern.StrId];
+    import_libraries: map.Map[intern.StrId, intern.StrId];
+    providers:        Vector[Provider];
+    provider_at:      map.Map[intern.StrId, usize];
+}
+
+pub fun init(alloc: *A.Allocator) Linkage {
+    ret Linkage{
+        export_names:     map.init[u64, intern.StrId](alloc),
+        export_libraries: map.init[u64, intern.StrId](alloc),
+        import_libraries: map.init[intern.StrId, intern.StrId](alloc),
+        providers:        collections_vector.init[Provider](alloc),
+        provider_at:      map.init[intern.StrId, usize](alloc)
+    };
+}
+
+pub fun dnit(l: *Linkage) {
+    map.dnit[u64, intern.StrId](?l.export_names);
+    map.dnit[u64, intern.StrId](?l.export_libraries);
+    map.dnit[intern.StrId, intern.StrId](?l.import_libraries);
+    collections_vector.dnit[Provider](?l.providers);
+    map.dnit[intern.StrId, usize](?l.provider_at);
+}
+
+# forget every declaration, import and provider, as a project does when its
+# module registry is reset
+pub fun clear(l: *Linkage) {
+    map.clear[u64, intern.StrId](?l.export_names);
+    map.clear[u64, intern.StrId](?l.export_libraries);
+    map.clear[intern.StrId, intern.StrId](?l.import_libraries);
+    providers_clear(l);
+}
+
+fun declaration(mid: module.ModuleId, did: u32) u64 {
+    ret (module.index(mid)::u64 << 32) | did::u64;
+}
+
+fun name_of(table: *map.Map[u64, intern.StrId], key: u64) intern.StrId {
+    val got: opt[*intern.StrId] = map.get[u64, intern.StrId](table, ?key);
+    if (sel got.some) { ret @got.some; }
+    ret intern.STR_NIL;
+}
+
+pub fun register_export_name(l: *Linkage, mid: module.ModuleId, did: u32, name: intern.StrId) err[fail.Fail] {
+    val inserted: res[bool, A.Error] = map.insert[u64, intern.StrId](?l.export_names, declaration(mid, did), name);
+    if (sel inserted.err) { ret err[fail.Fail].err{fail.refused(inserted.err)}; }
+    ret err[fail.Fail].ok{};
+}
+
+# drop every export name one module registered, before its syntax tree is
+# replaced and its declaration ids no longer name the same declarations
+# ---
+# mid:        the module whose names go
+# decl_count: the declaration count of the syntax tree they were registered against
+pub fun forget_export_names(l: *Linkage, mid: module.ModuleId, decl_count: u32) {
+    var did: u32 = 0;
+    for (did < decl_count) {
+        var key: u64 = declaration(mid, did);
+        map.remove[u64, intern.StrId](?l.export_names, ?key);
+        did = did + 1;
+    }
+}
+
+# the name declaration `did` of `mid` is exported under, nil when it names none
+pub fun export_name(l: *Linkage, mid: module.ModuleId, did: u32) intern.StrId {
+    ret name_of(?l.export_names, declaration(mid, did));
+}
+
+pub fun register_export_library(l: *Linkage, mid: module.ModuleId, did: u32, lib: intern.StrId) err[fail.Fail] {
+    val inserted: res[bool, A.Error] = map.insert[u64, intern.StrId](?l.export_libraries, declaration(mid, did), lib);
+    if (sel inserted.err) { ret err[fail.Fail].err{fail.refused(inserted.err)}; }
+    ret err[fail.Fail].ok{};
+}
+
+# the library declaration `did` of `mid` is imported from, nil when it names none
+pub fun export_library(l: *Linkage, mid: module.ModuleId, did: u32) intern.StrId {
+    ret name_of(?l.export_libraries, declaration(mid, did));
+}
+
+# pin the imported symbol `name` to the library `lib`
+pub fun register_import_library(l: *Linkage, name: intern.StrId, lib: intern.StrId) err[fail.Fail] {
+    val inserted: res[bool, A.Error] = map.insert[intern.StrId, intern.StrId](?l.import_libraries, name, lib);
+    if (sel inserted.err) { ret err[fail.Fail].err{fail.refused(inserted.err)}; }
+    ret err[fail.Fail].ok{};
+}
+
+# the library the imported symbol `name` is pinned to, nil when it is pinned to none
+pub fun import_library(l: *Linkage, name: intern.StrId) intern.StrId {
+    val got: opt[*intern.StrId] = map.get[intern.StrId, intern.StrId](?l.import_libraries, ?name);
+    if (sel got.some) { ret @got.some; }
+    ret intern.STR_NIL;
+}
+
+# offer the link the library `name`; a library offered again keeps its place,
+# and is static only while every offer of it is
+pub fun register_provider(l: *Linkage, name: intern.StrId, is_static: bool) err[fail.Fail] {
+    if (intern.str_is_nil(name)) { ret err[fail.Fail].ok{}; }
+    val known: opt[*usize] = map.get[intern.StrId, usize](?l.provider_at, ?name);
+    if (sel known.some) {
+        if (!is_static) { l.providers.data[@known.some].is_static = false; }
+        ret err[fail.Fail].ok{};
+    }
+    val at:     usize               = l.providers.len;
+    val pushed: res[usize, A.Error] = collections_vector.push[Provider](?l.providers, Provider{name: name, is_static: is_static});
+    if (sel pushed.err) { ret err[fail.Fail].err{fail.refused(pushed.err)}; }
+    val indexed: res[bool, A.Error] = map.insert[intern.StrId, usize](?l.provider_at, name, at);
+    if (sel indexed.err) {
+        l.providers.len = at;
+        ret err[fail.Fail].err{fail.refused(indexed.err)};
+    }
+    ret err[fail.Fail].ok{};
+}
+
+# the library `name` as the link is offered it, none when it is not
+pub fun provider(l: *Linkage, name: intern.StrId) opt[Provider] {
+    val known: opt[*usize] = map.get[intern.StrId, usize](?l.provider_at, ?name);
+    if (sel known.some) { ret opt[Provider].some{l.providers.data[@known.some]}; }
+    ret opt[Provider].none{};
+}
+
+# forget every library offered, as each link names its own
+pub fun providers_clear(l: *Linkage) {
+    l.providers.len = 0;
+    map.clear[intern.StrId, usize](?l.provider_at);
+}
+
+test provider__order_dedup_upgrade_clear {
+    var alloc: A.Allocator;
+    page.make(?alloc);
+    var itn: intern.Interner = intern.init(?alloc);
+    fin { intern.dnit(?itn); }
+    var l: Linkage = init(?alloc);
+    fin { dnit(?l); }
+
+    val a_r: res[intern.StrId, A.Error] = intern.add(?itn, "alpha");
+    val b_r: res[intern.StrId, A.Error] = intern.add(?itn, "beta");
+    val c_r: res[intern.StrId, A.Error] = intern.add(?itn, "gamma");
+    if (sel a_r.err) { ret 1; }
+    if (sel b_r.err) { ret 1; }
+    if (sel c_r.err) { ret 1; }
+    val a: intern.StrId = a_r.ok;
+    val b: intern.StrId = b_r.ok;
+    val c: intern.StrId = c_r.ok;
+
+    val none: opt[Provider] = provider(?l, a);
+    if (sel none.some) { ret 2; }
+    val nil_r: err[fail.Fail] = register_provider(?l, intern.STR_NIL, true);
+    if (sel nil_r.err || l.providers.len != 0) { ret 3; }
+
+    val ra: err[fail.Fail] = register_provider(?l, a, true);
+    val rb: err[fail.Fail] = register_provider(?l, b, false);
+    if (sel ra.err || sel rb.err || l.providers.len != 2)                                { ret 4; }
+    if (!intern.str_same(l.providers.data[0].name, a) || !l.providers.data[0].is_static) { ret 5; }
+    if (!intern.str_same(l.providers.data[1].name, b) || l.providers.data[1].is_static)  { ret 6; }
+
+    val rb2: err[fail.Fail] = register_provider(?l, b, true);
+    if (sel rb2.err || l.providers.len != 2 || l.providers.data[1].is_static) { ret 7; }
+    val ra2: err[fail.Fail] = register_provider(?l, a, false);
+    if (sel ra2.err || l.providers.len != 2) { ret 8; }
+    val pa: opt[Provider] = provider(?l, a);
+    if (!(sel pa.some && !pa.some.is_static)) { ret 9; }
+    val pc: opt[Provider] = provider(?l, c);
+    if (sel pc.some) { ret 10; }
+
+    providers_clear(?l);
+    val gone: opt[Provider] = provider(?l, a);
+    if (l.providers.len != 0 || sel gone.some) { ret 11; }
+    val rc: err[fail.Fail] = register_provider(?l, c, false);
+    if (sel rc.err || l.providers.len != 1) { ret 12; }
+    ret 0;
+}
+
+test export_names__keyed_by_declaration_and_forgotten_by_module {
+    var alloc: A.Allocator;
+    page.make(?alloc);
+    var itn: intern.Interner = intern.init(?alloc);
+    fin { intern.dnit(?itn); }
+    var l: Linkage = init(?alloc);
+    fin { dnit(?l); }
+    val n_r: res[intern.StrId, A.Error] = intern.add(?itn, "exported");
+    if (sel n_r.err) { ret 1; }
+    val one: module.ModuleId = module.id(1);
+    val two: module.ModuleId = module.id(2);
+    val r1:  err[fail.Fail]  = register_export_name(?l, one, 3, n_r.ok);
+    val r2:  err[fail.Fail]  = register_export_name(?l, two, 3, n_r.ok);
+    if (sel r1.err || sel r2.err)                          { ret 2; }
+    if (!intern.str_same(export_name(?l, one, 3), n_r.ok)) { ret 3; }
+    if (!intern.str_is_nil(export_name(?l, one, 4)))       { ret 4; }
+    forget_export_names(?l, one, 4);
+    if (!intern.str_is_nil(export_name(?l, one, 3)))       { ret 5; }
+    if (!intern.str_same(export_name(?l, two, 3), n_r.ok)) { ret 6; }
+    ret 0;
+}

@@ -37,7 +37,9 @@ use cli_diagnostic: mach.cli.diagnostic;
 use mach.cli.exit;
 use mach.cli.fixture;
 use mach.cli.util;
-use mach.lang.build.request;
+use mach.lang.driver.request;
+#[testing]
+use ir_printer: mach.lang.me.ir.printer;
 
 # length of COMMANDS; the compiler refuses a COMMANDS literal of any other length
 val COMMANDS_N: usize = 11;
@@ -204,14 +206,14 @@ fun t_refusal(argc: usize, argv: **u8) diagnostic_kind.Kind {
 
 # the build arguments argv reads as, none when it is refused
 #[testing]
-fun t_cli(argc: usize, argv: **u8) opt[request.CliArgs] {
+fun t_cli(argc: usize, argv: **u8) opt[args.CliArgs] {
     var backing: A.Allocator;
     page.make(?backing);
     var inv: args.ParsedInvocation = t_parse(argc, argv);
-    if (sel inv.refusal.some) { ret opt[request.CliArgs].none{}; }
-    val cr: res[request.CliArgs, fail.Fail] = args.build_cli_invocation(?backing, ?inv, argv);
-    if (sel cr.err) { ret opt[request.CliArgs].none{}; }
-    ret opt[request.CliArgs].some{cr.ok};
+    if (sel inv.refusal.some) { ret opt[args.CliArgs].none{}; }
+    val cr: res[args.CliArgs, fail.Fail] = args.build_cli_invocation(?backing, ?inv, argv);
+    if (sel cr.err) { ret opt[args.CliArgs].none{}; }
+    ret opt[args.CliArgs].some{cr.ok};
 }
 
 test commands__the_command_set_is_total_unique_and_unambiguous {
@@ -220,18 +222,17 @@ test commands__the_command_set_is_total_unique_and_unambiguous {
 }
 
 test build_cli_invocation__emit_ir_takes_an_attached_form_and_never_the_next_token {
-    var bare: [4]*u8               = [4]*u8{"mach", "build", "--emit-ir", "."};
-    val rb:   opt[request.CliArgs] = t_cli(4, ?bare[0]);
-    if (sel rb.none)                 { ret 1; }
-    if (!rb.some.emit_ir)            { ret 2; }
-    if (rb.some.emit_ir_form != nil) { ret 3; }
+    var bare: [4]*u8            = [4]*u8{"mach", "build", "--emit-ir", "."};
+    val rb:   opt[args.CliArgs] = t_cli(4, ?bare[0]);
+    if (sel rb.none)                                           { ret 1; }
+    if (!rb.some.overrides.emit_ir)                            { ret 2; }
+    if (rb.some.overrides.ir_form != ir_printer.IR_FORM_DEBUG) { ret 3; }
 
-    var attached: [4]*u8               = [4]*u8{"mach", "build", "--emit-ir=listing", "."};
-    val ra:       opt[request.CliArgs] = t_cli(4, ?attached[0]);
-    if (sel ra.none)                                       { ret 4; }
-    if (!ra.some.emit_ir)                                  { ret 5; }
-    if (ra.some.emit_ir_form == nil)                       { ret 6; }
-    if (!str_equals(ra.some.emit_ir_form::str, "listing")) { ret 7; }
+    var attached: [4]*u8            = [4]*u8{"mach", "build", "--emit-ir=listing", "."};
+    val ra:       opt[args.CliArgs] = t_cli(4, ?attached[0]);
+    if (sel ra.none)                                           { ret 4; }
+    if (!ra.some.overrides.emit_ir)                            { ret 5; }
+    if (ra.some.overrides.ir_form == ir_printer.IR_FORM_DEBUG) { ret 6; }
 
     # the bare form must leave the following token a positional, not eat it
     var inv: args.ParsedInvocation = t_parse(4, ?bare[0]);
@@ -245,26 +246,26 @@ test build_cli_invocation__emit_ir_takes_an_attached_form_and_never_the_next_tok
 # repeats, the pair of a lever conflicts, and a removed flag is refused naming
 # its replacement
 test build_cli_invocation__levers_read_as_given {
-    var a0: [4]*u8               = [4]*u8{"mach", "build", "-O", "."};
-    val r0: opt[request.CliArgs] = t_cli(4, ?a0[0]);
-    if (sel r0.none)                                                                    { ret 1; }
-    if (r0.some.optimize != request.LEVER_ON || r0.some.debug != request.LEVER_PROFILE) { ret 2; }
-    var a1: [5]*u8               = [5]*u8{"mach", "build", "--no-optimize", "-d", "."};
-    val r1: opt[request.CliArgs] = t_cli(5, ?a1[0]);
-    if (sel r1.none)                                                                { ret 3; }
-    if (r1.some.optimize != request.LEVER_OFF || r1.some.debug != request.LEVER_ON) { ret 4; }
-    var a2: [9]*u8               = [9]*u8{"mach", "build", "--pass", "inline", "--pass", "licm", "--skip", "vectorize", "."};
-    val r2: opt[request.CliArgs] = t_cli(9, ?a2[0]);
-    if (sel r2.none)                                    { ret 5; }
-    if (r2.some.pass.len != 2 || r2.some.skip.len != 1) { ret 6; }
-    var a3: [7]*u8               = [7]*u8{"mach", "test", "--relax", "float-reassoc", "--simd", "require", "."};
-    val r3: opt[request.CliArgs] = t_cli(7, ?a3[0]);
-    if (sel r3.none)                                   { ret 7; }
-    if (r3.some.relax.len != 1 || r3.some.simd == nil) { ret 8; }
-    var an: [3]*u8               = [3]*u8{"mach", "build", "."};
-    val rn: opt[request.CliArgs] = t_cli(3, ?an[0]);
-    if (sel rn.none)                                                                         { ret 9; }
-    if (rn.some.optimize != request.LEVER_PROFILE || rn.some.debug != request.LEVER_PROFILE) { ret 10; }
+    var a0: [4]*u8            = [4]*u8{"mach", "build", "-O", "."};
+    val r0: opt[args.CliArgs] = t_cli(4, ?a0[0]);
+    if (sel r0.none)                                                                                        { ret 1; }
+    if (r0.some.overrides.optimize != request.LEVER_ON || r0.some.overrides.debug != request.LEVER_PROFILE) { ret 2; }
+    var a1: [5]*u8            = [5]*u8{"mach", "build", "--no-optimize", "-d", "."};
+    val r1: opt[args.CliArgs] = t_cli(5, ?a1[0]);
+    if (sel r1.none)                                                                                    { ret 3; }
+    if (r1.some.overrides.optimize != request.LEVER_OFF || r1.some.overrides.debug != request.LEVER_ON) { ret 4; }
+    var a2: [9]*u8            = [9]*u8{"mach", "build", "--pass", "inline", "--pass", "licm", "--skip", "vectorize", "."};
+    val r2: opt[args.CliArgs] = t_cli(9, ?a2[0]);
+    if (sel r2.none)                                                        { ret 5; }
+    if (r2.some.overrides.pass.len != 2 || r2.some.overrides.skip.len != 1) { ret 6; }
+    var a3: [7]*u8            = [7]*u8{"mach", "test", "--relax", "float-reassoc", "--simd", "require", "."};
+    val r3: opt[args.CliArgs] = t_cli(7, ?a3[0]);
+    if (sel r3.none)                                                         { ret 7; }
+    if (r3.some.overrides.relax.len != 1 || sel r3.some.overrides.simd.none) { ret 8; }
+    var an: [3]*u8            = [3]*u8{"mach", "build", "."};
+    val rn: opt[args.CliArgs] = t_cli(3, ?an[0]);
+    if (sel rn.none)                                                                                             { ret 9; }
+    if (rn.some.overrides.optimize != request.LEVER_PROFILE || rn.some.overrides.debug != request.LEVER_PROFILE) { ret 10; }
 
     var both: [5]*u8 = [5]*u8{"mach", "build", "-O", "--no-optimize", "."};
     if (t_refusal(5, ?both[0]) != diagnostic_kind.CLI_FLAG_CONFLICT) { ret 11; }
@@ -291,21 +292,21 @@ test collect_link_inputs__preserves_command_line_order_across_flags_and_bare_pat
     var inv: args.ParsedInvocation = t_parse(8, ?a[0]);
     if (sel inv.refusal.some) { ret 2; }
 
-    var c:                     request.CliArgs;
+    var c:                     args.CliArgs;
     val collect_link_inputs_r: err[fail.Fail] = args.collect_link_inputs(?backing, ?c, ?inv, ?a[0]);
     if (sel collect_link_inputs_r.err) { ret 3; }
 
-    if (c.link_tokens.len != 2)                           { ret 4; }
-    if (!str_equals(c.link_tokens.data[0]::str, "one.o")) { ret 5; }
-    if (!str_equals(c.link_tokens.data[1]::str, "two"))   { ret 6; }
-    if (c.lib_dirs.len != 1)                              { ret 7; }
-    if (!str_equals(c.lib_dirs.data[0]::str, "dir"))      { ret 8; }
+    if (c.overrides.link_tokens.len != 2)                           { ret 4; }
+    if (!str_equals(c.overrides.link_tokens.data[0]::str, "one.o")) { ret 5; }
+    if (!str_equals(c.overrides.link_tokens.data[1]::str, "two"))   { ret 6; }
+    if (c.overrides.lib_dirs.len != 1)                              { ret 7; }
+    if (!str_equals(c.overrides.lib_dirs.data[0]::str, "dir"))      { ret 8; }
     ret 0;
 }
 
 test parse_invocation__quiet_is_refused_with_verbose {
-    var q:  [3]*u8               = [3]*u8{"mach", "test", "-q"};
-    val rq: opt[request.CliArgs] = t_cli(3, ?q[0]);
+    var q:  [3]*u8            = [3]*u8{"mach", "test", "-q"};
+    val rq: opt[args.CliArgs] = t_cli(3, ?q[0]);
     if (sel rq.none)    { ret 1; }
     if (!rq.some.quiet) { ret 2; }
 
@@ -403,9 +404,9 @@ test cache__no_cache_is_the_one_cache_option {
         if (i == 1) { argv[1] = "test"; }
         var inv: args.ParsedInvocation = t_parse(4, ?argv[0]);
         if (sel inv.refusal.some || inv.positional_count != 1 || inv.positional_idx != 2) { ret 3; }
-        val c: opt[request.CliArgs] = t_cli(4, ?argv[0]);
-        if (sel c.none)       { ret 4; }
-        if (!c.some.no_cache) { ret 5; }
+        val c: opt[args.CliArgs] = t_cli(4, ?argv[0]);
+        if (sel c.none)                 { ret 4; }
+        if (!c.some.overrides.no_cache) { ret 5; }
         i = i + 1;
     }
     argv[3] = "--cache";

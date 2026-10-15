@@ -31,6 +31,7 @@ use mach.lang.diagnostic;
 use diagnostic_kind: mach.lang.diagnostic.kind;
 use mach.lang.fail;
 use mach.lang.intern;
+use mach.lang.linkage;
 use mach.lang.session;
 use lang_target:       mach.lang.target;
 use catalog_artifact:  mach.lang.target.catalog.artifact;
@@ -113,11 +114,12 @@ use mach.lang.be.linker.unwind.resolve_native_unwind;
 
 rec ImageCountUnit {}
 
-pub fun link(s: *session.Session, diags: *diagnostic.DiagnosticStore, tgt: *lang_target.Binding, inputs: *target_of.ObjectInput,
+pub fun link(s: *session.Session, l: *linkage.Linkage, diags: *diagnostic.DiagnosticStore, tgt: *lang_target.Binding, inputs: *target_of.ObjectInput,
     input_count: u32, dynlibs: *target_of.DynLib, dynlib_count: u32,
     destination: str, name: *u8, mode: catalog_artifact.Kind, pie: bool,
     image_options: target_of.ImageOptions) err[fail.Fail] {
     if (s == nil)                          { ret err[fail.Fail].err{fail.message("nil session")}; }
+    if (l == nil)                          { ret err[fail.Fail].err{fail.message("nil linkage")}; }
     if (diags == nil)                      { ret err[fail.Fail].err{fail.message("nil diagnostic store")}; }
     if (tgt == nil)                        { ret err[fail.Fail].err{fail.message("nil target")}; }
     if (tgt == nil)                        { ret err[fail.Fail].err{fail.message("target: nil resolved target")}; }
@@ -149,7 +151,7 @@ pub fun link(s: *session.Session, diags: *diagnostic.DiagnosticStore, tgt: *lang
     val modules: *target_of.ObjectImage = read_r.ok;
 
     fin { free_modules(alloc, modules, module_count); }
-    ret link_modules_nocapture(s, diags, tgt, modules, module_count, dynlibs, dynlib_count,
+    ret link_modules_nocapture(s, l, diags, tgt, modules, module_count, dynlibs, dynlib_count,
         destination, name, mode, pie, image_options);
 }
 
@@ -188,7 +190,7 @@ pub fun captured_image_dnit(img: *CapturedImage, alloc: *A.Allocator) {
 #             does not reach them
 # root_count: number of root names
 #[testing]
-pub fun link_images_captured(s: *session.Session, diags: *diagnostic.DiagnosticStore, tgt: *lang_target.Binding, images: *target_of.ObjectImage,
+pub fun link_images_captured(s: *session.Session, l: *linkage.Linkage, diags: *diagnostic.DiagnosticStore, tgt: *lang_target.Binding, images: *target_of.ObjectImage,
     image_count: u32, dynlibs: *target_of.DynLib, dynlib_count: u32,
     name: *u8, pie: bool, image_options: target_of.ImageOptions,
     root_names: *str, root_count: u32, out: *CapturedImage) err[fail.Fail] {
@@ -205,6 +207,7 @@ pub fun link_images_captured(s: *session.Session, diags: *diagnostic.DiagnosticS
     out.function_count = 0;
 
     if (s == nil)      { ret err[fail.Fail].err{fail.message("nil session")}; }
+    if (l == nil)      { ret err[fail.Fail].err{fail.message("nil linkage")}; }
     if (diags == nil)  { ret err[fail.Fail].err{fail.message("nil diagnostic store")}; }
     if (tgt == nil)    { ret err[fail.Fail].err{fail.message("nil target")}; }
     if (tgt == nil)    { ret err[fail.Fail].err{fail.message("target: nil resolved target")}; }
@@ -234,7 +237,7 @@ pub fun link_images_captured(s: *session.Session, diags: *diagnostic.DiagnosticS
         ri        = ri + 1;
     }
 
-    ret link_modules(s, diags, tgt, images, image_count, dynlibs,
+    ret link_modules(s, l, diags, tgt, images, image_count, dynlibs,
         dynlib_count, nil, name, catalog_artifact.EXECUTABLE, pie, image_options, roots, root_count, out);
 }
 
@@ -242,11 +245,11 @@ pub fun link_images_captured(s: *session.Session, diags: *diagnostic.DiagnosticS
 # link_mixed does, handing back the symbol table and the unwound functions the
 # writer was given, whatever the object format
 #[testing]
-pub fun link_observed(s: *session.Session, diags: *diagnostic.DiagnosticStore, tgt: *lang_target.Binding,
+pub fun link_observed(s: *session.Session, l: *linkage.Linkage, diags: *diagnostic.DiagnosticStore, tgt: *lang_target.Binding,
     images: *target_of.ObjectImage, image_count: u32, inputs: *target_of.ObjectInput, input_count: u32,
     destination: str, name: *u8, image_options: target_of.ImageOptions, out: *CapturedImage) err[fail.Fail] {
-    if (s == nil || diags == nil || tgt == nil || out == nil || destination == nil) { ret err[fail.Fail].err{fail.message("incomplete observed link")}; }
-    if (tgt == nil)                                                                 { ret err[fail.Fail].err{fail.message("target: nil resolved target")}; }
+    if (s == nil || l == nil || diags == nil || tgt == nil || out == nil || destination == nil) { ret err[fail.Fail].err{fail.message("incomplete observed link")}; }
+    if (tgt == nil)                                                                             { ret err[fail.Fail].err{fail.message("target: nil resolved target")}; }
     if (out.bytes != nil || out.symbols != nil || out.functions != nil) {
         ret err[fail.Fail].err{fail.message("capture target is not empty")};
     }
@@ -279,15 +282,16 @@ pub fun link_observed(s: *session.Session, diags: *diagnostic.DiagnosticStore, t
         combined[image_count + i] = ext[i];
         i                         = i + 1;
     }
-    ret link_modules(s, diags, tgt, combined, total, nil::*target_of.DynLib, 0, destination, name, catalog_artifact.EXECUTABLE, false,
+    ret link_modules(s, l, diags, tgt, combined, total, nil::*target_of.DynLib, 0, destination, name, catalog_artifact.EXECUTABLE, false,
         image_options, nil::*intern.StrId, 0, out);
 }
 
-pub fun link_images(s: *session.Session, diags: *diagnostic.DiagnosticStore, tgt: *lang_target.Binding, images: *target_of.ObjectImage,
+pub fun link_images(s: *session.Session, l: *linkage.Linkage, diags: *diagnostic.DiagnosticStore, tgt: *lang_target.Binding, images: *target_of.ObjectImage,
     image_count: u32, dynlibs: *target_of.DynLib, dynlib_count: u32,
     destination: str, name: *u8, mode: catalog_artifact.Kind, pie: bool,
     image_options: target_of.ImageOptions) err[fail.Fail] {
     if (s == nil)                          { ret err[fail.Fail].err{fail.message("nil session")}; }
+    if (l == nil)                          { ret err[fail.Fail].err{fail.message("nil linkage")}; }
     if (diags == nil)                      { ret err[fail.Fail].err{fail.message("nil diagnostic store")}; }
     if (tgt == nil)                        { ret err[fail.Fail].err{fail.message("nil target")}; }
     if (tgt == nil)                        { ret err[fail.Fail].err{fail.message("target: nil resolved target")}; }
@@ -297,17 +301,18 @@ pub fun link_images(s: *session.Session, diags: *diagnostic.DiagnosticStore, tgt
     if (images == nil || image_count == 0) {
         ret err[fail.Fail].err{fail.message("no input objects")};
     }
-    ret link_modules_nocapture(s, diags, tgt, images, image_count, dynlibs,
+    ret link_modules_nocapture(s, l, diags, tgt, images, image_count, dynlibs,
         dynlib_count, destination, name, mode, pie, image_options);
 }
 
-pub fun link_mixed(s: *session.Session, diags: *diagnostic.DiagnosticStore, tgt: *lang_target.Binding,
+pub fun link_mixed(s: *session.Session, l: *linkage.Linkage, diags: *diagnostic.DiagnosticStore, tgt: *lang_target.Binding,
     images: *target_of.ObjectImage, image_count: u32,
     inputs: *target_of.ObjectInput, input_count: u32,
     dynlibs: *target_of.DynLib, dynlib_count: u32,
     destination: str, name: *u8, mode: catalog_artifact.Kind, pie: bool,
     image_options: target_of.ImageOptions) err[fail.Fail] {
     if (s == nil)                          { ret err[fail.Fail].err{fail.message("nil session")}; }
+    if (l == nil)                          { ret err[fail.Fail].err{fail.message("nil linkage")}; }
     if (diags == nil)                      { ret err[fail.Fail].err{fail.message("nil diagnostic store")}; }
     if (tgt == nil)                        { ret err[fail.Fail].err{fail.message("nil target")}; }
     if (tgt == nil)                        { ret err[fail.Fail].err{fail.message("target: nil resolved target")}; }
@@ -361,7 +366,7 @@ pub fun link_mixed(s: *session.Session, diags: *diagnostic.DiagnosticStore, tgt:
         j                         = j + 1;
     }
 
-    ret link_modules_nocapture(s, diags, tgt, combined, total, dynlibs, dynlib_count,
+    ret link_modules_nocapture(s, l, diags, tgt, combined, total, dynlibs, dynlib_count,
         destination, name, mode, pie, image_options);
 }
 
@@ -417,12 +422,12 @@ fun image_attributes(s: *session.Session, tgt: *lang_target.Binding, modules: *t
     ret res[*u8, fail.Fail].ok{acc};
 }
 
-fun link_modules_nocapture(s: *session.Session, diags: *diagnostic.DiagnosticStore, tgt: *lang_target.Binding, modules: *target_of.ObjectImage,
+fun link_modules_nocapture(s: *session.Session, l: *linkage.Linkage, diags: *diagnostic.DiagnosticStore, tgt: *lang_target.Binding, modules: *target_of.ObjectImage,
     module_count: u32,
     dynlibs: *target_of.DynLib, dynlib_count: u32,
     destination: str, name: *u8, mode: catalog_artifact.Kind, pie_opt_in: bool,
     image_options: target_of.ImageOptions) err[fail.Fail] {
-    ret link_modules(s, diags, tgt, modules, module_count, dynlibs, dynlib_count,
+    ret link_modules(s, l, diags, tgt, modules, module_count, dynlibs, dynlib_count,
         destination, name, mode, pie_opt_in, image_options, nil::*intern.StrId, 0, nil::*CapturedImage);
 }
 
@@ -439,7 +444,7 @@ val SYNTHESIZERS: [4]Synthesizer = [4]Synthesizer{
     synthesize_local_imports,
 };
 
-fun link_modules(s: *session.Session, diags: *diagnostic.DiagnosticStore, tgt: *lang_target.Binding, modules: *target_of.ObjectImage,
+fun link_modules(s: *session.Session, l: *linkage.Linkage, diags: *diagnostic.DiagnosticStore, tgt: *lang_target.Binding, modules: *target_of.ObjectImage,
     module_count: u32,
     dynlibs: *target_of.DynLib, dynlib_count: u32,
     destination: str, name: *u8, mode: catalog_artifact.Kind, pie_opt_in: bool,
@@ -451,7 +456,7 @@ fun link_modules(s: *session.Session, diags: *diagnostic.DiagnosticStore, tgt: *
     if (sel inputs_valid.err) { ret inputs_valid; }
 
     var st: LinkState;
-    link_state_init(?st, s, tgt, mode, modules, module_count, image_options);
+    link_state_init(?st, s, l, tgt, mode, modules, module_count, image_options);
     fin { link_state_dnit(?st); }
     st.pie = (mode == catalog_artifact.EXECUTABLE) && (target_requires_pie(tgt) || pie_opt_in);
 
@@ -722,7 +727,7 @@ fun reserve_tables(st: *LinkState, dynlibs: *target_of.DynLib, dynlib_count: u32
     }
     if (executable && !dynamic) {
         val unresolved_r: res[bool, fail.Fail] = has_unresolved_attributed_imports(
-            s, modules, module_count, dynlibs, dynlib_count, ?rs.sym_locs,
+            rs.dyn.linkage, s, modules, module_count, dynlibs, dynlib_count, ?rs.sym_locs,
             tgt.of.import_address_prefix, rs.sec_base, ?rs.atoms);
         if (sel unresolved_r.err) { ret err[fail.Fail].err{unresolved_r.err}; }
         dynamic = unresolved_r.ok;
@@ -1011,6 +1016,8 @@ fun lt_marker_present(bytes: *u8, len: usize, marker: u8) bool {
 #[testing]
 fun lt_foreign_dwarf_link(s: *session.Session, tgt: *lang_target.Binding,
     out_self: *bool, out_foreign: *bool) bool {
+    var l: linkage.Linkage = linkage.init(s.alloc);
+    fin { linkage.dnit(?l); }
     val alloc:   *A.Allocator = s.alloc;
     val text:    intern.StrId = lt_name(s, ".text");
     val info:    intern.StrId = lt_name(s, ".debug_info");
@@ -1158,7 +1165,7 @@ fun lt_foreign_dwarf_link(s: *session.Session, tgt: *lang_target.Binding,
         var paths: [2]target_of.ObjectInput;
         paths[0] = target_of.ObjectInput{path: apath::*u8, origin: target_of.RELOC_INPUT};
         paths[1] = target_of.ObjectInput{path: bpath::*u8, origin: target_of.RELOC_INPUT};
-        val lr: err[fail.Fail] = link(s, ?s.diags, tgt, ?paths[0], 2,
+        val lr: err[fail.Fail] = link(s, ?l, ?s.diags, tgt, ?paths[0], 2,
             nil::*target_of.DynLib, 0, epath, "foreign_dwarf"::*u8,
             catalog_artifact.EXECUTABLE, false, target_of.image_options_default(catalog_subsystem.CONSOLE));
         if (sel lr.err) { ok = false; }
@@ -1200,6 +1207,8 @@ test debug_merge__collected_definitions_are_tombstoned {
     var alloc: A.Allocator;
     page.make(?alloc);
     val sr: res[session.Session, fail.Fail] = session.init(?alloc);
+    var l:  linkage.Linkage                 = linkage.init(?alloc);
+    fin { linkage.dnit(?l); }
     if (sel sr.err) { ret 1; }
     var s: session.Session = sr.ok;
     fin { session.dnit(?s); }
@@ -1280,7 +1289,7 @@ test debug_merge__collected_definitions_are_tombstoned {
     var tf: output_testing.Output = tf_r.ok;
     fin { output_testing.dnit(?tf); }
     mods[0].codegen = true;
-    val lr: err[fail.Fail] = link_modules_nocapture(?s, ?s.diags, ?tgt, ?mods[0], 1, nil::*target_of.DynLib, 0,
+    val lr: err[fail.Fail] = link_modules_nocapture(?s, ?l, ?s.diags, ?tgt, ?mods[0], 1, nil::*target_of.DynLib, 0,
         output_testing.path(?tf), "gc_tombstones"::*u8, catalog_artifact.EXECUTABLE, false, target_of.image_options_default(catalog_subsystem.CONSOLE));
     if (sel lr.err) { ret 2; }
     val rr: res[Vector[u8], fs.FsError] = fs.read_bytes(?alloc, output_testing.path(?tf));
@@ -1340,6 +1349,8 @@ test link__an_unsupported_relocation_is_classed_by_its_input {
     var alloc: A.Allocator;
     page.make(?alloc);
     val sr: res[session.Session, fail.Fail] = session.init(?alloc);
+    var l:  linkage.Linkage                 = linkage.init(?alloc);
+    fin { linkage.dnit(?l); }
     if (sel sr.err) { ret 1; }
     var s: session.Session = sr.ok;
     fin { session.dnit(?s); }
@@ -1383,13 +1394,13 @@ test link__an_unsupported_relocation_is_classed_by_its_input {
 
     var input: [1]target_of.ObjectInput;
     input[0] = target_of.ObjectInput{path: opath::*u8, origin: target_of.RELOC_INPUT};
-    val foreign: err[fail.Fail] = link(?s, ?s.diags, ?tgt, ?input[0], 1, nil::*target_of.DynLib, 0, epath, "foreign"::*u8,
+    val foreign: err[fail.Fail] = link(?s, ?l, ?s.diags, ?tgt, ?input[0], 1, nil::*target_of.DynLib, 0, epath, "foreign"::*u8,
         catalog_artifact.EXECUTABLE, false, target_of.image_options_default(catalog_subsystem.CONSOLE));
     if (sel foreign.ok)                                                                           { ret 5; }
     if (!sel foreign.err.user || fail.kind_of(foreign.err) != diagnostic_kind.OBJECT_UNSUPPORTED) { ret 6; }
 
     input[0].origin = target_of.RELOC_CODEGEN;
-    val own: err[fail.Fail] = link(?s, ?s.diags, ?tgt, ?input[0], 1, nil::*target_of.DynLib, 0, epath, "own"::*u8,
+    val own: err[fail.Fail] = link(?s, ?l, ?s.diags, ?tgt, ?input[0], 1, nil::*target_of.DynLib, 0, epath, "own"::*u8,
         catalog_artifact.EXECUTABLE, false, target_of.image_options_default(catalog_subsystem.CONSOLE));
     if (sel own.ok)                                                 { ret 7; }
     if (fail.kind_of(own.err) != diagnostic_kind.COMPILER_INTERNAL) { ret 8; }
@@ -1442,6 +1453,8 @@ fun lt_marker_tombstoned(bytes: *u8, len: usize, marker: u8, tombstone: u8) bool
 
 #[testing]
 fun lt_parsed_weak_dwarf_target(s: *session.Session, tgt: *lang_target.Binding) bool {
+    var l: linkage.Linkage = linkage.init(s.alloc);
+    fin { linkage.dnit(?l); }
     val alloc:       *A.Allocator = s.alloc;
     val text:        intern.StrId = lt_name(s, ".text");
     val dup:         intern.StrId = lt_name(s, "parsed_weak");
@@ -1614,7 +1627,7 @@ fun lt_parsed_weak_dwarf_target(s: *session.Session, tgt: *lang_target.Binding) 
     paths[0] = target_of.ObjectInput{path: wpath::*u8, origin: target_of.RELOC_INPUT};
     paths[1] = target_of.ObjectInput{path: lpath::*u8, origin: target_of.RELOC_INPUT};
     if (ok) {
-        val lr: err[fail.Fail] = link(s, ?s.diags, tgt, ?paths[0], 2,
+        val lr: err[fail.Fail] = link(s, ?l, ?s.diags, tgt, ?paths[0], 2,
             nil::*target_of.DynLib, 0, epath, "parsed_weak_dwarf"::*u8,
             catalog_artifact.EXECUTABLE, false, target_of.image_options_default(catalog_subsystem.CONSOLE));
         if (sel lr.err) { ok = false; }
@@ -1683,6 +1696,8 @@ test patch_relocations__parsed_weak_dwarf_tombstones {
 
 #[testing]
 fun lt_dwarf_addend_crossing(s: *session.Session, tgt: *lang_target.Binding) i32 {
+    var l: linkage.Linkage = linkage.init(s.alloc);
+    fin { linkage.dnit(?l); }
     val alloc:   *A.Allocator = s.alloc;
     val text:    intern.StrId = lt_name(s, ".text");
     val info:    intern.StrId = lt_name(s, ".debug_info");
@@ -1855,7 +1870,7 @@ fun lt_dwarf_addend_crossing(s: *session.Session, tgt: *lang_target.Binding) i32
         var paths: [2]target_of.ObjectInput;
         paths[0] = target_of.ObjectInput{path: wpath::*u8, origin: target_of.RELOC_INPUT};
         paths[1] = target_of.ObjectInput{path: lpath::*u8, origin: target_of.RELOC_INPUT};
-        val lr: err[fail.Fail] = link(s, ?s.diags, tgt, ?paths[0], 2,
+        val lr: err[fail.Fail] = link(s, ?l, ?s.diags, tgt, ?paths[0], 2,
             nil::*target_of.DynLib, 0, epath, "crossing_dwarf"::*u8,
             catalog_artifact.EXECUTABLE, false, target_of.image_options_default(catalog_subsystem.CONSOLE));
         if (sel lr.err) {
@@ -1947,6 +1962,8 @@ test link_modules__flat_entry_leads_regardless_of_order {
     var alloc: A.Allocator;
     page.make(?alloc);
     val sr: res[session.Session, fail.Fail] = session.init(?alloc);
+    var l:  linkage.Linkage                 = linkage.init(?alloc);
+    fin { linkage.dnit(?l); }
     if (sel sr.err) { ret 1; }
     var s: session.Session = sr.ok;
 
@@ -2022,7 +2039,7 @@ test link_modules__flat_entry_leads_regardless_of_order {
     mods[0].codegen = true;
     mods[1].codegen = true;
     val lr: err[fail.Fail] =
-        link_modules_nocapture(?s, ?s.diags, ?tgt, ?mods[0], 2, nil::*target_of.DynLib, 0, tpath, "flat_entry"::*u8, catalog_artifact.EXECUTABLE, false, target_of.image_options_default(catalog_subsystem.CONSOLE));
+        link_modules_nocapture(?s, ?l, ?s.diags, ?tgt, ?mods[0], 2, nil::*target_of.DynLib, 0, tpath, "flat_entry"::*u8, catalog_artifact.EXECUTABLE, false, target_of.image_options_default(catalog_subsystem.CONSOLE));
     if (sel lr.err) { ret 1; }
 
     val rr: res[Vector[u8], fs.FsError] = fs.read_bytes(?alloc, tpath);
@@ -2055,6 +2072,8 @@ test link_modules__flat_entry_leads_regardless_of_order {
 #[testing]
 fun lt_loader_link(s: *session.Session, tgt: *lang_target.Binding, mode: catalog_artifact.Kind, pie: bool,
     dynlibs: *target_of.DynLib, dynlib_count: u32) str {
+    var l: linkage.Linkage = linkage.init(s.alloc);
+    fin { linkage.dnit(?l); }
     val text:  intern.StrId = lt_name(s, ".text");
     val entry: intern.StrId = lt_name(s, tgt.os.entry_symbol);
     if (intern.str_is_nil(text) || intern.str_is_nil(entry)) { ret "lt: intern failed"; }
@@ -2093,7 +2112,7 @@ fun lt_loader_link(s: *session.Session, tgt: *lang_target.Binding, mode: catalog
 
     mods[0].codegen = true;
     val lr: err[fail.Fail] =
-        link_modules_nocapture(s, ?s.diags, tgt, ?mods[0], 1, dynlibs, dynlib_count, tpath,
+        link_modules_nocapture(s, ?l, ?s.diags, tgt, ?mods[0], 1, dynlibs, dynlib_count, tpath,
         "loader_req"::*u8, mode, pie,
         target_of.image_options_default(catalog_subsystem.CONSOLE));
     # a loader the target lacks is the user's request, never a compiler defect
@@ -2138,11 +2157,13 @@ test link__refuses_a_kind_the_linker_does_not_produce {
     var alloc: A.Allocator;
     page.make(?alloc);
     val sr: res[session.Session, fail.Fail] = session.init(?alloc);
+    var l:  linkage.Linkage                 = linkage.init(?alloc);
+    fin { linkage.dnit(?l); }
     if (sel sr.err) { ret 1; }
     var s: session.Session = sr.ok;
     fin { session.dnit(?s); }
 
-    val lr: err[fail.Fail] = link(?s, ?s.diags, ?tgt, nil::*target_of.ObjectInput, 0, nil::*target_of.DynLib, 0,
+    val lr: err[fail.Fail] = link(?s, ?l, ?s.diags, ?tgt, nil::*target_of.ObjectInput, 0, nil::*target_of.DynLib, 0,
         "unlinked", "unlinked"::*u8, catalog_artifact.STATIC, false, target_of.image_options_default(catalog_subsystem.CONSOLE));
     if (!sel lr.err)                                                                          { ret 2; }
     if (!str_equals(fail.describe(lr.err), "the linker does not produce this artifact kind")) { ret 3; }
@@ -2153,6 +2174,8 @@ test link__refuses_a_kind_the_linker_does_not_produce {
 #[testing]
 fun lt_attributed_link(s: *session.Session, tgt: *lang_target.Binding, attributes: *u8,
     attributes_len: u32, extra_flags: u32) err[fail.Fail] {
+    var l: linkage.Linkage = linkage.init(s.alloc);
+    fin { linkage.dnit(?l); }
     val text:  intern.StrId = lt_name(s, ".text");
     val entry: intern.StrId = lt_name(s, tgt.os.entry_symbol);
     if (intern.str_is_nil(text) || intern.str_is_nil(entry)) { ret err[fail.Fail].err{fail.message("lt: intern failed")}; }
@@ -2184,7 +2207,7 @@ fun lt_attributed_link(s: *session.Session, tgt: *lang_target.Binding, attribute
     var tf: output_testing.Output = tf_r.ok;
     fin { output_testing.dnit(?tf); }
     mods[0].codegen = true;
-    ret link_modules_nocapture(s, ?s.diags, tgt, ?mods[0], 1, nil::*target_of.DynLib, 0, output_testing.path(?tf),
+    ret link_modules_nocapture(s, ?l, ?s.diags, tgt, ?mods[0], 1, nil::*target_of.DynLib, 0, output_testing.path(?tf),
         "attributed"::*u8, catalog_artifact.EXECUTABLE, false,
         target_of.image_options_default(catalog_subsystem.CONSOLE));
 }
@@ -2255,6 +2278,8 @@ test patch_relocations__anonymous_section_symbols_stay_distinct {
     var alloc: A.Allocator;
     page.make(?alloc);
     val sr: res[session.Session, fail.Fail] = session.init(?alloc);
+    var l:  linkage.Linkage                 = linkage.init(?alloc);
+    fin { linkage.dnit(?l); }
     if (sel sr.err) { ret 1; }
     var s: session.Session = sr.ok;
 
@@ -2361,7 +2386,7 @@ test patch_relocations__anonymous_section_symbols_stay_distinct {
     fin { output_testing.dnit(?otf); }
     val opath: str            = output_testing.path(?otf);
     val olr:   err[fail.Fail] =
-        link_modules_nocapture(?s, ?s.diags, ?etgt, ?mods[0], 1, nil::*target_of.DynLib, 0, opath,
+        link_modules_nocapture(?s, ?l, ?s.diags, ?etgt, ?mods[0], 1, nil::*target_of.DynLib, 0, opath,
         "anon_section_obj"::*u8, catalog_artifact.OBJECTS, false,
         target_of.image_options_default(catalog_subsystem.CONSOLE));
     if (sel olr.err) { ret 1; }
@@ -2416,7 +2441,7 @@ test patch_relocations__anonymous_section_symbols_stay_distinct {
 
     mods[0].codegen = true;
     val lr: err[fail.Fail] =
-        link_modules_nocapture(?s, ?s.diags, ?tgt, ?mods[0], 1, nil::*target_of.DynLib, 0, tpath, "anon_section_syms"::*u8, catalog_artifact.EXECUTABLE, false, target_of.image_options_default(catalog_subsystem.CONSOLE));
+        link_modules_nocapture(?s, ?l, ?s.diags, ?tgt, ?mods[0], 1, nil::*target_of.DynLib, 0, tpath, "anon_section_syms"::*u8, catalog_artifact.EXECUTABLE, false, target_of.image_options_default(catalog_subsystem.CONSOLE));
     if (sel lr.err) { ret 1; }
 
     val rr: res[Vector[u8], fs.FsError] = fs.read_bytes(?alloc, tpath);
@@ -2474,6 +2499,8 @@ test patch_relocations__duplicate_coff_section_symbols_stay_distinct {
     var alloc: A.Allocator;
     page.make(?alloc);
     val sr: res[session.Session, fail.Fail] = session.init(?alloc);
+    var l:  linkage.Linkage                 = linkage.init(?alloc);
+    fin { linkage.dnit(?l); }
     if (sel sr.err) { ret 1; }
     var s: session.Session = sr.ok;
 
@@ -2592,7 +2619,7 @@ test patch_relocations__duplicate_coff_section_symbols_stay_distinct {
     val tpath: str = output_testing.path(?tf);
 
     val lr: err[fail.Fail] =
-        link_modules_nocapture(?s, ?s.diags, ?tgt, ?mods[0], 1, nil::*target_of.DynLib, 0, tpath,
+        link_modules_nocapture(?s, ?l, ?s.diags, ?tgt, ?mods[0], 1, nil::*target_of.DynLib, 0, tpath,
         "coff_section_syms"::*u8, catalog_artifact.EXECUTABLE, false, target_of.image_options_default(catalog_subsystem.CONSOLE));
     if (sel lr.err) { ret 1; }
 
@@ -2648,6 +2675,8 @@ test link_modules__arm64_import_tail_branch {
     var alloc: A.Allocator;
     page.make(?alloc);
     val sr: res[session.Session, fail.Fail] = session.init(?alloc);
+    var l:  linkage.Linkage                 = linkage.init(?alloc);
+    fin { linkage.dnit(?l); }
     if (sel sr.err) { ret 1; }
     var s: session.Session = sr.ok;
     fin { session.dnit(?s); }
@@ -2656,7 +2685,7 @@ test link_modules__arm64_import_tail_branch {
     var tgt:                       lang_target.Binding = tr.ok;
     val pin:                       intern.StrId        = lt_name(?s, "libSystem");
     val imported:                  intern.StrId        = lt_name(?s, "_calloc");
-    val register_import_library_r: err[fail.Fail]      = session.register_import_library(?s, imported, pin);
+    val register_import_library_r: err[fail.Fail]      = linkage.register_import_library(?l, imported, pin);
     if (sel register_import_library_r.err) { ret 4; }
     var provider: target_of.DynLib;
     provider.name               = pin;
@@ -2703,7 +2732,7 @@ test link_modules__arm64_import_tail_branch {
     for (count <= 2) {
         module.reloc_count = count;
         module.codegen     = true;
-        val linked: err[fail.Fail] = link_modules_nocapture(?s, ?s.diags, ?tgt,
+        val linked: err[fail.Fail] = link_modules_nocapture(?s, ?l, ?s.diags, ?tgt,
             ?module, 1, ?provider, 1, path, "tail_import"::*u8,
             catalog_artifact.EXECUTABLE, true, target_of.image_options_default(catalog_subsystem.CONSOLE));
         if (sel linked.err) { ret 6; }
@@ -2741,6 +2770,8 @@ test link_modules__arm64_import_stub_beside_code_past_large_zero_fill {
     var alloc: A.Allocator;
     page.make(?alloc);
     val sr: res[session.Session, fail.Fail] = session.init(?alloc);
+    var l:  linkage.Linkage                 = linkage.init(?alloc);
+    fin { linkage.dnit(?l); }
     if (sel sr.err) { ret 1; }
     var s: session.Session = sr.ok;
     fin { session.dnit(?s); }
@@ -2749,7 +2780,7 @@ test link_modules__arm64_import_stub_beside_code_past_large_zero_fill {
     var tgt:      lang_target.Binding = tr.ok;
     val pin:      intern.StrId        = lt_name(?s, "libSystem");
     val imported: intern.StrId        = lt_name(?s, "_exit");
-    val pinned:   err[fail.Fail]      = session.register_import_library(?s, imported, pin);
+    val pinned:   err[fail.Fail]      = linkage.register_import_library(?l, imported, pin);
     if (sel pinned.err) { ret 4; }
     var provider: target_of.DynLib;
     provider.name               = pin;
@@ -2805,7 +2836,7 @@ test link_modules__arm64_import_stub_beside_code_past_large_zero_fill {
     val path: str = named.ok;
     fin { str_free(?alloc, path); }
     module.codegen = true;
-    val linked: err[fail.Fail] = link_modules_nocapture(?s, ?s.diags, ?tgt,
+    val linked: err[fail.Fail] = link_modules_nocapture(?s, ?l, ?s.diags, ?tgt,
         ?module, 1, ?provider, 1, path, "zero_fill"::*u8,
         catalog_artifact.EXECUTABLE, true, target_of.image_options_default(catalog_subsystem.CONSOLE));
     if (sel linked.err) { ret 6; }
@@ -2853,6 +2884,8 @@ test link_modules__x86_64_import_got_ahead_of_large_zero_fill {
     var alloc: A.Allocator;
     page.make(?alloc);
     val sr: res[session.Session, fail.Fail] = session.init(?alloc);
+    var l:  linkage.Linkage                 = linkage.init(?alloc);
+    fin { linkage.dnit(?l); }
     if (sel sr.err) { ret 1; }
     var s: session.Session = sr.ok;
     fin { session.dnit(?s); }
@@ -2862,9 +2895,9 @@ test link_modules__x86_64_import_got_ahead_of_large_zero_fill {
     val pin:         intern.StrId        = lt_name(?s, "libSystem");
     val called:      intern.StrId        = lt_name(?s, "_exit");
     val loaded:      intern.StrId        = lt_name(?s, "___stderrp");
-    val pinned_call: err[fail.Fail]      = session.register_import_library(?s, called, pin);
+    val pinned_call: err[fail.Fail]      = linkage.register_import_library(?l, called, pin);
     if (sel pinned_call.err) { ret 4; }
-    val pinned_load: err[fail.Fail] = session.register_import_library(?s, loaded, pin);
+    val pinned_load: err[fail.Fail] = linkage.register_import_library(?l, loaded, pin);
     if (sel pinned_load.err) { ret 4; }
     var provider: target_of.DynLib;
     provider.name               = pin;
@@ -2942,7 +2975,7 @@ test link_modules__x86_64_import_got_ahead_of_large_zero_fill {
     val path: str = named.ok;
     fin { str_free(?alloc, path); }
     module.codegen = true;
-    val linked: err[fail.Fail] = link_modules_nocapture(?s, ?s.diags, ?tgt,
+    val linked: err[fail.Fail] = link_modules_nocapture(?s, ?l, ?s.diags, ?tgt,
         ?module, 1, ?provider, 1, path, "got_ahead"::*u8,
         catalog_artifact.EXECUTABLE, true, target_of.image_options_default(catalog_subsystem.CONSOLE));
     if (sel linked.err) {
@@ -3026,6 +3059,8 @@ test link_modules__elf_arm64_plt_beside_code_past_large_zero_fill {
     var alloc: A.Allocator;
     page.make(?alloc);
     val sr: res[session.Session, fail.Fail] = session.init(?alloc);
+    var l:  linkage.Linkage                 = linkage.init(?alloc);
+    fin { linkage.dnit(?l); }
     if (sel sr.err) { ret 1; }
     var s: session.Session = sr.ok;
     fin { session.dnit(?s); }
@@ -3034,7 +3069,7 @@ test link_modules__elf_arm64_plt_beside_code_past_large_zero_fill {
     var tgt:      lang_target.Binding = tr.ok;
     val pin:      intern.StrId        = lt_name(?s, "libc");
     val imported: intern.StrId        = lt_name(?s, "_exit");
-    val pinned:   err[fail.Fail]      = session.register_import_library(?s, imported, pin);
+    val pinned:   err[fail.Fail]      = linkage.register_import_library(?l, imported, pin);
     if (sel pinned.err) { ret 4; }
     var provider: target_of.DynLib;
     provider.name               = pin;
@@ -3091,7 +3126,7 @@ test link_modules__elf_arm64_plt_beside_code_past_large_zero_fill {
     val path: str = named.ok;
     fin { str_free(?alloc, path); }
     module.codegen = true;
-    val linked: err[fail.Fail] = link_modules_nocapture(?s, ?s.diags, ?tgt,
+    val linked: err[fail.Fail] = link_modules_nocapture(?s, ?l, ?s.diags, ?tgt,
         ?module, 1, ?provider, 1, path, "elf_zero_fill"::*u8,
         catalog_artifact.EXECUTABLE, false, target_of.image_options_default(catalog_subsystem.CONSOLE));
     if (sel linked.err) {
@@ -3156,6 +3191,8 @@ test local_got_plan__arm64_function_pointer_slot {
     var alloc: A.Allocator;
     page.make(?alloc);
     val sr: res[session.Session, fail.Fail] = session.init(?alloc);
+    var l:  linkage.Linkage                 = linkage.init(?alloc);
+    fin { linkage.dnit(?l); }
     if (sel sr.err) { ret 1; }
     var s: session.Session = sr.ok;
     fin { session.dnit(?s); }
@@ -3206,7 +3243,7 @@ test local_got_plan__arm64_function_pointer_slot {
     var file: output_testing.Output = created.ok;
     fin { output_testing.dnit(?file); }
 
-    val linked: err[fail.Fail] = link_modules_nocapture(?s, ?s.diags, ?tgt,
+    val linked: err[fail.Fail] = link_modules_nocapture(?s, ?l, ?s.diags, ?tgt,
         ?module, 1, nil::*target_of.DynLib, 0, output_testing.path(?file), "arm-got"::*u8,
         catalog_artifact.EXECUTABLE, false, target_of.image_options_default(catalog_subsystem.CONSOLE));
     if (sel linked.err) { ret 5; }
@@ -3318,6 +3355,8 @@ fun t_riscv_got_pointer(arch: str, abi: str, width: u32) i32 {
     page.make(?alloc);
     val sr: res[session.Session, fail.Fail] = session.init(?alloc);
     if (sel sr.err) { ret 1; }
+    var l: linkage.Linkage = linkage.init(?alloc);
+    fin { linkage.dnit(?l); }
     var s: session.Session = sr.ok;
     fin { session.dnit(?s); }
     var system: str = "linux";
@@ -3376,7 +3415,7 @@ fun t_riscv_got_pointer(arch: str, abi: str, width: u32) i32 {
     var file: output_testing.Output = created.ok;
     fin { output_testing.dnit(?file); }
 
-    val linked: err[fail.Fail] = link_modules_nocapture(?s, ?s.diags, ?tgt,
+    val linked: err[fail.Fail] = link_modules_nocapture(?s, ?l, ?s.diags, ?tgt,
         ?module, 1, nil::*target_of.DynLib, 0, output_testing.path(?file), "riscv-got"::*u8,
         catalog_artifact.EXECUTABLE, false, target_of.image_options_default(catalog_subsystem.CONSOLE));
     if (sel linked.err) {

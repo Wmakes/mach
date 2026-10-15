@@ -1,4 +1,4 @@
-# mach.lang.build.request
+# mach.lang.driver.request
 
 ## def Lever
 
@@ -32,24 +32,36 @@ pub val LEVER_OFF: Lever = 2
 
 `--no-key`
 
-## rec CliArgs
+## rec Overrides
 
 ```mach
-pub rec CliArgs;
+pub rec Overrides;
 ```
 
-the typed options of a build-shaped command
+what a build-shaped command sets over the profile it builds, already typed;
+a lever or value left unset leaves the profile's
 
-selectors: the `-a`, `-t` and `-p` patterns and `--all`
+output: the `-o` path, nil when absent
 work: the `-w` work directory, nil when absent
-optimize: `--optimize` or `--no-optimize`
-debug: `--debug` or `--no-debug`
-simd: the `--simd` value, nil when absent
-pass: the `--pass` names, each added to the pass set
-skip: the `--skip` names, each left out of it
-relax: the `--relax` names, each permitted
-unrelax: the `--no-relax` names, each withdrawn
-jobs: the `--jobs` count, 0 when absent
+ir_form: the form `emit_ir` prints in
+subsystem: the declared subsystem, SUBSYSTEM_FLAG_NONE for the artifact's own
+optimize: whether to optimize, or LEVER_PROFILE
+debug: whether to emit debug information, or LEVER_PROFILE
+simd: the vector lowering mode, none for the profile's
+pass: the pass names, each added to the pass set
+skip: the pass names, each left out of it
+relax: the relaxation names, each permitted
+unrelax: the relaxation names, each withdrawn
+jobs: the worker count, 0 for the host's
+
+## fun overrides_init
+
+```mach
+pub fun overrides_init(a: *A.Allocator) Overrides;
+```
+
+no override: the profile decides everything, with empty name lists and link
+inputs growable through `a`
 
 ## def SubsystemFlag
 
@@ -62,6 +74,14 @@ pub def SubsystemFlag: u8
 ```mach
 pub val SUBSYSTEM_FLAG_CONSOLE: SubsystemFlag = 1
 ```
+
+## fun subsystem_flag_from_name
+
+```mach
+pub fun subsystem_flag_from_name(name: str) opt[SubsystemFlag];
+```
+
+the flag a subsystem name sets, none for a name no flag sets
 
 ## fun subsystem_from_flag
 
@@ -110,18 +130,6 @@ pub val GOAL_CHECK: BuildGoal = 4
 `mach check`: load, resolve and check the selected artifacts' reachable source
 through the frontend and stop; no step runs and no product is written
 
-## val EMIT_HELP
-
-```mach
-pub val EMIT_HELP: str = "obj | exe (default exe; obj stops at the objects)"
-```
-
-## val EMIT_ERROR
-
-```mach
-pub val EMIT_ERROR: str = "--emit expects 'obj' or 'exe'"
-```
-
 ## rec LinkToken
 
 ```mach
@@ -158,6 +166,14 @@ pub fun test_goal(g: BuildGoal) bool;
 pub fun goal_from_emit_name(name: str) opt[BuildGoal];
 ```
 
+## fun goal_emit_name
+
+```mach
+pub fun goal_emit_name(goal: BuildGoal) str;
+```
+
+the name `--emit` gives the goal, "" for a goal it does not name
+
 ## fun goal_name
 
 ```mach
@@ -176,17 +192,17 @@ pub fun goal_verb(goal: BuildGoal) str;
 pub fun validate(a: *A.Allocator, r: *BuildRequest) err[fail.Fail];
 ```
 
-## fun release
+## fun is_release
 
 ```mach
-pub fun release(r: *BuildRequest) bool;
+pub fun is_release(r: *BuildRequest) bool;
 ```
 
 ## fun compose
 
 ```mach
 pub fun compose(a: *A.Allocator, itn: *intern.Interner, m: *manifest.Manifest,
-cli: *CliArgs, root: str, goal: BuildGoal, profile: str) res[BuildRequest, fail.Fail];
+o: *Overrides, root: str, goal: BuildGoal, profile: str) res[BuildRequest, fail.Fail];
 ```
 
 ## fun work_apply

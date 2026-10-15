@@ -1,69 +1,5 @@
 # mach.lang.driver
 
-## fwd project.Project
-
-```mach
-fwd project.Project
-```
-
-forwards [`mach.lang.driver.project.Project`](driver/project.md#rec-project)
-
-## fwd project.ModuleEntry
-
-```mach
-fwd project.ModuleEntry
-```
-
-forwards [`mach.lang.driver.project.ModuleEntry`](driver/project.md#rec-moduleentry)
-
-## fwd project.TargetEntry
-
-```mach
-fwd project.TargetEntry
-```
-
-forwards [`mach.lang.driver.project.TargetEntry`](driver/project.md#rec-targetentry)
-
-## fwd project.dnit_project
-
-```mach
-fwd project.dnit_project
-```
-
-forwards [`mach.lang.driver.project.dnit_project`](driver/project.md#fun-dnit_project)
-
-## fwd project.module_by_fqn
-
-```mach
-fwd project.module_by_fqn
-```
-
-forwards [`mach.lang.driver.project.module_by_fqn`](driver/project.md#fun-module_by_fqn)
-
-## fwd project.module_count
-
-```mach
-fwd project.module_count
-```
-
-forwards [`mach.lang.driver.project.module_count`](driver/project.md#fun-module_count)
-
-## fwd project.module_at
-
-```mach
-fwd project.module_at
-```
-
-forwards [`mach.lang.driver.project.module_at`](driver/project.md#fun-module_at)
-
-## fwd project.link_name_for
-
-```mach
-fwd project.link_name_for
-```
-
-forwards [`mach.lang.driver.project.link_name_for`](driver/project.md#fun-link_name_for)
-
 ## fwd frontend.begin_query_phase
 
 ```mach
@@ -260,44 +196,45 @@ pub fun build_project(s: *session.Session, project_root: str, selectors: *manife
 ## fun closure_locate
 
 ```mach
-pub fun closure_locate(s: *session.Session, m: *manifest.Manifest, project_root: str) res[project.Project, fail.Fail];
+pub fun closure_locate(s: *session.Session, m: *manifest.Manifest, project_root: str,
+unrealized: driver_closure.Unrealized) res[project.Closure, fail.Fail];
 ```
 
 locate a root manifest's dependency closure with no build cell configured, as a
-build locates it: `p.config.deps` holds every dependency under dep/, its manifest
-and its direct edges, and nothing is checked against git or the pins
+build locates it: every dependency under dep/, its manifest and its direct
+edges, and nothing is checked against git or the pins
 
-s: the session
+s: the session; its build allocator owns the closure
 m: the root manifest
 project_root: the root project's directory
-ret: the project holding the closure, released with `project.dnit_project`;
-              err from locating the closure, its diagnostics published
+unrealized: what a dependency nothing is realized for is
+ret: the closure, released with `project.closure_dnit`
 
 ## fun closure_checked
 
 ```mach
 pub fun closure_checked(s: *session.Session, m: *manifest.Manifest, project_root: str,
-check: *driver_closure.Check) res[project.Project, fail.Fail];
+check: *driver_closure.Check) res[project.Closure, fail.Fail];
 ```
 
 locate a root manifest's dependency closure as `closure_locate` does, holding every edge
 to `check` as it is located, as `mach dep verify` does
 
-s: the session
-m: the root manifest
-project_root: the root project's directory
 check: what each located edge is held to
-ret: the project holding the closure, released with `project.dnit_project`;
-              err naming the first edge that does not locate or does not hold
+ret: the closure; err naming the first edge that does not locate or does not hold
 
 ## fun begin_build
 
 ```mach
-pub fun begin_build(s: *session.Session, m: *manifest.Manifest, req: *request.BuildRequest, progress: *readout.Progress) res[project.Project, fail.Fail];
+pub fun begin_build(s: *session.Session, m: *manifest.Manifest, closure: *project.Closure, req: *request.BuildRequest,
+progress: *readout.Progress) res[project.Project, fail.Fail];
 ```
 
 begin the build the request names: every goal, a test goal included, loads the
 selected artifact's closure
+
+m: the root manifest the cell was planned from
+closure: `m`'s closure as the plan located it, which the project borrows
 
 ## def FrontendPhase
 
@@ -381,4 +318,14 @@ ret: ok(true) when refreshed, a rejection included since the project's standing 
 ```mach
 pub fun load_manifest(s: *session.Session, project_root: str) res[manifest.Manifest, fail.Fail];
 ```
+
+the root manifest of the project at `project_root`, read once: its text, an
+open buffer's when the session holds one, becomes the session's input for the
+file, so a warm session sees an edit to it as an input change, and the manifest
+records the input and the revision it was read at
+
+s: the session; its build allocator owns the manifest
+project_root: the project root
+ret: the manifest, released with `manifest.dnit`; err when it cannot be
+              read, does not parse or fails a check
 

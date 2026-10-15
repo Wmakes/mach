@@ -1,5 +1,4 @@
 use mach.lang.fail;
-use std.allocator.arena;
 use std.allocator.page;
 use std.collections.sort;
 use collections_vector: std.collections.vector;
@@ -13,7 +12,6 @@ use std.types.bool.bool;
 use std.types.bool.false;
 use std.types.bool.true;
 use std.types.error.err;
-use std.types.option.opt;
 use types_path: std.types.path;
 use std.types.result.res;
 use std.types.size.usize;
@@ -35,15 +33,18 @@ use cmd_testing:    mach.cli.cmd.testing;
 use cli_diagnostic: mach.cli.diagnostic;
 use mach.cli.exit;
 use mach.cli.util;
+use build_plan: mach.lang.build.plan;
 use mach.lang.diagnostic;
 use diagnostic_kind: mach.lang.diagnostic.kind;
-use mach.lang.intern;
-use mach.lang.listing;
+use mach.lang.driver;
+use driver_closure: mach.lang.driver.closure;
+use mach.lang.driver.request;
+use mach.lang.driver.toolchain;
 use mach.lang.manifest;
+use mach.lang.output.layout;
 use mach.lang.output.remove;
 use output_testing: mach.lang.output.testing;
-use lang_target:    mach.lang.target;
-use mach.lang.toolchain;
+use mach.lang.session;
 
 # what a clean entry names
 def EntryKind: u8;
@@ -63,13 +64,14 @@ rec CleanEntry {
 }
 
 # `mach clean`
-pub val COMMAND: args.CommandSpec = args.CommandSpec{name: "clean", aliases: nil, alias_n: 0, grammar: " <path>", summary: "remove project build output", effect: "remove the output, object, IR, assembly, test, cache, and staging trees declared by the manifest", exits: nil, exit_n: 0, terminator: "", tables: nil, table_n: 0, refused: nil, refused_n: 0, refusal: "", relations: nil, relation_n: 0, constraints: nil, constraint_n: 0, operand_min: 0, operand_max: args.OPERANDS_ANY, truncate_at_sep: false, actions: nil, action_n: 0, examples: nil, example_n: 0, run: run};
+pub val COMMAND: args.CommandSpec = args.CommandSpec{name: "clean", aliases: nil, alias_n: 0, grammar: " <path>", summary: "remove project build output", effect: "remove every artifact and every object, IR, assembly, test, cache, staging and dependency tree a build of every cell writes, as the build plans it; a dependency never pulled was never built and adds nothing", exits: nil, exit_n: 0, terminator: "", tables: nil, table_n: 0, refused: nil, refused_n: 0, refusal: "", relations: nil, relation_n: 0, constraints: nil, constraint_n: 0, operand_min: 0, operand_max: args.OPERANDS_ANY, truncate_at_sep: false, actions: nil, action_n: 0, examples: nil, example_n: 0, run: run};
 
-# `mach clean`: remove every output path the manifest can produce for every declared target
-# and profile. the obj, ir, asm, and test roots, the compiler cache and step staging
-# directories, and the binary path of each artifact cell
-# are collected, sorted, collapsed under their ancestors, and removed inside the project
-# root; a path that escapes the root or crosses a symlink is refused. a missing path is
+# `mach clean`: remove every path a build of every cell writes, as the build
+# plans it: each artifact's output and the object, IR, assembly, test, cache,
+# staging and dependency trees beneath each cell's work directory, dependency
+# requirement cells included; a dependency never realized was never built, so
+# it adds no cell. they are sorted, collapsed under their ancestors,
+# and removed inside the project root; a path that escapes the root or crosses a symlink is refused. a missing path is
 # not an error; "nothing to clean" prints when nothing was removed
 # ---
 # cx:  the call
@@ -85,22 +87,7 @@ pub fun run(cx: *args.Call) res[i64, fail.Fail] {
 }
 
 fun clean_project(r: *cli_diagnostic.Report, a: *A.Allocator, root: *u8) i64 {
-    val mp_r: res[str, A.Error] = types_path.join(a, root, util.PROJECT_CONFIG_NAME);
-    if (sel mp_r.err) { ret cli_diagnostic.report_fail(r, fail.refused(mp_r.err), diagnostic.ORIGIN_NONE); }
-    val manifest_path: str = mp_r.ok;
-
-    val doc_r: res[manifest.Doc, fail.Fail] = manifest.doc_read(a, manifest_path);
-    if (sel doc_r.err) { ret cli_diagnostic.report_fail(r, doc_r.err, diagnostic.ORIGIN_NONE); }
-    var doc: manifest.Doc = doc_r.ok;
-
-    var itn:   intern.Interner                   = intern.init(a);
-    val man_r: res[manifest.Manifest, fail.Fail] = manifest.parse(a, ?itn, ?doc);
-    manifest.doc_dnit(a, ?doc);
-    if (sel man_r.err) { ret cli_diagnostic.report_fail(r, man_r.err, diagnostic.ORIGIN_NONE); }
-    var m: manifest.Manifest = man_r.ok;
-    fin { manifest.dnit(?m, a); }
-
-    val plan_r: res[Vector[CleanEntry], fail.Fail] = build_clean_plan(a, ?itn, ?m, root::str);
+    val plan_r: res[Vector[CleanEntry], fail.Fail] = build_clean_plan(a, root::str);
     if (sel plan_r.err) { ret cli_diagnostic.report_fail(r, plan_r.err, diagnostic.ORIGIN_NONE); }
     var plan: Vector[CleanEntry] = plan_r.ok;
 
@@ -112,37 +99,90 @@ fun clean_project(r: *cli_diagnostic.Report, a: *A.Allocator, root: *u8) i64 {
     ret code;
 }
 
-fun target_selectors(a: *A.Allocator, itn: *intern.Interner, m: *manifest.Manifest) res[Vector[str], fail.Fail] {
-    var v: Vector[str] = collections_vector.init[str](a);
-    if (m.target_count == 0) {
-        val pr: res[usize, A.Error] = collections_vector.push[str](?v, "");
-        if (sel pr.err) { ret res[Vector[str], fail.Fail].err{fail.refused(pr.err)}; }
-        ret res[Vector[str], fail.Fail].ok{v};
+# every path a build of the project writes, relative to `root`: each cell is
+# planned as `mach build --all` plans it, one plan per profile, and each
+# planned unit names its artifact and the trees the build owns beneath its
+# work directory. the planning session is torn down before this returns
+# ---
+# a:   owns the entries and a refusal
+# ret: the entries, sorted and collapsed under their ancestors; err from
+#      loading the manifest or planning
+fun build_clean_plan(a: *A.Allocator, root: str) res[Vector[CleanEntry], fail.Fail] {
+    val made: res[session.Session, fail.Fail] = toolchain.session_init(a);
+    if (sel made.err) { ret res[Vector[CleanEntry], fail.Fail].err{made.err}; }
+    var ps:      session.Session                    = made.ok;
+    val written: res[Vector[CleanEntry], fail.Fail] = planned_entries(a, ?ps, root);
+    if (sel written.ok) {
+        session.dnit(?ps);
+        ret written;
     }
-    var i: u32 = 0;
-    for (i < m.target_count) {
-        val found: opt[str] = intern.get(itn, m.targets[i].name);
-        if (sel found.some) {
-            val pr: res[usize, A.Error] = collections_vector.push[str](?v, found.some);
-            if (sel pr.err) { ret res[Vector[str], fail.Fail].err{fail.refused(pr.err)}; }
-        }
-        i = i + 1;
-    }
-    ret res[Vector[str], fail.Fail].ok{v};
+    var kept: fail.Fail               = fail.message("failed to retain the clean planning error");
+    val held: res[fail.Fail, A.Error] = fail.retain(a, written.err);
+    if (sel held.ok) { kept = held.ok; }
+    session.dnit(?ps);
+    ret res[Vector[CleanEntry], fail.Fail].err{kept};
 }
 
-fun profile_selectors(a: *A.Allocator, itn: *intern.Interner, m: *manifest.Manifest) res[Vector[str], fail.Fail] {
-    var v: Vector[str] = collections_vector.init[str](a);
-    var i: u32         = 0;
-    for (i < m.profile_count) {
-        val found: opt[str] = intern.get(itn, m.profiles[i].name);
-        if (sel found.some) {
-            val pr: res[usize, A.Error] = collections_vector.push[str](?v, found.some);
-            if (sel pr.err) { ret res[Vector[str], fail.Fail].err{fail.refused(pr.err)}; }
+fun planned_entries(a: *A.Allocator, ps: *session.Session, root: str) res[Vector[CleanEntry], fail.Fail] {
+    val loaded: res[manifest.Manifest, fail.Fail] = driver.load_manifest(ps, root);
+    if (sel loaded.err) { ret res[Vector[CleanEntry], fail.Fail].err{loaded.err}; }
+    var m:   manifest.Manifest = loaded.ok;
+    var cli: args.CliArgs;
+    cli.verbosity     = 0;
+    cli.quiet         = true;
+    cli.overrides     = request.overrides_init(ps.alloc);
+    cli.selectors     = manifest.selectors_init(ps.alloc);
+    cli.selectors.all = true;
+    # a dependency never realized was never built, so it adds no cell
+    val planned_r: res[build.Planned, fail.Fail] = build.plan_selection(ps.alloc, ps, ?m, root, ?cli,
+        request.GOAL_ARTIFACT, manifest.ARTIFACT_DEFAULT_SET, false, driver_closure.UNREALIZED_UNBUILT);
+    if (sel planned_r.err) { ret res[Vector[CleanEntry], fail.Fail].err{planned_r.err}; }
+    val planned: build.Planned = planned_r.ok;
+
+    var raw: Vector[CleanEntry] = collections_vector.init[CleanEntry](a);
+    fin { collections_vector.dnit[CleanEntry](?raw); }
+    var pi: usize = 0;
+    for (pi < planned.plans.len) {
+        val bp: *build_plan.BuildPlan = ?planned.plans.data[pi];
+        var ui: usize                 = 0;
+        for (ui < bp.units.len) {
+            val unit:  *build_plan.BuildUnit = ?bp.units.data[ui];
+            val wrote: err[fail.Fail]        = push_unit(a, ps.alloc, root, ?raw, unit);
+            if (sel wrote.err) { ret res[Vector[CleanEntry], fail.Fail].err{wrote.err}; }
+            ui = ui + 1;
         }
-        i = i + 1;
+        pi = pi + 1;
     }
-    ret res[Vector[str], fail.Fail].ok{v};
+    ret normalize_and_collapse(a, ?raw);
+}
+
+# a unit's artifact and every tree the build owns beneath its work directory
+fun push_unit(a: *A.Allocator, scratch: *A.Allocator, root: str, raw: *Vector[CleanEntry], u: *build_plan.BuildUnit) err[fail.Fail] {
+    val artifact: err[fail.Fail] = push_written(a, root, raw, u.out_path, ENTRY_FILE);
+    if (sel artifact.err) { ret artifact; }
+    var t: u32 = 0;
+    for (t < layout.TREE_COUNT) {
+        val tree: res[str, fail.Fail] = layout.under(scratch, u.out_dir, layout.TREES[t]);
+        if (sel tree.err) { ret err[fail.Fail].err{tree.err}; }
+        val pushed: err[fail.Fail] = push_written(a, root, raw, tree.ok, ENTRY_DIR);
+        if (sel pushed.err) { ret pushed; }
+        t = t + 1;
+    }
+    ret err[fail.Fail].ok{};
+}
+
+# `path`, which the build placed beneath `root`, as the root-relative entry clean removes
+fun push_written(a: *A.Allocator, root: str, v: *Vector[CleanEntry], path: str, kind: EntryKind) err[fail.Fail] {
+    if (str_empty(path)) { ret err[fail.Fail].ok{}; }
+    var start: usize = str_len(root);
+    if (start > 0 && root[start - 1] != '/'::u8) { start = start + 1; }
+    val n: usize = str_len(path);
+    if (n <= start || !str_starts_with(path, root) || path[start - 1] != '/'::u8) {
+        ret err[fail.Fail].err{fail.formatted_user(a, diagnostic_kind.CLEAN_PATH_INVALID, "clean target '{}' is not beneath the project root", path)};
+    }
+    val rel: res[str, types_string.StrError] = str_copy_slice(a, path, start, n - start);
+    if (sel rel.err) { ret err[fail.Fail].err{fail.message(fail.str_text(rel.err))}; }
+    ret push_entry(v, rel.ok, kind);
 }
 
 fun push_entry(v: *Vector[CleanEntry], rel: str, kind: EntryKind) err[fail.Fail] {
@@ -153,241 +193,6 @@ fun push_entry(v: *Vector[CleanEntry], rel: str, kind: EntryKind) err[fail.Fail]
     val pr: res[usize, A.Error] = collections_vector.push[CleanEntry](v, e);
     if (sel pr.err) { ret err[fail.Fail].err{fail.refused(pr.err)}; }
     ret err[fail.Fail].ok{};
-}
-
-fun push_id_entry(itn: *intern.Interner, v: *Vector[CleanEntry], id: intern.StrId, kind: EntryKind) err[fail.Fail] {
-    val found: opt[str] = intern.get(itn, id);
-    if (sel found.none) { ret err[fail.Fail].ok{}; }
-    ret push_entry(v, found.some, kind);
-}
-
-fun push_test_root_entry(a: *A.Allocator, itn: *intern.Interner, v: *Vector[CleanEntry], id: intern.StrId) err[fail.Fail] {
-    val found: opt[str] = intern.get(itn, id);
-    if (sel found.none) { ret err[fail.Fail].ok{}; }
-    val tmpl: str = found.some;
-
-    val n:        usize = str_len(tmpl);
-    var last_sep: i64   = -1;
-    var i:        usize = 0;
-    for (i < n) {
-        if (tmpl[i] == '/'::u8) { last_sep = i::i64; }
-        i = i + 1;
-    }
-    if (last_sep < 0) { ret err[fail.Fail].ok{}; }
-
-    val parent_r: res[str, types_string.StrError] = str_copy_slice(a, tmpl, 0, last_sep::usize);
-    if (sel parent_r.err) { ret err[fail.Fail].err{fail.message(fail.str_text(parent_r.err))}; }
-    ret push_entry(v, parent_r.ok, ENTRY_DIR);
-}
-
-# the dependency artifact home beside the cell's object root: every requirement a
-# dependency's export library carries writes under it, so it is this cell's output
-# as much as `obj/` is
-fun push_dependency_home(a: *A.Allocator, itn: *intern.Interner, v: *Vector[CleanEntry], obj_root: intern.StrId) err[fail.Fail] {
-    val found: opt[str] = intern.get(itn, obj_root);
-    if (sel found.none) { ret err[fail.Fail].ok{}; }
-    val tmpl:     str   = found.some;
-    val n:        usize = str_len(tmpl);
-    var last_sep: i64   = -1;
-    var i:        usize = 0;
-    for (i < n) {
-        if (tmpl[i] == '/'::u8) { last_sep = i::i64; }
-        i = i + 1;
-    }
-    if (last_sep < 0) { ret err[fail.Fail].ok{}; }
-    val parent_r: res[str, types_string.StrError] = str_copy_slice(a, tmpl, 0, last_sep::usize);
-    if (sel parent_r.err) { ret err[fail.Fail].err{fail.message(fail.str_text(parent_r.err))}; }
-    val home_r: res[str, std_format.FormatError] = std_format.sprint(a, "{}/{}", parent_r.ok, manifest.DEPENDENCY_ARTIFACT_DIR);
-    if (sel home_r.err) { ret err[fail.Fail].err{fail.message(fail.format_text(home_r.err))}; }
-    ret push_entry(v, home_r.ok, ENTRY_DIR);
-}
-
-fun build_clean_plan(a: *A.Allocator, itn: *intern.Interner, m: *manifest.Manifest, root: str) res[Vector[CleanEntry], fail.Fail] {
-    val reg_made: res[*lang_target.TargetRegistry, fail.Fail] = toolchain.registry();
-    if (sel reg_made.err) { ret res[Vector[CleanEntry], fail.Fail].err{reg_made.err}; }
-    val reg: *lang_target.TargetRegistry = reg_made.ok;
-
-    var raw: Vector[CleanEntry] = collections_vector.init[CleanEntry](a);
-
-    val targets_r: res[Vector[str], fail.Fail] = target_selectors(a, itn, m);
-    if (sel targets_r.err) { ret res[Vector[CleanEntry], fail.Fail].err{targets_r.err}; }
-    var targets: Vector[str] = targets_r.ok;
-
-    val profiles_r: res[Vector[str], fail.Fail] = profile_selectors(a, itn, m);
-    if (sel profiles_r.err) { ret res[Vector[CleanEntry], fail.Fail].err{profiles_r.err}; }
-    var profiles: Vector[str] = profiles_r.ok;
-
-    var ti: usize = 0;
-    for (ti < targets.len) {
-        val tname: str   = targets.data[ti];
-        var pi:    usize = 0;
-        for (pi < profiles.len) {
-            val pname: str            = profiles.data[pi];
-            val fault: err[fail.Fail] = plan_cells_for(a, itn, reg, m, tname, pname, ?raw);
-            if (sel fault.err) { ret res[Vector[CleanEntry], fail.Fail].err{fault.err}; }
-            pi = pi + 1;
-        }
-        ti = ti + 1;
-    }
-
-    var pdi: usize = 0;
-    for (pdi < profiles.len) {
-        val fault: err[fail.Fail] = plan_dependency_cells_for(a, itn, reg, m, root, profiles.data[pdi], ?raw);
-        if (sel fault.err) { ret res[Vector[CleanEntry], fail.Fail].err{fault.err}; }
-        pdi = pdi + 1;
-    }
-
-    val collapsed_r: res[Vector[CleanEntry], fail.Fail] = normalize_and_collapse(a, ?raw);
-    collections_vector.dnit[CleanEntry](?raw);
-    ret collapsed_r;
-}
-
-fun plan_cells_for(a: *A.Allocator, itn: *intern.Interner, reg: *lang_target.TargetRegistry, m: *manifest.Manifest,
-    tname: str, pname: str, raw: *Vector[CleanEntry]) err[fail.Fail] {
-    var target_id:      intern.StrId = intern.STR_NIL;
-    var have_target_id: bool         = false;
-    if (m.target_count > 0) {
-        val tid_r: res[intern.StrId, A.Error] = intern.add(itn, tname);
-        if (sel tid_r.err) { ret err[fail.Fail].err{fail.refused(tid_r.err)}; }
-        target_id      = tid_r.ok;
-        have_target_id = true;
-    }
-
-    var ai: u32 = 0;
-    for (ai < m.artifact_count) {
-        val art: *manifest.ArtifactDef = ?m.artifacts[ai];
-
-        if (have_target_id && !manifest.artifact_supports_target(itn, art, target_id)) {
-            ai = ai + 1;
-            cnt;
-        }
-
-        val name_opt: opt[str] = intern.get(itn, art.name);
-        if (sel name_opt.none) {
-            ai = ai + 1;
-            cnt;
-        }
-
-        var cell: manifest.Cell = manifest.cell_of(name_opt.some, tname, pname);
-
-        val ur: res[manifest.BuildUnit, fail.Fail] = manifest.resolve_build_unit(a, itn, reg, m, ?cell);
-        if (sel ur.err) {
-            if (!have_target_id) {
-                ai = ai + 1;
-                cnt;
-            }
-            ret err[fail.Fail].err{ur.err};
-        }
-        val bu: manifest.BuildUnit = ur.ok;
-
-        var fault: err[fail.Fail] = push_id_entry(itn, raw, bu.obj_root, ENTRY_DIR);
-        if (sel fault.err) { ret err[fail.Fail].err{fault.err}; }
-        val home_fault: err[fail.Fail] = push_dependency_home(a, itn, raw, bu.obj_root);
-        if (sel home_fault.err) { ret err[fail.Fail].err{home_fault.err}; }
-        val fault2: err[fail.Fail] = push_id_entry(itn, raw, bu.ir_root, ENTRY_DIR);
-        if (sel fault2.err) { ret err[fail.Fail].err{fault2.err}; }
-        val fault3: err[fail.Fail] = push_id_entry(itn, raw, bu.asm_root, ENTRY_DIR);
-        if (sel fault3.err) { ret err[fail.Fail].err{fault3.err}; }
-        val fault4: err[fail.Fail] = push_test_root_entry(a, itn, raw, bu.test_root);
-        if (sel fault4.err) { ret err[fail.Fail].err{fault4.err}; }
-        val fault5: err[fail.Fail] = push_id_entry(itn, raw, bu.bin_path, ENTRY_FILE);
-        if (sel fault5.err) { ret err[fail.Fail].err{fault5.err}; }
-        val fault6: err[fail.Fail] = push_state_entries(itn, raw, bu);
-        if (sel fault6.err) { ret err[fail.Fail].err{fault6.err}; }
-
-        ai = ai + 1;
-    }
-    ret err[fail.Fail].ok{};
-}
-
-# the compiler cache and step staging directories of a cell's output directory
-fun push_state_entries(itn: *intern.Interner, raw: *Vector[CleanEntry], bu: manifest.BuildUnit) err[fail.Fail] {
-    val cache: err[fail.Fail] = push_id_entry(itn, raw, bu.cache_root, ENTRY_DIR);
-    if (sel cache.err) { ret cache; }
-    ret push_id_entry(itn, raw, bu.stage_root, ENTRY_DIR);
-}
-
-# the cells a dependency's export library requires write under the root's
-# out expanded with the dependency's own target, which the root never names. the
-# realized dependency manifests are read for those target names only: no
-# verification, no network, and a slot without a readable manifest is skipped
-fun plan_dependency_cells_for(a: *A.Allocator, itn: *intern.Interner, reg: *lang_target.TargetRegistry,
-    m: *manifest.Manifest, root: str, pname: str, raw: *Vector[CleanEntry]) err[fail.Fail] {
-    if (m.dep_count == 0) { ret err[fail.Fail].ok{}; }
-    val dep_dir_r: res[str, A.Error] = types_path.join(a, root, "dep");
-    if (sel dep_dir_r.err) { ret err[fail.Fail].err{fail.refused(dep_dir_r.err)}; }
-    val dep_dir: str = dep_dir_r.ok;
-
-    val listed: res[Vector[fs.Listed], fs.FsError] = fs.read_dir(a, dep_dir);
-    if (sel listed.err) { ret err[fail.Fail].ok{}; }
-    var entries: Vector[fs.Listed] = listed.ok;
-    fin { fs.listed_free(?entries); }
-    val names_r: res[Vector[str], fail.Fail] = listing.names(a, dep_dir, ?entries);
-    if (sel names_r.err) { ret err[fail.Fail].err{names_r.err}; }
-    var names: Vector[str] = names_r.ok;
-    fin { collections_vector.dnit[str](?names); }
-
-    var i: usize = 0;
-    for (i < names.len) {
-        val slot_r: res[str, A.Error] = types_path.join(a, dep_dir, names.data[i]);
-        if (sel slot_r.err) { ret err[fail.Fail].err{fail.refused(slot_r.err)}; }
-        val manifest_r: res[str, A.Error] = types_path.join(a, slot_r.ok, manifest.MANIFEST_FILE);
-        if (sel manifest_r.err) { ret err[fail.Fail].err{fail.refused(manifest_r.err)}; }
-        val dm_r: res[manifest.Manifest, fail.Fail] = read_dependency_manifest(a, itn, manifest_r.ok);
-        if (sel dm_r.ok) {
-            var dm:    manifest.Manifest = dm_r.ok;
-            var scope: manifest.Scope    = manifest.dependency_scope(m, ?dm);
-            var ai:    u32               = 0;
-            for (ai < dm.artifact_count) {
-                val ra: *manifest.ArtifactDef = ?dm.artifacts[ai];
-                if (manifest.export_requires(itn, ?dm, ra)) {
-                    val rname:         opt[str] = intern.get(itn, ra.name);
-                    var artifact_name: str      = "";
-                    if (sel rname.some) { artifact_name = rname.some; }
-                    var ti: u32 = 0;
-                    for (ti < dm.target_count) {
-                        val tname:       opt[str] = intern.get(itn, dm.targets[ti].name);
-                        var target_name: str      = "";
-                        if (sel tname.some) { target_name = tname.some; }
-                        if (!str_empty(artifact_name) && !str_empty(target_name)
-                            && manifest.artifact_supports_target(itn, ra, dm.targets[ti].name)) {
-                            var cell:  manifest.Cell                      = manifest.cell_of(artifact_name, target_name, pname);
-                            val ur:    res[manifest.BuildUnit, fail.Fail] = manifest.resolve_scoped_build_unit(a, itn, reg, ?scope, ?cell);
-                            val fault: err[fail.Fail]                     = push_dependency_cell(a, itn, raw, ur);
-                            if (sel fault.err) { ret fault; }
-                        }
-                        ti = ti + 1;
-                    }
-                }
-                ai = ai + 1;
-            }
-            manifest.dnit(?dm, a);
-        }
-        i = i + 1;
-    }
-    ret err[fail.Fail].ok{};
-}
-
-# the object root, cache and staging directories, and dependency home of one resolved dependency cell; a cell that
-# does not resolve names no output to remove
-fun push_dependency_cell(a: *A.Allocator, itn: *intern.Interner, raw: *Vector[CleanEntry],
-    ur: res[manifest.BuildUnit, fail.Fail]) err[fail.Fail] {
-    if (sel ur.err) { ret err[fail.Fail].ok{}; }
-    val bu:    manifest.BuildUnit = ur.ok;
-    val fault: err[fail.Fail]     = push_id_entry(itn, raw, bu.obj_root, ENTRY_DIR);
-    if (sel fault.err) { ret fault; }
-    val state: err[fail.Fail] = push_state_entries(itn, raw, bu);
-    if (sel state.err) { ret state; }
-    ret push_dependency_home(a, itn, raw, bu.obj_root);
-}
-
-fun read_dependency_manifest(a: *A.Allocator, itn: *intern.Interner, manifest_path: str) res[manifest.Manifest, fail.Fail] {
-    val doc_r: res[manifest.Doc, fail.Fail] = manifest.doc_read(a, manifest_path);
-    if (sel doc_r.err) { ret res[manifest.Manifest, fail.Fail].err{doc_r.err}; }
-    var doc:    manifest.Doc                      = doc_r.ok;
-    val parsed: res[manifest.Manifest, fail.Fail] = manifest.parse(a, itn, ?doc);
-    manifest.doc_dnit(a, ?doc);
-    ret parsed;
 }
 
 fun cmp_entry(x: *CleanEntry, y: *CleanEntry) i64 {
@@ -707,6 +512,35 @@ test build_clean_plan__dynamic_first_out_template_still_cleans {
 
     fs.remove_all(?a, root);
     ret bad;
+}
+
+# a dependency never pulled was never built: clean does not refuse it, and still
+# removes the project's own outputs
+test clean_project__an_unpulled_dependency_adds_nothing_and_is_not_refused {
+    var r: cli_diagnostic.Report;
+    cli_diagnostic.report_init(?r, cli_diagnostic.FORMAT_HUMAN);
+    var a:      A.Allocator;
+    val make_r: err[A.Error] = page.make(?a);
+    if (sel make_r.err) { ret 1; }
+    val created: res[output_testing.Output, fail.Fail] = output_testing.create(?a, "mach-clean-unpulled");
+    if (sel created.err) { ret 2; }
+    var owner: output_testing.Output = created.ok;
+    fin { output_testing.dnit(?owner); }
+    val root: str = owner.directory;
+
+    val toml_r: res[str, A.Error] = types_path.join(?a, root, "mach.toml");
+    if (sel toml_r.err) { ret 3; }
+    val body:  str             = "[project]\nmach = \">=5\"\nid = \"unpulled\"\nversion = \"0.0.0\"\nsrc = \"src\"\nwork = \"out\"\n\n[dep.leaf]\npath = \"dep/leaf\"\n\n[artifact.unpulled]\nkind = \"bin\"\nentry = \"src/main.mach\"\nout = \"{project.work}/bin/unpulled\"\ntargets = [\"*\"]\nlink = []\nneed = []\n[profile.debug]\ndefault = true\noptimize = false\ndebug = true\nsimd = \"scalarize\"\n";
+    val wrote: err[fs.FsError] = fs.write_bytes(toml_r.ok, body::*u8, str_len(body), 0o644);
+    if (sel wrote.err) { ret 3; }
+    val obj_r: res[str, A.Error] = types_path.join(?a, root, "out/obj");
+    if (sel obj_r.err) { ret 4; }
+    val made: err[fs.FsError] = fs.create_dir_all(?a, obj_r.ok, 0o755);
+    if (sel made.err) { ret 4; }
+
+    if (clean_project(?r, ?a, root::*u8) != 0) { ret 5; }
+    if (t_exists(?a, root, "out/obj"))         { ret 6; }
+    ret 0;
 }
 
 test build_clean_plan__unsupported_target_artifact_pairs_are_skipped_not_errored {

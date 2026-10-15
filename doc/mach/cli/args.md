@@ -1,12 +1,26 @@
 # mach.cli.args
 
-## fwd request.CliArgs
+## rec CliArgs
 
 ```mach
-fwd request.CliArgs
+pub rec CliArgs;
 ```
 
-forwards [`mach.lang.build.request.CliArgs`](../lang/build/request.md#rec-cliargs)
+the typed options of a build-shaped command: what it reports and selects, and
+what it sets over the profile it builds
+
+verbosity: 0, 1 or 2 from `-v` and `-vv`
+quiet: `--quiet`
+selectors: the `-a`, `-t` and `-p` patterns and `--all`
+overrides: everything else the command sets, typed
+
+## val EMIT_ERROR
+
+```mach
+pub val EMIT_ERROR: str = "--emit expects 'obj' or 'exe'"
+```
+
+the refusal of an `--emit` value no goal is named by
 
 ## val ARITY_FLAG
 
@@ -221,7 +235,7 @@ pub val WORKDIR: [WORKDIR_N]*FlagSpec = [WORKDIR_N]*FlagSpec;
 pub val EMIT: FlagSpec = FlagSpec;
 ```
 
-`--emit <kind>`; its help text is request.EMIT_HELP
+`--emit <kind>`
 
 ## val EMITS_N
 
@@ -960,26 +974,27 @@ f: the failure resolving them
 ## fun build_cli_invocation
 
 ```mach
-pub fun build_cli_invocation(a: *A.Allocator, inv: *ParsedInvocation, argv: **u8) res[request.CliArgs, fail.Fail];
+pub fun build_cli_invocation(a: *A.Allocator, inv: *ParsedInvocation, argv: **u8) res[CliArgs, fail.Fail];
 ```
 
-the typed request.CliArgs of a build-shaped command: verbosity 0, 1, or 2 from `-v` and `-vv`,
-quiet, the CGEN flags, the selectors, `-o` and `-w` as raw argv pointers or nil, the LEVERS as
-given, `--jobs` as a count or 0 when absent. include_deps is false for the command to set, and
-link_tokens and lib_dirs are left empty for collect_link_inputs
+the typed CliArgs of a build-shaped command: verbosity, quiet, the selectors,
+and the overrides, each typed as the request reads it: `-o` and `-w` as raw argv
+pointers or nil, the LEVERS as given, `--jobs` as a count or 0 when absent.
+include_deps is false for the command to set, and link_tokens and lib_dirs are
+left empty for collect_link_inputs
 
-a: backs the selector patterns
+a: backs the selector patterns and the name lists
 inv: the parsed invocation
 argv: the argument vector inv was parsed from
-ret: the arguments; err when a vector cannot grow or `--jobs` is no count
+ret: the arguments; err when a vector cannot grow or a value names nothing its flag takes
 
 ## fun collect_link_inputs
 
 ```mach
-pub fun collect_link_inputs(a: *A.Allocator, c: *request.CliArgs, inv: *ParsedInvocation, argv: **u8) err[fail.Fail];
+pub fun collect_link_inputs(a: *A.Allocator, c: *CliArgs, inv: *ParsedInvocation, argv: **u8) err[fail.Fail];
 ```
 
-fill c.link_tokens and c.lib_dirs in command-line order: every `-l` value and every bare
+fill c.overrides.link_tokens and c.overrides.lib_dirs in command-line order: every `-l` value and every bare
 positional after the first that input.token_is_path accepts go to link_tokens, every `-L`
 value to lib_dirs. Both vectors are reinitialised with a first
 

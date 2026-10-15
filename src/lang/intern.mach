@@ -90,11 +90,25 @@ pub fun init(a: *A.Allocator) Interner {
     ret itn;
 }
 
+# an interner layered over `base`: it answers every id `base` and its own
+# bases had issued when it was made, and issues its own past them. a base may
+# itself be a child, so a session over a plan's interner layers its parallel
+# workers over the session's
 pub fun child_init(base: *Interner, a: *A.Allocator) Interner {
     var itn: Interner = init(a);
     itn.base     = base;
-    itn.base_len = base.len;
+    itn.base_len = base.base_len + base.len;
     ret itn;
+}
+
+# whether `itn` answers every id `base` has issued: it is `base`, or layered over it
+pub fun descends(itn: *Interner, base: *Interner) bool {
+    var at: *Interner = itn;
+    for (at != nil) {
+        if (at == base) { ret true; }
+        at = at.base;
+    }
+    ret false;
 }
 
 pub fun dnit(itn: *Interner) {
@@ -171,9 +185,17 @@ pub fun range_add(itn: *Interner, source: str, offset: usize, len: usize) res[St
     var probe: Entry = Entry{data: ?source[offset], len: len};
     if (len == 0) { probe.data = ""; }
 
-    if (itn.base != nil) {
-        val res_base: opt[*StrId] = map.get_by[Entry, StrId](?itn.base.dedup, ?probe);
-        if (sel res_base.some) { ret res[StrId, A.Error].ok{@res_base.some}; }
+    # each base answers only the ids it had issued when the layer above it was
+    # made; one it issued since lies in that layer's own range
+    var below: *Interner = itn.base;
+    var limit: usize     = itn.base_len;
+    for (below != nil) {
+        val res_base: opt[*StrId] = map.get_by[Entry, StrId](?below.dedup, ?probe);
+        if (sel res_base.some) {
+            if (str_index(@res_base.some)::usize < limit) { ret res[StrId, A.Error].ok{@res_base.some}; }
+        }
+        limit = below.base_len;
+        below = below.base;
     }
 
     val res_existing: opt[*StrId] = map.get_by[Entry, StrId](?itn.dedup, ?probe);
@@ -332,6 +354,42 @@ test child_init__layers_and_reinterns {
     val in_base: res[StrId, A.Error] = add(?base, "gamma");
     if (sel in_base.err)                   { ret 11; }
     if (!str_same(in_base.ok, gamma_base)) { ret 11; }
+    ret 0;
+}
+
+# a child of a child answers its grandparent's ids, issues past every layer, and
+# a string its grandparent holds interns to the grandparent's id
+test child_init__layers_over_a_child {
+    var alloc: A.Allocator;
+    val made:  err[A.Error] = page.make(?alloc);
+    if (sel made.err) { ret 1; }
+    var base: Interner = init(?alloc);
+    fin { dnit(?base); }
+    val alpha: res[StrId, A.Error] = add(?base, "alpha");
+    if (sel alpha.err) { ret 1; }
+    var mid: Interner = child_init(?base, ?alloc);
+    fin { dnit(?mid); }
+    val beta: res[StrId, A.Error] = add(?mid, "beta");
+    if (sel beta.err) { ret 2; }
+    var top: Interner = child_init(?mid, ?alloc);
+    fin { dnit(?top); }
+    if (child_base_len(?top) != 2) { ret 3; }
+    val alpha_top: res[StrId, A.Error] = add(?top, "alpha");
+    val beta_top:  res[StrId, A.Error] = add(?top, "beta");
+    val gamma:     res[StrId, A.Error] = add(?top, "gamma");
+    if (sel alpha_top.err)                               { ret 4; }
+    if (sel beta_top.err)                                { ret 4; }
+    if (sel gamma.err)                                   { ret 4; }
+    if (!str_same(alpha_top.ok, alpha.ok))               { ret 5; }
+    if (!str_same(beta_top.ok, beta.ok))                 { ret 6; }
+    if (str_index(gamma.ok) != 2)                        { ret 7; }
+    if (!descends(?top, ?base) || descends(?base, ?top)) { ret 8; }
+    # a string the base takes after the child was layered stays the child's own
+    val late:      res[StrId, A.Error] = add(?base, "late");
+    val late_here: res[StrId, A.Error] = add(?top, "late");
+    if (sel late.err)                       { ret 9; }
+    if (sel late_here.err)                  { ret 9; }
+    if (str_index(late_here.ok)::usize < 2) { ret 10; }
     ret 0;
 }
 

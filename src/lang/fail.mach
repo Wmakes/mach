@@ -10,6 +10,7 @@ use std.types.size.usize;
 use std.types.string.StrError;
 use std.types.string.str;
 use std.types.string.str_equals;
+use std.types.string.str_join;
 use std.types.string.str_len;
 
 use A: std.allocator;
@@ -632,6 +633,14 @@ pub fun env_text(e: env.EnvError) str {
 pub fun format(a: *A.Allocator, fmt: str, va: ...) res[str, Fail] {
     val r: res[str, std_format.FormatError] = std_format.sprint(a, fmt, va...);
     if (sel r.err) { ret res[str, Fail].err{format_refused(r.err)}; }
+    ret res[str, Fail].ok{r.ok};
+}
+
+# the texts `va` joined into `a`, which owns the result; a refusal to join is
+# the failure instead
+pub fun join(a: *A.Allocator, va: ...) res[str, Fail] {
+    val r: res[str, StrError] = str_join(a, va...);
+    if (sel r.err) { ret res[str, Fail].err{str_refused(r.err)}; }
     ret res[str, Fail].ok{r.ok};
 }
 

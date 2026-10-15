@@ -14,9 +14,10 @@ use A: std.allocator;
 use std.process.exec;
 use std.runtime.native.view.Unit;
 
-use build_fingerprint: mach.lang.build.fingerprint;
-use mach.lang.build.request;
+use mach.lang.driver.request;
+use mach.lang.driver.toolchain;
 use mach.lang.fail;
+use lang_fingerprint: mach.lang.fingerprint;
 use mach.lang.intern;
 use mach.lang.manifest;
 use mach.lang.manifest.template;
@@ -24,12 +25,11 @@ use mach.lang.query;
 use mach.lang.session;
 use lang_target:        mach.lang.target;
 use target_fingerprint: mach.lang.target.fingerprint;
-use mach.lang.toolchain;
 use mach.lang.wire;
 
+use mach.lang.driver.codec;
 use driver_environment: mach.lang.driver.environment;
 use mach.lang.driver.project;
-use driver_query: mach.lang.driver.query;
 
 # the build context of the last frozen build, keyed 0
 pub val TARGET: query.Kind = query.Kind{name: "build context", role: query.INPUT, owner: query.KEY_UNOWNED};
@@ -39,7 +39,7 @@ pub fun capture_build_config(p: *project.Project, alloc: *A.Allocator) res[query
     fin { wire.dnit(?fb); }
     val written: err[fail.Fail] = write_build_config(?fb, p, alloc);
     if (sel written.err) { ret res[query.QueryOutput, fail.Fail].err{written.err}; }
-    ret driver_query.output(?fb);
+    ret codec.output(?fb);
 }
 
 # the configuration without the planner environment: what a persistent product
@@ -51,7 +51,7 @@ fun capture_build_identity(p: *project.Project, alloc: *A.Allocator) res[query.Q
     fin { wire.dnit(?fb); }
     val written: err[fail.Fail] = write_build_identity(?fb, p, alloc);
     if (sel written.err) { ret res[query.QueryOutput, fail.Fail].err{written.err}; }
-    ret driver_query.output(?fb);
+    ret codec.output(?fb);
 }
 
 # the build identity without the request: the persistent key hashes the request
@@ -60,7 +60,7 @@ pub fun capture_configuration_identity(p: *project.Project, alloc: *A.Allocator)
     var fb: wire.Sink = wire.grown(alloc);
     fin { wire.dnit(?fb); }
     write_configuration_identity(?fb, p);
-    ret driver_query.output(?fb);
+    ret codec.output(?fb);
 }
 
 # freeze the build context: what every computation reads of the cell, the request and the
@@ -122,13 +122,13 @@ fun write_build_identity(fb: *wire.Sink, p: *project.Project, a: *A.Allocator) e
 
 fun write_configuration_identity(fb: *wire.Sink, p: *project.Project) {
     write_target_fingerprint(fb, p);
-    build_fingerprint.put_name(fb, ?p.s.interner, p.target_entry.os_name);
-    build_fingerprint.put_name(fb, ?p.s.interner, p.target_entry.isa_name);
-    build_fingerprint.put_name(fb, ?p.s.interner, p.target_entry.abi_name);
-    build_fingerprint.put_name(fb, ?p.s.interner, p.target_entry.platform_name);
-    build_fingerprint.put_name(fb, ?p.s.interner, p.config.id);
-    build_fingerprint.put_name(fb, ?p.s.interner, p.config.version);
-    build_fingerprint.put_name(fb, ?p.s.interner, p.config.bin_name);
+    lang_fingerprint.put_name(fb, ?p.s.interner, p.target_entry.os_name);
+    lang_fingerprint.put_name(fb, ?p.s.interner, p.target_entry.isa_name);
+    lang_fingerprint.put_name(fb, ?p.s.interner, p.target_entry.abi_name);
+    lang_fingerprint.put_name(fb, ?p.s.interner, p.target_entry.platform_name);
+    lang_fingerprint.put_name(fb, ?p.s.interner, p.config.id);
+    lang_fingerprint.put_name(fb, ?p.s.interner, p.config.version);
+    lang_fingerprint.put_name(fb, ?p.s.interner, p.config.bin_name);
     write_dependency_identities(fb, p);
     # the root set decides which entries load and how gates are walked
     wire.put_u8(fb, p.roots::u8);
@@ -141,8 +141,8 @@ fun write_dependency_identities(fb: *wire.Sink, p: *project.Project) {
     wire.put_u32(fb, p.config.dep_count);
     var i: u32 = 0;
     for (i < p.config.dep_count) {
-        build_fingerprint.put_name(fb, ?p.s.interner, p.config.deps[i].project_id);
-        build_fingerprint.put_name(fb, ?p.s.interner, p.config.deps[i].manifest.version);
+        lang_fingerprint.put_name(fb, ?p.s.interner, p.config.deps[i].project_id);
+        lang_fingerprint.put_name(fb, ?p.s.interner, p.config.deps[i].manifest.version);
         i = i + 1;
     }
 }
@@ -155,15 +155,15 @@ fun write_requirement_scopes(fb: *wire.Sink, p: *project.Project) {
     var si: u32 = 0;
     for (si < p.config.req_scope_count) {
         val sc: *template.Requirements = ?p.config.req_scopes[si];
-        build_fingerprint.put_name(fb, ?p.s.interner, sc.owner);
+        lang_fingerprint.put_name(fb, ?p.s.interner, sc.owner);
         var dependency: u8 = 0;
         if (sc.dependency) { dependency = 1; }
         wire.put_u8(fb, dependency);
         wire.put_u32(fb, sc.req_count);
         var ri: u32 = 0;
         for (ri < sc.req_count) {
-            build_fingerprint.put_text(fb, sc.reqs[ri].name);
-            build_fingerprint.put_text(fb, sc.reqs[ri].out);
+            lang_fingerprint.put_text(fb, sc.reqs[ri].name);
+            lang_fingerprint.put_text(fb, sc.reqs[ri].out);
             ri = ri + 1;
         }
         si = si + 1;
@@ -192,12 +192,12 @@ fun write_step_declarations(fb: *wire.Sink, p: *project.Project) {
     var si: u32 = 0;
     for (si < p.config.step_count) {
         val st: *manifest.StepDef = ?p.config.steps[si];
-        build_fingerprint.put_name(fb, ?p.s.interner, st.name);
+        lang_fingerprint.put_name(fb, ?p.s.interner, st.name);
         wire.put_u32(fb, st.env_count);
         var ei: u32 = 0;
         for (ei < st.env_count) {
-            build_fingerprint.put_name(fb, ?p.s.interner, st.env_keys[ei]);
-            build_fingerprint.put_name(fb, ?p.s.interner, st.env_values[ei]);
+            lang_fingerprint.put_name(fb, ?p.s.interner, st.env_keys[ei]);
+            lang_fingerprint.put_name(fb, ?p.s.interner, st.env_values[ei]);
             ei = ei + 1;
         }
         si = si + 1;

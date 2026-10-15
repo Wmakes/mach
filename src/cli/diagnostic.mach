@@ -34,11 +34,12 @@ use types_string: std.types.string;
 use mach.cli.exit;
 use mach.cli.fixture;
 use mach.lang.build.outcome;
-use mach.lang.build.request;
 use mach.lang.diagnostic;
 use diagnostic_kind: mach.lang.diagnostic.kind;
 use mach.lang.driver;
 use mach.lang.driver.project;
+use mach.lang.driver.request;
+use mach.lang.driver.toolchain;
 use mach.lang.duration;
 use mach.lang.manifest;
 use mach.lang.package.report;
@@ -48,7 +49,6 @@ use lang_source: mach.lang.source;
 use mach.lang.step;
 use lang_target: mach.lang.target;
 use target_of:   mach.lang.target.of;
-use mach.lang.toolchain;
 
 val MAX_SPAN_LINES: usize = 10;
 

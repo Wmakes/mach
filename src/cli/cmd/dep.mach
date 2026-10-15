@@ -37,6 +37,7 @@ use mach.cli.fixture;
 use mach.cli.util;
 use mach.lang.driver;
 use mach.lang.driver.project;
+use mach.lang.driver.toolchain;
 use mach.lang.manifest;
 use mach.lang.manifest.target.on_host;
 use mach.lang.package;
@@ -55,7 +56,6 @@ use package_source: mach.lang.package.source;
 use package_verify: mach.lang.package.verify;
 use mach.lang.session;
 use mach.lang.step;
-use mach.lang.toolchain;
 
 val MANIFEST: str = manifest.MANIFEST_FILE;
 

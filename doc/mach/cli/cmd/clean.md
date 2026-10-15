@@ -14,11 +14,12 @@ pub val COMMAND: args.CommandSpec = args.CommandSpec;
 pub fun run(cx: *args.Call) res[i64, fail.Fail];
 ```
 
-`mach clean`: remove every output path the manifest can produce for every declared target
-and profile. the obj, ir, asm, and test roots, the compiler cache and step staging
-directories, and the binary path of each artifact cell
-are collected, sorted, collapsed under their ancestors, and removed inside the project
-root; a path that escapes the root or crosses a symlink is refused. a missing path is
+`mach clean`: remove every path a build of every cell writes, as the build
+plans it: each artifact's output and the object, IR, assembly, test, cache,
+staging and dependency trees beneath each cell's work directory, dependency
+requirement cells included; a dependency never realized was never built, so
+it adds no cell. they are sorted, collapsed under their ancestors,
+and removed inside the project root; a path that escapes the root or crosses a symlink is refused. a missing path is
 not an error; "nothing to clean" prints when nothing was removed
 
 cx: the call

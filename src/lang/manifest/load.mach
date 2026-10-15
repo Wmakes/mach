@@ -24,7 +24,8 @@ use A:                  std.allocator;
 use chrono_duration:    std.chrono.duration;
 use collections_vector: std.collections.vector;
 use std.collections.vector.Vector;
-use fs: std.filesystem;
+use fs:         std.filesystem;
+use types_path: std.types.path;
 
 use diagnostic_kind: mach.lang.diagnostic.kind;
 use mach.lang.fail;
@@ -236,6 +237,41 @@ pub fun doc_read(alloc: *A.Allocator, path: str) res[Doc, fail.Fail] {
     var bytes: Vector[u8] = rb.ok;
     fin { collections_vector.dnit[u8](?bytes); }
     ret doc_parse_bytes(alloc, path, bytes.data, bytes.len);
+}
+
+# the file name of a project manifest, looked up in a project root
+pub val MANIFEST_FILE: str = "mach.toml";
+
+# the manifest `text`, read from `path`, parsed and checked
+# ---
+# alloc: owns the manifest, released with `dnit`, and a refusal's text
+# itn:   interns its names
+# ret:   the manifest; err as the text does not parse or fails a check
+pub fun parse_text(alloc: *A.Allocator, itn: *intern.Interner, path: str, text: str) res[Manifest, fail.Fail] {
+    val doc_r: res[Doc, fail.Fail] = doc_parse(alloc, path, text);
+    if (sel doc_r.err) { ret res[Manifest, fail.Fail].err{doc_r.err}; }
+    var doc: Doc = doc_r.ok;
+    fin { doc_dnit(alloc, ?doc); }
+    ret parse(alloc, itn, ?doc);
+}
+
+# the manifest of the project rooted at `dir`, read off disk and parsed
+# ---
+# alloc: owns the manifest, released with `dnit`, and a refusal's text
+# itn:   interns its names
+# dir:   the project root, which holds MANIFEST_FILE
+# ret:   the manifest; err from the environment when it cannot be read, else as
+#        it does not parse or fails a check
+pub fun read_at(alloc: *A.Allocator, itn: *intern.Interner, dir: str) res[Manifest, fail.Fail] {
+    val path_r: res[str, A.Error] = types_path.join(alloc, dir, MANIFEST_FILE);
+    if (sel path_r.err) { ret res[Manifest, fail.Fail].err{fail.refused(path_r.err)}; }
+    val path: str = path_r.ok;
+    fin { str_free(alloc, path); }
+    val doc_r: res[Doc, fail.Fail] = doc_read(alloc, path);
+    if (sel doc_r.err) { ret res[Manifest, fail.Fail].err{doc_r.err}; }
+    var doc: Doc = doc_r.ok;
+    fin { doc_dnit(alloc, ?doc); }
+    ret parse(alloc, itn, ?doc);
 }
 
 # release a doc and everything it owns

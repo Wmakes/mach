@@ -1,7 +1,9 @@
 # the hygiene of the code that stays at the toolchain split, read from the
 # source tree under the working directory: each module is imported under one
-# name and each name imports one module, and no pub declaration is named only
-# in its own file unless its doc comment says what reaches it
+# name and each name imports one module, no pub declaration is named only in
+# its own file unless its doc comment says what reaches it, driver imports
+# nothing of build, and a file directly under src/lang is a foundation or the
+# facade of a shadow module
 use std.allocator.arena;
 use std.allocator.page;
 use collections_vector: std.collections.vector;
@@ -111,6 +113,22 @@ rec Tree {
     surface:  Vector[Surface];
     first:    Vector[u32];
     shared:   Vector[bool];
+    src:      str;
+    fqns:     Vector[intern.StrId];
+    starts:   Vector[u32];
+    imports:  Vector[Import];
+    by_fqn:   Vector[u32];
+}
+
+# a `use` in any file, leaving or staying, read for layering: the path it names
+# and the file of the module that path is or names a member of, NONE outside
+# the tree. the imports of file f run from starts[f] to the next file's start
+#[testing]
+rec Import {
+    file: u32;
+    line: usize;
+    path: intern.StrId;
+    to:   u32;
 }
 
 # where a scan stands in a file's text, so lines are counted once
@@ -257,10 +275,21 @@ fun publishes(d: *ast_decl.Decl) bool {
     ret d.kind == ast_decl.DECL_KIND_VAL || d.kind == ast_decl.DECL_KIND_VAR;
 }
 
-# the module-scope declarations from `start`, through every arm of a
-# declaration-level `$if`
 #[testing]
-fun walk(t: *Tree, f: u32, text: str, c: *Cursor, a: *ast.Ast, start: u32, len: u32) err[fail.Fail] {
+fun record(t: *Tree, f: u32, text: str, c: *Cursor, d: *ast_decl.Decl) err[fail.Fail] {
+    val path: lang_source.Span           = d.data.use_.path;
+    val rp:   res[intern.StrId, A.Error] = intern.range_add(?t.itn, text, path.offset, path.len);
+    if (sel rp.err) { ret err[fail.Fail].err{fail.refused(rp.err)}; }
+    val pushed: res[usize, A.Error] = collections_vector.push[Import](?t.imports, Import{file: f, line: line_at(c, d.span.offset), path: rp.ok, to: NONE});
+    if (sel pushed.err) { ret err[fail.Fail].err{fail.refused(pushed.err)}; }
+    ret err[fail.Fail].ok{};
+}
+
+# the module-scope declarations from `start`, through every arm of a
+# declaration-level `$if`; every file's imports are recorded, and a staying
+# file's bindings and pub surface
+#[testing]
+fun walk(t: *Tree, f: u32, text: str, c: *Cursor, a: *ast.Ast, start: u32, len: u32, stays: bool) err[fail.Fail] {
     var i: u32 = 0;
     for (i < len) {
         val did: ast_id.DeclId  = a.decl_ids.data[start + i];
@@ -270,18 +299,21 @@ fun walk(t: *Tree, f: u32, text: str, c: *Cursor, a: *ast.Ast, start: u32, len: 
             var b: u32 = 0;
             for (b < d.data.comptime_if.branches_len) {
                 val br:     *ast_decl.ComptimeBranch = ?a.comptime_branches.data[d.data.comptime_if.branches_start + b];
-                val walked: err[fail.Fail]           = walk(t, f, text, c, a, br.body_start, br.body_len);
+                val walked: err[fail.Fail]           = walk(t, f, text, c, a, br.body_start, br.body_len, stays);
                 if (sel walked.err) { ret walked; }
                 b = b + 1;
             }
             cnt;
         }
         if (d.kind == ast_decl.DECL_KIND_USE) {
+            val recorded: err[fail.Fail] = record(t, f, text, c, d);
+            if (sel recorded.err) { ret recorded; }
+            if (!stays)           { cnt; }
             val bound: err[fail.Fail] = bind(t, f, text, c, d);
             if (sel bound.err) { ret bound; }
             cnt;
         }
-        if (!publishes(d)) { cnt; }
+        if (!stays || !publishes(d)) { cnt; }
         val span: lang_source.Span           = ast.decl_name_span(a, did);
         val rn:   res[intern.StrId, A.Error] = intern.range_add(?t.itn, text, span.offset, span.len);
         if (sel rn.err) { ret err[fail.Fail].err{fail.refused(rn.err)}; }
@@ -292,8 +324,9 @@ fun walk(t: *Tree, f: u32, text: str, c: *Cursor, a: *ast.Ast, start: u32, len: 
     ret err[fail.Fail].ok{};
 }
 
-# every name file f spells, and when it stays, its imports and pub surface;
-# the text and its syntax live in `scratch`, released by the caller
+# every name file f spells and every module it imports, and when it stays, its
+# bindings and pub surface; the text and its syntax live in `scratch`, released
+# by the caller
 #[testing]
 fun scan(t: *Tree, scratch: *A.Allocator, f: u32, path: str, stays: bool) err[fail.Fail] {
     val rt: res[str, fs.FsError] = fs.read_string(scratch, path);
@@ -313,7 +346,6 @@ fun scan(t: *Tree, scratch: *A.Allocator, f: u32, path: str, stays: bool) err[fa
         val marked: err[fail.Fail] = mark(t, rn.ok, f);
         if (sel marked.err) { ret marked; }
     }
-    if (!stays) { ret err[fail.Fail].ok{}; }
 
     var diags: diagnostic.DiagnosticStore             = diagnostic.store_init(scratch);
     var a:     ast.Ast                                = ast.init(scratch, lang_source.FILE_NIL);
@@ -322,7 +354,7 @@ fun scan(t: *Tree, scratch: *A.Allocator, f: u32, path: str, stays: bool) err[fa
 
     var c: Cursor             = Cursor{text: text, offset: 0, line: 1};
     val m: *ast_module.Module = ?a.modules.data[ast_id.module_node_index(a.root_module)];
-    ret walk(t, f, text, ?c, ?a, m.decls_start, m.decls_len);
+    ret walk(t, f, text, ?c, ?a, m.decls_start, m.decls_len, stays);
 }
 
 #[testing]
@@ -356,6 +388,10 @@ fun collect(t: *Tree, src: str, dir: str) err[fail.Fail] {
         val f:      u32                 = t.paths.len::u32;
         val pushed: res[usize, A.Error] = collections_vector.push[str](?t.paths, rel);
         if (sel pushed.err) { ret err[fail.Fail].err{fail.refused(pushed.err)}; }
+        val pf: res[usize, A.Error] = collections_vector.push[intern.StrId](?t.fqns, rm.ok);
+        if (sel pf.err) { ret err[fail.Fail].err{fail.refused(pf.err)}; }
+        val ps: res[usize, A.Error] = collections_vector.push[u32](?t.starts, t.imports.len::u32);
+        if (sel ps.err) { ret err[fail.Fail].err{fail.refused(ps.err)}; }
 
         var ar:      arena.Arena;
         var scratch: A.Allocator;
@@ -383,13 +419,58 @@ fun load(alloc: *A.Allocator, backing: *A.Allocator, t: *Tree) bool {
     t.surface  = collections_vector.init[Surface](alloc);
     t.first    = collections_vector.init[u32](alloc);
     t.shared   = collections_vector.init[bool](alloc);
+    t.fqns     = collections_vector.init[intern.StrId](alloc);
+    t.starts   = collections_vector.init[u32](alloc);
+    t.imports  = collections_vector.init[Import](alloc);
     val rs: res[str, fail.Fail] = find_src(alloc);
     if (sel rs.err) {
         print.eprintln(fail.describe(rs.err));
         ret false;
     }
+    t.src = rs.ok;
     val walked: err[fail.Fail] = collect(t, rs.ok, rs.ok);
-    ret !sel walked.err;
+    if (sel walked.err) { ret false; }
+    val resolved: err[fail.Fail] = resolve(t);
+    if (sel resolved.err) {
+        print.eprintln(fail.describe(resolved.err));
+        ret false;
+    }
+    ret true;
+}
+
+# the file of the module `id` names, NONE when it names none in the tree
+#[testing]
+fun file_of(t: *Tree, id: intern.StrId) u32 {
+    val at: usize = intern.str_index(id)::usize;
+    if (at >= t.by_fqn.len) { ret NONE; }
+    ret t.by_fqn.data[at];
+}
+
+# each import's file: the module its path names, or the longest module prefix
+# of a member's path
+#[testing]
+fun resolve(t: *Tree) err[fail.Fail] {
+    t.by_fqn = index(t);
+    var f: usize = 0;
+    for (f < t.fqns.len) {
+        t.by_fqn.data[intern.str_index(t.fqns.data[f])] = f::u32;
+        f                                               = f + 1;
+    }
+    var i: usize = 0;
+    for (i < t.imports.len) {
+        val m:    *Import = ?t.imports.data[i];
+        val path: str     = intern.text(?t.itn, m.path);
+        i = i + 1;
+        var len: usize = str_len(path);
+        for (len > 0 && m.to == NONE) {
+            val rp: res[intern.StrId, A.Error] = intern.range_add(?t.itn, path, 0, len);
+            if (sel rp.err) { ret err[fail.Fail].err{fail.refused(rp.err)}; }
+            m.to = file_of(t, rp.ok);
+            len  = len - 1;
+            for (len > 0 && path[len] != '.') { len = len - 1; }
+        }
+    }
+    ret err[fail.Fail].ok{};
 }
 
 # by name index, NONE everywhere
@@ -456,6 +537,132 @@ fun surface_violations(t: *Tree) usize {
     ret count;
 }
 
+# the files of the driver, apart from its tests (which F4 #4439 moves out),
+# that import a module of build, each printed; build is the layer above
+#[testing]
+fun driver_violations(t: *Tree) usize {
+    var count: usize = 0;
+    var i:     usize = 0;
+    for (i < t.imports.len) {
+        val m:    *Import = ?t.imports.data[i];
+        val from: str     = intern.text(?t.itn, t.fqns.data[m.file]);
+        i = i + 1;
+        if (!under(from, "mach.lang.driver") || under(from, "mach.lang.driver.tests")) { cnt; }
+        if (!under(intern.text(?t.itn, m.path), "mach.lang.build"))                    { cnt; }
+        print.eprintlnf("hygiene: {}:{}: the driver imports {}, of build, the layer above it", t.paths.data[m.file], m.line, intern.text(?t.itn, m.path));
+        count = count + 1;
+    }
+    ret count;
+}
+
+# the segments of a dotted name
+#[testing]
+fun segments(name: str) usize {
+    var n:  usize = 1;
+    var at: usize = 0;
+    for (name[at] != 0) {
+        if (name[at] == '.') { n = n + 1; }
+        at = at + 1;
+    }
+    ret n;
+}
+
+# whether file f lies directly under src/lang
+#[testing]
+fun loose(t: *Tree, f: usize) bool {
+    val fqn: str = intern.text(?t.itn, t.fqns.data[f]);
+    ret under(fqn, "mach.lang") && segments(fqn) == 3;
+}
+
+# whether file f, directly under src/lang, has a shadow module: lang/fe.mach
+# and the modules under lang/fe
+#[testing]
+fun facade(t: *Tree, f: usize) bool {
+    val fqn: str   = intern.text(?t.itn, t.fqns.data[f]);
+    var g:   usize = 0;
+    for (g < t.fqns.len) {
+        if (g != f && under(intern.text(?t.itn, t.fqns.data[g]), fqn)) { ret true; }
+        g = g + 1;
+    }
+    ret false;
+}
+
+# a file a foundation may import: one directly under src/lang, or one in the
+# shadow module of a facade there
+#[testing]
+fun candidate(t: *Tree, f: usize) bool {
+    val fqn: str = intern.text(?t.itn, t.fqns.data[f]);
+    if (!under(fqn, "mach.lang")) { ret false; }
+    if (segments(fqn) == 3)       { ret true; }
+    var len: usize = 10;
+    for (fqn[len] != '.') { len = len + 1; }
+    val rp: res[intern.StrId, A.Error] = intern.range_add(?t.itn, fqn, 0, len);
+    if (sel rp.err) { ret false; }
+    ret file_of(t, rp.ok) != NONE;
+}
+
+# the import of file f that is neither std nor a foundation, or NONE
+#[testing]
+fun blocker(t: *Tree, founds: *Vector[bool], f: usize) u32 {
+    var i:   usize = t.starts.data[f]::usize;
+    var end: usize = t.imports.len;
+    if (f + 1 < t.starts.len) { end = t.starts.data[f + 1]::usize; }
+    for (i < end) {
+        val m: *Import = ?t.imports.data[i];
+        i = i + 1;
+        if (under(intern.text(?t.itn, m.path), "std")) { cnt; }
+        if (m.to != NONE && founds.data[m.to])         { cnt; }
+        ret (i - 1)::u32;
+    }
+    ret NONE;
+}
+
+# by file, whether it is a foundation: a candidate whose every import is std or
+# a foundation. every candidate starts as one and loses it once an import does
+# not qualify, until none changes, so a cycle of foundations stays one
+#[testing]
+fun foundations(t: *Tree) Vector[bool] {
+    var founds: Vector[bool] = collections_vector.init[bool](t.alloc);
+    var f:      usize        = 0;
+    for (f < t.paths.len) {
+        collections_vector.push[bool](?founds, candidate(t, f));
+        f = f + 1;
+    }
+    var changed: bool = true;
+    for (changed) {
+        changed = false;
+        f       = 0;
+        for (f < t.paths.len) {
+            if (founds.data[f] && blocker(t, ?founds, f) != NONE) {
+                founds.data[f] = false;
+                changed        = true;
+            }
+            f = f + 1;
+        }
+    }
+    ret founds;
+}
+
+# the files directly under src/lang that are neither the facade of a shadow
+# module nor a foundation, each printed with the import that keeps it from
+# being one; editor.mach is split by S4 #4454
+#[testing]
+fun loose_violations(t: *Tree) usize {
+    var founds: Vector[bool] = foundations(t);
+    var count:  usize        = 0;
+    var f:      usize        = 0;
+    for (f < t.paths.len) {
+        val rel: str = t.paths.data[f];
+        f = f + 1;
+        if (!loose(t, f - 1) || founds.data[f - 1] || facade(t, f - 1))              { cnt; }
+        if (str_equals(intern.text(?t.itn, t.fqns.data[f - 1]), "mach.lang.editor")) { cnt; }
+        val b: *Import = ?t.imports.data[blocker(t, ?founds, f - 1)];
+        print.eprintlnf("hygiene: {}:{}: a loose file imports {}, which is not std or a foundation; make it a foundation, or the facade of a shadow module", rel, b.line, intern.text(?t.itn, b.path));
+        count = count + 1;
+    }
+    ret count;
+}
+
 test hygiene__each_module_is_imported_under_one_name {
     var backing: A.Allocator;
     page.make(?backing);
@@ -483,5 +690,35 @@ test hygiene__no_pub_declaration_is_named_only_in_its_own_file {
     if (!load(?alloc, ?backing, ?t)) { ret 1; }
     if (t.surface.len == 0)          { ret 2; }
     if (surface_violations(?t) != 0) { ret 3; }
+    ret 0;
+}
+
+test hygiene__the_driver_imports_nothing_of_build {
+    var backing: A.Allocator;
+    page.make(?backing);
+    var ar:    arena.Arena;
+    var alloc: A.Allocator;
+    val made:  err[A.Error] = arena.init(?ar, ?backing, 0);
+    if (sel made.err) { ret 1; }
+    arena.make(?alloc, ?ar);
+    var t: Tree;
+    if (!load(?alloc, ?backing, ?t)) { ret 1; }
+    if (t.imports.len == 0)          { ret 2; }
+    if (driver_violations(?t) != 0)  { ret 3; }
+    ret 0;
+}
+
+test hygiene__each_loose_file_is_a_foundation_or_a_facade {
+    var backing: A.Allocator;
+    page.make(?backing);
+    var ar:    arena.Arena;
+    var alloc: A.Allocator;
+    val made:  err[A.Error] = arena.init(?ar, ?backing, 0);
+    if (sel made.err) { ret 1; }
+    arena.make(?alloc, ?ar);
+    var t: Tree;
+    if (!load(?alloc, ?backing, ?t)) { ret 1; }
+    if (t.imports.len == 0)          { ret 2; }
+    if (loose_violations(?t) != 0)   { ret 3; }
     ret 0;
 }

@@ -252,13 +252,12 @@ pub fun dependencies(s: *session.Session, project_root: str, release_rule: bool,
     fin { checkouts.close(checkouts.ctx); }
     var v:        Verifier                        = Verifier{checkouts: ?checkouts};
     var check:    driver_closure.Check            = driver_closure.Check{ctx: (?v)::ptr, located: located, release: release, selector: selector};
-    val realized: res[project.Project, fail.Fail] = driver.closure_checked(s, ?m, project_root, ?check);
+    val realized: res[project.Closure, fail.Fail] = driver.closure_checked(s, ?m, project_root, ?check);
     if (sel realized.err) { ret err[fail.Fail].err{realized.err}; }
-    var p:     project.Project = realized.ok;
-    var noted: err[fail.Fail]  = err[fail.Fail].ok{};
-    if (overrides != nil) { noted = root_overrides(s, ?m, p.config.deps, p.config.dep_count, overrides); }
-    project.dnit_project(?p);
-    ret noted;
+    var closure: project.Closure = realized.ok;
+    fin { project.closure_dnit(?closure); }
+    if (overrides != nil) { ret root_overrides(s, ?m, closure.deps, closure.count, overrides); }
+    ret err[fail.Fail].ok{};
 }
 
 # `mach dep verify`: check that every dependency of a project is realized and consistent

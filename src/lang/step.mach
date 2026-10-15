@@ -3,30 +3,31 @@
 # a step runs again only when what it reads changed. the build engine runs a
 # project's own steps and its dependencies' steps as phases of a unit
 
-use cache_key:         mach.lang.build.cache.key;
-use build_fingerprint: mach.lang.build.fingerprint;
-use mach.lang.build.request;
 use diagnostic_kind: mach.lang.diagnostic.kind;
 use mach.lang.driver;
+use cache_key:      mach.lang.driver.cache.key;
 use driver_closure: mach.lang.driver.closure;
 use mach.lang.driver.config;
 use driver_environment: mach.lang.driver.environment;
 use driver_load:        mach.lang.driver.load;
 use mach.lang.driver.project;
+use mach.lang.driver.request;
+use mach.lang.driver.toolchain;
 use mach.lang.duration;
 use mach.lang.fail;
+use lang_fingerprint: mach.lang.fingerprint;
 use mach.lang.host;
 use mach.lang.intern;
 use mach.lang.listing;
 use mach.lang.manifest;
 use mach.lang.manifest.template;
 use mach.lang.output;
+use mach.lang.output.layout;
 use mach.lang.readout;
 use mach.lang.session;
 use step_glob: mach.lang.step.glob;
 use step_walk: mach.lang.step.walk;
 use mach.lang.subprocess;
-use mach.lang.toolchain;
 use mach.lang.wire;
 use A: std.allocator;
 use std.allocator.page;
@@ -540,7 +541,7 @@ fun collect_tree_files(a: *A.Allocator, dir: str, out: *collections_vector.Vecto
             tf.sec  = fi.modified.sec;
             tf.nsec = fi.modified.nsec;
             tf.size = fi.size;
-            val digest_r: err[fail.Fail] = build_fingerprint.file_sha256(child, ?tf.digest[0]);
+            val digest_r: err[fail.Fail] = lang_fingerprint.file_sha256(child, ?tf.digest[0]);
             if (sel digest_r.err) { ret digest_r; }
             val pr: res[usize, A.Error] = collections_vector.push[TreeFile](out, tf);
             if (sel pr.err) { ret err[fail.Fail].err{fail.refused(pr.err)}; }
@@ -756,7 +757,7 @@ fun step_stamp_path(a: *A.Allocator, root_project: str, root_out: str, owner_id:
     val d1_r: res[str, fail.Fail] = driver_load.join_path(a, root_project, root_out);
     if (sel d1_r.err) { ret d1_r; }
     val d1:   str                 = d1_r.ok;
-    val d2_r: res[str, fail.Fail] = driver_load.join_path(a, d1, manifest.STEP_STAMP_DIR);
+    val d2_r: res[str, fail.Fail] = driver_load.join_path(a, d1, layout.STEPS);
     str_free(a, d1);
     if (sel d2_r.err) { ret d2_r; }
     val d2:     str                 = d2_r.ok;
@@ -810,7 +811,7 @@ fun put_step_count(s: *wire.Sink, n: u32) {
     b[1] = ((n >> 8) & 0xFF)::u8;
     b[2] = ((n >> 16) & 0xFF)::u8;
     b[3] = ((n >> 24) & 0xFF)::u8;
-    build_fingerprint.put_domain_bytes(s, build_fingerprint.DOMAIN_BUILD_STEP, STEP_FP_SCHEMA, ?b[0], 4);
+    lang_fingerprint.put_domain_bytes(s, lang_fingerprint.DOMAIN_BUILD_STEP, STEP_FP_SCHEMA, ?b[0], 4);
 }
 
 fun put_step_file(s: *wire.Sink, a: *A.Allocator, path: str) err[fail.Fail] {
@@ -820,7 +821,7 @@ fun put_step_file(s: *wire.Sink, a: *A.Allocator, path: str) err[fail.Fail] {
     var digest: [32]u8;
     sha256.hash(buf.data, buf.len, ?digest[0]);
     collections_vector.dnit[u8](?buf);
-    build_fingerprint.put_domain_bytes(s, build_fingerprint.DOMAIN_BUILD_STEP, STEP_FP_SCHEMA, ?digest[0], 32);
+    lang_fingerprint.put_domain_bytes(s, lang_fingerprint.DOMAIN_BUILD_STEP, STEP_FP_SCHEMA, ?digest[0], 32);
     ret err[fail.Fail].ok{};
 }
 
@@ -828,7 +829,7 @@ fun put_step_strings(s: *wire.Sink, values: *StepStrings) {
     put_step_count(s, values.count);
     var i: u32 = 0;
     for (i < values.count) {
-        build_fingerprint.put_domain_str(s, build_fingerprint.DOMAIN_BUILD_STEP, STEP_FP_SCHEMA, values.items[i]::str);
+        lang_fingerprint.put_domain_str(s, lang_fingerprint.DOMAIN_BUILD_STEP, STEP_FP_SCHEMA, values.items[i]::str);
         i = i + 1;
     }
 }
@@ -840,7 +841,7 @@ fun put_step_environment(s: *wire.Sink, values: *driver_environment.Strings) {
     var i: u32 = 0;
     for (i < values.count) {
         val units: usize = driver_environment.units_length(values.items[i]);
-        build_fingerprint.put_domain_bytes(s, build_fingerprint.DOMAIN_BUILD_STEP, STEP_FP_SCHEMA, values.items[i]::*u8, units * $size_of(Unit));
+        lang_fingerprint.put_domain_bytes(s, lang_fingerprint.DOMAIN_BUILD_STEP, STEP_FP_SCHEMA, values.items[i]::*u8, units * $size_of(Unit));
         i = i + 1;
     }
 }
@@ -850,7 +851,7 @@ fun put_step_paths(s: *wire.Sink, values: *Vector[str]) err[fail.Fail] {
     put_step_count(s, values.len::u32);
     var i: usize = 0;
     for (i < values.len) {
-        build_fingerprint.put_domain_str(s, build_fingerprint.DOMAIN_BUILD_STEP, STEP_FP_SCHEMA, values.data[i]);
+        lang_fingerprint.put_domain_str(s, lang_fingerprint.DOMAIN_BUILD_STEP, STEP_FP_SCHEMA, values.data[i]);
         i = i + 1;
     }
     ret err[fail.Fail].ok{};
@@ -861,7 +862,7 @@ fun put_step_inputs(s: *wire.Sink, a: *A.Allocator, values: *Vector[str]) err[fa
     put_step_count(s, values.len::u32);
     var i: usize = 0;
     for (i < values.len) {
-        build_fingerprint.put_domain_str(s, build_fingerprint.DOMAIN_BUILD_STEP, STEP_FP_SCHEMA, values.data[i]);
+        lang_fingerprint.put_domain_str(s, lang_fingerprint.DOMAIN_BUILD_STEP, STEP_FP_SCHEMA, values.data[i]);
         val wc: err[fail.Fail] = put_step_file(s, a, values.data[i]);
         if (sel wc.err) { ret wc; }
         i = i + 1;
@@ -872,9 +873,9 @@ fun put_step_inputs(s: *wire.Sink, a: *A.Allocator, values: *Vector[str]) err[fa
 fun put_step(s: *wire.Sink, a: *A.Allocator, target_s: str, profile_s: str, program: str,
     argv: *StepStrings, env: *driver_environment.Strings, prerequisites: *StepStrings,
     ins: *Vector[str], outputs: *Vector[str]) err[fail.Fail] {
-    build_fingerprint.put_domain_str(s, build_fingerprint.DOMAIN_BUILD_STEP, STEP_FP_SCHEMA, target_s);
-    build_fingerprint.put_domain_str(s, build_fingerprint.DOMAIN_BUILD_STEP, STEP_FP_SCHEMA, profile_s);
-    build_fingerprint.put_domain_str(s, build_fingerprint.DOMAIN_BUILD_STEP, STEP_FP_SCHEMA, program);
+    lang_fingerprint.put_domain_str(s, lang_fingerprint.DOMAIN_BUILD_STEP, STEP_FP_SCHEMA, target_s);
+    lang_fingerprint.put_domain_str(s, lang_fingerprint.DOMAIN_BUILD_STEP, STEP_FP_SCHEMA, profile_s);
+    lang_fingerprint.put_domain_str(s, lang_fingerprint.DOMAIN_BUILD_STEP, STEP_FP_SCHEMA, program);
     val wpc: err[fail.Fail] = put_step_file(s, a, program);
     if (sel wpc.err) { ret wpc; }
     put_step_strings(s, argv);
@@ -899,13 +900,13 @@ fun step_fingerprint(a: *A.Allocator, target_s: str, profile_s: str, program: st
 }
 
 fun step_staging_root(a: *A.Allocator, output_root: str, step_name: str) res[str, fail.Fail] {
-    ret fail.format(a, "{}/{}/{}", output_root, manifest.STAGE_DIR, step_name);
+    ret layout.within(a, output_root, layout.STAGE, step_name);
 }
 
 fun step_prepare_staging(a: *A.Allocator, output_root: str, staging_root: str, step_name: str) err[fail.Fail] {
-    val stage_r: err[fail.Fail] = step_walk.owned_directory_ensure(a, output_root, manifest.STAGE_DIR, "build step staging area");
+    val stage_r: err[fail.Fail] = step_walk.owned_directory_ensure(a, output_root, layout.STAGE, "build step staging area");
     if (sel stage_r.err) { ret stage_r; }
-    val rel_r: res[str, fail.Fail] = fail.format(a, "{}/{}", manifest.STAGE_DIR, step_name);
+    val rel_r: res[str, fail.Fail] = fail.format(a, "{}/{}", layout.STAGE, step_name);
     if (sel rel_r.err) { ret err[fail.Fail].err{rel_r.err}; }
     val rel: str = rel_r.ok;
     fin { str_free(a, rel); }

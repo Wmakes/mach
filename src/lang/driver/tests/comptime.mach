@@ -25,8 +25,8 @@ use mach.lang.driver.tests.testing.ut_divide_manifest;
 use mach.lang.driver.tests.testing.ut_str_contains;
 use mach.lang.driver.tests.testing.ut_tag_native_case_files;
 use mach.lang.driver.tests.testing.ut_tag_start_stub;
+use mach.lang.driver.toolchain;
 use mach.lang.module;
-use mach.lang.toolchain;
 
 test comptime_arm__does_not_mask_a_cross_module_import_conflict {
     var alloc:  A.Allocator;

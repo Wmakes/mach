@@ -10,7 +10,7 @@ module. a release build inlines bodies across modules, so there an import's
 whole source is its surface. a module whose `obj/` object carries its key
 is reused, and when nothing the build still compiles imports it, it is not
 resolved, typed or lowered at all. source digests come from the per-file
-digest memo in the cell's `.cache` directory (build/cache/memo)
+digest memo in the cell's `.cache` directory (driver/cache/memo)
 
 ## fun configuration
 

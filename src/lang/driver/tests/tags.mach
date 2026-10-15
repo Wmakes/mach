@@ -15,7 +15,7 @@ use std.types.string.str_empty;
 use A: std.allocator;
 
 use mach.lang.build.outcome;
-use mach.lang.build.request;
+use mach.lang.driver.request;
 use mach.lang.manifest;
 use me_ir:          mach.lang.me.ir;
 use ir_id:          mach.lang.me.ir.id;
@@ -25,6 +25,7 @@ use mach.lang.session;
 
 use mach.lang.build.engine;
 use build_plan: mach.lang.build.plan;
+use mach.lang.build.publication;
 use mach.lang.driver;
 use mach.lang.driver.project;
 
@@ -44,8 +45,8 @@ use mach.lang.driver.tests.testing.ut_tag_native_case;
 use mach.lang.driver.tests.testing.ut_tag_native_case_files;
 use mach.lang.driver.tests.testing.ut_tag_start_stub;
 use mach.lang.driver.tests.testing.ut_vec_sema_n;
+use mach.lang.driver.toolchain;
 use lang_target: mach.lang.target;
-use mach.lang.toolchain;
 
 # tag locals, globals, array elements, record fields, nested tags and pointer receivers: reads, writes, `?` addresses and whole copies
 #[testing]
@@ -383,13 +384,15 @@ fun ut_l8_trap_target(alloc: *A.Allocator, target_name: str, runner_name: str, r
         rq.profile = "release";
         rq.opt     = pipeline.OPT_RELEASE;
     }
-    val pr: res[build_plan.BuildPlan, fail.Fail] = build_plan.plan(alloc, ?s.interner, toolchain.t_registry(), ?m, rq);
+    val pr: res[build_plan.BuildPlan, fail.Fail] = build_plan.plan_to_run(alloc, ?s, toolchain.t_registry(), ?m, rq);
     if (sel pr.err) {
         fs.remove_all(alloc, root);
         ret 1;
     }
-    var bp: build_plan.BuildPlan                 = pr.ok;
-    val br: res[outcome.BuildOutcome, fail.Fail] = engine.execute_warm(?bp, 0, ?s, alloc, nil);
+    var bp:        build_plan.BuildPlan     = pr.ok;
+    var published: publication.Publications = publication.init(alloc);
+    fin { publication.dnit(?published); }
+    val br: res[outcome.BuildOutcome, fail.Fail] = engine.execute_warm(?bp, 0, ?s, ?published, alloc, nil);
     if (sel br.err) { bad = 1; }
     if (sel br.ok) {
         val bo: outcome.BuildOutcome = br.ok;

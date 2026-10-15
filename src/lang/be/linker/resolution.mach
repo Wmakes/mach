@@ -8,6 +8,7 @@ use std.types.size.usize;
 use A: std.allocator;
 
 use mach.lang.intern;
+use mach.lang.linkage;
 use mach.lang.target.isa;
 use target_of: mach.lang.target.of;
 
@@ -49,7 +50,7 @@ pub rec Resolution {
     out_img:       target_of.ObjectImage;
 }
 
-pub fun resolution_init(r: *Resolution, alloc: *A.Allocator, itn: *intern.Interner,
+pub fun resolution_init(r: *Resolution, l: *linkage.Linkage, alloc: *A.Allocator, itn: *intern.Interner,
     format: *target_of.OfVTable, arch: *isa.IsaVTable, image_base: u64) {
     r.modules       = nil;
     r.module_count  = 0;
@@ -66,7 +67,7 @@ pub fun resolution_init(r: *Resolution, alloc: *A.Allocator, itn: *intern.Intern
     init_atom_plan(?r.atoms);
     r.strm     = StrMerge{};
     r.sym_locs = map.init[intern.StrId, SymbolLoc](alloc);
-    init_dynstate(?r.dyn);
+    init_dynstate(?r.dyn, l);
     r.out_img = target_of.object_image_init(alloc, itn, intern.STR_NIL);
 }
 

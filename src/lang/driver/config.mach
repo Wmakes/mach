@@ -29,8 +29,8 @@ use T: std.allocator.testing;
 use std.filesystem.native;
 use std.process.env;
 
-use mach.lang.build.request;
 use diagnostic_kind: mach.lang.diagnostic.kind;
+use mach.lang.driver.request;
 use mach.lang.intern;
 use mach.lang.manifest;
 use mach.lang.manifest.template;
@@ -41,23 +41,15 @@ use catalog_artifact: mach.lang.target.catalog.artifact;
 use driver_closure: mach.lang.driver.closure;
 use driver_load:    mach.lang.driver.load;
 use mach.lang.driver.project;
+use mach.lang.driver.toolchain;
 use mach.lang.driver.union;
 use mach.lang.output;
-use mach.lang.toolchain;
+use mach.lang.output.layout;
 
 #[testing]
 pub fun resolve_artifact_path(alloc: *A.Allocator, reg: *lang_target.TargetRegistry, project_root: str, selectors: *manifest.Selectors) res[str, fail.Fail] {
-    val mp_r: res[str, fail.Fail] = driver_load.join_path(alloc, project_root, manifest.MANIFEST_FILE);
-    if (sel mp_r.err) { ret res[str, fail.Fail].err{mp_r.err}; }
-    val manifest_path: str = mp_r.ok;
-
-    val doc_r: res[manifest.Doc, fail.Fail] = manifest.doc_read(alloc, manifest_path);
-    if (sel doc_r.err) { ret res[str, fail.Fail].err{doc_r.err}; }
-    var doc: manifest.Doc = doc_r.ok;
-
     var itn: intern.Interner                   = intern.init(alloc);
-    val mr:  res[manifest.Manifest, fail.Fail] = manifest.parse(alloc, ?itn, ?doc);
-    manifest.doc_dnit(alloc, ?doc);
+    val mr:  res[manifest.Manifest, fail.Fail] = manifest.read_at(alloc, ?itn, project_root);
     if (sel mr.err) { ret res[str, fail.Fail].err{mr.err}; }
     var m: manifest.Manifest = mr.ok;
     fin { manifest.dnit(?m, alloc); }
@@ -97,17 +89,8 @@ pub rec RunArtifact {
 #                  names several cells or a library, or for an unusable `-o`
 pub fun resolve_run_artifact(alloc: *A.Allocator, reg: *lang_target.TargetRegistry, project_root: str, selectors: *manifest.Selectors,
     output_override: str) res[RunArtifact, fail.Fail] {
-    val mp_r: res[str, fail.Fail] = driver_load.join_path(alloc, project_root, manifest.MANIFEST_FILE);
-    if (sel mp_r.err) { ret res[RunArtifact, fail.Fail].err{mp_r.err}; }
-    val manifest_path: str = mp_r.ok;
-
-    val doc_r: res[manifest.Doc, fail.Fail] = manifest.doc_read(alloc, manifest_path);
-    if (sel doc_r.err) { ret res[RunArtifact, fail.Fail].err{doc_r.err}; }
-    var doc: manifest.Doc = doc_r.ok;
-
     var itn: intern.Interner                   = intern.init(alloc);
-    val mr:  res[manifest.Manifest, fail.Fail] = manifest.parse(alloc, ?itn, ?doc);
-    manifest.doc_dnit(alloc, ?doc);
+    val mr:  res[manifest.Manifest, fail.Fail] = manifest.read_at(alloc, ?itn, project_root);
     if (sel mr.err) { ret res[RunArtifact, fail.Fail].err{mr.err}; }
     var m: manifest.Manifest = mr.ok;
     fin { manifest.dnit(?m, alloc); }
@@ -244,11 +227,27 @@ fun clone_step(alloc: *A.Allocator, src: *manifest.StepDef, out: *manifest.StepD
     ret err[fail.Fail].ok{};
 }
 
+# the closure the project compiles against: `closure` borrowed, or with none
+# given one it locates and owns
+fun closure_taken(p: *project.Project, m: *manifest.Manifest, project_root: str, closure: *project.Closure) err[fail.Fail] {
+    var taken: *project.Closure = closure;
+    if (taken == nil) {
+        val located: res[project.Closure, fail.Fail] = driver_closure.locate(p.s, p.alloc, m, project_root, nil, driver_closure.UNREALIZED_REFUSED);
+        if (sel located.err) { ret err[fail.Fail].err{located.err}; }
+        project.closure_dnit(?p.config.closure);
+        p.config.closure = located.ok;
+        taken            = ?p.config.closure;
+    }
+    ret driver_closure.adopt(p, taken);
+}
+
 # configure a project for one build cell of `m`, or of one of its dependencies
 # ---
 # p:            the project being configured
 # project_root: the root project's directory
 # m:            the root manifest
+# closure:      `m`'s located closure, which the project borrows; nil to locate
+#               one the project owns
 # c:            the cell; with `owner`, a target and artifact of that dependency and
 #               a profile of `m`
 # owner:        "" for a cell of `m`, or the id of the closure dependency whose export
@@ -257,7 +256,7 @@ fun clone_step(alloc: *A.Allocator, src: *manifest.StepDef, out: *manifest.StepD
 #               entry loads, and `{artifact.<id>.out}` resolves over every artifact
 #               some artifact needs
 # ret:          ok; err from selection, template, step, link or dependency resolution
-pub fun load_config_manifest(p: *project.Project, project_root: str, m: *manifest.Manifest, c: *manifest.Cell,
+pub fun load_config_manifest(p: *project.Project, project_root: str, m: *manifest.Manifest, closure: *project.Closure, c: *manifest.Cell,
     owner: str, for_union: bool) err[fail.Fail] {
     val toolchain_r: res[*lang_target.TargetRegistry, fail.Fail] = toolchain.registry();
     if (sel toolchain_r.err) { ret err[fail.Fail].err{toolchain_r.err}; }
@@ -266,14 +265,11 @@ pub fun load_config_manifest(p: *project.Project, project_root: str, m: *manifes
     if (sel abs_root_r.err) { ret err[fail.Fail].err{fail.refused(abs_root_r.err)}; }
     p.config.project_root = abs_root_r.ok;
     p.config.home_root    = abs_root_r.ok;
-    val res_dep_id: res[intern.StrId, A.Error] = intern.add(?p.s.interner, "dep");
-    if (sel res_dep_id.err) { ret err[fail.Fail].err{fail.refused(res_dep_id.err)}; }
-    p.config.dir_dep = res_dep_id.ok;
 
     var scope: manifest.Scope = manifest.root_scope(m);
     if (!str_empty(owner)) {
-        val dr: err[fail.Fail] = driver_closure.locate(p, m, project_root, nil);
-        if (sel dr.err) { ret err[fail.Fail].err{dr.err}; }
+        val dr: err[fail.Fail] = closure_taken(p, m, project_root, closure);
+        if (sel dr.err) { ret dr; }
         val sr: err[fail.Fail] = driver_closure.scope_closure_to_dependency(p, owner);
         if (sel sr.err) { ret sr; }
         scope                 = manifest.dependency_scope(m, ?p.config.owner.manifest);
@@ -396,8 +392,8 @@ pub fun load_config_manifest(p: *project.Project, project_root: str, m: *manifes
     }
 
     if (!manifest.scope_is_dependency(?scope)) {
-        val dr: err[fail.Fail] = driver_closure.locate(p, m, project_root, nil);
-        if (sel dr.err) { ret err[fail.Fail].err{dr.err}; }
+        val dr: err[fail.Fail] = closure_taken(p, m, project_root, closure);
+        if (sel dr.err) { ret dr; }
     }
 
     val scoped: err[fail.Fail] = driver_closure.resolve_requirement_scopes(p, m, cell_profile);
@@ -422,7 +418,7 @@ pub fun load_config_manifest(p: *project.Project, project_root: str, m: *manifes
 }
 
 pub fun module_obj_tree(a: *A.Allocator, proj_out: str, id: str) res[str, fail.Fail] {
-    ret fail.format(a, "{}/obj/{}", proj_out, id);
+    ret layout.within(a, proj_out, layout.OBJ, id);
 }
 
 pub fun path_in_module_obj_tree(path: str, tree: str) bool {
@@ -497,11 +493,11 @@ fun validate_step_outputs(p: *project.Project, m: *manifest.Manifest, proj_out: 
     if (sel tree_r.err) { ret err[fail.Fail].err{tree_r.err}; }
     val tree: str = tree_r.ok;
     fin { str_free(p.alloc, tree); }
-    val stage_tree_r: res[str, fail.Fail] = fail.format(p.alloc, "{}/{}", proj_out, manifest.STAGE_DIR);
+    val stage_tree_r: res[str, fail.Fail] = layout.under(p.alloc, proj_out, layout.STAGE);
     if (sel stage_tree_r.err) { ret err[fail.Fail].err{stage_tree_r.err}; }
     val stage_tree: str = stage_tree_r.ok;
     fin { str_free(p.alloc, stage_tree); }
-    val cache_tree_r: res[str, fail.Fail] = fail.format(p.alloc, "{}/{}", proj_out, manifest.CACHE_DIR);
+    val cache_tree_r: res[str, fail.Fail] = layout.under(p.alloc, proj_out, layout.CACHE);
     if (sel cache_tree_r.err) { ret err[fail.Fail].err{cache_tree_r.err}; }
     val cache_tree: str = cache_tree_r.ok;
     fin { str_free(p.alloc, cache_tree); }
@@ -680,21 +676,6 @@ pub fun select_target(p: *project.Project, t: *project.TargetEntry) err[fail.Fai
     ret err[fail.Fail].ok{};
 }
 
-#[testing]
-fun cfg_contains(hay: str, needle: str) bool {
-    val hn: usize = str_len(hay);
-    val nn: usize = str_len(needle);
-    if (nn > hn) { ret false; }
-    var i: usize = 0;
-    for (i + nn <= hn) {
-        var j: usize = 0;
-        for (j < nn && hay[i + j] == needle[j]) { j = j + 1; }
-        if (j == nn) { ret true; }
-        i = i + 1;
-    }
-    ret false;
-}
-
 # two allocations succeed, then every request is refused
 test clone_step__allocation_failure_is_atomic {
     var t:      T.Testing;
@@ -757,7 +738,7 @@ test validate_declared_step_output_collisions__deterministic {
     var bad:   bool           = sel exact.ok;
     if (sel exact.err) {
         val msg: str = fail.describe(exact.err);
-        if (!cfg_contains(msg, "[step.alpha]") || !cfg_contains(msg, "[step.zeta]")) { bad = true; }
+        if (!str_contains(msg, "[step.alpha]") || !str_contains(msg, "[step.zeta]")) { bad = true; }
         str_free(?alloc, msg);
     }
     collections_vector.dnit[DeclaredStepOutput](?outputs);
@@ -771,7 +752,7 @@ test validate_declared_step_output_collisions__deterministic {
     if (sel nested.ok) { bad = true; }
     if (sel nested.err) {
         val msg: str = fail.describe(nested.err);
-        if (!cfg_contains(msg, "collides")) { bad = true; }
+        if (!str_contains(msg, "collides")) { bad = true; }
         str_free(?alloc, msg);
     }
     collections_vector.dnit[DeclaredStepOutput](?outputs);
@@ -785,7 +766,7 @@ test validate_declared_step_output_collisions__deterministic {
     if (sel same_step_nested.ok) { bad = true; }
     if (sel same_step_nested.err) {
         val msg: str = fail.describe(same_step_nested.err);
-        if (!cfg_contains(msg, "collides")) { bad = true; }
+        if (!str_contains(msg, "collides")) { bad = true; }
         str_free(?alloc, msg);
     }
     collections_vector.dnit[DeclaredStepOutput](?outputs);

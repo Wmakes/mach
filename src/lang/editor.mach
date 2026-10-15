@@ -33,7 +33,6 @@ use std.text.string.str_free;
 use A: std.allocator;
 use T: std.allocator.testing;
 
-use mach.lang.build.request;
 use mach.lang.diagnostic;
 use diagnostic_kind: mach.lang.diagnostic.kind;
 use mach.lang.driver;
@@ -42,6 +41,8 @@ use mach.lang.driver.frontend;
 use driver_load: mach.lang.driver.load;
 use mach.lang.driver.passes;
 use mach.lang.driver.project;
+use mach.lang.driver.request;
+use mach.lang.driver.toolchain;
 use mach.lang.fail;
 use mach.lang.fe.ast;
 use ast_decl: mach.lang.fe.ast.decl;
@@ -75,7 +76,6 @@ use mach.lang.stack;
 use mach.lang.step;
 use lang_target:       mach.lang.target;
 use catalog_subsystem: mach.lang.target.catalog.subsystem;
-use mach.lang.toolchain;
 use mach.lang.type;
 
 # one reusable slot for a currently open file
@@ -988,7 +988,9 @@ fun analyze_buffer(es: *EditorSession, fid: lang_source.FileId) res[*fe_sema.Sem
     deps.entries = nil;
     deps.count   = 0;
 
-    val res_sema: res[fe_sema.SemaResult, fail.Fail] = fe_sema.sema(es.s, b.a, rr, ?deps, ?b.ctx, fid::session.ModuleId, ?es.s.diags);
+    val mid: res[session.ModuleId, fail.Fail] = buffer_module(b);
+    if (sel mid.err) { ret res[*fe_sema.SemaResult, fail.Fail].err{mid.err}; }
+    val res_sema: res[fe_sema.SemaResult, fail.Fail] = fe_sema.sema(es.s, b.a, rr, ?deps, ?b.ctx, mid.ok, ?es.s.diags);
     if (sel res_sema.err) {
         es.operation_failure = opt[fail.Fail].some{res_sema.err};
         ret res[*fe_sema.SemaResult, fail.Fail].err{res_sema.err};
@@ -1701,7 +1703,11 @@ fun buffer_definition(raw: ptr, origin: session.ModuleId, phase: fe_sema.Definit
     if (es == nil) {
         ret res[fe_sema.Definition, fail.Fail].err{fail.message("current definition is not an open editor buffer")};
     }
-    val b: *Buffer = slot_live(es, origin::lang_source.FileId);
+    val file: opt[u32] = module.buffer_file(origin);
+    if (sel file.none) {
+        ret res[fe_sema.Definition, fail.Fail].err{fail.message("editor definition names a module that is not a standalone buffer")};
+    }
+    val b: *Buffer = slot_live(es, lang_source.file_id(file.some));
     if (b == nil || !b.owned || b.a == nil) {
         ret res[fe_sema.Definition, fail.Fail].err{fail.message("editor definition has no current standalone parsed owner")};
     }
@@ -1721,17 +1727,26 @@ fun buffer_definition(raw: ptr, origin: session.ModuleId, phase: fe_sema.Definit
     ret res[fe_sema.Definition, fail.Fail].ok{result};
 }
 
-# a standalone buffer is a module of its own, which its path names: the stable identity its
-# symbols carry, numbered back to the buffer's file id for the readers that number modules
+# the module of a standalone buffer, from the buffer range no project's module takes
+fun buffer_module(b: *Buffer) res[session.ModuleId, fail.Fail] {
+    val mid: opt[session.ModuleId] = module.buffer_id(lang_source.file_index(b.file_id));
+    if (sel mid.none) { ret res[session.ModuleId, fail.Fail].err{fail.message("editor: the buffer's file is past the last standalone module id")}; }
+    ret res[session.ModuleId, fail.Fail].ok{mid.some};
+}
+
+# a standalone buffer is a module of its own, which its path names: its module id, the name
+# readers of that id see, and the stable identity its symbols carry
 fun buffer_identity(es: *EditorSession, b: *Buffer) res[session.StableModuleId, fail.Fail] {
     val file: opt[*lang_source.SourceFile] = lang_source.get(?es.s.sources, b.file_id);
     if (sel file.none) { ret res[session.StableModuleId, fail.Fail].err{fail.message("editor: buffer has no source")}; }
+    val mid: res[session.ModuleId, fail.Fail] = buffer_module(b);
+    if (sel mid.err) { ret res[session.StableModuleId, fail.Fail].err{mid.err}; }
     val named: res[intern.StrId, A.Error] = intern.add(?es.s.interner, file.some.path);
     if (sel named.err) { ret res[session.StableModuleId, fail.Fail].err{fail.refused(named.err)}; }
     val stable: res[session.StableModuleId, fail.Fail] = session.stable_module_id(es.s, named.ok);
     if (sel stable.err) { ret stable; }
-    val numbered: err[fail.Fail] = session.register_stable_mid(es.s, stable.ok, b.file_id::session.ModuleId);
-    if (sel numbered.err) { ret res[session.StableModuleId, fail.Fail].err{numbered.err}; }
+    val registered: err[fail.Fail] = session.register_module_identity(es.s, mid.ok, named.ok, stable.ok);
+    if (sel registered.err) { ret res[session.StableModuleId, fail.Fail].err{registered.err}; }
     ret stable;
 }
 
@@ -1743,8 +1758,11 @@ fun buffer_resolve(es: *EditorSession, b: *Buffer, deps: *resolve.ResolveDeps) r
     val identity: res[session.StableModuleId, fail.Fail] = buffer_identity(es, b);
     if (sel identity.err) { ret res[*resolve.ResolveResult, fail.Fail].err{identity.err}; }
 
+    val mid: res[session.ModuleId, fail.Fail] = buffer_module(b);
+    if (sel mid.err) { ret res[*resolve.ResolveResult, fail.Fail].err{mid.err}; }
+
     comptime.decorators_clear(?b.ctx);
-    val res_resolve: res[resolve.ResolveResult, fail.Fail] = resolve.resolve(es.s, b.a, deps, ?b.ctx, b.file_id::session.ModuleId, identity.ok, ?es.s.diags);
+    val res_resolve: res[resolve.ResolveResult, fail.Fail] = resolve.resolve(es.s, b.a, deps, ?b.ctx, mid.ok, identity.ok, ?es.s.diags);
     if (sel res_resolve.err) {
         es.operation_failure = opt[fail.Fail].some{res_resolve.err};
         ret res[*resolve.ResolveResult, fail.Fail].err{res_resolve.err};
@@ -1778,7 +1796,9 @@ fun decorators_record(es: *EditorSession, b: *Buffer, rr: *resolve.ResolveResult
     val strings: err[fail.Fail] = decorator.strings_record[comptime.NoCapabilityContext](?es.s.interner, ?b.ctx, b.a,
         text.some.text, ?read, nil, comptime.no_capabilities(), nil);
     if (sel strings.err) { ret strings; }
-    ret fe_load.embeds_record(es.s, ?b.ctx, b.a, session.module_fqn(es.s, b.file_id::session.ModuleId), nil);
+    val mid: res[session.ModuleId, fail.Fail] = buffer_module(b);
+    if (sel mid.err) { ret err[fail.Fail].err{mid.err}; }
+    ret fe_load.embeds_record(es.s, ?b.ctx, b.a, session.module_fqn(es.s, mid.ok), nil);
 }
 
 fun slot_get(es: *EditorSession, fid: lang_source.FileId) *Buffer {
@@ -1993,7 +2013,9 @@ fun t_run_sema(es: *EditorSession, fid: lang_source.FileId, pw: u32) res[*diagno
     deps.entries = nil;
     deps.count   = 0;
 
-    val res_sema: res[fe_sema.SemaResult, fail.Fail] = fe_sema.sema(es.s, b.a, rr, ?deps, ?b.ctx, fid::session.ModuleId, ?es.s.diags);
+    val mid: res[session.ModuleId, fail.Fail] = buffer_module(b);
+    if (sel mid.err) { ret res[*diagnostic.DiagnosticStore, fail.Fail].err{mid.err}; }
+    val res_sema: res[fe_sema.SemaResult, fail.Fail] = fe_sema.sema(es.s, b.a, rr, ?deps, ?b.ctx, mid.ok, ?es.s.diags);
     if (sel res_sema.err) {
         ret res[*diagnostic.DiagnosticStore, fail.Fail].err{res_sema.err};
     }
@@ -3315,6 +3337,60 @@ test analyze__broken_manifest_falls_back_to_standalone_analysis {
     ret 0;
 }
 
+# a standalone buffer opened before a project loads holds the lowest file index, which the
+# project's first module took as its id when buffers were numbered by their file: the type
+# the buffer declares must still be owned by the buffer's own module
+test analyze__a_standalone_buffer_beside_a_project_owns_its_types {
+    var alloc:       A.Allocator;
+    val res_session: res[session.Session, fail.Fail] = t_session(?alloc);
+    if (sel res_session.err) { ret 99; }
+    var s: session.Session = res_session.ok;
+    fin { session.dnit(?s); }
+    var es: EditorSession = init(?s);
+    fin { t_dnit(?es); }
+
+    val loose_r: res[lang_source.FileId, fail.Fail] = open(?es, "standalone.mach", "rec Loose { a: u64; }\n");
+    if (sel loose_r.err) { ret 99; }
+    val loose: lang_source.FileId = loose_r.ok;
+
+    var names: [2]str = [2]str{"main.mach", "api.mach"};
+    var texts: [2]str;
+    texts[0] = "use edbuild.api;\nfun main() i32 { ret api.v(); }\n";
+    texts[1] = "pub rec Held { a: u64; }\npub fun v() i32 { ret 0; }\n";
+    val root_r: res[str, fail.Fail] = t_scaffold(?alloc, ?names[0], ?texts[0], 2);
+    if (sel root_r.err) { ret 99; }
+    val root: str = root_r.ok;
+    fin { fs.remove_all(?alloc, root); }
+    val main_r: res[lang_source.FileId, fail.Fail] = t_open_scaffolded(?es, ?alloc, root, "main.mach", texts[0]);
+    if (sel main_r.err) { ret 99; }
+    var project_req: AnalysisRequest                = analysis_request(main_r.ok, PHASE_SEMA);
+    val project_r:   res[AnalysisResult, fail.Fail] = analyze(?es, ?project_req);
+    if (sel project_r.err) { ret 1; }
+    var project_result: AnalysisResult = project_r.ok;
+    fin { analysis_dnit(?project_result); }
+    if (!es.proj_loaded) { ret 2; }
+
+    var loose_req: AnalysisRequest                = analysis_request(loose, PHASE_SEMA);
+    val loose_a:   res[AnalysisResult, fail.Fail] = analyze(?es, ?loose_req);
+    if (sel loose_a.err) { ret 3; }
+    var loose_result: AnalysisResult = loose_a.ok;
+    fin { analysis_dnit(?loose_result); }
+    val b: *Buffer = slot_live(?es, loose);
+    if (b == nil || !b.owned) { ret 4; }
+
+    val typed: res[type.TypeId, fail.Fail] = decl_type_of(?loose_result, ast_id.decl(0));
+    if (sel typed.err) { ret 5; }
+    val t: opt[*type.Type] = type.get(?s.types, typed.ok);
+    if (sel t.none)                   { ret 6; }
+    if (t.some.kind != type.TYPE_REC) { ret 6; }
+    val owner: session.ModuleId = session.module_id_for_stable(?s, t.some.data.nominal.owner.module);
+    if (module.is_nil(owner)) { ret 7; }
+    val file: opt[*lang_source.SourceFile] = lang_source.get(?s.sources, loose);
+    if (sel file.none)                                                                        { ret 99; }
+    if (!str_equals(intern.text(?s.interner, session.module_fqn(?s, owner)), file.some.path)) { ret 8; }
+    ret 0;
+}
+
 test resolve__bracket_value_resolution_preserves_the_parsed_owner {
     var alloc:       A.Allocator;
     val res_session: res[session.Session, fail.Fail] = t_session(?alloc);
@@ -4186,8 +4262,8 @@ test lifecycle__allocation_refusal_preserves_open_buffers_and_retry {
                 if (sel t_atomic_buffer_action_r.err) { ret 9; }
             }
             analysis_dnit(?result);
-            if (action != 3)        { t_dnit(?es); }
-            if (s.overlay_len != 0) { ret 10; }
+            if (action != 3)         { t_dnit(?es); }
+            if (s.overlays.len != 0) { ret 10; }
             session.dnit(?s);
             if (T.leaked(?t)) { ret 11; }
             refusal = refusal + 1;
@@ -4708,7 +4784,7 @@ test close__repeated_open_update_close_leaves_unrelated_products_and_identities_
     }
     val overlay_get_r: opt[str] = session.overlay_get(?s, "/mach-editor-unrelated/kept.mach");
     if (sel overlay_get_r.none) { ret 12; }
-    if (s.overlay_len != 1)     { ret 12; }
+    if (s.overlays.len != 1)    { ret 12; }
     ret 0;
 }
 

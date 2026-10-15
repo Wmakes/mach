@@ -39,11 +39,11 @@ use A: std.allocator;
 use diagnostic_kind:    mach.lang.diagnostic.kind;
 use driver_environment: mach.lang.driver.environment;
 use driver_load:        mach.lang.driver.load;
+use mach.lang.driver.toolchain;
 use mach.lang.fail;
 use mach.lang.host;
 use mach.lang.session;
 use mach.lang.subprocess;
-use mach.lang.toolchain;
 
 pub rec Entry {
     path: str;

@@ -23,7 +23,6 @@ use std.types.string.str_empty;
 use std.types.string.str_equals;
 use std.types.string.str_join;
 use std.types.string.str_len;
-use std.types.string.str_replace;
 use std.types.string.str_starts_with;
 
 use A: std.allocator;
@@ -32,14 +31,17 @@ use mach.lang.diagnostic;
 use diagnostic_kind: mach.lang.diagnostic.kind;
 use io_writer:       std.io.writer;
 
-use mach.lang.build.request;
 use mach.lang.driver;
+use driver_closure: mach.lang.driver.closure;
 use mach.lang.driver.project;
+use mach.lang.driver.request;
+use mach.lang.driver.toolchain;
 use mach.lang.intern;
 use mach.lang.manifest;
 use mach.lang.manifest.target.host_target_table;
 use mach.lang.manifest.template;
 use mach.lang.me.pipeline;
+use mach.lang.output.layout;
 use mach.lang.session;
 use mach.lang.step;
 use lang_target:       mach.lang.target;
@@ -47,7 +49,6 @@ use catalog_artifact:  mach.lang.target.catalog.artifact;
 use catalog_subsystem: mach.lang.target.catalog.subsystem;
 use mach.lang.target.input;
 use mach.lang.textbuild;
-use mach.lang.toolchain;
 use T: std.allocator.testing;
 
 pub def PhaseKind: u8;
@@ -122,13 +123,22 @@ pub rec BuildUnit {
     dep_requires: Vector[str];
 }
 
-pub def BuildRequest: request.BuildRequest;
-
-# project: the root manifest's `[project].id`
+# project:  the root manifest's `[project].id`
+# names:    the interner the plan's names live in; a session runs the plan only
+#           when it holds them
+# manifest: the root manifest the plan was made from, borrowed; it outlives the plan
+# closure:  the manifest's dependency closure, located once by
+#           `plan_dependency_requirements`; every cell borrows it
+# located:  whether `closure` was located as a build needs it, every dependency
+#           realized, which running the plan requires
 pub rec BuildPlan {
-    request: BuildRequest;
-    project: str;
-    units:   Vector[BuildUnit];
+    request:  request.BuildRequest;
+    project:  str;
+    units:    Vector[BuildUnit];
+    names:    *intern.Interner;
+    manifest: *manifest.Manifest;
+    closure:  project.Closure;
+    located:  bool;
 }
 
 # plan the request's own selection: `req.artifact` on `req.target`, each an
@@ -163,6 +173,21 @@ pub fun plan(a: *A.Allocator, itn: *intern.Interner, reg: *lang_target.TargetReg
     ret plan_validated(a, itn, reg, m, owned_req, ?cells);
 }
 
+# `plan`, with the plan's dependency closure located in `s` as
+# `plan_dependency_requirements` locates it, so the plan is ready to run there
+# ---
+# s:   the session the plan's names live in; `itn` of `plan` is its interner
+# ret: the plan; err from planning or from locating the closure
+pub fun plan_to_run(a: *A.Allocator, s: *session.Session, reg: *lang_target.TargetRegistry,
+    m: *manifest.Manifest, owned_req: request.BuildRequest) res[BuildPlan, fail.Fail] {
+    val planned: res[BuildPlan, fail.Fail] = plan(a, ?s.interner, reg, m, owned_req);
+    if (sel planned.err) { ret planned; }
+    var bp:      BuildPlan      = planned.ok;
+    val located: err[fail.Fail] = plan_dependency_requirements(s, ?bp, driver_closure.UNREALIZED_REFUSED);
+    if (sel located.err) { ret res[BuildPlan, fail.Fail].err{located.err}; }
+    ret res[BuildPlan, fail.Fail].ok{bp};
+}
+
 # plan resolved cells for one profile: each cell's artifact on its target, and
 # before it every artifact it requires. the request's `profile` is the plan's;
 # a cell's own profile is its caller's grouping and is not read here
@@ -188,9 +213,13 @@ pub fun plan_cells(a: *A.Allocator, itn: *intern.Interner, reg: *lang_target.Tar
 fun plan_validated(a: *A.Allocator, itn: *intern.Interner, reg: *lang_target.TargetRegistry,
     m: *manifest.Manifest, owned_req: request.BuildRequest, cells: *Vector[manifest.Cell]) res[BuildPlan, fail.Fail] {
     var bp: BuildPlan;
-    bp.request = owned_req;
-    bp.units   = collections_vector.init[BuildUnit](a);
-    bp.project = entry_name(itn, m.id);
+    bp.request  = owned_req;
+    bp.units    = collections_vector.init[BuildUnit](a);
+    bp.project  = entry_name(itn, m.id);
+    bp.names    = itn;
+    bp.manifest = m;
+    bp.closure  = project.closure_empty(a);
+    bp.located  = false;
     val req: *request.BuildRequest = ?bp.request;
 
     var ci: usize = 0;
@@ -211,24 +240,24 @@ fun plan_validated(a: *A.Allocator, itn: *intern.Interner, reg: *lang_target.Tar
     ret res[BuildPlan, fail.Fail].ok{bp};
 }
 
-# resolve every planned cell against the realized dependency closure, filling in
+# resolve every planned cell against the plan's dependency closure, filling in
 # the exported dependency steps and export link requirements each cell consumes.
-# it configures projects through the same `driver.begin_build` a build runs, so a
-# missing realization, an invalid dependency manifest or a dependency cycle is
-# reported here exactly as the build would report it. nothing is fetched, no step
-# runs and no output is written
+# it configures projects through the same `driver.begin_build` a build runs, so
+# what configuring a cell refuses is reported here exactly as the build would
+# report it. nothing is fetched, no step runs and no output is written
 # ---
 # s:   the session the plan was made in
-# m:   the root manifest
-# bp:  the plan, mutated in place; each unit becomes `configured`
+# bp:  the plan, its closure located; mutated in place, each unit becomes `configured`
 # ret: ok; the configuration failure of the first cell that has one
-pub fun configure(s: *session.Session, m: *manifest.Manifest, bp: *BuildPlan) err[fail.Fail] {
-    var i: usize = 0;
+pub fun configure(s: *session.Session, bp: *BuildPlan) err[fail.Fail] {
+    if (!bp.located) { ret err[fail.Fail].err{fail.message("internal: a plan is configured only once its closure is located")}; }
+    val m: *manifest.Manifest = bp.manifest;
+    var i: usize              = 0;
     for (i < bp.units.len) {
         val u:   *BuildUnit           = ?bp.units.data[i];
         var req: request.BuildRequest = request.for_cell(?bp.request, u.owner, u.sel_target,
             u.sel_artifact, u.subsystem, u.goal);
-        val begun: res[project.Project, fail.Fail] = driver.begin_build(s, m, ?req, nil);
+        val begun: res[project.Project, fail.Fail] = driver.begin_build(s, m, ?bp.closure, ?req, nil);
         if (sel begun.err) {
             ret err[fail.Fail].err{begun.err};
         }
@@ -353,7 +382,7 @@ fun plan_cell(a: *A.Allocator, itn: *intern.Interner, reg: *lang_target.TargetRe
             ti = ti + 1;
         }
         if (!reached) {
-            ret err[fail.Fail].err{in_dependency(a, owner_chain, fail.user_of(diagnostic_kind.ARTIFACT_REQUIREMENT_UNREACHABLE, join_msg(a,
+            ret err[fail.Fail].err{in_dependency(a, owner_chain, fail.user_of(diagnostic_kind.ARTIFACT_REQUIREMENT_UNREACHABLE, fail.join(a,
                 "mach.toml: artifact '", u.sel_artifact, "' requires artifact '", rname,
                 "', which declares no target this build can produce")))};
         }
@@ -370,35 +399,38 @@ fun in_dependency(a: *A.Allocator, owner_chain: str, f: fail.Fail) fail.Fail {
     if (str_empty(owner_chain)) { ret f; }
     val carried: opt[str] = fail.text(f);
     if (sel carried.none) { ret f; }
-    val joined: res[str, fail.Fail] = join_msg(a, "dependency ", owner_chain, ": ", carried.some);
+    val joined: res[str, fail.Fail] = fail.join(a, "dependency ", owner_chain, ": ", carried.some);
     if (sel joined.err) { ret joined.err; }
     ret fail.with_text(f, joined.ok);
 }
 
-# add the cells a dependency's export library requires to a plan made
-# from the root manifest. the root's closure is located exactly as a build
-# locates it; every cell compiled against a closure that holds a dependency
+# locate the root's dependency closure, once, into the plan, and add the cells a
+# dependency's export library requires to it. a plan runs only once this has
+# located its closure; every cell compiled against a closure that holds a dependency
 # waits on that dependency's requirement cells, which are planned before it with
 # the root's profile, for every target they name in the dependency's manifest,
 # and against the dependency's own closure in turn. a requirement reached through
 # several consumers is planned once. two cells that would write one output path
 # are refused
 # ---
-# s:   the session the plan was made in
-# m:   the root manifest
-# bp:  the plan, mutated in place
-# ret: ok; err from closure realization, a dependency cell's planning, or an
-#      output collision
-pub fun plan_dependency_requirements(s: *session.Session, m: *manifest.Manifest, bp: *BuildPlan) err[fail.Fail] {
+# s:          the session the plan was made in
+# bp:         the plan, mutated in place
+# unrealized: what a dependency nothing is realized for is; a plan that leaves
+#             one out lists what was built and never runs
+# ret:        ok; err from locating the closure, a dependency cell's planning, or an
+#             output collision
+pub fun plan_dependency_requirements(s: *session.Session, bp: *BuildPlan, unrealized: driver_closure.Unrealized) err[fail.Fail] {
+    val m: *manifest.Manifest = bp.manifest;
+    if (bp.located) { ret err[fail.Fail].err{fail.message("internal: the plan's dependency closure is already located")}; }
     val toolchain_r: res[*lang_target.TargetRegistry, fail.Fail] = toolchain.registry();
     if (sel toolchain_r.err) { ret err[fail.Fail].err{toolchain_r.err}; }
-    val toolchain: *lang_target.TargetRegistry = toolchain_r.ok;
-    if (m.dep_count > 0) {
-        val realized: res[project.Project, fail.Fail] = driver.closure_locate(s, m, bp.request.project_root);
-        if (sel realized.err) { ret err[fail.Fail].err{realized.err}; }
-        var closure: project.Project = realized.ok;
-        fin { project.dnit_project(?closure); }
-
+    val toolchain: *lang_target.TargetRegistry     = toolchain_r.ok;
+    val realized:  res[project.Closure, fail.Fail] = driver.closure_locate(s, m, bp.request.project_root, unrealized);
+    if (sel realized.err) { ret err[fail.Fail].err{realized.err}; }
+    bp.closure = realized.ok;
+    bp.located = unrealized == driver_closure.UNREALIZED_REFUSED;
+    if (bp.closure.count > 0) {
+        val closure: *project.Closure  = ?bp.closure;
         val a:       *A.Allocator      = bp.units.a;
         var planned: Vector[BuildUnit] = collections_vector.init[BuildUnit](a);
         var handed:  bool              = false;
@@ -408,7 +440,7 @@ pub fun plan_dependency_requirements(s: *session.Session, m: *manifest.Manifest,
         var i: usize = 0;
         for (i < bp.units.len) {
             var u:       BuildUnit      = bp.units.data[i];
-            val reached: err[fail.Fail] = plan_dependency_cells(a, ?s.interner, toolchain, ?closure, m,
+            val reached: err[fail.Fail] = plan_dependency_cells(a, ?s.interner, toolchain, closure, m,
                 -1, ?bp.request, ?planned, ?u.dep_requires);
             if (sel reached.err) { ret reached; }
             val pushed: res[usize, A.Error] = collections_vector.push[BuildUnit](?planned, u);
@@ -425,8 +457,8 @@ pub fun plan_dependency_requirements(s: *session.Session, m: *manifest.Manifest,
 # the dependencies a consumer compiles against: every dependency of the closure
 # for the root (`consumer < 0`), otherwise what closure dependency `consumer`
 # reaches through its own edges
-fun closure_reach(closure: *project.Project, reach: *bool, consumer: i64) {
-    val n: u32 = closure.config.dep_count;
+fun closure_reach(closure: *project.Closure, reach: *bool, consumer: i64) {
+    val n: u32 = closure.count;
     var i: u32 = 0;
     for (i < n) {
         reach[i] = consumer < 0;
@@ -436,13 +468,13 @@ fun closure_reach(closure: *project.Project, reach: *bool, consumer: i64) {
     reach_edges(closure, reach, consumer::u32);
 }
 
-fun reach_edges(closure: *project.Project, reach: *bool, from: u32) {
-    val d: *project.DepEntry = ?closure.config.deps[from];
+fun reach_edges(closure: *project.Closure, reach: *bool, from: u32) {
+    val d: *project.DepEntry = ?closure.deps[from];
     var k: u32               = 0;
     for (k < d.direct_count) {
         var j: u32 = 0;
-        for (j < closure.config.dep_count) {
-            if (intern.str_same(closure.config.deps[j].project_id, d.direct[k]) && !reach[j]) {
+        for (j < closure.count) {
+            if (intern.str_same(closure.deps[j].project_id, d.direct[k]) && !reach[j]) {
                 reach[j] = true;
                 reach_edges(closure, reach, j);
             }
@@ -455,9 +487,9 @@ fun reach_edges(closure: *project.Project, reach: *bool, from: u32) {
 # plan the requirement cells of each dependency `consumer` compiles against and
 # record their labels in `labels`
 fun plan_dependency_cells(a: *A.Allocator, itn: *intern.Interner, reg: *lang_target.TargetRegistry,
-    closure: *project.Project, root: *manifest.Manifest, consumer: i64, req: *request.BuildRequest,
+    closure: *project.Closure, root: *manifest.Manifest, consumer: i64, req: *request.BuildRequest,
     units: *Vector[BuildUnit], labels: *Vector[str]) err[fail.Fail] {
-    val n: u32 = closure.config.dep_count;
+    val n: u32 = closure.count;
     if (n == 0) { ret err[fail.Fail].ok{}; }
     val rr: res[*bool, A.Error] = A.allocate[bool](a, n::usize);
     if (sel rr.err) { ret err[fail.Fail].err{fail.refused(rr.err)}; }
@@ -468,7 +500,7 @@ fun plan_dependency_cells(a: *A.Allocator, itn: *intern.Interner, reg: *lang_tar
     var di: u32 = 0;
     for (di < n) {
         if (reach[di]) {
-            val dep:   *project.DepEntry  = ?closure.config.deps[di];
+            val dep:   *project.DepEntry  = ?closure.deps[di];
             val dm:    *manifest.Manifest = ?dep.manifest;
             var scope: manifest.Scope     = manifest.dependency_scope(root, dm);
             val chain: str                = entry_name(itn, dep.chain);
@@ -490,11 +522,11 @@ fun plan_dependency_cells(a: *A.Allocator, itn: *intern.Interner, reg: *lang_tar
                         ti = ti + 1;
                     }
                     if (!reached) {
-                        ret err[fail.Fail].err{in_dependency(a, chain, fail.user_of(diagnostic_kind.ARTIFACT_REQUIREMENT_UNREACHABLE, join_msg(a,
+                        ret err[fail.Fail].err{in_dependency(a, chain, fail.user_of(diagnostic_kind.ARTIFACT_REQUIREMENT_UNREACHABLE, fail.join(a,
                             "mach.toml: its export library requires artifact '", rname,
                             "', which declares no target")))};
                     }
-                    val label_r: res[str, fail.Fail] = join_msg(a, owner, ".", rname);
+                    val label_r: res[str, fail.Fail] = fail.join(a, owner, ".", rname);
                     if (sel label_r.err) { ret err[fail.Fail].err{label_r.err}; }
                     val label: str = label_r.ok;
                     if (!label_listed(labels, label)) {
@@ -514,7 +546,7 @@ fun plan_dependency_cells(a: *A.Allocator, itn: *intern.Interner, reg: *lang_tar
 # cells are planned in the dependency's scope, then each waits on the requirement
 # cells of the dependency's own closure
 fun plan_dependency_cell(a: *A.Allocator, itn: *intern.Interner, reg: *lang_target.TargetRegistry,
-    closure: *project.Project, root: *manifest.Manifest, owner_index: u32, s: *manifest.Scope, chain: str,
+    closure: *project.Closure, root: *manifest.Manifest, owner_index: u32, s: *manifest.Scope, chain: str,
     req: *request.BuildRequest, units: *Vector[BuildUnit], tname: str, aname: str) err[fail.Fail] {
     val first: usize          = units.len;
     val cr:    err[fail.Fail] = plan_cell(a, itn, reg, s, chain, req, units, tname, aname, true);
@@ -525,22 +557,23 @@ fun plan_dependency_cell(a: *A.Allocator, itn: *intern.Interner, reg: *lang_targ
     # its closure, so each is preceded by that closure's requirement cells
     var added: Vector[BuildUnit] = collections_vector.init[BuildUnit](a);
     fin { collections_vector.dnit[BuildUnit](?added); }
-    var i: usize = first;
-    for (i < units.len) {
-        val pushed: res[usize, A.Error] = collections_vector.push[BuildUnit](?added, units.data[i]);
-        if (sel pushed.err) { ret err[fail.Fail].err{fail.refused(pushed.err)}; }
-        i = i + 1;
+    for (units.len > first) {
+        val taken: opt[BuildUnit] = collections_vector.pop[BuildUnit](units);
+        if (sel taken.some) {
+            val pushed: res[usize, A.Error] = collections_vector.push[BuildUnit](?added, taken.some);
+            if (sel pushed.err) { ret err[fail.Fail].err{fail.refused(pushed.err)}; }
+        }
     }
-    units.len = first;
-    i         = 0;
-    for (i < added.len) {
+    # popped last first, so the cells are taken back in planned order
+    var i: usize = added.len;
+    for (i > 0) {
+        i = i - 1;
         var u:       BuildUnit      = added.data[i];
         val reached: err[fail.Fail] = plan_dependency_cells(a, itn, reg, closure, root, owner_index::i64,
             req, units, ?u.dep_requires);
         if (sel reached.err) { ret reached; }
         val pushed: res[usize, A.Error] = collections_vector.push[BuildUnit](units, u);
         if (sel pushed.err) { ret err[fail.Fail].err{fail.refused(pushed.err)}; }
-        i = i + 1;
     }
     ret err[fail.Fail].ok{};
 }
@@ -575,7 +608,7 @@ pub fun check_plan_outputs(a: *A.Allocator, plans: *Vector[BuildPlan]) err[fail.
                 for (j < right.len) {
                     val v: *BuildUnit = ?right.data[j];
                     if (writes_output(u) && writes_output(v) && str_equals(u.out_path, v.out_path)) {
-                        ret err[fail.Fail].err{fail.user_of(diagnostic_kind.OUTPUT_COLLISION, join_msg(a,
+                        ret err[fail.Fail].err{fail.user_of(diagnostic_kind.OUTPUT_COLLISION, fail.join(a,
                             "artifact '", u.label, "' in profiles '", u.profile, "' and '", v.profile,
                             "' collides on output path '", u.out_path, "'; put {profile.name} in [project].work"))};
                     }
@@ -612,7 +645,7 @@ fun check_unit_outputs(a: *A.Allocator, units: *Vector[BuildUnit]) err[fail.Fail
             for (j < units.len) {
                 val v: *BuildUnit = ?units.data[j];
                 if (writes_output(v) && str_equals(u.out_path, v.out_path)) {
-                    ret err[fail.Fail].err{fail.user_of(diagnostic_kind.OUTPUT_COLLISION, join_msg(a,
+                    ret err[fail.Fail].err{fail.user_of(diagnostic_kind.OUTPUT_COLLISION, fail.join(a,
                         "artifacts '", u.label, "' and '", v.label, "' collide on output path '", u.out_path, "'"))};
                 }
                 j = j + 1;
@@ -639,72 +672,8 @@ fun out_conflict_msg(a: *A.Allocator, bp: *BuildPlan) res[str, fail.Fail] {
     val cells_r: res[str, textbuild.Error] = textbuild.tb_finish(?cb);
     textbuild.tb_dnit(?cb);
     if (sel cells_r.err) { ret res[str, fail.Fail].err{fail.message(textbuild.text(cells_r.err))}; }
-    ret join_msg(a, "-o names a single output but the selection resolves to several build units (",
+    ret fail.join(a, "-o names a single output but the selection resolves to several build units (",
         cells_r.ok, "); narrow it with -a, -t and -p");
-}
-
-pub fun replan_unit(a: *A.Allocator, itn: *intern.Interner, reg: *lang_target.TargetRegistry,
-    s: *manifest.Scope, req: *request.BuildRequest,
-    prior: *BuildUnit) res[BuildUnit, fail.Fail] {
-    val ur: res[BuildUnit, fail.Fail] = plan_unit(a, itn, reg, s, req,
-        prior.sel_target, prior.sel_artifact, prior.is_required);
-    if (sel ur.err) { ret ur; }
-    var u: BuildUnit = ur.ok;
-    if (!unit_decisions_equal(?u, prior)) {
-        ret res[BuildUnit, fail.Fail].err{fail.user(diagnostic_kind.MANIFEST_CHANGED,
-            "the manifest changed after this build was planned; re-run the build")};
-    }
-    ret res[BuildUnit, fail.Fail].ok{u};
-}
-
-fun unit_decisions_equal(a: *BuildUnit, b: *BuildUnit) bool {
-    if (!str_equals(a.profile, b.profile)) { ret false; }
-    if (a.opt_level != b.opt_level)        { ret false; }
-    if (a.goal != b.goal)                  { ret false; }
-    if (a.subsystem != b.subsystem)        { ret false; }
-    if (a.is_required != b.is_required)    { ret false; }
-    if (!str_equals(a.owner, b.owner))     { ret false; }
-
-    if (a.requires.len != b.requires.len) { ret false; }
-    var ri: usize = 0;
-    for (ri < a.requires.len) {
-        if (!str_equals(a.requires.data[ri], b.requires.data[ri])) { ret false; }
-        ri = ri + 1;
-    }
-    if (a.steps.len != b.steps.len) { ret false; }
-    var si: usize = 0;
-    for (si < a.steps.len) {
-        if (!str_equals(a.steps.data[si], b.steps.data[si])) { ret false; }
-        si = si + 1;
-    }
-    if (!str_equals(a.out_path, b.out_path))   { ret false; }
-    if (!str_equals(a.out_dir, b.out_dir))     { ret false; }
-    if (!str_equals(a.obj_dir, b.obj_dir))     { ret false; }
-    if (!str_equals(a.cache_dir, b.cache_dir)) { ret false; }
-    if (!str_equals(a.ir_dir, b.ir_dir))       { ret false; }
-    if (!str_equals(a.asm_dir, b.asm_dir))     { ret false; }
-    if (!str_equals(a.test_dir, b.test_dir))   { ret false; }
-
-    if (a.phases.len != b.phases.len) { ret false; }
-    var i: usize = 0;
-    for (i < a.phases.len) {
-        if (a.phases.data[i] != b.phases.data[i]) { ret false; }
-        i = i + 1;
-    }
-
-    if (a.link_inputs.len != b.link_inputs.len) { ret false; }
-    i = 0;
-    for (i < a.link_inputs.len) {
-        val la: *input.Input = ?a.link_inputs.data[i];
-        val lb: *input.Input = ?b.link_inputs.data[i];
-        if (la.kind != lb.kind)                             { ret false; }
-        if (la.include_referenced != lb.include_referenced) { ret false; }
-        if (!str_equals(la.text, lb.text))                  { ret false; }
-        if (!str_equals(la.library, lb.library))            { ret false; }
-        if (!str_equals(la.rpath, lb.rpath))                { ret false; }
-        i = i + 1;
-    }
-    ret true;
 }
 
 # `where` names the declaration (the flag, or the manifest key of artifact
@@ -762,7 +731,7 @@ fun plan_unit(a: *A.Allocator, itn: *intern.Interner, reg: *lang_target.TargetRe
     u.owner_chain  = "";
     u.label        = aname;
     if (!str_empty(req.owner)) {
-        val label: res[str, fail.Fail] = join_msg(a, req.owner, ".", aname);
+        val label: res[str, fail.Fail] = fail.join(a, req.owner, ".", aname);
         if (sel label.err) { ret res[BuildUnit, fail.Fail].err{label.err}; }
         u.label = label.ok;
     }
@@ -815,33 +784,33 @@ fun plan_unit(a: *A.Allocator, itn: *intern.Interner, reg: *lang_target.TargetRe
     if (sel od_r.err) { ret res[BuildUnit, fail.Fail].err{od_r.err}; }
     u.out_dir = od_r.ok;
 
-    val ob_r: res[str, fail.Fail] = join_template(a, itn, root, bu.obj_root, "project obj output dir: ");
+    val ob_r: res[str, fail.Fail] = layout.under(a, u.out_dir, layout.OBJ);
     if (sel ob_r.err) { ret res[BuildUnit, fail.Fail].err{ob_r.err}; }
     u.obj_dir = ob_r.ok;
 
-    val cb_r: res[str, fail.Fail] = join_template(a, itn, root, bu.cache_root, "project cache dir: ");
+    val cb_r: res[str, fail.Fail] = layout.under(a, u.out_dir, layout.CACHE);
     if (sel cb_r.err) { ret res[BuildUnit, fail.Fail].err{cb_r.err}; }
     u.cache_dir = cb_r.ok;
 
     u.ir_dir = "";
     if (req.emit_ir) {
-        val ib_r: res[str, fail.Fail] = join_template(a, itn, root, bu.ir_root, "project ir output dir: ");
+        val ib_r: res[str, fail.Fail] = layout.under(a, u.out_dir, layout.IR);
         if (sel ib_r.err) { ret res[BuildUnit, fail.Fail].err{ib_r.err}; }
         u.ir_dir = ib_r.ok;
     }
     u.asm_dir = "";
     if (req.emit_asm) {
-        val ab_r: res[str, fail.Fail] = join_template(a, itn, root, bu.asm_root, "project asm output dir: ");
+        val ab_r: res[str, fail.Fail] = layout.under(a, u.out_dir, layout.ASM);
         if (sel ab_r.err) { ret res[BuildUnit, fail.Fail].err{ab_r.err}; }
         u.asm_dir = ab_r.ok;
     }
 
-    val op_r: res[str, fail.Fail] = unit_out_path(a, itn, m, req, ?bu, u.obj_dir, is_required);
-    if (sel op_r.err) { ret res[BuildUnit, fail.Fail].err{op_r.err}; }
-    u.out_path = op_r.ok;
-    val td_r: res[str, fail.Fail] = unit_test_dir(a, itn, m, req, ?bu);
+    val td_r: res[str, fail.Fail] = unit_test_dir(a, itn, m, req, ?bu, u.out_dir);
     if (sel td_r.err) { ret res[BuildUnit, fail.Fail].err{td_r.err}; }
     u.test_dir = td_r.ok;
+    val op_r: res[str, fail.Fail] = unit_out_path(a, itn, m, req, ?bu, u.obj_dir, u.test_dir, is_required);
+    if (sel op_r.err) { ret res[BuildUnit, fail.Fail].err{op_r.err}; }
+    u.out_path = op_r.ok;
 
     u.link_inputs  = collections_vector.init[input.Input](a);
     u.dep_steps    = collections_vector.init[str](a);
@@ -865,6 +834,8 @@ fun plan_unit(a: *A.Allocator, itn: *intern.Interner, reg: *lang_target.TargetRe
     if (sel ph_r.err) {
         ret res[BuildUnit, fail.Fail].err{ph_r.err};
     }
+    val admitted: err[fail.Fail] = goal_admitted(?tgt, ?u);
+    if (sel admitted.err) { ret res[BuildUnit, fail.Fail].err{admitted.err}; }
     ret res[BuildUnit, fail.Fail].ok{u};
 }
 
@@ -899,11 +870,11 @@ fun oom_unit() res[BuildUnit, fail.Fail] {
 fun join_template(a: *A.Allocator, itn: *intern.Interner, root: str, dir_id: intern.StrId, what: str) res[str, fail.Fail] {
     val opt_tmpl: opt[str] = intern.get(itn, dir_id);
     if (sel opt_tmpl.none) {
-        ret res[str, fail.Fail].err{fail.message_of(join_msg(a, what, "template not interned", ""))};
+        ret res[str, fail.Fail].err{fail.message_of(fail.join(a, what, "template not interned", ""))};
     }
     val jr: res[str, A.Error] = types_path.join(a, root, opt_tmpl.some);
     if (sel jr.err) {
-        ret res[str, fail.Fail].err{fail.message_of(join_msg(a, what, lang_alloc.text(jr.err), ""))};
+        ret res[str, fail.Fail].err{fail.message_of(fail.join(a, what, lang_alloc.text(jr.err), ""))};
     }
     ret res[str, fail.Fail].ok{jr.ok};
 }
@@ -914,7 +885,7 @@ pub fun finished_modules(tgt: *lang_target.Binding) bool {
 
 fun unit_out_path(a: *A.Allocator, itn: *intern.Interner, m: *manifest.Manifest,
     req: *request.BuildRequest, bu: *manifest.BuildUnit,
-    obj_dir: str, is_required: bool) res[str, fail.Fail] {
+    obj_dir: str, test_dir: str, is_required: bool) res[str, fail.Fail] {
     if (req.goal == request.GOAL_CHECK)     { ret res[str, fail.Fail].ok{""}; }
     if (req.goal == request.GOAL_OBJECTS)   { ret res[str, fail.Fail].ok{obj_dir}; }
     if (req.goal == request.GOAL_TEST_LIST) { ret res[str, fail.Fail].ok{""}; }
@@ -932,10 +903,8 @@ fun unit_out_path(a: *A.Allocator, itn: *intern.Interner, m: *manifest.Manifest,
 
     # the dispatcher is `test/<artifact>/<artifact>`
     if (req.goal == request.GOAL_TESTS) {
-        val dir_r: res[str, fail.Fail] = unit_test_dir(a, itn, m, req, bu);
-        if (sel dir_r.err) { ret dir_r; }
-        val full_r: res[str, A.Error] = types_path.join(a, dir_r.ok, tested_name(itn, m, bu));
-        if (sel full_r.err) { ret test_exe_fail(); }
+        val full_r: res[str, A.Error] = types_path.join(a, test_dir, tested_name(itn, m, bu));
+        if (sel full_r.err) { ret res[str, fail.Fail].err{fail.refused(full_r.err)}; }
         ret res[str, fail.Fail].ok{full_r.ok};
     }
 
@@ -968,19 +937,9 @@ fun tested_name(itn: *intern.Interner, m: *manifest.Manifest, bu: *manifest.Buil
 # `test/<artifact>`: where a test run's dispatcher object, dispatcher and logs go;
 # empty outside a test goal
 fun unit_test_dir(a: *A.Allocator, itn: *intern.Interner, m: *manifest.Manifest,
-    req: *request.BuildRequest, bu: *manifest.BuildUnit) res[str, fail.Fail] {
+    req: *request.BuildRequest, bu: *manifest.BuildUnit, out_dir: str) res[str, fail.Fail] {
     if (!request.test_goal(req.goal)) { ret res[str, fail.Fail].ok{""}; }
-    val tmpl_opt: opt[str] = intern.get(itn, bu.test_root);
-    if (sel tmpl_opt.none) { ret test_exe_fail(); }
-    val rel_r: res[str, types_string.StrError] = str_replace(a, tmpl_opt.some, "{name}", tested_name(itn, m, bu));
-    if (sel rel_r.err) { ret test_exe_fail(); }
-    val full_r: res[str, A.Error] = types_path.join(a, req.project_root, rel_r.ok);
-    if (sel full_r.err) { ret test_exe_fail(); }
-    ret res[str, fail.Fail].ok{full_r.ok};
-}
-
-fun test_exe_fail() res[str, fail.Fail] {
-    ret res[str, fail.Fail].err{fail.message("failed to resolve the test executable path; check the `tests` template in mach.toml")};
+    ret layout.within(a, out_dir, layout.TEST, tested_name(itn, m, bu));
 }
 
 fun derive_phases(a: *A.Allocator, itn: *intern.Interner, s: *manifest.Scope,
@@ -1032,6 +991,43 @@ fun derive_phases(a: *A.Allocator, itn: *intern.Interner, s: *manifest.Scope,
     if (req.goal == request.GOAL_ARTIFACT || req.goal == request.GOAL_TESTS) {
         val r8: err[fail.Fail] = push_phase(u, PH_LINK);
         if (sel r8.err) { ret r8; }
+    }
+    ret err[fail.Fail].ok{};
+}
+
+val FLAT_ONLY: str = "a flat-image object format produces only executables; library and '--emit obj' outputs are unsupported";
+
+fun has_phase(u: *BuildUnit, k: PhaseKind) bool {
+    var i: usize = 0;
+    for (i < u.phases.len) {
+        if (u.phases.data[i] == k) { ret true; }
+        i = i + 1;
+    }
+    ret false;
+}
+
+# what the target's object format cannot produce for the unit's goal is refused
+# as the unit is planned, before anything compiles. a format either is its own
+# artifact or links from compiled images, which the registry holds it to, so
+# one that is neither never reaches a plan
+fun goal_admitted(tgt: *lang_target.Binding, u: *BuildUnit) err[fail.Fail] {
+    if (tgt.of == nil) { ret err[fail.Fail].ok{}; }
+    val flat:     bool = tgt.of.produces_image;
+    val finished: bool = finished_modules(tgt);
+    val library:  bool = catalog_artifact.is_library(u.target_entry.kind);
+    val emits:    bool = has_phase(u, PH_EMIT);
+    val links:    bool = has_phase(u, PH_LINK);
+    if (emits && u.goal == request.GOAL_OBJECTS && flat) {
+        ret err[fail.Fail].err{fail.user(diagnostic_kind.TARGET_OUTPUT_UNSUPPORTED, FLAT_ONLY)};
+    }
+    if (emits && u.goal == request.GOAL_TESTS && finished) {
+        ret err[fail.Fail].err{fail.user(diagnostic_kind.TARGET_OUTPUT_UNSUPPORTED, "a finished-module object format produces no executable; this target cannot build or run tests")};
+    }
+    if (emits && finished && library) {
+        ret err[fail.Fail].err{fail.user(diagnostic_kind.TARGET_OUTPUT_UNSUPPORTED, "a finished-module object format has no archive or shared-library form; each module is its own artifact")};
+    }
+    if (links && u.goal != request.GOAL_TESTS && flat && library) {
+        ret err[fail.Fail].err{fail.user(diagnostic_kind.TARGET_OUTPUT_UNSUPPORTED, FLAT_ONLY)};
     }
     ret err[fail.Fail].ok{};
 }
@@ -1102,12 +1098,6 @@ pub fun resolve_requirement(a: *A.Allocator, itn: *intern.Interner, tgt: *lang_t
     li.library            = library;
     li.include_referenced = req.include_referenced;
     ret res[input.Input, fail.Fail].ok{li};
-}
-
-pub fun join_msg(al: *A.Allocator, va: ...) res[str, fail.Fail] {
-    val r: res[str, types_string.StrError] = str_join(al, va...);
-    if (sel r.err) { ret res[str, fail.Fail].err{fail.str_refused(r.err)}; }
-    ret res[str, fail.Fail].ok{r.ok};
 }
 
 # render the effective plan: one block per selected cell, naming the project,
@@ -1952,6 +1942,13 @@ test plan__a_finished_modules_target_delivers_the_entry_module_at_out {
     val pw: res[BuildPlan, fail.Fail] = plan(?alloc, ?itn, lang_target.t_registry(), ?m, rq);
     if (sel pw.err)                                                   { ret 1; }
     if (!ut_path_eq(pw.ok.units.data[0].out_path, "/r/spv/appa.spv")) { ret 1; }
+
+    # what the format cannot produce is refused as the cell is planned, before anything compiles
+    rq.out  = "";
+    rq.goal = request.GOAL_TESTS;
+    val pt: res[BuildPlan, fail.Fail] = plan(?alloc, ?itn, lang_target.t_registry(), ?m, rq);
+    if (sel pt.ok)                                                         { ret 2; }
+    if (fail.kind_of(pt.err) != diagnostic_kind.TARGET_OUTPUT_UNSUPPORTED) { ret 3; }
     ret 0;
 }
 

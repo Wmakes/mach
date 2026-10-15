@@ -17,9 +17,9 @@ use std.types.string.str_len;
 use A: std.allocator;
 
 use mach.lang.be.linker;
-use mach.lang.build.request;
 use mach.lang.diagnostic;
 use diagnostic_kind: mach.lang.diagnostic.kind;
+use mach.lang.driver.request;
 use mach.lang.manifest;
 use mach.lang.me.pipeline;
 use mach.lang.session;
@@ -42,9 +42,9 @@ use mach.lang.driver.tests.testing.ut_str_contains;
 use mach.lang.driver.tests.testing.ut_target_sel;
 use mach.lang.driver.tests.testing.ut_write_gitmodules;
 use mach.lang.driver.tests.testing.ut_write_node;
+use mach.lang.driver.toolchain;
 use mach.lang.manifest.target.on_host;
 use lang_target: mach.lang.target;
-use mach.lang.toolchain;
 
 #[testing]
 fun ut_manifest_notargets() str {
@@ -331,7 +331,7 @@ fun ut_pe_stack_of(p: *project.Project, outcome_r: *u64, com: *u64) bool {
 
     var linked: bool = false;
     if (!missing) {
-        val lr: err[fail.Fail] = ut_planned_link_images(p.s, ?p.target, images,
+        val lr: err[fail.Fail] = ut_planned_link_images(p.s, ?p.linkage, ?p.target, images,
             p.emit_len, nil::*target_of.DynLib, 0, output_testing.path(?tf)::*u8, "stkprobe"::*u8,
             catalog_artifact.EXECUTABLE, false, target_of.image_options_default(catalog_subsystem.CONSOLE));
         linked = sel lr.ok;
@@ -430,7 +430,7 @@ test manifest__the_root_and_each_dependency_are_held_to_one_rule_per_key {
                 bad = 5;
             }
             if (sel pr2.err) {
-                if (!ut_str_contains(fail.describe(pr2.err), "dep 'old': mach.toml: unknown key 'description' in [project]")) { bad = 6; }
+                if (!ut_str_contains(fail.describe(pr2.err), "dependency 'old': mach.toml: unknown key 'description' in [project]")) { bad = 6; }
             }
         }
     }
@@ -450,7 +450,7 @@ test manifest__the_root_and_each_dependency_are_held_to_one_rule_per_key {
                 bad = 8;
             }
             if (sel pr3.err) {
-                if (!ut_str_contains(fail.describe(pr3.err), "dep 'old': mach.toml: missing [profile] table")) { bad = 9; }
+                if (!ut_str_contains(fail.describe(pr3.err), "dependency 'old': mach.toml: missing [profile] table")) { bad = 9; }
             }
         }
     }

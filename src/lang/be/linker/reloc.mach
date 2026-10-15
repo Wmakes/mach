@@ -15,6 +15,7 @@ use diagnostic_kind: mach.lang.diagnostic.kind;
 use mach.lang.fail;
 use mach.lang.growth;
 use mach.lang.intern;
+use mach.lang.linkage;
 use mach.lang.session;
 use lang_target: mach.lang.target;
 use mach.lang.target.isa;
@@ -151,7 +152,7 @@ fun difference_subtrahend_vaddr(s: *session.Session, rs: *Resolution, m: u32,
     if ((sub.flags & target_of.SYM_OBJ_FLAG_GLOBAL) == 0 && !target_of.section_is_external(sub.section)) {
         var t: of_reloc.RelocTarget = of_reloc.target(0, 0, 0);
         if (!local_symbol_target(rs, m, sym2, ?t)) {
-            ret res[u64, fail.Fail].err{fail.user_of(diagnostic_kind.LINK_UNDEFINED_SYMBOL, undef_message(s, sub_name))};
+            ret res[u64, fail.Fail].err{fail.user_of(diagnostic_kind.LINK_UNDEFINED_SYMBOL, undef_message(rs.dyn.linkage, s, sub_name))};
         }
         ret res[u64, fail.Fail].ok{t.vaddr};
     }
@@ -277,7 +278,7 @@ pub fun personality_slot(s: *session.Session, rs: *Resolution, local_got: *Local
         }
         var t: of_reloc.RelocTarget = of_reloc.target(0, 0, 0);
         if (!local_symbol_target(rs, m, sy, ?t)) {
-            ret res[target_of.UnwindPersonality, fail.Fail].err{fail.user_of(diagnostic_kind.LINK_UNDEFINED_SYMBOL, undef_message(s, target.name))};
+            ret res[target_of.UnwindPersonality, fail.Fail].err{fail.user_of(diagnostic_kind.LINK_UNDEFINED_SYMBOL, undef_message(rs.dyn.linkage, s, target.name))};
         }
         vaddr = t.vaddr;
     }
@@ -291,7 +292,7 @@ pub fun personality_slot(s: *session.Session, rs: *Resolution, local_got: *Local
             if (sel imp.ok) {
                 ret res[target_of.UnwindPersonality, fail.Fail].ok{target_of.UnwindPersonality{slot: 0, import_index: imp.ok}};
             }
-            ret res[target_of.UnwindPersonality, fail.Fail].err{fail.user_of(diagnostic_kind.LINK_UNDEFINED_SYMBOL, undef_message(s, effective))};
+            ret res[target_of.UnwindPersonality, fail.Fail].err{fail.user_of(diagnostic_kind.LINK_UNDEFINED_SYMBOL, undef_message(rs.dyn.linkage, s, effective))};
         }
         vaddr    = sl.some.vaddr;
         absolute = sl.some.merged_index == target_of.SECTION_ABSOLUTE;
@@ -507,7 +508,7 @@ fun patch_module_relocations(s: *session.Session, rs: *Resolution, m: u32,
         if ((target.flags & target_of.SYM_OBJ_FLAG_GLOBAL) == 0
             && !target_of.section_is_external(target.section)) {
             if (!local_symbol_target(rs, m, target_sym, ?resolved)) {
-                ret err[fail.Fail].err{fail.user_of(diagnostic_kind.LINK_UNDEFINED_SYMBOL, undef_message(s, target_name))};
+                ret err[fail.Fail].err{fail.user_of(diagnostic_kind.LINK_UNDEFINED_SYMBOL, undef_message(rs.dyn.linkage, s, target_name))};
             }
         }
         or {
@@ -579,7 +580,7 @@ fun patch_module_relocations(s: *session.Session, rs: *Resolution, m: u32,
                     }
                     ret err[fail.Fail].err{reloc_refusal_of(r.origin, diagnostic_kind.LINK_RELOCATION_UNSUPPORTED, unbound_import_message(s, r.kind, resolved_name))};
                 }
-                ret err[fail.Fail].err{fail.user_of(diagnostic_kind.LINK_UNDEFINED_SYMBOL, undef_message(s, resolved_name))};
+                ret err[fail.Fail].err{fail.user_of(diagnostic_kind.LINK_UNDEFINED_SYMBOL, undef_message(rs.dyn.linkage, s, resolved_name))};
             }
         }
 
@@ -635,7 +636,7 @@ fun patch_module_relocations(s: *session.Session, rs: *Resolution, m: u32,
                     if (sel named.err) { ret err[fail.Fail].err{named.err}; }
                     val name:    intern.StrId    = named.ok;
                     val located: opt[*SymbolLoc] = map.get[intern.StrId, SymbolLoc](sym_locs, ?name);
-                    if (sel located.none) { ret err[fail.Fail].err{fail.user_of(diagnostic_kind.LINK_UNDEFINED_SYMBOL, undef_message(s, name))}; }
+                    if (sel located.none) { ret err[fail.Fail].err{fail.user_of(diagnostic_kind.LINK_UNDEFINED_SYMBOL, undef_message(rs.dyn.linkage, s, name))}; }
                     sub_absolute = located.some.merged_index == target_of.SECTION_ABSOLUTE;
                 }
                 if (resolved_absolute != sub_absolute) {
@@ -948,10 +949,10 @@ fun dwarf_addend_message(s: *session.Session, modules: *target_of.ObjectImage, m
         sec, intern.text(?s.interner, name), r.addend);
 }
 
-fun undef_message(s: *session.Session, name: intern.StrId) res[str, fail.Fail] {
-    val pinned: intern.StrId = session.import_library(s, name);
+fun undef_message(l: *linkage.Linkage, s: *session.Session, name: intern.StrId) res[str, fail.Fail] {
+    val pinned: intern.StrId = linkage.import_library(l, name);
     if (!intern.str_is_nil(pinned)) {
-        ret pinned_attribution_message(s, name, pinned);
+        ret pinned_attribution_message(l, s, name, pinned);
     }
     ret named_message(s, "undefined symbol: ", name, "", "undefined symbol");
 }

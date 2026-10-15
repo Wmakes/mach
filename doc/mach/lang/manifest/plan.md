@@ -18,13 +18,7 @@ entry: the artifact's `entry`
 bin_path: the artifact's output: the expanded `[project].work` joined with the
               expanded artifact `out`
 out_root: `<expanded project work>`, whose layout beneath it the build owns
-obj_root: `<expanded project work>/obj`
-ir_root: `<expanded project work>/ir`
-asm_root: `<expanded project work>/asm`
-test_root: `<expanded project work>/test/{name}`, with `{name}` left literal for
-              the test runner to fill
-cache_root: `<expanded project work>/.cache`, the compiler-only state
-stage_root: `<expanded project work>/.stage`, the build step scratch space
+              (mach.lang.output.layout)
 optimize: from the resolved profile
 debug: from the resolved profile
 simd: from the resolved profile
@@ -47,41 +41,6 @@ so identically named artifacts of two dependencies never share a path
 
 root: the manifest of the project being built
 owner: the manifest declaring the cell's artifact; `root` for the root's own
-
-## val DEPENDENCY_ARTIFACT_DIR
-
-```mach
-pub val DEPENDENCY_ARTIFACT_DIR: str = "dep"
-```
-
-the directory under the expanded root `[project].work` that holds a dependency's
-artifact outputs, one subdirectory per dependency id
-
-## val CACHE_DIR
-
-```mach
-pub val CACHE_DIR: str = ".cache"
-```
-
-the directory under the expanded `[project].work` that holds compiler-only state:
-nothing but the compiler reads or writes it, and a step output may not name it
-
-## val STEP_STAMP_DIR
-
-```mach
-pub val STEP_STAMP_DIR: str = ".cache/steps"
-```
-
-the directory under `CACHE_DIR` that holds one fingerprint stamp per build step
-
-## val STAGE_DIR
-
-```mach
-pub val STAGE_DIR: str = ".stage"
-```
-
-the directory under the expanded `[project].work` that holds build step scratch
-space, one subdirectory per step, reset before the step runs
 
 ## fun root_scope
 

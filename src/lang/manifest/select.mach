@@ -1326,3 +1326,32 @@ test resolve_target__native_resolution_borrows_one_manifest_definition {
     }
     ret 0;
 }
+
+# refuse a target's stack size on an object format whose image headers carry
+# none; a target the registry cannot resolve is left to the build that selects it
+# ---
+# alloc: owns a refusal's text
+# itn:   holds the manifest's names
+# reg:   the registry the targets resolve against
+# m:     the manifest
+pub fun check_stack_keys(alloc: *A.Allocator, itn: *intern.Interner, reg: *lang_target.TargetRegistry, m: *Manifest) err[fail.Fail] {
+    var i: u32 = 0;
+    for (i < m.target_count) {
+        val td: *TargetDef = ?m.targets[i];
+        i = i + 1;
+        if (td.stack_reserve == 0 && td.stack_commit == 0) { cnt; }
+        var of_name: str = "";
+        if (!intern.str_is_nil(td.of)) { of_name = intern.text(itn, td.of); }
+        val tr: res[lang_target.Binding, fail.Fail] = lang_target.select_of(reg,
+            intern.text(itn, td.isa), intern.text(itn, td.os), intern.text(itn, td.abi), of_name);
+        if (sel tr.err) { cnt; }
+        val t: lang_target.Binding = tr.ok;
+        if (t.of.carries_stack_size) { cnt; }
+        var key: str = "stack_reserve";
+        if (td.stack_reserve == 0) { key = "stack_commit"; }
+        ret err[fail.Fail].err{fail.formatted_user(alloc, diagnostic_kind.TARGET_STACK_SIZE,
+            "mach.toml: [target.{}].{} is not expressible on the `{}` object format, which carries no stack size in its image headers",
+            intern.text(itn, td.name), key, t.of.name)};
+    }
+    ret err[fail.Fail].ok{};
+}

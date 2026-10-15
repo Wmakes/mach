@@ -13,10 +13,11 @@ export: intern.StrId) res[intern.StrId, fail.Fail];
 ## fun declaration_linkage_name
 
 ```mach
-pub fun declaration_linkage_name(s: *session.Session, mid: module.ModuleId, canon: intern.StrId, decl: u32) res[intern.StrId, fail.Fail];
+pub fun declaration_linkage_name(l: *linkage.Linkage, s: *session.Session, mid: module.ModuleId, canon: intern.StrId, decl: u32) res[intern.StrId, fail.Fail];
 ```
 
-the linkage name of the declaration `decl` of module `mid`, whose canonical name is `canon`
+the linkage name of the declaration `decl` of module `mid`, whose canonical name is `canon`,
+exported under the name `l` declares for it
 
 ## fun test_name
 

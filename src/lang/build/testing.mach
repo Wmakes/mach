@@ -21,8 +21,7 @@ use A: std.allocator;
 use mach.lang.be.codegen;
 use mach.lang.be.linker;
 use mach.lang.be.obj;
-use build_emit:        mach.lang.build.emit;
-use build_fingerprint: mach.lang.build.fingerprint;
+use build_emit: mach.lang.build.emit;
 use mach.lang.build.outcome;
 use build_plan: mach.lang.build.plan;
 use mach.lang.diagnostic;
@@ -30,8 +29,11 @@ use diagnostic_kind: mach.lang.diagnostic.kind;
 use mach.lang.driver;
 use mach.lang.driver.cache;
 use mach.lang.driver.project;
+use mach.lang.driver.toolchain;
 use mach.lang.fail;
+use lang_fingerprint: mach.lang.fingerprint;
 use mach.lang.intern;
+use mach.lang.linkage;
 use mach.lang.manifest;
 use me_ir: mach.lang.me.ir;
 use mach.lang.me.lower.testrunner;
@@ -46,7 +48,6 @@ use catalog_artifact:  mach.lang.target.catalog.artifact;
 use catalog_subsystem: mach.lang.target.catalog.subsystem;
 use target_of:         mach.lang.target.of;
 use target_testing:    mach.lang.target.testing;
-use mach.lang.toolchain;
 use mach.lang.wire;
 
 pub fun classify_subprocess(term: *subprocess.SubprocessTerminal, expired: bool, cap_ok: bool, cap: *subprocess.CaptureIoResult) outcome.GateResult {
@@ -90,7 +91,7 @@ pub rec TestScope {
 }
 
 # col is the unit's test declarations in module order; the scope owns it from here
-pub fun collect_scope(p: *driver.Project, col: testrunner.Collected, sc: *TestScope) err[fail.Fail] {
+pub fun collect_scope(p: *project.Project, col: testrunner.Collected, sc: *TestScope) err[fail.Fail] {
     sc.have    = false;
     sc.pick    = nil;
     sc.sel_len = 0;
@@ -120,7 +121,7 @@ pub fun collect_scope(p: *driver.Project, col: testrunner.Collected, sc: *TestSc
     ret err[fail.Fail].ok{};
 }
 
-pub fun free_scope(p: *driver.Project, sc: *TestScope) {
+pub fun free_scope(p: *project.Project, sc: *TestScope) {
     if (sc.pick != nil && sc.have && sc.col.count > 0) {
         A.deallocate[testrunner.Test](p.alloc, sc.pick, sc.col.count::usize);
     }
@@ -132,7 +133,7 @@ pub fun free_scope(p: *driver.Project, sc: *TestScope) {
     }
 }
 
-pub fun record_tests(p: *driver.Project, sc: *TestScope, exe: *u8, target: str, profile: str,
+pub fun record_tests(p: *project.Project, sc: *TestScope, exe: *u8, target: str, profile: str,
     bo: *outcome.BuildOutcome, oa: *A.Allocator) err[fail.Fail] {
     var k: u32 = 0;
     for (k < sc.sel_len) {
@@ -145,7 +146,7 @@ pub fun record_tests(p: *driver.Project, sc: *TestScope, exe: *u8, target: str, 
 
 # a run selects the project's own tests, or its dependencies' too under
 # `--include-deps`, whose qualified name contains the filter
-fun test_selected(p: *driver.Project, t: *testrunner.Test) bool {
+fun test_selected(p: *project.Project, t: *testrunner.Test) bool {
     if (!p.req.include_deps && !test_in_project(p, t)) { ret false; }
     if (str_empty(p.req.test_filter))                  { ret true; }
     val name: opt[str] = intern.get(?p.s.interner, t.name);
@@ -153,9 +154,9 @@ fun test_selected(p: *driver.Project, t: *testrunner.Test) bool {
     ret str_contains(name.some, p.req.test_filter);
 }
 
-fun test_in_project(p: *driver.Project, t: *testrunner.Test) bool {
-    if (t.mod_idx >= driver.module_count(p)) { ret false; }
-    val m: *driver.ModuleEntry = driver.module_at(p, t.mod_idx);
+fun test_in_project(p: *project.Project, t: *testrunner.Test) bool {
+    if (t.mod_idx >= project.module_count(p)) { ret false; }
+    val m: *project.ModuleEntry = project.module_at(p, t.mod_idx);
     ret driver.module_in_current_project(p, m.fqn);
 }
 
@@ -168,7 +169,7 @@ pub rec DispatchInputs {
     dynlib_len: u32;
 }
 
-pub fun collect_dispatch_inputs(p: *driver.Project, unit: *build_plan.BuildUnit) res[DispatchInputs, fail.Fail] {
+pub fun collect_dispatch_inputs(p: *project.Project, unit: *build_plan.BuildUnit) res[DispatchInputs, fail.Fail] {
     var di: DispatchInputs = DispatchInputs{};
     val ec: err[fail.Fail] = build_emit.append_external_inputs(p, unit, ?di.ext, ?di.ext_len, ?di.dynlibs, ?di.dynlib_len);
     if (sel ec.err) {
@@ -178,7 +179,7 @@ pub fun collect_dispatch_inputs(p: *driver.Project, unit: *build_plan.BuildUnit)
     ret res[DispatchInputs, fail.Fail].ok{di};
 }
 
-pub fun free_dispatch_inputs(p: *driver.Project, di: *DispatchInputs) {
+pub fun free_dispatch_inputs(p: *project.Project, di: *DispatchInputs) {
     build_emit.free_inputs(p.alloc, di.ext, di.ext_len, di.ext_len);
     build_emit.free_dynlibs(p.alloc, di.dynlibs, di.dynlib_len);
     @di = DispatchInputs{};
@@ -189,14 +190,11 @@ pub fun free_dispatch_inputs(p: *driver.Project, di: *DispatchInputs) {
 # are compiler-produced, so the link keeps only what the selected tests reach
 # ---
 # modules: the build's current images: normal and test objects in topological order
-pub fun link_dispatcher(p: *driver.Project, sc: *TestScope, di: *DispatchInputs,
+pub fun link_dispatcher(p: *project.Project, sc: *TestScope, di: *DispatchInputs,
     modules: *target_of.ObjectImage, module_len: u32, dispatcher: str, artifact: str) err[fail.Fail] {
-    val te: *driver.TargetEntry = p.target_entry;
+    val te: *project.TargetEntry = p.target_entry;
     if (te == nil) {
         ret err[fail.Fail].err{fail.message("no target selected")};
-    }
-    if (!p.target.of.links_from_image) {
-        ret err[fail.Fail].err{fail.user(diagnostic_kind.TARGET_OUTPUT_UNSUPPORTED, "this target's object format does not link from compiled images, so it cannot build tests")};
     }
 
     var scratch_ar: arena.Arena;
@@ -218,25 +216,25 @@ pub fun link_dispatcher(p: *driver.Project, sc: *TestScope, di: *DispatchInputs,
     ret result;
 }
 
-pub fun fingerprint_scope(s: *wire.Sink, p: *driver.Project, sc: *TestScope) {
+pub fun fingerprint_scope(s: *wire.Sink, p: *project.Project, sc: *TestScope) {
     wire.put_u32(s, sc.sel_len);
     var i: u32 = 0;
     for (i < sc.sel_len) {
         val t: *testrunner.Test = ?sc.pick[i];
-        build_fingerprint.put_text(s, scope_name(p, t.name)::str);
+        lang_fingerprint.put_text(s, scope_name(p, t.name)::str);
         wire.put_u32(s, t.line);
         wire.put_u32(s, t.mod_idx);
         i = i + 1;
     }
 }
 
-fun scope_name(p: *driver.Project, id: intern.StrId) *u8 {
+fun scope_name(p: *project.Project, id: intern.StrId) *u8 {
     val nm: opt[str] = intern.get(?p.s.interner, id);
     if (sel nm.some) { ret nm.some::*u8; }
     ret ""::*u8;
 }
 
-fun build_dispatch_executable(p: *driver.Project, dispatcher: str, artifact: str,
+fun build_dispatch_executable(p: *project.Project, dispatcher: str, artifact: str,
     pick: *testrunner.Test, sel_len: u32,
     modules: *target_of.ObjectImage, module_len: u32, di: *DispatchInputs) err[fail.Fail] {
     val res_synth: res[me_ir.Module, fail.Fail] = testrunner.synthesize_dispatcher(p.s, pick, sel_len);
@@ -289,7 +287,7 @@ fun build_dispatch_executable(p: *driver.Project, dispatcher: str, artifact: str
     if (sel yielded.err) { ret yielded; }
 
     project.set_origin(p, diagnostic.ORIGIN_LINK);
-    val res_link: err[fail.Fail] = linker.link_mixed(p.s, ?p.diags, ?p.target, images, total, di.ext, di.ext_len,
+    val res_link: err[fail.Fail] = linker.link_mixed(p.s, ?p.linkage, ?p.diags, ?p.target, images, total, di.ext, di.ext_len,
         di.dynlibs, di.dynlib_len, artifact, build_emit.artifact_product_name(p), catalog_artifact.EXECUTABLE, p.req.pie,
         target_of.image_options_default(p.req.subsystem));
     if (sel res_link.err) {
@@ -301,7 +299,7 @@ fun build_dispatch_executable(p: *driver.Project, dispatcher: str, artifact: str
 # the dispatcher is the test executable's `main`: an artifact's own `main` yields to
 # it as a weak definition, so the normal object that defines it links unchanged. the
 # yielding image's symbols are copied, never the build's own
-fun yield_main(p: *driver.Project, images: *target_of.ObjectImage, count: u32) err[fail.Fail] {
+fun yield_main(p: *project.Project, images: *target_of.ObjectImage, count: u32) err[fail.Fail] {
     val named: res[intern.StrId, A.Error] = intern.add(?p.s.interner, testrunner.MAIN_LINKAGE);
     if (sel named.err) { ret err[fail.Fail].err{fail.refused(named.err)}; }
     var i: u32 = 0;
@@ -328,11 +326,11 @@ fun yield_main(p: *driver.Project, images: *target_of.ObjectImage, count: u32) e
     ret err[fail.Fail].ok{};
 }
 
-fun record_test(p: *driver.Project, t: *testrunner.Test, exe: *u8, target: str, profile: str, idx: u32,
+fun record_test(p: *project.Project, t: *testrunner.Test, exe: *u8, target: str, profile: str, idx: u32,
     bo: *outcome.BuildOutcome) err[fail.Fail] {
     val name: str = intern.text(?p.s.interner, t.name);
-    if (t.mod_idx >= driver.module_count(p)) { ret err[fail.Fail].err{fail.message("a test names a module the project never loaded")}; }
-    val m:    *driver.ModuleEntry          = driver.module_at(p, t.mod_idx);
+    if (t.mod_idx >= project.module_count(p)) { ret err[fail.Fail].err{fail.message("a test names a module the project never loaded")}; }
+    val m:    *project.ModuleEntry         = project.module_at(p, t.mod_idx);
     val file: opt[*lang_source.SourceFile] = lang_source.get(?p.s.sources, m.file_id);
     if (sel file.none) { ret err[fail.Fail].err{fail.message("a test's module has no source file")}; }
 
@@ -358,7 +356,9 @@ fun testing_name(s: *session.Session, name: str) intern.StrId {
 # links `paths` into `out` and reads the image back
 #[testing]
 fun t_link_image(s: *session.Session, tgt: *lang_target.Binding, paths: *target_of.ObjectInput, count: u32, out: str, image: *Vector[u8]) bool {
-    val linked: err[fail.Fail] = linker.link(s, ?s.diags, tgt, paths, count, nil, 0, out, "coff-atom-test", catalog_artifact.EXECUTABLE, false,
+    var l: linkage.Linkage = linkage.init(s.alloc);
+    fin { linkage.dnit(?l); }
+    val linked: err[fail.Fail] = linker.link(s, ?l, ?s.diags, tgt, paths, count, nil, 0, out, "coff-atom-test", catalog_artifact.EXECUTABLE, false,
         target_of.image_options_default(catalog_subsystem.CONSOLE));
     if (sel linked.err) {
         print.eprintln(fail.describe(linked.err));

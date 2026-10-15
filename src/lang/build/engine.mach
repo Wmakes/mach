@@ -26,20 +26,22 @@ use sync_thread: std.sync.thread;
 
 use mach.lang.be.codegen;
 use mach.lang.be.linker;
-use build_emit:        mach.lang.build.emit;
-use build_fingerprint: mach.lang.build.fingerprint;
+use build_emit: mach.lang.build.emit;
 use mach.lang.build.outcome;
 use build_plan: mach.lang.build.plan;
-use mach.lang.build.request;
+use mach.lang.build.publication;
 use build_testing: mach.lang.build.testing;
 use mach.lang.diagnostic;
 use diagnostic_kind: mach.lang.diagnostic.kind;
 use mach.lang.driver;
 use mach.lang.driver.cache;
+use mach.lang.driver.codec;
 use mach.lang.driver.passes;
 use mach.lang.driver.project;
-use driver_query: mach.lang.driver.query;
+use mach.lang.driver.request;
+use mach.lang.driver.toolchain;
 use mach.lang.fail;
+use lang_fingerprint: mach.lang.fingerprint;
 use mach.lang.intern;
 use mach.lang.manifest;
 use me_ir: mach.lang.me.ir;
@@ -48,12 +50,12 @@ use mach.lang.output;
 use mach.lang.query;
 use mach.lang.readout;
 use mach.lang.session;
+use lang_source: mach.lang.source;
 use mach.lang.step;
 use lang_target:       mach.lang.target;
 use catalog_artifact:  mach.lang.target.catalog.artifact;
 use catalog_subsystem: mach.lang.target.catalog.subsystem;
 use target_of:         mach.lang.target.of;
-use mach.lang.toolchain;
 use mach.lang.wire;
 
 rec UnitState {
@@ -71,6 +73,8 @@ rec UnitState {
     asm_outputs:  *str;
     artifact:     str;
     dispatcher:   str;
+    # what the host's earlier links wrote, read and extended by this unit's
+    published: *publication.Publications;
 }
 
 fun label_failed(failed: *Vector[str], label: str) bool {
@@ -89,7 +93,7 @@ fun blocking_requirement(oa: *A.Allocator, failed: *Vector[str], u: *build_plan.
     for (i < u.requires.len) {
         var label: str = u.requires.data[i];
         if (!str_empty(u.owner)) {
-            val owned: res[str, fail.Fail] = build_plan.join_msg(oa, u.owner, ".", label);
+            val owned: res[str, fail.Fail] = fail.join(oa, u.owner, ".", label);
             if (sel owned.err) { ret res[opt[str], fail.Fail].err{owned.err}; }
             label = owned.ok;
         }
@@ -106,7 +110,7 @@ fun blocking_requirement(oa: *A.Allocator, failed: *Vector[str], u: *build_plan.
 
 fun record_blocked_unit(bo: *outcome.BuildOutcome, sink: *readout.Sink, oa: *A.Allocator, failed: *Vector[str],
     u: *build_plan.BuildUnit, blocked_by: str) err[fail.Fail] {
-    var f: fail.Fail = fail.user_of(diagnostic_kind.ARTIFACT_BLOCKED, build_plan.join_msg(oa,
+    var f: fail.Fail = fail.user_of(diagnostic_kind.ARTIFACT_BLOCKED, fail.join(oa,
         "artifact '", u.label, "' was not built: it requires artifact '", blocked_by,
         "', which failed to build"));
     readout.failure(sink, ?f, diagnostic.ORIGIN_BUILD);
@@ -123,7 +127,7 @@ fun record_blocked_unit(bo: *outcome.BuildOutcome, sink: *readout.Sink, oa: *A.A
 # plan, its severity the worst unit's; err is a failure of the engine itself, never of a
 # unit
 # ---
-# bp:      the plan, read only
+# bp:      the plan, its closure located; read only, and trusted as planned
 # backing: the allocator each unit's arena grows from; released per unit
 # oa:      owns the returned outcome and every path and text in it
 # sink:    where every unit, failure, diagnostic and phase row is sent as it happens; nil for none
@@ -192,16 +196,20 @@ fun execute_unit_cold(bp: *build_plan.BuildPlan, unit_index: usize, backing: *A.
     val make_r:  err[A.Error] = arena.make(?u_alloc, ?u_ar);
     if (sel make_r.err) { ret cold_fail(oa, sink, fail.message("failed to initialise allocator")); }
 
-    var r:           res[outcome.BuildOutcome, fail.Fail];
-    val res_session: res[session.Session, fail.Fail] = toolchain.session_init(?u_alloc);
+    var r: res[outcome.BuildOutcome, fail.Fail];
+    # the unit's session reads the plan's names, so its manifest and cells read as planned
+    val res_session: res[session.Session, fail.Fail] = toolchain.session_init_over(?u_alloc, bp.names);
     if (sel res_session.err) {
-        val f: fail.Fail = fail.message_of(build_plan.join_msg(?u_alloc, "failed to initialise compiler session: ", fail.describe(res_session.err)));
+        val f: fail.Fail = fail.message_of(fail.join(?u_alloc, "failed to initialise compiler session: ", fail.describe(res_session.err)));
         r = cold_fail(oa, sink, f);
     }
     if (sel res_session.ok) {
-        var s: session.Session = res_session.ok;
+        # the session ends with the unit, so its links' record does too
+        var s:         session.Session          = res_session.ok;
+        var published: publication.Publications = publication.init(?u_alloc);
         s.backing = backing;
-        r         = execute_warm(bp, unit_index, ?s, oa, sink);
+        r         = execute_warm(bp, unit_index, ?s, ?published, oa, sink);
+        publication.dnit(?published);
         session.dnit(?s);
     }
 
@@ -217,11 +225,12 @@ fun cold_fail(oa: *A.Allocator, sink: *readout.Sink, f: fail.Fail) res[outcome.B
 # the project root, its manifest and its plan; it must not move once made
 #[testing]
 pub rec WarmProject {
-    alloc: A.Allocator;
-    s:     session.Session;
-    root:  str;
-    m:     manifest.Manifest;
-    plan:  build_plan.BuildPlan;
+    alloc:     A.Allocator;
+    s:         session.Session;
+    published: publication.Publications;
+    root:      str;
+    m:         manifest.Manifest;
+    plan:      build_plan.BuildPlan;
 }
 
 # the allocator and the session, released with warm_project_dnit once made
@@ -231,8 +240,9 @@ pub fun warm_project_init(w: *WarmProject) err[fail.Fail] {
     if (sel made.err) { ret err[fail.Fail].err{fail.refused(made.err)}; }
     val s: res[session.Session, fail.Fail] = toolchain.session_init(?w.alloc);
     if (sel s.err) { ret err[fail.Fail].err{s.err}; }
-    w.s    = s.ok;
-    w.root = nil;
+    w.s         = s.ok;
+    w.published = publication.init(?w.alloc);
+    w.root      = nil;
     ret err[fail.Fail].ok{};
 }
 
@@ -254,7 +264,7 @@ pub fun warm_project_plan(w: *WarmProject, rq: request.BuildRequest) err[fail.Fa
     w.m = loaded.ok;
     var at: request.BuildRequest = rq;
     at.project_root = w.root;
-    val planned: res[build_plan.BuildPlan, fail.Fail] = build_plan.plan(?w.alloc, ?w.s.interner, toolchain.t_registry(), ?w.m, at);
+    val planned: res[build_plan.BuildPlan, fail.Fail] = build_plan.plan_to_run(?w.alloc, ?w.s, toolchain.t_registry(), ?w.m, at);
     if (sel planned.err) { ret err[fail.Fail].err{planned.err}; }
     w.plan = planned.ok;
     ret err[fail.Fail].ok{};
@@ -263,6 +273,7 @@ pub fun warm_project_plan(w: *WarmProject, rq: request.BuildRequest) err[fail.Fa
 #[testing]
 pub fun warm_project_dnit(w: *WarmProject) {
     if (w.root != nil) { fs.remove_all(?w.alloc, w.root); }
+    publication.dnit(?w.published);
     session.dnit(?w.s);
 }
 
@@ -290,8 +301,11 @@ test execute_unit_cold__session_init_failure_is_sent_before_arena_teardown {
 
     var rd: readout.Recording;
     readout.recording_init(?rd, ?oa, readout.LEVEL_RESULTS);
+    var names: intern.Interner = intern.init(?oa);
+    fin { intern.dnit(?names); }
     var bp: build_plan.BuildPlan;
-    val r:  res[outcome.BuildOutcome, fail.Fail] = execute_unit_cold(?bp, 0::usize, T.allocator_of(?t), ?oa, ?rd.sink);
+    bp.names = ?names;
+    val r: res[outcome.BuildOutcome, fail.Fail] = execute_unit_cold(?bp, 0::usize, T.allocator_of(?t), ?oa, ?rd.sink);
     if (sel r.err) { ret 3; }
 
     var bo:  outcome.BuildOutcome = r.ok;
@@ -310,14 +324,15 @@ test execute_unit_cold__session_init_failure_is_sent_before_arena_teardown {
 # restored on return, so every raw product a caller borrowed from the session before the
 # call is expired by it
 # ---
-# bp:         the plan, read only
+# bp:         the plan, its closure located; read only, and trusted as planned: neither the manifest
+#             nor the closure is read again, and a manifest the session reloaded since is refused
 # unit_index: the cell to run; out of range is an internal failure
 # s:          the warm session; its sources and queries carry over between calls
 # oa:         owns the returned outcome
 # sink:       where the unit's failures, diagnostics and phase rows are sent as they happen; nil for none
 # ret:        the outcome of that one unit, released with outcome.outcome_dnit, or an engine failure
-pub fun execute_warm(bp: *build_plan.BuildPlan, unit_index: usize, s: *session.Session, oa: *A.Allocator,
-    sink: *readout.Sink) res[outcome.BuildOutcome, fail.Fail] {
+pub fun execute_warm(bp: *build_plan.BuildPlan, unit_index: usize, s: *session.Session,
+    published: *publication.Publications, oa: *A.Allocator, sink: *readout.Sink) res[outcome.BuildOutcome, fail.Fail] {
     if (unit_index >= bp.units.len) {
         ret res[outcome.BuildOutcome, fail.Fail].err{fail.message("build unit index out of range")};
     }
@@ -344,42 +359,22 @@ pub fun execute_warm(bp: *build_plan.BuildPlan, unit_index: usize, s: *session.S
     s.build_alloc = ?call_alloc;
     fin { s.build_alloc = prior_build; }
 
-    val res_manifest: res[manifest.Manifest, fail.Fail] = driver.load_manifest(s, bp.request.project_root);
-    if (sel res_manifest.err) {
-        val r: res[outcome.BuildOutcome, fail.Fail] = warm_fail(?bo, sink, res_manifest.err);
-        ret r;
-    }
-    var m:      manifest.Manifest = res_manifest.ok;
-    val worked: err[fail.Fail]    = request.request_work_apply(?s.interner, ?bp.request, ?m);
-    if (sel worked.err) {
-        val r: res[outcome.BuildOutcome, fail.Fail] = warm_fail(?bo, sink, worked.err);
-        ret r;
-    }
+    val held: err[fail.Fail] = plan_held(bp, s);
+    if (sel held.err) { ret warm_fail(?bo, sink, held.err); }
 
     var req: request.BuildRequest =
         request.for_cell(?bp.request, planned.owner, planned.sel_target, planned.sel_artifact,
         planned.subsystem, planned.goal);
 
-    val begin_r: res[driver.Project, fail.Fail] = driver.begin_build(s, ?m, ?req, pr);
+    val begin_r: res[project.Project, fail.Fail] = driver.begin_build(s, bp.manifest, ?bp.closure, ?req, pr);
     if (sel begin_r.err) {
         readout.diagnostics(sink, ?s.sources, ?s.diags);
         ret warm_fail(?bo, sink, begin_r.err);
     }
-    var p: driver.Project = begin_r.ok;
-    fin { driver.dnit_project(?p); }
+    var p: project.Project = begin_r.ok;
+    fin { project.dnit_project(?p); }
 
-    # a dependency's cell replans in the scope its configuration realized
-    var scope: manifest.Scope = manifest.root_scope(?m);
-    if (p.config.dependency_owned) { scope = manifest.dependency_scope(?m, ?p.config.owner.manifest); }
-    val res_register: res[*lang_target.TargetRegistry, fail.Fail] = toolchain.registry();
-    if (sel res_register.err) { ret warm_fail(?bo, sink, res_register.err); }
-    val replan_r: res[build_plan.BuildUnit, fail.Fail] = build_plan.replan_unit(?call_alloc, ?s.interner, res_register.ok, ?scope, ?req, planned);
-    if (sel replan_r.err) {
-        val r: res[outcome.BuildOutcome, fail.Fail] = warm_fail(?bo, sink, replan_r.err);
-        ret r;
-    }
-    var cell: build_plan.BuildUnit  = replan_r.ok;
-    val unit: *build_plan.BuildUnit = ?cell;
+    val unit: *build_plan.BuildUnit = planned;
     # the cell's objects live in its obj directory, which is the object cache
     p.object_dir = unit.obj_dir;
     p.cache_dir  = unit.cache_dir;
@@ -394,6 +389,7 @@ pub fun execute_warm(bp: *build_plan.BuildPlan, unit_index: usize, s: *session.S
     st.scope.have    = false;
     st.scope.pick    = nil;
     st.scope.sel_len = 0;
+    st.published     = published;
 
     var result:        err[fail.Fail]    = err[fail.Fail].ok{};
     var failed_origin: diagnostic.Origin = diagnostic.ORIGIN_BUILD;
@@ -446,7 +442,26 @@ pub fun execute_warm(bp: *build_plan.BuildPlan, unit_index: usize, s: *session.S
     ret res[outcome.BuildOutcome, fail.Fail].ok{bo};
 }
 
-fun pcg_sweep_staged(p: *driver.Project) {
+# a session runs a plan it reads as planned: the plan located its closure, and
+# the session holds the plan's names, as the session it was planned in or one
+# layered over that session's names. the session it was planned in also holds
+# the manifest's text, which must still be the text the plan was made from
+fun plan_held(bp: *build_plan.BuildPlan, s: *session.Session) err[fail.Fail] {
+    if (!bp.located) { ret err[fail.Fail].err{fail.message("internal: a plan runs only once its dependency closure is located")}; }
+    if (?s.interner != bp.names) {
+        if (!intern.descends(?s.interner, bp.names)) { ret err[fail.Fail].err{fail.message("internal: the session does not hold the plan's names")}; }
+        ret err[fail.Fail].ok{};
+    }
+    val m: *manifest.Manifest = bp.manifest;
+    if (lang_source.file_is_nil(m.source)) { ret err[fail.Fail].ok{}; }
+    val now: query.Revision = query.peek_revision(?s.queries, ?session.FILE_TEXT, lang_source.file_index(m.source)::u64);
+    if (now != m.source_revision) {
+        ret err[fail.Fail].err{fail.user(diagnostic_kind.MANIFEST_CHANGED, "the manifest changed after this build was planned; re-run the build")};
+    }
+    ret err[fail.Fail].ok{};
+}
+
+fun pcg_sweep_staged(p: *project.Project) {
     project.release_all_staged(p);
 }
 
@@ -457,7 +472,7 @@ fun warm_fail(bo: *outcome.BuildOutcome, sink: *readout.Sink, f: fail.Fail) res[
     ret res[outcome.BuildOutcome, fail.Fail].ok{@bo};
 }
 
-fun plan_module_outputs(p: *driver.Project, base: str, suffix: str) res[*str, fail.Fail] {
+fun plan_module_outputs(p: *project.Project, base: str, suffix: str) res[*str, fail.Fail] {
     if (p.emit_len == 0) { ret res[*str, fail.Fail].ok{nil}; }
     val allocated: res[*str, A.Error] = A.zallocate[str](p.alloc, p.emit_len::usize);
     if (sel allocated.err) {
@@ -470,8 +485,8 @@ fun plan_module_outputs(p: *driver.Project, base: str, suffix: str) res[*str, fa
     }
     var i: u32 = 0;
     for (i < p.emit_len) {
-        val m:   *driver.ModuleEntry = project.module_at(p, p.topo[i]::u32);
-        val fqn: opt[str]            = intern.get(?p.s.interner, m.fqn);
+        val m:   *project.ModuleEntry = project.module_at(p, p.topo[i]::u32);
+        val fqn: opt[str]             = intern.get(?p.s.interner, m.fqn);
         if (sel fqn.none) {
             ret res[*str, fail.Fail].err{fail.message("module FQN not interned")};
         }
@@ -494,11 +509,11 @@ fun plan_module_outputs(p: *driver.Project, base: str, suffix: str) res[*str, fa
 
 # an output's parent directory exists before its phase runs; the file itself
 # is written in place, a build product regenerable by the next build
-fun reserve_output(p: *driver.Project, name: str) err[fail.Fail] {
+fun reserve_output(p: *project.Project, name: str) err[fail.Fail] {
     ret output.reserve(p.alloc, p.out_dir, name);
 }
 
-fun plan_outputs(p: *driver.Project, unit: *build_plan.BuildUnit, st: *UnitState) err[fail.Fail] {
+fun plan_outputs(p: *project.Project, unit: *build_plan.BuildUnit, st: *UnitState) err[fail.Fail] {
     val goal:    request.BuildGoal = p.req.goal;
     val flat:    bool              = p.target.of != nil && p.target.of.produces_image;
     val objects: bool              = (goal == request.GOAL_ARTIFACT && !flat)
@@ -524,7 +539,7 @@ fun plan_outputs(p: *driver.Project, unit: *build_plan.BuildUnit, st: *UnitState
         st.artifact = unit.out_path;
     }
     if (goal == request.GOAL_TESTS) {
-        val file_r: res[str, fail.Fail] = build_plan.join_msg(p.alloc, "dispatch.", target_of.object_ext(p.target.of));
+        val file_r: res[str, fail.Fail] = fail.join(p.alloc, "dispatch.", target_of.object_ext(p.target.of));
         if (sel file_r.err) { ret err[fail.Fail].err{file_r.err}; }
         val name_r: res[str, A.Error] = types_path.join(p.alloc, unit.test_dir, file_r.ok);
         str_free(p.alloc, file_r.ok);
@@ -544,7 +559,7 @@ fun plan_outputs(p: *driver.Project, unit: *build_plan.BuildUnit, st: *UnitState
 }
 
 # `obj/<project>/<module>.test.<object suffix>` for each emitted module with a test object
-fun plan_test_outputs(p: *driver.Project) res[*str, fail.Fail] {
+fun plan_test_outputs(p: *project.Project) res[*str, fail.Fail] {
     if (p.emit_len == 0) { ret res[*str, fail.Fail].ok{nil}; }
     val allocated: res[*str, A.Error] = A.zallocate[str](p.alloc, p.emit_len::usize);
     if (sel allocated.err) { ret res[*str, fail.Fail].err{fail.refused(allocated.err)}; }
@@ -555,7 +570,7 @@ fun plan_test_outputs(p: *driver.Project) res[*str, fail.Fail] {
     }
     var i: u32 = 0;
     for (i < p.emit_len) {
-        val m: *driver.ModuleEntry = project.module_at(p, p.topo[i]::u32);
+        val m: *project.ModuleEntry = project.module_at(p, p.topo[i]::u32);
         if (passes.has_test_object(p, m)) {
             val named: res[str, fail.Fail] = cache.test_object_path(p, m, p.alloc);
             if (sel named.err) { ret res[*str, fail.Fail].err{named.err}; }
@@ -569,7 +584,7 @@ fun plan_test_outputs(p: *driver.Project) res[*str, fail.Fail] {
     ret res[*str, fail.Fail].ok{destinations};
 }
 
-fun release_names(p: *driver.Project, names: *str) {
+fun release_names(p: *project.Project, names: *str) {
     if (names == nil) { ret; }
     var i: usize = 0;
     for (i < p.emit_len::usize) {
@@ -579,7 +594,7 @@ fun release_names(p: *driver.Project, names: *str) {
     A.deallocate[str](p.alloc, names, p.emit_len::usize);
 }
 
-fun release_outputs(p: *driver.Project, st: *UnitState) {
+fun release_outputs(p: *project.Project, st: *UnitState) {
     release_names(p, st.objects);
     release_names(p, st.test_objects);
     release_names(p, st.ir_outputs);
@@ -595,7 +610,7 @@ fun release_outputs(p: *driver.Project, st: *UnitState) {
     st.artifact = nil;
 }
 
-fun run_phase(ph: build_plan.PhaseKind, p: *driver.Project, unit: *build_plan.BuildUnit, st: *UnitState,
+fun run_phase(ph: build_plan.PhaseKind, p: *project.Project, unit: *build_plan.BuildUnit, st: *UnitState,
     bo: *outcome.BuildOutcome, oa: *A.Allocator) err[fail.Fail] {
     val phase_name_r: opt[str] = build_plan.phase_name(ph);
     if (sel phase_name_r.none) {
@@ -604,7 +619,7 @@ fun run_phase(ph: build_plan.PhaseKind, p: *driver.Project, unit: *build_plan.Bu
     var result: err[fail.Fail] = err[fail.Fail].err{fail.message("unknown build phase")};
     if (ph == build_plan.PH_STEPS) { result = driver.phase_finish(p, step.run(p.alloc, p)); }
     if (ph == build_plan.PH_DEP_STEPS) {
-        val te: *driver.TargetEntry = p.target_entry;
+        val te: *project.TargetEntry = p.target_entry;
         result = driver.phase_finish(p, step.dependency_run(p, te.isa_name, te.os_name, te.abi_name));
     }
     if (ph == build_plan.PH_LOAD)  { result = load_phase(p); }
@@ -646,7 +661,7 @@ test run_phase__unknown_catalog_member_is_internal_before_execution {
     ret 0;
 }
 
-fun load_phase(p: *driver.Project) err[fail.Fail] {
+fun load_phase(p: *project.Project) err[fail.Fail] {
     val lr: err[fail.Fail] = driver.run_load_phase(p);
     if (sel lr.err) { ret lr; }
     if (project.module_count(p) == 0) {
@@ -658,7 +673,7 @@ fun load_phase(p: *driver.Project) err[fail.Fail] {
 # tests are gathered in module order from the lowered test ir, or from the facts
 # a restored test object carries, so a cached test build lists the same tests in
 # the same order as a clean one
-fun collect_test_scope(p: *driver.Project, st: *UnitState) err[fail.Fail] {
+fun collect_test_scope(p: *project.Project, st: *UnitState) err[fail.Fail] {
     var col: testrunner.Collected = testrunner.collected_init();
     var i:   u32                  = 0;
     for (i < project.module_count(p)) {
@@ -672,7 +687,7 @@ fun collect_test_scope(p: *driver.Project, st: *UnitState) err[fail.Fail] {
     ret build_testing.collect_scope(p, col, ?st.scope);
 }
 
-fun current_image_headers(p: *driver.Project) res[*target_of.ObjectImage, fail.Fail] {
+fun current_image_headers(p: *project.Project) res[*target_of.ObjectImage, fail.Fail] {
     val allocated: res[*target_of.ObjectImage, A.Error] = A.zallocate[target_of.ObjectImage](p.alloc, project.module_count(p)::usize);
     if (sel allocated.err) {
         ret res[*target_of.ObjectImage, fail.Fail].err{fail.refused(allocated.err)};
@@ -694,7 +709,7 @@ fun current_image_headers(p: *driver.Project) res[*target_of.ObjectImage, fail.F
 
 # the lower and optimize rows count the modules that lowered: a module whose
 # object the load restored does not
-fun lower_phase(p: *driver.Project, st: *UnitState, bo: *outcome.BuildOutcome) err[fail.Fail] {
+fun lower_phase(p: *project.Project, st: *UnitState, bo: *outcome.BuildOutcome) err[fail.Fail] {
     readout.phase_begin(p.progress, readout.LOWER);
     readout.phase_begin(p.progress, readout.OPTIMIZE);
     readout.phase_carved(p.progress, readout.OPTIMIZE);
@@ -711,7 +726,7 @@ fun lower_phase(p: *driver.Project, st: *UnitState, bo: *outcome.BuildOutcome) e
 # a test build's test objects: each lowered against its module's normal object and
 # generated, or restored from `obj/`, read out as a test lower row and a test
 # codegen row. the tests they hold are collected here
-fun test_phase(p: *driver.Project, st: *UnitState) err[fail.Fail] {
+fun test_phase(p: *project.Project, st: *UnitState) err[fail.Fail] {
     readout.phase_begin(p.progress, readout.TEST_LOWER);
     project.set_origin(p, diagnostic.ORIGIN_CODEGEN);
 
@@ -750,7 +765,7 @@ fun test_phase(p: *driver.Project, st: *UnitState) err[fail.Fail] {
     ret err[fail.Fail].ok{};
 }
 
-fun codegen_phase(p: *driver.Project, st: *UnitState) err[fail.Fail] {
+fun codegen_phase(p: *project.Project, st: *UnitState) err[fail.Fail] {
     readout.phase_begin(p.progress, readout.CODEGEN);
     project.set_origin(p, diagnostic.ORIGIN_CODEGEN);
     var roots: Vector[query.QueryKey] = collections_vector.init[query.QueryKey](p.alloc);
@@ -759,9 +774,9 @@ fun codegen_phase(p: *driver.Project, st: *UnitState) err[fail.Fail] {
     if (sel frontend.err) { ret frontend; }
     var i: u32 = 0;
     for (i < p.emit_len) {
-        val m:       *driver.ModuleEntry = project.module_at(p, p.topo[i]::u32);
-        val key:     u64                 = passes.back_half_key_for(p, m);
-        val lowered: res[usize, A.Error] = collections_vector.push[query.QueryKey](?roots,
+        val m:       *project.ModuleEntry = project.module_at(p, p.topo[i]::u32);
+        val key:     u64                  = passes.back_half_key_for(p, m);
+        val lowered: res[usize, A.Error]  = collections_vector.push[query.QueryKey](?roots,
             query.QueryKey{kind: ?passes.LOWER, key: key});
         if (sel lowered.err) {
             ret err[fail.Fail].err{fail.refused(lowered.err)};
@@ -795,7 +810,7 @@ fun codegen_phase(p: *driver.Project, st: *UnitState) err[fail.Fail] {
     ret err[fail.Fail].ok{};
 }
 
-fun emit_phase(p: *driver.Project, unit: *build_plan.BuildUnit, st: *UnitState,
+fun emit_phase(p: *project.Project, unit: *build_plan.BuildUnit, st: *UnitState,
     bo: *outcome.BuildOutcome) err[fail.Fail] {
     val goal: request.BuildGoal = p.req.goal;
     val flat: bool              = p.target.of != nil && p.target.of.produces_image;
@@ -805,8 +820,8 @@ fun emit_phase(p: *driver.Project, unit: *build_plan.BuildUnit, st: *UnitState,
     if (p.req.emit_ir || p.req.emit_asm) {
         var i: u32 = 0;
         for (i < p.emit_len) {
-            val mid: session.ModuleId    = p.topo[i];
-            val m:   *driver.ModuleEntry = project.module_at(p, mid::u32);
+            val mid: session.ModuleId     = p.topo[i];
+            val m:   *project.ModuleEntry = project.module_at(p, mid::u32);
             if (m.ir_module == nil) { ret err[fail.Fail].err{fail.message("ir and asm emission require a current lowered module")}; }
             if (p.req.emit_ir) {
                 val res_ir: err[fail.Fail] = build_emit.emit_ir(p, st.ir_outputs[i], m.ir_module);
@@ -822,19 +837,6 @@ fun emit_phase(p: *driver.Project, unit: *build_plan.BuildUnit, st: *UnitState,
             }
             i = i + 1;
         }
-    }
-
-    if (goal == request.GOAL_OBJECTS && flat) {
-        ret err[fail.Fail].err{fail.user(diagnostic_kind.TARGET_OUTPUT_UNSUPPORTED, "a flat-image object format produces only executables; library and '--emit obj' outputs are unsupported")};
-    }
-
-    if (goal == request.GOAL_TESTS && build_plan.finished_modules(?p.target)) {
-        ret err[fail.Fail].err{fail.user(diagnostic_kind.TARGET_OUTPUT_UNSUPPORTED, "a finished-module object format produces no executable; this target cannot build or run tests")};
-    }
-
-    if (build_plan.finished_modules(?p.target) && p.target_entry != nil
-        && catalog_artifact.is_library(p.target_entry.kind)) {
-        ret err[fail.Fail].err{fail.user(diagnostic_kind.TARGET_OUTPUT_UNSUPPORTED, "a finished-module object format has no archive or shared-library form; each module is its own artifact")};
     }
 
     if (goal == request.GOAL_TESTS) {
@@ -871,7 +873,7 @@ fun emit_phase(p: *driver.Project, unit: *build_plan.BuildUnit, st: *UnitState,
 }
 
 fun artifact_digest(path: *u8, out: *u8) err[fail.Fail] {
-    val rr: err[fail.Fail] = build_fingerprint.file_sha256(path::str, out);
+    val rr: err[fail.Fail] = lang_fingerprint.file_sha256(path::str, out);
     if (sel rr.err) {
         ret err[fail.Fail].err{rr.err};
     }
@@ -880,7 +882,7 @@ fun artifact_digest(path: *u8, out: *u8) err[fail.Fail] {
 
 # whether the artifact on disk is the one this revision's link published; one
 # relinked, missing, or never published at this revision is not
-fun artifact_reusable(s: *session.Session, relinked: bool, artifact: *u8, revision: query.Revision) res[bool, fail.Fail] {
+fun artifact_reusable(p: *project.Project, st: *UnitState, relinked: bool, artifact: *u8, revision: query.Revision) res[bool, fail.Fail] {
     if (relinked) { ret res[bool, fail.Fail].ok{false}; }
     val is_file_r: res[bool, io_error.Error] = fs.is_file(artifact::str);
     if (sel is_file_r.err) {
@@ -888,28 +890,28 @@ fun artifact_reusable(s: *session.Session, relinked: bool, artifact: *u8, revisi
         ret res[bool, fail.Fail].err{fail.environment(diagnostic_kind.FS_STAT, fail.io_text(is_file_r.err))};
     }
     if (!is_file_r.ok) { ret res[bool, fail.Fail].ok{false}; }
-    val recorded: opt[[32]u8] = session.link_publication_at(s, artifact::str, revision);
-    if (sel recorded.none) { ret res[bool, fail.Fail].ok{false}; }
-    var want: [32]u8         = recorded.some;
+    val recorded: res[opt[[32]u8], fail.Fail] = publication.at(st.published, ?p.s.interner, artifact::str, revision);
+    if (sel recorded.err) { ret res[bool, fail.Fail].err{recorded.err}; }
+    val written: opt[[32]u8] = recorded.ok;
+    if (sel written.none) { ret res[bool, fail.Fail].ok{false}; }
+    var want: [32]u8         = written.some;
     var cur:  [32]u8;
     val d_r:  err[fail.Fail] = artifact_digest(artifact, ?cur[0]);
     if (sel d_r.err) { ret res[bool, fail.Fail].err{d_r.err}; }
     ret res[bool, fail.Fail].ok{memory.raw_equal((?cur[0])::ptr, (?want[0])::ptr, 32::usize)};
 }
 
-fun record_artifact_publication(s: *session.Session, artifact: *u8, revision: query.Revision) err[fail.Fail] {
-    if (query.peek_revision(?s.queries, ?passes.LINK, 0) != revision) {
+fun record_artifact_publication(p: *project.Project, st: *UnitState, artifact: *u8, revision: query.Revision) err[fail.Fail] {
+    if (query.peek_revision(?p.s.queries, ?passes.LINK, 0) != revision) {
         ret err[fail.Fail].err{fail.message("the link query's revision moved while the artifact was being written")};
     }
     var d:   [32]u8;
     val d_r: err[fail.Fail] = artifact_digest(artifact, ?d[0]);
     if (sel d_r.err) { ret d_r; }
-    val rec_r: err[fail.Fail] = session.record_link_publication(s, artifact::str, revision, ?d);
-    if (sel rec_r.err) { ret err[fail.Fail].err{rec_r.err}; }
-    ret err[fail.Fail].ok{};
+    ret publication.record(st.published, ?p.s.interner, artifact::str, revision, ?d);
 }
 
-fun link_phase(p: *driver.Project, unit: *build_plan.BuildUnit, st: *UnitState,
+fun link_phase(p: *project.Project, unit: *build_plan.BuildUnit, st: *UnitState,
     bo: *outcome.BuildOutcome, oa: *A.Allocator) err[fail.Fail] {
     val goal: request.BuildGoal = p.req.goal;
     project.set_origin(p, diagnostic.ORIGIN_LINK);
@@ -933,15 +935,10 @@ fun link_phase(p: *driver.Project, unit: *build_plan.BuildUnit, st: *UnitState,
         ret err[fail.Fail].ok{};
     }
 
-    val te: *driver.TargetEntry = p.target_entry;
+    val te: *project.TargetEntry = p.target_entry;
     if (te == nil) { ret err[fail.Fail].err{fail.message("no target selected")}; }
 
-    if (p.target.of != nil && p.target.of.produces_image) {
-        if (catalog_artifact.is_library(te.kind)) {
-            ret err[fail.Fail].err{fail.user(diagnostic_kind.TARGET_OUTPUT_UNSUPPORTED, "a flat-image object format produces only executables; library and '--emit obj' outputs are unsupported")};
-        }
-        ret link_flat(p, unit, st, t_link);
-    }
+    if (p.target.of != nil && p.target.of.produces_image) { ret link_flat(p, unit, st, t_link); }
     if (build_plan.finished_modules(?p.target)) {
         ret link_finished(p, unit, st, t_link);
     }
@@ -1004,7 +1001,7 @@ fun link_phase(p: *driver.Project, unit: *build_plan.BuildUnit, st: *UnitState,
     val relink_r: res[bool, fail.Fail] = driver.run_link_pass(p);
     if (sel relink_r.err) { ret err[fail.Fail].err{relink_r.err}; }
     val link_rev: query.Revision       = query.peek_revision(?p.s.queries, ?passes.LINK, 0);
-    val reusable: res[bool, fail.Fail] = artifact_reusable(p.s, relink_r.ok, artifact::*u8, link_rev);
+    val reusable: res[bool, fail.Fail] = artifact_reusable(p, st, relink_r.ok, artifact::*u8, link_rev);
     if (sel reusable.err) { ret err[fail.Fail].err{reusable.err}; }
     if (reusable.ok) {
         st.out_path = artifact::*u8;
@@ -1027,7 +1024,7 @@ fun link_phase(p: *driver.Project, unit: *build_plan.BuildUnit, st: *UnitState,
     }
     if (sel res_link.err) { ret res_link; }
 
-    val publish_r: err[fail.Fail] = record_artifact_publication(p.s, artifact::*u8, link_rev);
+    val publish_r: err[fail.Fail] = record_artifact_publication(p, st, artifact::*u8, link_rev);
     if (sel publish_r.err) { ret publish_r; }
 
     st.out_path = artifact::*u8;
@@ -1036,7 +1033,7 @@ fun link_phase(p: *driver.Project, unit: *build_plan.BuildUnit, st: *UnitState,
     ret err[fail.Fail].ok{};
 }
 
-fun link_dispatch_phase(p: *driver.Project, unit: *build_plan.BuildUnit, st: *UnitState,
+fun link_dispatch_phase(p: *project.Project, unit: *build_plan.BuildUnit, st: *UnitState,
     t_link: readout.Instant) err[fail.Fail] {
     val artifact: str = unit.out_path;
 
@@ -1054,7 +1051,7 @@ fun link_dispatch_phase(p: *driver.Project, unit: *build_plan.BuildUnit, st: *Un
     val relink_r: res[bool, fail.Fail] = driver.run_link_pass(p);
     if (sel relink_r.err) { ret err[fail.Fail].err{relink_r.err}; }
     val link_rev: query.Revision       = query.peek_revision(?p.s.queries, ?passes.LINK, 0);
-    val reusable: res[bool, fail.Fail] = artifact_reusable(p.s, relink_r.ok, artifact::*u8, link_rev);
+    val reusable: res[bool, fail.Fail] = artifact_reusable(p, st, relink_r.ok, artifact::*u8, link_rev);
     if (sel reusable.err) { ret err[fail.Fail].err{reusable.err}; }
     if (reusable.ok)      { ret err[fail.Fail].ok{}; }
 
@@ -1065,7 +1062,7 @@ fun link_dispatch_phase(p: *driver.Project, unit: *build_plan.BuildUnit, st: *Un
     val lr: err[fail.Fail] = build_testing.link_dispatcher(p, ?st.scope, ?di, images.data, images.len, st.dispatcher, st.artifact);
     if (sel lr.err) { ret lr; }
 
-    ret record_artifact_publication(p.s, artifact::*u8, link_rev);
+    ret record_artifact_publication(p, st, artifact::*u8, link_rev);
 }
 
 rec ImageList {
@@ -1076,14 +1073,14 @@ rec ImageList {
 
 # the images a dispatcher links: every emitted module's test object, then every
 # emitted module's normal object, in topological order
-fun test_link_images(p: *driver.Project) res[ImageList, fail.Fail] {
+fun test_link_images(p: *project.Project) res[ImageList, fail.Fail] {
     val cap:       u32                                  = p.emit_len * 2;
     val allocated: res[*target_of.ObjectImage, A.Error] = A.allocate[target_of.ObjectImage](p.alloc, cap::usize);
     if (sel allocated.err) { ret res[ImageList, fail.Fail].err{fail.refused(allocated.err)}; }
     var list: ImageList = ImageList{data: allocated.ok, len: 0, cap: cap};
     var i:    u32       = 0;
     for (i < p.emit_len) {
-        val m: *driver.ModuleEntry = project.module_at(p, p.topo[i]::u32);
+        val m: *project.ModuleEntry = project.module_at(p, p.topo[i]::u32);
         if (m.test.object_image != nil) {
             list.data[list.len] = @m.test.object_image;
             list.len            = list.len + 1;
@@ -1092,7 +1089,7 @@ fun test_link_images(p: *driver.Project) res[ImageList, fail.Fail] {
     }
     i = 0;
     for (i < p.emit_len) {
-        val m: *driver.ModuleEntry = project.module_at(p, p.topo[i]::u32);
+        val m: *project.ModuleEntry = project.module_at(p, p.topo[i]::u32);
         if (m.object_image == nil) {
             A.deallocate[target_of.ObjectImage](p.alloc, list.data, cap::usize);
             ret res[ImageList, fail.Fail].err{fail.message("a test link requires every module's current image")};
@@ -1104,7 +1101,7 @@ fun test_link_images(p: *driver.Project) res[ImageList, fail.Fail] {
     ret res[ImageList, fail.Fail].ok{list};
 }
 
-fun set_dispatch_config_input(p: *driver.Project, out_path: *u8,
+fun set_dispatch_config_input(p: *project.Project, out_path: *u8,
     ext: *target_of.ObjectInput, ext_count: u32,
     dynlibs: *target_of.DynLib, dynlib_count: u32,
     sc: *build_testing.TestScope) err[fail.Fail] {
@@ -1116,7 +1113,7 @@ fun set_dispatch_config_input(p: *driver.Project, out_path: *u8,
     ret set_link_config(p, ?fb);
 }
 
-fun link_flat(p: *driver.Project, unit: *build_plan.BuildUnit, st: *UnitState, t_link: readout.Instant) err[fail.Fail] {
+fun link_flat(p: *project.Project, unit: *build_plan.BuildUnit, st: *UnitState, t_link: readout.Instant) err[fail.Fail] {
     val artifact: str = unit.out_path;
 
     val cfg_r: err[fail.Fail] = set_link_config_input(p, artifact::*u8, build_emit.artifact_product_name(p), catalog_artifact.EXECUTABLE::u32, nil, 0, nil, 0, nil);
@@ -1124,7 +1121,7 @@ fun link_flat(p: *driver.Project, unit: *build_plan.BuildUnit, st: *UnitState, t
     val relink_r: res[bool, fail.Fail] = driver.run_link_pass(p);
     if (sel relink_r.err) { ret err[fail.Fail].err{relink_r.err}; }
     val link_rev: query.Revision       = query.peek_revision(?p.s.queries, ?passes.LINK, 0);
-    val reusable: res[bool, fail.Fail] = artifact_reusable(p.s, relink_r.ok, artifact::*u8, link_rev);
+    val reusable: res[bool, fail.Fail] = artifact_reusable(p, st, relink_r.ok, artifact::*u8, link_rev);
     if (sel reusable.err) { ret err[fail.Fail].err{reusable.err}; }
     if (reusable.ok) {
         st.out_path = artifact::*u8;
@@ -1141,7 +1138,7 @@ fun link_flat(p: *driver.Project, unit: *build_plan.BuildUnit, st: *UnitState, t
         target_of.image_options_default(p.req.subsystem));
     if (sel res_link.err) { ret res_link; }
 
-    val publish_r: err[fail.Fail] = record_artifact_publication(p.s, artifact::*u8, link_rev);
+    val publish_r: err[fail.Fail] = record_artifact_publication(p, st, artifact::*u8, link_rev);
     if (sel publish_r.err) { ret publish_r; }
 
     st.out_path = artifact::*u8;
@@ -1152,7 +1149,7 @@ fun link_flat(p: *driver.Project, unit: *build_plan.BuildUnit, st: *UnitState, t
 
 # a finished-module format has no linker: the entry module's object is already the
 # whole artifact, so publishing it at the artifact path is the link
-fun link_finished(p: *driver.Project, unit: *build_plan.BuildUnit, st: *UnitState, t_link: readout.Instant) err[fail.Fail] {
+fun link_finished(p: *project.Project, unit: *build_plan.BuildUnit, st: *UnitState, t_link: readout.Instant) err[fail.Fail] {
     val artifact: str = unit.out_path;
 
     val cfg_r: err[fail.Fail] = set_link_config_input(p, artifact::*u8, build_emit.artifact_product_name(p), catalog_artifact.EXECUTABLE::u32, nil, 0, nil, 0, nil);
@@ -1160,7 +1157,7 @@ fun link_finished(p: *driver.Project, unit: *build_plan.BuildUnit, st: *UnitStat
     val relink_r: res[bool, fail.Fail] = driver.run_link_pass(p);
     if (sel relink_r.err) { ret err[fail.Fail].err{relink_r.err}; }
     val link_rev: query.Revision       = query.peek_revision(?p.s.queries, ?passes.LINK, 0);
-    val reusable: res[bool, fail.Fail] = artifact_reusable(p.s, relink_r.ok, artifact::*u8, link_rev);
+    val reusable: res[bool, fail.Fail] = artifact_reusable(p, st, relink_r.ok, artifact::*u8, link_rev);
     if (sel reusable.err) { ret err[fail.Fail].err{reusable.err}; }
     if (!reusable.ok) {
         val borrowed: res[*target_of.ObjectImage, fail.Fail] = current_image_headers(p);
@@ -1169,7 +1166,7 @@ fun link_finished(p: *driver.Project, unit: *build_plan.BuildUnit, st: *UnitStat
         fin { A.deallocate[target_of.ObjectImage](p.alloc, images, project.module_count(p)::usize); }
         val published: err[fail.Fail] = build_emit.publish_entry_module(p, images, artifact);
         if (sel published.err) { ret published; }
-        val publish_r: err[fail.Fail] = record_artifact_publication(p.s, artifact::*u8, link_rev);
+        val publish_r: err[fail.Fail] = record_artifact_publication(p, st, artifact::*u8, link_rev);
         if (sel publish_r.err) { ret publish_r; }
     }
 
@@ -1179,11 +1176,11 @@ fun link_finished(p: *driver.Project, unit: *build_plan.BuildUnit, st: *UnitStat
     ret err[fail.Fail].ok{};
 }
 
-fun list_tests(p: *driver.Project, unit: *build_plan.BuildUnit, st: *UnitState, bo: *outcome.BuildOutcome, oa: *A.Allocator) err[fail.Fail] {
+fun list_tests(p: *project.Project, unit: *build_plan.BuildUnit, st: *UnitState, bo: *outcome.BuildOutcome, oa: *A.Allocator) err[fail.Fail] {
     ret build_testing.record_tests(p, ?st.scope, nil, intern.text(?p.s.interner, unit.target_entry.name), unit.profile, bo, oa);
 }
 
-fun record_artifact(p: *driver.Project, unit: *build_plan.BuildUnit, st: *UnitState, bo: *outcome.BuildOutcome) err[fail.Fail] {
+fun record_artifact(p: *project.Project, unit: *build_plan.BuildUnit, st: *UnitState, bo: *outcome.BuildOutcome) err[fail.Fail] {
     if (st.out_path == nil) { ret err[fail.Fail].ok{}; }
 
     var kind: catalog_artifact.Kind = catalog_artifact.EXECUTABLE;
@@ -1196,13 +1193,13 @@ fun record_artifact(p: *driver.Project, unit: *build_plan.BuildUnit, st: *UnitSt
     ret err[fail.Fail].ok{};
 }
 
-fun emit_unit_summary(p: *driver.Project, st: *UnitState) {
+fun emit_unit_summary(p: *project.Project, st: *UnitState) {
     var out_str: str = "<output>";
     if (st.out_path != nil) { out_str = st.out_path::str; }
 
-    val te:       *driver.TargetEntry = p.target_entry;
-    val emit_obj: bool                = p.req.goal == request.GOAL_OBJECTS;
-    val is_lib:   bool                = emit_obj || (te != nil && catalog_artifact.is_library(te.kind));
+    val te:       *project.TargetEntry = p.target_entry;
+    val emit_obj: bool                 = p.req.goal == request.GOAL_OBJECTS;
+    val is_lib:   bool                 = emit_obj || (te != nil && catalog_artifact.is_library(te.kind));
 
     if (!is_lib && st.out_path != nil) {
         val fi_r: res[fs.Metadata, io_error.Error] = fs.metadata(st.out_path::str);
@@ -1214,7 +1211,7 @@ fun emit_unit_summary(p: *driver.Project, st: *UnitState) {
     readout.summary(p.progress, out_str, p.emit_len, 0, false);
 }
 
-fun pcg_enabled(p: *driver.Project) bool {
+fun pcg_enabled(p: *project.Project) bool {
     ret p.req.jobs >= 1 && p.emit_len > 0;
 }
 
@@ -1225,7 +1222,7 @@ fun pcg_enabled(p: *driver.Project) bool {
 # ---
 # p:   the project whose session holds the query db
 # ret: ok, or the fingerprint or query failure
-pub fun set_link_config_input(p: *driver.Project, out_path: *u8, product: *u8, out_kind: u32,
+pub fun set_link_config_input(p: *project.Project, out_path: *u8, product: *u8, out_kind: u32,
     ext: *target_of.ObjectInput, ext_count: u32,
     dynlibs: *target_of.DynLib, dynlib_count: u32,
     image: *build_emit.LoadedImageOptions) err[fail.Fail] {
@@ -1236,15 +1233,15 @@ pub fun set_link_config_input(p: *driver.Project, out_path: *u8, product: *u8, o
 }
 
 # the link configuration a sink holds, as the link's query input
-fun set_link_config(p: *driver.Project, fb: *wire.Sink) err[fail.Fail] {
-    val taken: res[query.QueryOutput, fail.Fail] = driver_query.output(fb);
+fun set_link_config(p: *project.Project, fb: *wire.Sink) err[fail.Fail] {
+    val taken: res[query.QueryOutput, fail.Fail] = codec.output(fb);
     if (sel taken.err) { ret err[fail.Fail].err{taken.err}; }
     val si: err[fail.Fail] = query.set_input(?p.s.queries, ?passes.LINK_CONFIG, 0, taken.ok.bytes, taken.ok.len);
     if (taken.ok.bytes != nil) { A.deallocate[u8](p.alloc, taken.ok.bytes, taken.ok.len::usize); }
     ret si;
 }
 
-fun write_link_config(fb: *wire.Sink, p: *driver.Project, out_path: *u8, product: *u8, out_kind: u32,
+fun write_link_config(fb: *wire.Sink, p: *project.Project, out_path: *u8, product: *u8, out_kind: u32,
     ext: *target_of.ObjectInput, ext_count: u32,
     dynlibs: *target_of.DynLib, dynlib_count: u32,
     image: *build_emit.LoadedImageOptions) {
@@ -1252,38 +1249,38 @@ fun write_link_config(fb: *wire.Sink, p: *driver.Project, out_path: *u8, product
     var pie_axis: u32 = 0;
     if (p.req.pie) { pie_axis = 1; }
     wire.put_u32(fb, pie_axis);
-    build_fingerprint.put_text(fb, out_path::str);
-    build_fingerprint.put_text(fb, product::str);
-    build_fingerprint.put_domain_u8(fb, build_fingerprint.DOMAIN_SUBSYSTEM,
+    lang_fingerprint.put_text(fb, out_path::str);
+    lang_fingerprint.put_text(fb, product::str);
+    lang_fingerprint.put_domain_u8(fb, lang_fingerprint.DOMAIN_SUBSYSTEM,
         catalog_subsystem.VERSION, catalog_subsystem.fingerprint_tag(p.req.subsystem));
 
     var has_resources: u32 = 0;
     if (image != nil && image.resource != nil) { has_resources = 1; }
     wire.put_u32(fb, has_resources);
     if (has_resources != 0) {
-        build_fingerprint.put_text(fb, image.icon_path);
-        build_fingerprint.put_content(fb, image.icon_bytes.data, image.icon_bytes.len);
-        build_fingerprint.put_text(fb, image.manifest_path);
-        build_fingerprint.put_content(fb, image.manifest_bytes.data, image.manifest_bytes.len);
-        build_fingerprint.put_text(fb, image.resource.version);
-        build_fingerprint.put_text(fb, image.resource.internal_name);
-        build_fingerprint.put_text(fb, image.resource.original_filename);
-        build_fingerprint.put_text(fb, image.resource.product_name);
+        lang_fingerprint.put_text(fb, image.icon_path);
+        lang_fingerprint.put_content(fb, image.icon_bytes.data, image.icon_bytes.len);
+        lang_fingerprint.put_text(fb, image.manifest_path);
+        lang_fingerprint.put_content(fb, image.manifest_bytes.data, image.manifest_bytes.len);
+        lang_fingerprint.put_text(fb, image.resource.version);
+        lang_fingerprint.put_text(fb, image.resource.internal_name);
+        lang_fingerprint.put_text(fb, image.resource.original_filename);
+        lang_fingerprint.put_text(fb, image.resource.product_name);
     }
 
     wire.put_u32(fb, ext_count);
     var i: u32 = 0;
     for (i < ext_count) {
-        build_fingerprint.put_text(fb, ext[i].path::str);
-        build_fingerprint.put_file(fb, ext[i].path::str);
+        lang_fingerprint.put_text(fb, ext[i].path::str);
+        lang_fingerprint.put_file(fb, ext[i].path::str);
         i = i + 1;
     }
     wire.put_u32(fb, dynlib_count);
     var j: u32 = 0;
     for (j < dynlib_count) {
-        build_fingerprint.put_name(fb, ?p.s.interner, dynlibs[j].name);
-        build_fingerprint.put_name(fb, ?p.s.interner, dynlibs[j].soname);
-        build_fingerprint.put_name(fb, ?p.s.interner, dynlibs[j].rpath);
+        lang_fingerprint.put_name(fb, ?p.s.interner, dynlibs[j].name);
+        lang_fingerprint.put_name(fb, ?p.s.interner, dynlibs[j].soname);
+        lang_fingerprint.put_name(fb, ?p.s.interner, dynlibs[j].rpath);
         var referenced: u8 = 0;
         if (dynlibs[j].include_referenced) { referenced = 1; }
         wire.put_u8(fb, referenced);
@@ -1299,9 +1296,9 @@ test link_config__provider_policy_invalidates_without_changing_names {
     if (sel initialized.err) { ret 2; }
     var s: session.Session = initialized.ok;
     fin { session.dnit(?s); }
-    var p: driver.Project;
+    var p: project.Project;
     project.init_project(?p, ?s);
-    fin { driver.dnit_project(?p); }
+    fin { project.dnit_project(?p); }
     val name: res[intern.StrId, A.Error] = intern.add(?s.interner, "provider");
     if (sel name.err) { ret 3; }
     var lib: target_of.DynLib = target_of.DynLib{
@@ -1350,7 +1347,7 @@ rec PcgSlot {
 }
 
 rec ParallelCodegen {
-    p:          *driver.Project;
+    p:          *project.Project;
     next:       i64;
     worker_seq: i64;
     stop:       i64;
@@ -1367,12 +1364,12 @@ rec ParallelCodegen {
 }
 
 # the ir a codegen worker generates for module m
-fun pcg_ir(m: *driver.ModuleEntry, test: bool) *me_ir.Module {
+fun pcg_ir(m: *project.ModuleEntry, test: bool) *me_ir.Module {
     if (test) { ret m.test.ir_module; }
     ret m.ir_module;
 }
 
-fun pcg_worker_init(w: *PcgWorker, p: *driver.Project) err[fail.Fail] {
+fun pcg_worker_init(w: *PcgWorker, p: *project.Project) err[fail.Fail] {
     w.active = false;
     val init_r: err[A.Error] = arena.init(?w.ar, p.s.backing, 0);
     if (sel init_r.err) { ret err[fail.Fail].err{fail.message("parallel codegen: worker arena init failed")}; }
@@ -1397,7 +1394,7 @@ fun pcg_worker_teardown(w: *PcgWorker) {
     w.active = false;
 }
 
-fun pcg_stable_err(p: *driver.Project, msg: str) str {
+fun pcg_stable_err(p: *project.Project, msg: str) str {
     val kept: res[str, fail.Fail] = fail.text_retain(?p.s.interner, msg);
     if (sel kept.ok) { ret kept.ok; }
     ret "parallel codegen failed, and re-homing its diagnostic off the worker arena failed in turn (allocation failure)";
@@ -1417,9 +1414,9 @@ fun pcg_worker_main(arg: *u8) {
         if (idx_raw >= pc.stale_len::i64) { ret; }
         val idx: u32 = idx_raw::u32;
 
-        val mid:  session.ModuleId    = pc.p.topo[pc.stale[idx::usize]];
-        val m:    *driver.ModuleEntry = project.module_at(pc.p, mid::u32);
-        val slot: *PcgSlot            = ?pc.slots[idx::usize];
+        val mid:  session.ModuleId     = pc.p.topo[pc.stale[idx::usize]];
+        val m:    *project.ModuleEntry = project.module_at(pc.p, mid::u32);
+        val slot: *PcgSlot             = ?pc.slots[idx::usize];
         slot.worker = wid;
 
         val t0: readout.Instant = readout.item_begin(pc.p.progress);
@@ -1470,7 +1467,7 @@ fun pcg_worker_main(arg: *u8) {
 
 # generate the stale objects on worker threads and stage them for the codegen
 # queries to publish: the modules' normal objects, or with `test` their test objects
-fun run_codegen_parallel(p: *driver.Project, test: bool) err[fail.Fail] {
+fun run_codegen_parallel(p: *project.Project, test: bool) err[fail.Fail] {
     val emit_len: u32 = p.emit_len;
     if (emit_len == 0) { ret err[fail.Fail].ok{}; }
 
@@ -1481,7 +1478,7 @@ fun run_codegen_parallel(p: *driver.Project, test: bool) err[fail.Fail] {
     var stale_len: u32 = 0;
     var ti:        u32 = 0;
     for (ti < emit_len) {
-        val m:        *driver.ModuleEntry  = project.module_at(p, p.topo[ti]::u32);
+        val m:        *project.ModuleEntry = project.module_at(p, p.topo[ti]::u32);
         var reusable: res[bool, fail.Fail] = res[bool, fail.Fail].ok{true};
         if (!test)                        { reusable = passes.codegen_reusable(p, p.topo[ti]); }
         or (passes.has_test_object(p, m)) { reusable = passes.test_codegen_reusable(p, p.topo[ti]); }
@@ -1596,7 +1593,7 @@ fun run_codegen_parallel(p: *driver.Project, test: bool) err[fail.Fail] {
     ret err[fail.Fail].ok{};
 }
 
-fun pcg_collect(p: *driver.Project, ctx: *ParallelCodegen) err[fail.Fail] {
+fun pcg_collect(p: *project.Project, ctx: *ParallelCodegen) err[fail.Fail] {
     val nworkers: u32 = ctx.nworkers;
 
     val rmaps: res[*intern.Remap, A.Error] = A.allocate[intern.Remap](p.alloc, nworkers::usize);
@@ -1635,8 +1632,8 @@ fun pcg_collect(p: *driver.Project, ctx: *ParallelCodegen) err[fail.Fail] {
         val box: *target_of.ObjectImage = rbox.ok;
         box[0] = rehomed.ok;
 
-        val mid: session.ModuleId    = p.topo[ctx.stale[i::usize]];
-        val m:   *driver.ModuleEntry = project.module_at(p, mid::u32);
+        val mid: session.ModuleId     = p.topo[ctx.stale[i::usize]];
+        val m:   *project.ModuleEntry = project.module_at(p, mid::u32);
         if (ctx.test) { m.test.staged_image = box; }
         or            { m.staged_image = box; }
         i = i + 1;
@@ -1649,7 +1646,7 @@ fun workers_at(ctx: *ParallelCodegen, wi: u32) *PcgWorker {
     ret ?ctx.workers[wi::usize];
 }
 
-fun pcg_free_remaps(p: *driver.Project, remaps: *intern.Remap, n: u32) {
+fun pcg_free_remaps(p: *project.Project, remaps: *intern.Remap, n: u32) {
     var wi: u32 = 0;
     for (wi < n) {
         intern.remap_dnit(p.alloc, ?remaps[wi]);

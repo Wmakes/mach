@@ -8,16 +8,17 @@
 # whole source is its surface. a module whose `obj/` object carries its key
 # is reused, and when nothing the build still compiles imports it, it is not
 # resolved, typed or lowered at all. source digests come from the per-file
-# digest memo in the cell's `.cache` directory (build/cache/memo)
-use cache_key: mach.lang.build.cache.key;
-use mach.lang.build.request;
+# digest memo in the cell's `.cache` directory (driver/cache/memo)
+use cache_key: mach.lang.driver.cache.key;
 use mach.lang.diagnostic;
 use diagnostic_kind: mach.lang.diagnostic.kind;
 use mach.lang.driver.frontend;
 use mach.lang.driver.project;
+use mach.lang.driver.request;
 use mach.lang.fail;
 use mach.lang.fe.ast;
 use mach.lang.intern;
+use mach.lang.linkage;
 use session_embed: mach.lang.session.embed;
 use lang_source:   mach.lang.source;
 use A:             std.allocator;
@@ -35,11 +36,12 @@ use std.types.string.str;
 use std.types.string.str_join;
 use std.types.string.str_len;
 
-use mach.lang.build.cache.compiler;
-use mach.lang.build.cache.memo;
-use cache_record: mach.lang.build.cache.record;
+use mach.lang.driver.cache.compiler;
+use mach.lang.driver.cache.memo;
+use cache_record: mach.lang.driver.cache.record;
+use mach.lang.driver.declared;
 use mach.lang.driver.surface;
-use mach.lang.driver.union;
+use mach.lang.driver.toolchain;
 use me_ir: mach.lang.me.ir;
 use mach.lang.me.lower.testrunner;
 use mach.lang.me.pass;
@@ -51,7 +53,6 @@ use mach.lang.readout;
 use mach.lang.session;
 use mach.lang.target.isa;
 use target_of: mach.lang.target.of;
-use mach.lang.toolchain;
 use mach.lang.wire;
 use std.allocator.page;
 use std.chrono.time;
@@ -162,12 +163,12 @@ pub fun configuration(scratch: *A.Allocator, p: *project.Project, config: *u8, c
         }
         i = i + 1;
     }
-    cache_key.number(?b, p.s.link_provider_len::u64);
-    i = 0;
-    for (i < p.s.link_provider_len) {
-        cache_key.name(?b, ?p.s.interner, p.s.link_providers[i].name);
-        cache_key.number(?b, p.s.link_providers[i].is_static::u64);
-        i = i + 1;
+    cache_key.number(?b, p.linkage.providers.len::u64);
+    var k: usize = 0;
+    for (k < p.linkage.providers.len) {
+        cache_key.name(?b, ?p.s.interner, p.linkage.providers.data[k].name);
+        cache_key.number(?b, p.linkage.providers.data[k].is_static::u64);
+        k = k + 1;
     }
     ret cache_key.finish(?b, digest);
 }
@@ -571,7 +572,7 @@ fun key_embeds(b: *cache_key.Builder, p: *project.Project, mid: u32) err[fail.Fa
         }
         collections_vector.dnit[str](?paths);
     }
-    val collected: err[fail.Fail] = union.module_embeds(p, mid::session.ModuleId, ?paths);
+    val collected: err[fail.Fail] = declared.module_embeds(p, mid::session.ModuleId, ?paths);
     if (sel collected.err) { ret collected; }
     cache_key.number(b, paths.len::u64);
     var i: usize = 0;
@@ -1214,10 +1215,10 @@ test configuration__tracks_compiler_request_steps_dependencies_and_providers {
     compiler_id.len = 0;
     if (t_configured(?p, ?config, ?compiler_id, ?changed)) { ret 37; }
     compiler_id.len = 32;
-    val register_link_provider_r: err[fail.Fail] = session.register_link_provider(?s, ids[3], false);
+    val register_link_provider_r: err[fail.Fail] = linkage.register_provider(?p.linkage, ids[3], false);
     if (sel register_link_provider_r.err)                    { ret 38; }
     if (!t_configured(?p, ?config, ?compiler_id, ?baseline)) { ret 38; }
-    s.link_providers[0].is_static = true;
+    p.linkage.providers.data[0].is_static = true;
     if (!t_configured(?p, ?config, ?compiler_id, ?changed) || cache_key.equal(?baseline, ?changed)) { ret 39; }
     ret 0;
 }

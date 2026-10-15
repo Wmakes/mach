@@ -25,6 +25,8 @@ use mach.lang.intern;
 use lang_target: mach.lang.target;
 use catalog_abi: mach.lang.target.catalog.abi;
 
+use mach.lang.output.layout;
+
 use mach.lang.manifest.artifact.artifact_needs_artifact;
 use mach.lang.manifest.artifact.artifact_supports_target;
 use mach.lang.manifest.artifact.expand_artifact_output;
@@ -90,13 +92,7 @@ use mach.lang.manifest.template;
 # bin_path:     the artifact's output: the expanded `[project].work` joined with the
 #               expanded artifact `out`
 # out_root:     `<expanded project work>`, whose layout beneath it the build owns
-# obj_root:     `<expanded project work>/obj`
-# ir_root:      `<expanded project work>/ir`
-# asm_root:     `<expanded project work>/asm`
-# test_root:    `<expanded project work>/test/{name}`, with `{name}` left literal for
-#               the test runner to fill
-# cache_root:   `<expanded project work>/.cache`, the compiler-only state
-# stage_root:   `<expanded project work>/.stage`, the build step scratch space
+#               (mach.lang.output.layout)
 # optimize:     from the resolved profile
 # debug:        from the resolved profile
 # simd:         from the resolved profile
@@ -111,12 +107,6 @@ pub rec BuildUnit {
     entry:        intern.StrId;
     bin_path:     intern.StrId;
     out_root:     intern.StrId;
-    obj_root:     intern.StrId;
-    ir_root:      intern.StrId;
-    asm_root:     intern.StrId;
-    test_root:    intern.StrId;
-    cache_root:   intern.StrId;
-    stage_root:   intern.StrId;
     optimize:     bool;
     debug:        bool;
     simd:         SimdMode;
@@ -137,21 +127,6 @@ pub rec Scope {
     root:  *Manifest;
     owner: *Manifest;
 }
-
-# the directory under the expanded root `[project].work` that holds a dependency's
-# artifact outputs, one subdirectory per dependency id
-pub val DEPENDENCY_ARTIFACT_DIR: str = "dep";
-
-# the directory under the expanded `[project].work` that holds compiler-only state:
-# nothing but the compiler reads or writes it, and a step output may not name it
-pub val CACHE_DIR: str = ".cache";
-
-# the directory under `CACHE_DIR` that holds one fingerprint stamp per build step
-pub val STEP_STAMP_DIR: str = ".cache/steps";
-
-# the directory under the expanded `[project].work` that holds build step scratch
-# space, one subdirectory per step, reset before the step runs
-pub val STAGE_DIR: str = ".stage";
 
 pub fun root_scope(m: *Manifest) Scope {
     ret Scope{root: m, owner: m};
@@ -174,7 +149,7 @@ pub fun scope_is_dependency(s: *Scope) bool {
 # ret:      `proj_out` for the root, `<proj_out>/dep/<owner id>` for a dependency
 fun scope_artifact_root(alloc: *A.Allocator, itn: *intern.Interner, s: *Scope, proj_out: str) res[str, fail.Fail] {
     if (!scope_is_dependency(s)) { ret path_dup(alloc, proj_out, 0, str_len(proj_out)); }
-    val home: res[str, fail.Fail] = path_join(alloc, proj_out, DEPENDENCY_ARTIFACT_DIR);
+    val home: res[str, fail.Fail] = path_join(alloc, proj_out, layout.DEPENDENCY);
     if (sel home.err) { ret home; }
     val owned: res[str, fail.Fail] = path_join(alloc, home.ok, intern.text(itn, s.owner.id));
     str_free(alloc, home.ok);
@@ -693,27 +668,9 @@ pub fun resolve_scoped_build_unit(alloc: *A.Allocator, itn: *intern.Interner, re
         if (!handed) { free_link_claims(alloc, u.libs, u.lib_count); }
     }
 
-    var roots: [7]intern.StrId;
-    var under: [7]str = [7]str{"", "obj", "ir", "asm", "test/{name}", CACHE_DIR, STAGE_DIR};
-    var k:     usize  = 0;
-    for (k < 7) {
-        var root: res[str, fail.Fail];
-        if (k == 0)       { root = path_dup(alloc, proj_out, 0, str_len(proj_out)); }
-        or                { root = sfmt(alloc, "{}/{}", proj_out, under[k]); }
-        if (sel root.err) { ret res[BuildUnit, fail.Fail].err{root.err}; }
-        val id: res[intern.StrId, fail.Fail] = id_of(itn, root.ok);
-        str_free(alloc, root.ok);
-        if (sel id.err) { ret res[BuildUnit, fail.Fail].err{id.err}; }
-        roots[k] = id.ok;
-        k        = k + 1;
-    }
-    u.out_root   = roots[0];
-    u.obj_root   = roots[1];
-    u.ir_root    = roots[2];
-    u.asm_root   = roots[3];
-    u.test_root  = roots[4];
-    u.cache_root = roots[5];
-    u.stage_root = roots[6];
+    val out_root: res[intern.StrId, fail.Fail] = id_of(itn, proj_out);
+    if (sel out_root.err) { ret res[BuildUnit, fail.Fail].err{out_root.err}; }
+    u.out_root = out_root.ok;
 
     val bin: res[str, fail.Fail] = scoped_artifact_output(alloc, itn, reg, s, a, proj_out, ?v);
     if (sel bin.err) { ret res[BuildUnit, fail.Fail].err{bin.err}; }
@@ -968,7 +925,7 @@ test resolve_export_reqs__a_dependency_requirement_is_homed_under_its_id_in_the_
     if (sel unit.ok) {
         val u: BuildUnit = unit.ok;
         if (!str_equals(intern.text(?itn, u.bin_path), "out/alt/debug/dep/shlib/spv/shader-a.spv")) { code = 1; }
-        if (!str_equals(intern.text(?itn, u.obj_root), "out/alt/debug/obj"))                        { code = 1; }
+        if (!str_equals(intern.text(?itn, u.out_root), "out/alt/debug"))                            { code = 1; }
         if (!str_equals(intern.text(?itn, u.profile_name), "debug"))                                { code = 1; }
     }
 
@@ -1175,7 +1132,7 @@ test resolve_build_unit__native_resolution_zero_target {
             if (!str_equals(intern.text(?itn, bu.target.isa), host_isa_name()))                                 { code = 1; }
             if (!str_equals(intern.text(?itn, bu.target.os), host_os_name()))                                   { code = 1; }
             if (!str_equals(intern.text(?itn, bu.target.abi), catalog_abi.name_for(lang_target.host_abi_id()))) { code = 1; }
-            if (!str_equals(intern.text(?itn, bu.obj_root), "out/native/obj"))                                  { code = 1; }
+            if (!str_equals(intern.text(?itn, bu.out_root), "out/native"))                                      { code = 1; }
         }
 
         val uf: res[BuildUnit, fail.Fail] = t_unit(?alloc, ?itn, ?m, "app", "foreign", "");

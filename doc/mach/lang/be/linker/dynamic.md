@@ -9,7 +9,7 @@ pub rec DynState;
 ## fun init_dynstate
 
 ```mach
-pub fun init_dynstate(dyn: *DynState);
+pub fun init_dynstate(dyn: *DynState, l: *linkage.Linkage);
 ```
 
 ## fun free_dynstate
@@ -61,7 +61,7 @@ whether a declared import the image still references resolves nowhere in it
 ## fun has_unresolved_attributed_imports
 
 ```mach
-pub fun has_unresolved_attributed_imports(s: *session.Session, modules: *target_of.ObjectImage,
+pub fun has_unresolved_attributed_imports(l: *linkage.Linkage, s: *session.Session, modules: *target_of.ObjectImage,
 module_count: u32, dynlibs: *target_of.DynLib, dynlib_count: u32,
 sym_locs: *map.Map[intern.StrId, SymbolLoc], prefix: str,
 sec_base: *u32, atoms: *AtomPlan) res[bool, fail.Fail];
@@ -143,7 +143,7 @@ refused when the link needs a loader and the os maps none
 ## fun pinned_attribution_message
 
 ```mach
-pub fun pinned_attribution_message(s: *session.Session, sym_name: intern.StrId,
+pub fun pinned_attribution_message(l: *linkage.Linkage, s: *session.Session, sym_name: intern.StrId,
 lib: intern.StrId) res[str, fail.Fail];
 ```
 

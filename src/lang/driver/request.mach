@@ -19,9 +19,9 @@ use std.types.string.str_len;
 use A:         std.allocator;
 use system_os: std.system.os;
 
-use build_fingerprint: mach.lang.build.fingerprint;
-use diagnostic_kind:   mach.lang.diagnostic.kind;
+use diagnostic_kind: mach.lang.diagnostic.kind;
 use mach.lang.fail;
+use lang_fingerprint: mach.lang.fingerprint;
 use mach.lang.intern;
 use mach.lang.manifest;
 use ir_printer: mach.lang.me.ir.printer;
@@ -40,32 +40,32 @@ pub val LEVER_ON: Lever = 1;
 # `--no-key`
 pub val LEVER_OFF: Lever = 2;
 
-# the typed options of a build-shaped command
+# what a build-shaped command sets over the profile it builds, already typed;
+# a lever or value left unset leaves the profile's
 # ---
-# selectors: the `-a`, `-t` and `-p` patterns and `--all`
+# output:    the `-o` path, nil when absent
 # work:      the `-w` work directory, nil when absent
-# optimize:  `--optimize` or `--no-optimize`
-# debug:     `--debug` or `--no-debug`
-# simd:      the `--simd` value, nil when absent
-# pass:      the `--pass` names, each added to the pass set
-# skip:      the `--skip` names, each left out of it
-# relax:     the `--relax` names, each permitted
-# unrelax:   the `--no-relax` names, each withdrawn
-# jobs:      the `--jobs` count, 0 when absent
-pub rec CliArgs {
-    verbosity:    u8;
-    quiet:        bool;
-    selectors:    manifest.Selectors;
+# ir_form:   the form `emit_ir` prints in
+# subsystem: the declared subsystem, SUBSYSTEM_FLAG_NONE for the artifact's own
+# optimize:  whether to optimize, or LEVER_PROFILE
+# debug:     whether to emit debug information, or LEVER_PROFILE
+# simd:      the vector lowering mode, none for the profile's
+# pass:      the pass names, each added to the pass set
+# skip:      the pass names, each left out of it
+# relax:     the relaxation names, each permitted
+# unrelax:   the relaxation names, each withdrawn
+# jobs:      the worker count, 0 for the host's
+pub rec Overrides {
     output:       *u8;
     work:         *u8;
     emit_asm:     bool;
     emit_ir:      bool;
-    emit_ir_form: *u8;
+    ir_form:      ir_printer.IrForm;
     pie:          bool;
-    subsystem:    *u8;
+    subsystem:    SubsystemFlag;
     optimize:     Lever;
     debug:        Lever;
-    simd:         *u8;
+    simd:         opt[manifest.SimdMode];
     pass:         Vector[str];
     skip:         Vector[str];
     relax:        Vector[str];
@@ -75,6 +75,32 @@ pub rec CliArgs {
     no_cache:     bool;
     link_tokens:  Vector[*u8];
     lib_dirs:     Vector[*u8];
+}
+
+# no override: the profile decides everything, with empty name lists and link
+# inputs growable through `a`
+pub fun overrides_init(a: *A.Allocator) Overrides {
+    var o: Overrides;
+    o.output       = nil;
+    o.work         = nil;
+    o.emit_asm     = false;
+    o.emit_ir      = false;
+    o.ir_form      = ir_printer.IR_FORM_DEBUG;
+    o.pie          = false;
+    o.subsystem    = SUBSYSTEM_FLAG_NONE;
+    o.optimize     = LEVER_PROFILE;
+    o.debug        = LEVER_PROFILE;
+    o.simd         = opt[manifest.SimdMode].none{};
+    o.pass         = collections_vector.init[str](a);
+    o.skip         = collections_vector.init[str](a);
+    o.relax        = collections_vector.init[str](a);
+    o.unrelax      = collections_vector.init[str](a);
+    o.jobs         = 0;
+    o.include_deps = false;
+    o.no_cache     = false;
+    o.link_tokens  = collections_vector.init[*u8](a);
+    o.lib_dirs     = collections_vector.init[*u8](a);
+    ret o;
 }
 
 pub def SubsystemFlag: u8;
@@ -95,7 +121,8 @@ val SUBSYSTEM_FLAGS:  [SUBSYSTEM_FLAG_N]SubsystemFlagSpec = [SUBSYSTEM_FLAG_N]Su
     SubsystemFlagSpec{flag: SUBSYSTEM_FLAG_GUI, resolved: catalog_subsystem.GUI, fingerprint_tag: 2},
 };
 
-fun subsystem_flag_from_name(name: str) opt[SubsystemFlag] {
+# the flag a subsystem name sets, none for a name no flag sets
+pub fun subsystem_flag_from_name(name: str) opt[SubsystemFlag] {
     val parsed: opt[catalog_subsystem.Subsystem] = catalog_subsystem.from_name(name);
     if (sel parsed.none) { ret opt[SubsystemFlag].none{}; }
     val s: catalog_subsystem.Subsystem = parsed.some;
@@ -154,10 +181,6 @@ val BUILD_GOALS:  [BUILD_GOAL_N]BuildGoalSpec = [BUILD_GOAL_N]BuildGoalSpec{
     BuildGoalSpec{goal: GOAL_CHECK, display: "check", verb: "checking", emit_name: "", fingerprint_tag: 5, caches: false},
 };
 
-pub val EMIT_HELP: str = "obj | exe (default exe; obj stops at the objects)";
-
-pub val EMIT_ERROR: str = "--emit expects 'obj' or 'exe'";
-
 # reached only by mach-lsp
 pub rec LinkToken {
     text: str;
@@ -214,41 +237,35 @@ pub rec BuildRequest {
 
 pub fun defaults() BuildRequest {
     var r: BuildRequest;
-    r.project_root     = "";
-    r.owner            = "";
-    r.target           = "";
-    r.profile          = "";
-    r.artifact         = "";
-    r.goal             = GOAL_ARTIFACT;
-    r.opt              = pipeline.OPT_DEBUG;
-    r.debug            = false;
-    r.pie              = false;
-    r.subsystem_flag   = SUBSYSTEM_FLAG_NONE;
-    r.subsystem        = catalog_subsystem.CONSOLE;
-    r.simd             = manifest.SIMD_SCALARIZE;
-    r.passes           = pipeline.set_empty();
-    r.skips            = pipeline.set_empty();
-    r.relax            = pass.RELAX_NONE;
-    r.overrides        = false;
-    r.allow            = diagnostic_kind.set_empty();
-    r.jobs             = 0;
-    r.emit_ir          = false;
-    r.ir_form          = ir_printer.IR_FORM_DEBUG;
-    r.emit_asm         = false;
-    r.out              = "";
-    r.work             = "";
-    r.link_tokens.a    = nil;
-    r.link_tokens.data = nil;
-    r.link_tokens.len  = 0;
-    r.link_tokens.cap  = 0;
-    r.lib_dirs.a       = nil;
-    r.lib_dirs.data    = nil;
-    r.lib_dirs.len     = 0;
-    r.lib_dirs.cap     = 0;
-    r.include_deps     = false;
-    r.test_filter      = "";
-    r.no_cache         = false;
-    r.object_cache     = false;
+    r.project_root   = "";
+    r.owner          = "";
+    r.target         = "";
+    r.profile        = "";
+    r.artifact       = "";
+    r.goal           = GOAL_ARTIFACT;
+    r.opt            = pipeline.OPT_DEBUG;
+    r.debug          = false;
+    r.pie            = false;
+    r.subsystem_flag = SUBSYSTEM_FLAG_NONE;
+    r.subsystem      = catalog_subsystem.CONSOLE;
+    r.simd           = manifest.SIMD_SCALARIZE;
+    r.passes         = pipeline.set_empty();
+    r.skips          = pipeline.set_empty();
+    r.relax          = pass.RELAX_NONE;
+    r.overrides      = false;
+    r.allow          = diagnostic_kind.set_empty();
+    r.jobs           = 0;
+    r.emit_ir        = false;
+    r.ir_form        = ir_printer.IR_FORM_DEBUG;
+    r.emit_asm       = false;
+    r.out            = "";
+    r.work           = "";
+    r.link_tokens    = collections_vector.init[LinkToken](nil);
+    r.lib_dirs       = collections_vector.init[str](nil);
+    r.include_deps   = false;
+    r.test_filter    = "";
+    r.no_cache       = false;
+    r.object_cache   = false;
     ret r;
 }
 
@@ -265,6 +282,13 @@ pub fun goal_from_emit_name(name: str) opt[BuildGoal] {
         i = i + 1;
     }
     ret opt[BuildGoal].none{};
+}
+
+# the name `--emit` gives the goal, "" for a goal it does not name
+pub fun goal_emit_name(goal: BuildGoal) str {
+    val spec: *BuildGoalSpec = goal_spec(goal);
+    if (spec == nil) { ret ""; }
+    ret spec.emit_name;
 }
 
 pub fun goal_name(goal: BuildGoal) str {
@@ -299,12 +323,12 @@ pub fun validate(a: *A.Allocator, r: *BuildRequest) err[fail.Fail] {
     ret err[fail.Fail].ok{};
 }
 
-pub fun release(r: *BuildRequest) bool {
+pub fun is_release(r: *BuildRequest) bool {
     ret r.opt == pipeline.OPT_RELEASE;
 }
 
 pub fun compose(a: *A.Allocator, itn: *intern.Interner, m: *manifest.Manifest,
-    cli: *CliArgs, root: str, goal: BuildGoal, profile: str) res[BuildRequest, fail.Fail] {
+    o: *Overrides, root: str, goal: BuildGoal, profile: str) res[BuildRequest, fail.Fail] {
     var r: BuildRequest = defaults();
     r.project_root = root;
     r.goal         = goal;
@@ -323,40 +347,27 @@ pub fun compose(a: *A.Allocator, itn: *intern.Interner, m: *manifest.Manifest,
 
     val checked: err[fail.Fail] = profiles_check(a, itn, m);
     if (sel checked.err) { ret res[BuildRequest, fail.Fail].err{checked.err}; }
-    val levers: err[fail.Fail] = levers_compose(a, itn, ?pf, cli, ?r);
+    val levers: err[fail.Fail] = levers_compose(a, itn, ?pf, o, ?r);
     if (sel levers.err) { ret res[BuildRequest, fail.Fail].err{levers.err}; }
-    r.pie = cli.pie;
+    r.pie = o.pie;
 
-    if (cli.subsystem != nil) {
-        val ss:   str                = cli.subsystem::str;
-        val flag: opt[SubsystemFlag] = subsystem_flag_from_name(ss);
-        if (sel flag.none) {
-            ret res[BuildRequest, fail.Fail].err{fail.user(diagnostic_kind.CLI_FLAG_VALUE, "--subsystem expects \"console\" or \"gui\"")};
-        }
-        r.subsystem_flag = flag.some;
-    }
+    r.subsystem_flag = o.subsystem;
 
     r.allow = pf.allow;
 
-    r.jobs = workers(cli.jobs);
+    r.jobs = workers(o.jobs);
 
-    r.emit_ir = cli.emit_ir;
-    if (cli.emit_ir_form != nil) {
-        val form: opt[ir_printer.IrForm] = ir_printer.ir_form_from_name(cli.emit_ir_form::str);
-        if (sel form.none) {
-            ret res[BuildRequest, fail.Fail].err{fail.user(diagnostic_kind.CLI_FLAG_VALUE, ir_printer.IR_FORM_ERROR)};
-        }
-        r.ir_form = form.some;
-    }
-    r.emit_asm = cli.emit_asm;
-    if (cli.output != nil) { r.out = cli.output::str; }
-    if (cli.work != nil)   { r.work = cli.work::str; }
+    r.emit_ir  = o.emit_ir;
+    r.ir_form  = o.ir_form;
+    r.emit_asm = o.emit_asm;
+    if (o.output != nil) { r.out = o.output::str; }
+    if (o.work != nil)   { r.work = o.work::str; }
 
     r.link_tokens = collections_vector.init[LinkToken](a);
     var ti: usize = 0;
-    for (ti < cli.link_tokens.len) {
+    for (ti < o.link_tokens.len) {
         var t: LinkToken;
-        t.text = cli.link_tokens.data[ti]::str;
+        t.text = o.link_tokens.data[ti]::str;
         val pr: res[usize, A.Error] = collections_vector.push[LinkToken](?r.link_tokens, t);
         if (sel pr.err) {
             ret res[BuildRequest, fail.Fail].err{fail.message("out of memory")};
@@ -365,23 +376,23 @@ pub fun compose(a: *A.Allocator, itn: *intern.Interner, m: *manifest.Manifest,
     }
     r.lib_dirs = collections_vector.init[str](a);
     var di: usize = 0;
-    for (di < cli.lib_dirs.len) {
-        val dr: res[usize, A.Error] = collections_vector.push[str](?r.lib_dirs, cli.lib_dirs.data[di]::str);
+    for (di < o.lib_dirs.len) {
+        val dr: res[usize, A.Error] = collections_vector.push[str](?r.lib_dirs, o.lib_dirs.data[di]::str);
         if (sel dr.err) {
             ret res[BuildRequest, fail.Fail].err{fail.message("out of memory")};
         }
         di = di + 1;
     }
 
-    r.include_deps = cli.include_deps;
-    r.no_cache     = cli.no_cache;
-    r.object_cache = goal_caches(goal) && !cli.no_cache;
+    r.include_deps = o.include_deps;
+    r.no_cache     = o.no_cache;
+    r.object_cache = goal_caches(goal) && !o.no_cache;
     ret res[BuildRequest, fail.Fail].ok{r};
 }
 
 # the levers of the selected profile `pf`, then the command line's over them,
 # into `r`: built-in defaults, then the profile, then the command line
-fun levers_compose(a: *A.Allocator, itn: *intern.Interner, pf: *manifest.ResolvedProfile, cli: *CliArgs, r: *BuildRequest) err[fail.Fail] {
+fun levers_compose(a: *A.Allocator, itn: *intern.Interner, pf: *manifest.ResolvedProfile, o: *Overrides, r: *BuildRequest) err[fail.Fail] {
     if (pf.optimize) { r.opt = pipeline.OPT_RELEASE; }
     r.debug = pf.debug;
     r.simd  = pf.simd;
@@ -396,43 +407,37 @@ fun levers_compose(a: *A.Allocator, itn: *intern.Interner, pf: *manifest.Resolve
     r.relax = relax.ok;
 
     val profiled: BuildRequest = @r;
-    if (cli.optimize == LEVER_ON)  { r.opt = pipeline.OPT_RELEASE; }
-    if (cli.optimize == LEVER_OFF) { r.opt = pipeline.OPT_DEBUG; }
-    if (cli.debug == LEVER_ON)     { r.debug = true; }
-    if (cli.debug == LEVER_OFF)    { r.debug = false; }
-    if (cli.simd != nil) {
-        val mode: opt[manifest.SimdMode] = manifest.simd_named(cli.simd::str);
-        if (sel mode.none) {
-            ret err[fail.Fail].err{fail.user(diagnostic_kind.CLI_FLAG_VALUE, "--simd expects \"scalarize\" or \"require\"")};
-        }
-        r.simd = mode.some;
-    }
+    if (o.optimize == LEVER_ON)  { r.opt = pipeline.OPT_RELEASE; }
+    if (o.optimize == LEVER_OFF) { r.opt = pipeline.OPT_DEBUG; }
+    if (o.debug == LEVER_ON)     { r.debug = true; }
+    if (o.debug == LEVER_OFF)    { r.debug = false; }
+    if (sel o.simd.some)         { r.simd = o.simd.some; }
     var i: usize = 0;
-    for (i < cli.pass.len) {
-        val at: res[usize, fail.Fail] = cli_pass(a, cli.pass.data[i], "--pass", ?cli.skip, "--skip");
+    for (i < o.pass.len) {
+        val at: res[usize, fail.Fail] = cli_pass(a, o.pass.data[i], "--pass", ?o.skip, "--skip");
         if (sel at.err) { ret err[fail.Fail].err{at.err}; }
         pipeline.set_add(?r.passes, at.ok);
         pipeline.set_remove(?r.skips, at.ok);
         i = i + 1;
     }
     i = 0;
-    for (i < cli.skip.len) {
-        val at: res[usize, fail.Fail] = cli_pass(a, cli.skip.data[i], "--skip", ?cli.pass, "--pass");
+    for (i < o.skip.len) {
+        val at: res[usize, fail.Fail] = cli_pass(a, o.skip.data[i], "--skip", ?o.pass, "--pass");
         if (sel at.err) { ret err[fail.Fail].err{at.err}; }
         pipeline.set_add(?r.skips, at.ok);
         pipeline.set_remove(?r.passes, at.ok);
         i = i + 1;
     }
     i = 0;
-    for (i < cli.relax.len) {
-        val bit: res[pass.Relax, fail.Fail] = cli_relax(a, cli.relax.data[i], "--relax", ?cli.unrelax, "--no-relax");
+    for (i < o.relax.len) {
+        val bit: res[pass.Relax, fail.Fail] = cli_relax(a, o.relax.data[i], "--relax", ?o.unrelax, "--no-relax");
         if (sel bit.err) { ret err[fail.Fail].err{bit.err}; }
         r.relax = r.relax | bit.ok;
         i       = i + 1;
     }
     i = 0;
-    for (i < cli.unrelax.len) {
-        val bit: res[pass.Relax, fail.Fail] = cli_relax(a, cli.unrelax.data[i], "--no-relax", ?cli.relax, "--relax");
+    for (i < o.unrelax.len) {
+        val bit: res[pass.Relax, fail.Fail] = cli_relax(a, o.unrelax.data[i], "--no-relax", ?o.relax, "--relax");
         if (sel bit.err) { ret err[fail.Fail].err{bit.err}; }
         r.relax = r.relax & ~bit.ok;
         i       = i + 1;
@@ -648,20 +653,20 @@ fun write_goal(s: *wire.Sink, goal: BuildGoal) {
         wire.refuse(s, fail.message("build request names an unknown goal"));
         ret;
     }
-    build_fingerprint.put_domain_u8(s, build_fingerprint.DOMAIN_BUILD_GOAL, BUILD_GOAL_CATALOG_VERSION, spec.fingerprint_tag);
+    lang_fingerprint.put_domain_u8(s, lang_fingerprint.DOMAIN_BUILD_GOAL, BUILD_GOAL_CATALOG_VERSION, spec.fingerprint_tag);
 }
 
 #[testing]
 fun write_request_extra(s: *wire.Sink, r: *BuildRequest) {
     wire.put_u32(s, r.jobs);
     put_flag(s, r.emit_ir);
-    build_fingerprint.put_domain_u8(s, build_fingerprint.DOMAIN_IR_FORM,
+    lang_fingerprint.put_domain_u8(s, lang_fingerprint.DOMAIN_IR_FORM,
         ir_printer.IR_FORM_CATALOG_VERSION, ir_printer.ir_form_fingerprint_tag(r.ir_form));
     put_flag(s, r.emit_asm);
     put_flag(s, r.no_cache);
     put_flag(s, r.object_cache);
     put_text(s, r.out);
-    build_fingerprint.put_domain_u8(s, build_fingerprint.DOMAIN_SUBSYSTEM,
+    lang_fingerprint.put_domain_u8(s, lang_fingerprint.DOMAIN_SUBSYSTEM,
         catalog_subsystem.VERSION, catalog_subsystem.fingerprint_tag(r.subsystem));
     wire.put_u32(s, r.link_tokens.len::u32);
     var ti: usize = 0;
@@ -756,10 +761,8 @@ test build_goal_catalog__is_complete_unique_ordered_and_round_trips {
 
         if (!str_empty(spec.emit_name)) {
             val parsed: opt[BuildGoal] = goal_from_emit_name(spec.emit_name);
-            if (sel parsed.none)                           { ret 1; }
-            if (parsed.some != spec.goal)                  { ret 1; }
-            if (!str_contains(EMIT_HELP, spec.emit_name))  { ret 1; }
-            if (!str_contains(EMIT_ERROR, spec.emit_name)) { ret 1; }
+            if (sel parsed.none)          { ret 1; }
+            if (parsed.some != spec.goal) { ret 1; }
             emit_count = emit_count + 1;
         }
         i = i + 1;
@@ -943,17 +946,6 @@ test semantic_hash__omits_nonsemantic_fields {
     ret 0;
 }
 
-# command-line arguments that set no lever, their sets growable through `a`
-#[testing]
-fun t_cli_args(a: *A.Allocator) CliArgs {
-    var cli: CliArgs;
-    cli.pass    = collections_vector.init[str](a);
-    cli.skip    = collections_vector.init[str](a);
-    cli.relax   = collections_vector.init[str](a);
-    cli.unrelax = collections_vector.init[str](a);
-    ret cli;
-}
-
 # the profile's levers fill the request and each command-line lever wins over
 # its profile's, and only a change marks the request as overriding the profile
 test levers_compose__the_command_line_wins_over_the_profile {
@@ -984,24 +976,24 @@ test levers_compose__the_command_line_wins_over_the_profile {
     if (sel inline_at.none) { ret 3; }
     if (sel vector_at.none) { ret 3; }
 
-    var cli:         CliArgs        = t_cli_args(?a);
+    var o:           Overrides      = overrides_init(?a);
     var r:           BuildRequest   = defaults();
-    val as_profiled: err[fail.Fail] = levers_compose(?a, ?itn, ?pf, ?cli, ?r);
+    val as_profiled: err[fail.Fail] = levers_compose(?a, ?itn, ?pf, ?o, ?r);
     if (sel as_profiled.err)                                                                       { ret 4; }
     if (r.opt != pipeline.OPT_DEBUG || r.overrides || r.relax != pass.RELAX_FLOAT_REASSOC)         { ret 5; }
     if (!pipeline.set_has(r.passes, inline_at.some) || !pipeline.set_has(r.skips, vector_at.some)) { ret 6; }
 
-    cli.optimize = LEVER_ON;
-    cli.debug    = LEVER_ON;
-    collections_vector.push[str](?cli.skip, "inline");
-    collections_vector.push[str](?cli.unrelax, "float-reassoc");
+    o.optimize = LEVER_ON;
+    o.debug    = LEVER_ON;
+    collections_vector.push[str](?o.skip, "inline");
+    collections_vector.push[str](?o.unrelax, "float-reassoc");
     r = defaults();
-    val overridden: err[fail.Fail] = levers_compose(?a, ?itn, ?pf, ?cli, ?r);
+    val overridden: err[fail.Fail] = levers_compose(?a, ?itn, ?pf, ?o, ?r);
     if (sel overridden.err)                                                                       { ret 7; }
     if (r.opt != pipeline.OPT_RELEASE || !r.debug || !r.overrides || r.relax != pass.RELAX_NONE)  { ret 8; }
     if (pipeline.set_has(r.passes, inline_at.some) || !pipeline.set_has(r.skips, inline_at.some)) { ret 9; }
 
-    var both: CliArgs = t_cli_args(?a);
+    var both: Overrides = overrides_init(?a);
     collections_vector.push[str](?both.pass, "licm");
     collections_vector.push[str](?both.skip, "licm");
     r = defaults();
@@ -1011,7 +1003,7 @@ test levers_compose__the_command_line_wins_over_the_profile {
     val legal: res[intern.StrId, A.Error] = intern.add(?itn, "vecsplit");
     if (sel legal.err) { ret 11; }
     ids[2] = legal.ok;
-    var plain: CliArgs = t_cli_args(?a);
+    var plain: Overrides = overrides_init(?a);
     r = defaults();
     val refused: err[fail.Fail] = levers_compose(?a, ?itn, ?pf, ?plain, ?r);
     if (!(sel refused.err && str_contains(fail.describe(refused.err), "[profile.p].skip names \"vecsplit\", a legalization pass"))) { ret 12; }

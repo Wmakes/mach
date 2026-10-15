@@ -61,9 +61,9 @@ use mach.lang.driver.tests.testing.ut_target_sel;
 use mach.lang.driver.tests.testing.ut_vec_codegen_defined;
 use mach.lang.driver.tests.testing.ut_vec_lower;
 use mach.lang.driver.tests.testing.ut_vec_lower_opt;
+use mach.lang.driver.toolchain;
 use ir_id: mach.lang.me.ir.id;
 use mach.lang.module;
-use mach.lang.toolchain;
 
 #[testing]
 fun ut_codegen_target_rejects(src: str, target_name: str, needle: str) i32 {

@@ -1,8 +1,7 @@
 # descriptor-relative removal beneath a project root: every component is
-use std.types.error.err;
 # opened without following symlinks so no part of the path is resolved as a
 # string and a link out of the tree is refused rather than followed
-use std.filesystem.removal;
+use std.types.error.err;
 #[testing]
 use mach.lang.fail;
 use mach.lang.host;
@@ -12,6 +11,7 @@ use output_testing: mach.lang.output.testing;
 use A:              std.allocator;
 #[testing]
 use std.allocator.page;
+use std.filesystem.removal;
 use io_error:  std.io.error;
 use system_os: std.system.os;
 use std.types.bool.bool;

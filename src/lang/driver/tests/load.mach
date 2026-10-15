@@ -17,15 +17,16 @@ use std.types.string.str_len;
 use A: std.allocator;
 use T: std.allocator.testing;
 
-use mach.lang.build.request;
 use mach.lang.diagnostic;
 use diagnostic_kind: mach.lang.diagnostic.kind;
+use mach.lang.driver.request;
 use mach.lang.fe.ast;
 use ast_decl: mach.lang.fe.ast.decl;
 use ast_id:   mach.lang.fe.ast.id;
 use mach.lang.fe.comptime;
 use comptime_path: mach.lang.fe.comptime.path;
 use mach.lang.intern;
+use mach.lang.linkage;
 use mach.lang.manifest;
 use mach.lang.me.pipeline;
 use mach.lang.query;
@@ -79,8 +80,8 @@ use mach.lang.driver.tests.testing.ut_vec_diag;
 use mach.lang.driver.tests.testing.ut_vec_sema;
 use mach.lang.driver.tests.testing.ut_vec_sema_n;
 use mach.lang.driver.tests.testing.ut_write_source;
+use mach.lang.driver.toolchain;
 use mach.lang.module;
-use mach.lang.toolchain;
 
 # a module's load walks past a gate only layout decides, so an `ext` declared after it
 # keeps its C name and its library
@@ -118,11 +119,11 @@ test layout_gate__a_later_ext_keeps_its_link_name {
         val d: *ast_decl.Decl = ?frontend.syntax(?p, m).decls.data[di];
         if (d.kind == ast_decl.DECL_KIND_FUN && (d.flags & ast_decl.DECL_FLAG_EXT) != 0) {
             found = true;
-            val link: intern.StrId = session.export_name(?s, mid, di);
+            val link: intern.StrId = linkage.export_name(?p.linkage, mid, di);
             if (intern.str_is_nil(link)) { ret 5; }
             val text: opt[str] = intern.get(?s.interner, link);
             if (!(sel text.some && str_equals(text.some, "getppid"))) { ret 6; }
-            val library: intern.StrId = session.export_library(?s, mid, di);
+            val library: intern.StrId = linkage.export_library(?p.linkage, mid, di);
             if (intern.str_is_nil(library)) { ret 7; }
         }
         di = di + 1;

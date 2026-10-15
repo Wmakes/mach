@@ -12,6 +12,7 @@ use A: std.allocator;
 
 use mach.lang.fail;
 use mach.lang.intern;
+use mach.lang.linkage;
 use mach.lang.session;
 use lang_target:      mach.lang.target;
 use catalog_artifact: mach.lang.target.catalog.artifact;
@@ -78,7 +79,7 @@ pub rec LinkState {
     native_count:    u32;
 }
 
-pub fun link_state_init(st: *LinkState, s: *session.Session, tgt: *lang_target.Binding, mode: catalog_artifact.Kind,
+pub fun link_state_init(st: *LinkState, s: *session.Session, l: *linkage.Linkage, tgt: *lang_target.Binding, mode: catalog_artifact.Kind,
     modules: *target_of.ObjectImage, module_count: u32, image_options: target_of.ImageOptions) {
     st.s                   = s;
     st.tgt                 = tgt;
@@ -100,7 +101,7 @@ pub fun link_state_init(st: *LinkState, s: *session.Session, tgt: *lang_target.B
     st.sym_out             = nil;
     st.sym_total           = 0;
     st.header_reserve      = 0;
-    resolution_init(?st.resolution, s.alloc, ?s.interner, tgt.of, tgt.isa, os_base_addr(tgt));
+    resolution_init(?st.resolution, l, s.alloc, ?s.interner, tgt.of, tgt.isa, os_base_addr(tgt));
     init_local_got_plan(?st.local_got);
     init_thunk_plan(?st.thunks);
     init_unwind_plan(?st.unwind);

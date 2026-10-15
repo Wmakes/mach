@@ -16,7 +16,7 @@ stays where link_state_init put it
 ## fun link_state_init
 
 ```mach
-pub fun link_state_init(st: *LinkState, s: *session.Session, tgt: *lang_target.Binding, mode: catalog_artifact.Kind,
+pub fun link_state_init(st: *LinkState, s: *session.Session, l: *linkage.Linkage, tgt: *lang_target.Binding, mode: catalog_artifact.Kind,
 modules: *target_of.ObjectImage, module_count: u32, image_options: target_of.ImageOptions);
 ```
 

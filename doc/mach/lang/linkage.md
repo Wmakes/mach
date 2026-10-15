@@ -1,0 +1,127 @@
+# mach.lang.linkage
+
+what a build declares about linkage, owned by the build's project and read
+by the lowering that names declarations and the linker that binds imports:
+each declaration's export name and library, the library each imported
+symbol is pinned to, and the libraries the link is offered in the order the
+build first named them
+
+## rec Provider
+
+```mach
+pub rec Provider;
+```
+
+a library the link is offered, and whether only its static form is
+
+## rec Linkage
+
+```mach
+pub rec Linkage;
+```
+
+keyed by declaration: a module's index in the high 32 bits, its declaration
+index in the low
+
+## fun init
+
+```mach
+pub fun init(alloc: *A.Allocator) Linkage;
+```
+
+## fun dnit
+
+```mach
+pub fun dnit(l: *Linkage);
+```
+
+## fun clear
+
+```mach
+pub fun clear(l: *Linkage);
+```
+
+forget every declaration, import and provider, as a project does when its
+module registry is reset
+
+## fun register_export_name
+
+```mach
+pub fun register_export_name(l: *Linkage, mid: module.ModuleId, did: u32, name: intern.StrId) err[fail.Fail];
+```
+
+## fun forget_export_names
+
+```mach
+pub fun forget_export_names(l: *Linkage, mid: module.ModuleId, decl_count: u32);
+```
+
+drop every export name one module registered, before its syntax tree is
+replaced and its declaration ids no longer name the same declarations
+
+mid: the module whose names go
+decl_count: the declaration count of the syntax tree they were registered against
+
+## fun export_name
+
+```mach
+pub fun export_name(l: *Linkage, mid: module.ModuleId, did: u32) intern.StrId;
+```
+
+the name declaration `did` of `mid` is exported under, nil when it names none
+
+## fun register_export_library
+
+```mach
+pub fun register_export_library(l: *Linkage, mid: module.ModuleId, did: u32, lib: intern.StrId) err[fail.Fail];
+```
+
+## fun export_library
+
+```mach
+pub fun export_library(l: *Linkage, mid: module.ModuleId, did: u32) intern.StrId;
+```
+
+the library declaration `did` of `mid` is imported from, nil when it names none
+
+## fun register_import_library
+
+```mach
+pub fun register_import_library(l: *Linkage, name: intern.StrId, lib: intern.StrId) err[fail.Fail];
+```
+
+pin the imported symbol `name` to the library `lib`
+
+## fun import_library
+
+```mach
+pub fun import_library(l: *Linkage, name: intern.StrId) intern.StrId;
+```
+
+the library the imported symbol `name` is pinned to, nil when it is pinned to none
+
+## fun register_provider
+
+```mach
+pub fun register_provider(l: *Linkage, name: intern.StrId, is_static: bool) err[fail.Fail];
+```
+
+offer the link the library `name`; a library offered again keeps its place,
+and is static only while every offer of it is
+
+## fun provider
+
+```mach
+pub fun provider(l: *Linkage, name: intern.StrId) opt[Provider];
+```
+
+the library `name` as the link is offered it, none when it is not
+
+## fun providers_clear
+
+```mach
+pub fun providers_clear(l: *Linkage);
+```
+
+forget every library offered, as each link names its own
+

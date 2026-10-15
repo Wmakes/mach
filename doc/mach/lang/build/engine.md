@@ -14,7 +14,7 @@ fails is recorded and the remaining units still run. ok is the outcome of the wh
 plan, its severity the worst unit's; err is a failure of the engine itself, never of a
 unit
 
-bp: the plan, read only
+bp: the plan, its closure located; read only, and trusted as planned
 backing: the allocator each unit's arena grows from; released per unit
 oa: owns the returned outcome and every path and text in it
 sink: where every unit, failure, diagnostic and phase row is sent as it happens; nil for none
@@ -24,8 +24,8 @@ ret: the outcome, released with outcome.outcome_dnit, or an engine failure whose
 ## fun execute_warm
 
 ```mach
-pub fun execute_warm(bp: *build_plan.BuildPlan, unit_index: usize, s: *session.Session, oa: *A.Allocator,
-sink: *readout.Sink) res[outcome.BuildOutcome, fail.Fail];
+pub fun execute_warm(bp: *build_plan.BuildPlan, unit_index: usize, s: *session.Session,
+published: *publication.Publications, oa: *A.Allocator, sink: *readout.Sink) res[outcome.BuildOutcome, fail.Fail];
 ```
 
 run one planned cell through a caller-owned session, reusing its query cache, source
@@ -34,7 +34,8 @@ diagnostic store is replaced for the call and its build allocator is a per-call 
 restored on return, so every raw product a caller borrowed from the session before the
 call is expired by it
 
-bp: the plan, read only
+bp: the plan, its closure located; read only, and trusted as planned: neither the manifest
+            nor the closure is read again, and a manifest the session reloaded since is refused
 unit_index: the cell to run; out of range is an internal failure
 s: the warm session; its sources and queries carry over between calls
 oa: owns the returned outcome
@@ -44,7 +45,7 @@ ret: the outcome of that one unit, released with outcome.outcome_dnit, or an eng
 ## fun set_link_config_input
 
 ```mach
-pub fun set_link_config_input(p: *driver.Project, out_path: *u8, product: *u8, out_kind: u32,
+pub fun set_link_config_input(p: *project.Project, out_path: *u8, product: *u8, out_kind: u32,
 ext: *target_of.ObjectInput, ext_count: u32,
 dynlibs: *target_of.DynLib, dynlib_count: u32,
 image: *build_emit.LoadedImageOptions) err[fail.Fail];

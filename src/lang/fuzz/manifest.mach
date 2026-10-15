@@ -12,12 +12,12 @@ use std.types.string.str_len;
 use A: std.allocator;
 use std.data.toml;
 
+use mach.lang.driver.toolchain;
 use mach.lang.fuzz.verdict;
 use mach.lang.intern;
 use mach.lang.manifest;
 use mach.lang.manifest.template;
 use lang_target: mach.lang.target;
-use mach.lang.toolchain;
 
 #[testing]
 pub fun answer(alloc: *A.Allocator, data: *u8, len: usize) verdict.Verdict {
@@ -161,9 +161,7 @@ fun resolve_every_cell(alloc: *A.Allocator, itn: *intern.Interner, m: *manifest.
                 if (sel br.err) { cnt; }
                 val bu: manifest.BuildUnit = br.ok;
                 if (!resolves(itn, bu.entry) || !resolves(itn, bu.bin_path)
-                    || !resolves(itn, bu.out_root) || !resolves(itn, bu.obj_root) || !resolves(itn, bu.ir_root)
-                    || !resolves(itn, bu.asm_root) || !resolves(itn, bu.test_root)
-                    || !resolves(itn, bu.cache_root) || !resolves(itn, bu.stage_root)) {
+                    || !resolves(itn, bu.out_root)) {
                     ret "a resolved build unit names a path string that is not interned";
                 }
             }

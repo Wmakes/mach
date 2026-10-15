@@ -77,6 +77,40 @@ pub fun doc_read(alloc: *A.Allocator, path: str) res[Doc, fail.Fail];
 the manifest file at `path` read and parsed as `doc_parse` parses it; a file
 that cannot be read is the environment's
 
+## val MANIFEST_FILE
+
+```mach
+pub val MANIFEST_FILE: str = "mach.toml"
+```
+
+the file name of a project manifest, looked up in a project root
+
+## fun parse_text
+
+```mach
+pub fun parse_text(alloc: *A.Allocator, itn: *intern.Interner, path: str, text: str) res[Manifest, fail.Fail];
+```
+
+the manifest `text`, read from `path`, parsed and checked
+
+alloc: owns the manifest, released with `dnit`, and a refusal's text
+itn: interns its names
+ret: the manifest; err as the text does not parse or fails a check
+
+## fun read_at
+
+```mach
+pub fun read_at(alloc: *A.Allocator, itn: *intern.Interner, dir: str) res[Manifest, fail.Fail];
+```
+
+the manifest of the project rooted at `dir`, read off disk and parsed
+
+alloc: owns the manifest, released with `dnit`, and a refusal's text
+itn: interns its names
+dir: the project root, which holds MANIFEST_FILE
+ret: the manifest; err from the environment when it cannot be read, else as
+       it does not parse or fails a check
+
 ## fun doc_dnit
 
 ```mach

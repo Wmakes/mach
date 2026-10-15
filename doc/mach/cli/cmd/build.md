@@ -25,6 +25,7 @@ pub rec Planned;
 a command's selection, planned: the cells the selectors resolved to, and one
 plan per selected profile in the order the cells name them
 
+manifest: the root manifest the plans were made from, in the planning session
 cells: the resolved (artifact, target, profile) cells
 plans: one plan per profile; each plans that profile's cells
 
@@ -52,6 +53,24 @@ ps: out; the session the plans refer to, initialised here; on an error it has al
 ret: the plans, or a Fail: internal for session or registry setup, user for manifest,
                 selection, request and dependency-configuration errors, `-o` over several cells,
                 and whatever planning returns
+
+## fun plan_selection
+
+```mach
+pub fun plan_selection(a: *A.Allocator, ps: *session.Session, m: *manifest.Manifest, root: str, cli: *args.CliArgs,
+goal: request.BuildGoal, mode: manifest.ArtifactDefault, configure_deps: bool,
+unrealized: driver_closure.Unrealized) res[Planned, fail.Fail];
+```
+
+resolve the selectors against a loaded manifest and plan every resolved cell,
+one plan per profile. plans of different profiles are not checked against
+each other: a caller that runs them all checks they write disjoint outputs
+
+a: allocator for the requests
+ps: the session the manifest was loaded in; owns the plans
+m: the root manifest
+unrealized: what a dependency nothing is realized for is
+ret: the plans; err from selection, a request, planning or dependency configuration
 
 ## fun announce_profile
 

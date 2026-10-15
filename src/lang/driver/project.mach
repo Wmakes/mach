@@ -18,10 +18,10 @@ use std.types.string.str_len;
 use A: std.allocator;
 
 use lang_alloc: mach.lang.alloc;
-use mach.lang.build.cache.compiler;
-use cache_record: mach.lang.build.cache.record;
-use mach.lang.build.request;
 use mach.lang.diagnostic;
+use mach.lang.driver.cache.compiler;
+use cache_record: mach.lang.driver.cache.record;
+use mach.lang.driver.request;
 use mach.lang.fail;
 use mach.lang.fe.ast;
 use mach.lang.fe.comptime;
@@ -31,6 +31,7 @@ use mach.lang.fe.resolve;
 use fe_sema: mach.lang.fe.sema;
 use mach.lang.handle;
 use mach.lang.intern;
+use mach.lang.linkage;
 use mach.lang.manifest;
 use mach.lang.manifest.template;
 use me_ir: mach.lang.me.ir;
@@ -88,9 +89,34 @@ pub rec DepEntry {
     ref:             intern.StrId;
     chain:           intern.StrId;
     root_declared:   bool;
-    direct:          *intern.StrId;
-    direct_count:    u32;
-    manifest:        manifest.Manifest;
+    # the project each of its dependency declarations reaches, nil for one
+    # left out as never realized
+    direct:       *intern.StrId;
+    direct_count: u32;
+    manifest:     manifest.Manifest;
+}
+
+# a root manifest's located dependency closure: every dependency realized under
+# dep/, its manifest read once, and its direct edges. a plan locates it once and
+# every cell it configures borrows it; a project configured without one locates
+# and owns its own
+# ---
+# alloc: owns the entries, their manifests and their edges
+pub rec Closure {
+    alloc: *A.Allocator;
+    deps:  *DepEntry;
+    count: u32;
+}
+
+# a closure that holds no dependency
+pub fun closure_empty(alloc: *A.Allocator) Closure {
+    ret Closure{alloc: alloc, deps: nil, count: 0};
+}
+
+pub fun closure_dnit(c: *Closure) {
+    free_dep_entries(c.alloc, c.deps, c.count, c.count::usize);
+    c.deps  = nil;
+    c.count = 0;
 }
 
 # what a configured build cell compiles and where it writes
@@ -98,12 +124,15 @@ pub rec DepEntry {
 # project_root:     the directory of the project that declares the cell: the root
 #                   project, or for a dependency's cell the dependency's realization
 # home_root:        the root project's directory; `project_work` is rooted here
-# owner:            the dependency that declares the cell, moved out of the closure;
+# owner:            the dependency that declares the cell, as the closure holds it;
 #                   meaningful only with `dependency_owned`
 # dependency_owned: the cell is a requirement of a dependency's default library
 #                   artifacts, built for the root project
+# closure:          the closure this project located itself, when it was configured
+#                   without one to borrow; empty otherwise
 # deps:             the realized closure the cell compiles against: the root's whole
-#                   closure, or a dependency cell's own transitive closure
+#                   closure, or a dependency cell's own transitive closure. the array
+#                   is the project's, each entry borrowed from the closure
 # art_reqs:         the requirements of the cell's artifact, in its declaring manifest
 # req_scopes:       one requirement scope per project the cell compiles, the declaring
 #                   project's first
@@ -115,11 +144,11 @@ pub rec ProjectConfig {
     app_manifest:      intern.StrId;
     module:            intern.StrId;
     dir_src:           intern.StrId;
-    dir_dep:           intern.StrId;
     project_root:      intern.StrId;
     home_root:         intern.StrId;
     owner:             DepEntry;
     dependency_owned:  bool;
+    closure:           Closure;
     targets:           *TargetEntry;
     target_count:      u32;
     deps:              *DepEntry;
@@ -266,6 +295,9 @@ pub rec Project {
 
     roots: RootSet;
 
+    # what the load declares about linkage and the link phase offers the linker
+    linkage: linkage.Linkage;
+
     # the unit's phase rows, nil when nothing reads them
     progress: *readout.Progress;
 
@@ -377,6 +409,7 @@ pub fun dnit_project(p: *Project) {
     disk.dnit(?p.disk);
     diagnostic.store_dnit(?p.diags);
     deallocate_config(?p.config, p.alloc);
+    linkage.dnit(?p.linkage);
 
     session.reset_module_registry(p.s);
 }
@@ -405,6 +438,7 @@ pub fun init_project(p: *Project, s: *session.Session) {
     p.since                 = s.queries.operation_sequence + 1;
     p.context_frozen        = false;
     p.diags                 = diagnostic.store_init(p.alloc);
+    p.linkage               = linkage.init(p.alloc);
     p.target_entry          = nil;
     p.union_entries         = nil;
     p.union_entry_count     = 0;
@@ -441,6 +475,7 @@ pub fun init_project(p: *Project, s: *session.Session) {
     p.config.module                 = intern.STR_NIL;
     p.config.targets                = nil;
     p.config.target_count           = 0;
+    p.config.closure                = closure_empty(p.alloc);
     p.config.deps                   = nil;
     p.config.dep_count              = 0;
     p.config.cascade_libs           = nil;
@@ -479,9 +514,7 @@ fun deallocate_config(c: *ProjectConfig, alloc: *A.Allocator) {
         }
         A.deallocate[TargetEntry](alloc, c.targets, c.target_count::usize);
     }
-    if (c.deps != nil && c.dep_count > 0) {
-        free_dep_entries(alloc, c.deps, c.dep_count, c.dep_count::usize);
-    }
+    if (c.deps != nil && c.dep_count > 0) { A.deallocate[DepEntry](alloc, c.deps, c.dep_count::usize); }
     if (c.cascade_libs != nil && c.cascade_lib_count > 0) {
         manifest.free_link_claims(alloc, c.cascade_libs, c.cascade_lib_count);
         A.deallocate[manifest.LinkRequirement](alloc, c.cascade_libs, c.cascade_lib_count::usize);
@@ -508,9 +541,7 @@ fun deallocate_config(c: *ProjectConfig, alloc: *A.Allocator) {
         }
         A.deallocate[template.Requirements](alloc, c.req_scopes, c.req_scope_count::usize);
     }
-    if (c.dependency_owned) {
-        free_dep_entries_in_place(alloc, ?c.owner, 1);
-    }
+    closure_dnit(?c.closure);
     c.dependency_owned  = false;
     c.req_scopes        = nil;
     c.req_scope_count   = 0;
@@ -535,7 +566,7 @@ pub fun free_dep_entries(alloc: *A.Allocator, deps: *DepEntry, count: u32, capac
 }
 
 # release what each entry owns, leaving the entries' own storage to the caller
-pub fun free_dep_entries_in_place(alloc: *A.Allocator, deps: *DepEntry, count: u32) {
+fun free_dep_entries_in_place(alloc: *A.Allocator, deps: *DepEntry, count: u32) {
     var i: u32 = 0;
     for (i < count) {
         if (deps[i].direct != nil && deps[i].direct_count > 0) {
@@ -587,6 +618,7 @@ fun store_fail(e: handle.Error) fail.Fail {
 
 # make room for one more entry so the next module_append cannot fail
 pub fun module_reserve(p: *Project) err[fail.Fail] {
+    if (module_count(p) >= module.BUFFER_BASE) { ret err[fail.Fail].err{fail.message("a project numbers at most 2^31 modules")}; }
     val editor_r: res[handle.ChunkEditor[ModuleEntry], handle.Error] = handle.chunk_editor[ModuleEntry](?p.modules);
     if (sel editor_r.err) { ret err[fail.Fail].err{store_fail(editor_r.err)}; }
     var editor: handle.ChunkEditor[ModuleEntry] = editor_r.ok;

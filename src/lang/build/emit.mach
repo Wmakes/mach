@@ -30,9 +30,12 @@ use build_plan:      mach.lang.build.plan;
 use diagnostic_kind: mach.lang.diagnostic.kind;
 use mach.lang.driver;
 use mach.lang.driver.cache;
+use mach.lang.driver.project;
+use mach.lang.driver.toolchain;
 use mach.lang.fail;
 use mach.lang.growth;
 use mach.lang.intern;
+use mach.lang.linkage;
 use mach.lang.manifest;
 use me_ir:      mach.lang.me.ir;
 use ir_printer: mach.lang.me.ir.printer;
@@ -47,10 +50,9 @@ use mach.lang.target.input;
 use target_of: mach.lang.target.of;
 use mach.lang.target.of.ar;
 use of_destination: mach.lang.target.of.destination;
-use mach.lang.toolchain;
 
 rec AsmWriteContext {
-    p:   *driver.Project;
+    p:   *project.Project;
     m:   *me_ir.Module;
     dbg: codegen.DebugInfo;
 }
@@ -68,7 +70,7 @@ fun write_asm_codegen(ctx: *AsmWriteContext, out: *io_writer.Writer) err[io_writ
     ret err[io_writer.WriteError].ok{};
 }
 
-pub fun emit_asm(p: *driver.Project, destination: str, m: *me_ir.Module) err[fail.Fail] {
+pub fun emit_asm(p: *project.Project, destination: str, m: *me_ir.Module) err[fail.Fail] {
     val dbg_r: res[codegen.DebugInfo, fail.Fail] = driver.debug_info_of(p);
     if (sel dbg_r.err) {
         ret err[fail.Fail].err{dbg_r.err};
@@ -97,7 +99,7 @@ fun write_ir_form(iwc: *IrWriteContext, out: *io_writer.Writer) err[io_writer.Wr
     ret err[io_writer.WriteError].ok{};
 }
 
-pub fun emit_ir(p: *driver.Project, destination: str, m: *me_ir.Module) err[fail.Fail] {
+pub fun emit_ir(p: *project.Project, destination: str, m: *me_ir.Module) err[fail.Fail] {
     if (p.target_entry == nil) { ret err[fail.Fail].err{fail.message("selected target is unavailable")}; }
 
     val opt_target: opt[str] = intern.get(?p.s.interner, p.target_entry.name);
@@ -117,7 +119,7 @@ pub fun emit_ir(p: *driver.Project, destination: str, m: *me_ir.Module) err[fail
     ret output.writer[IrWriteContext](nil, p.alloc, destination, ?iwc, write_ir_form, 0o644, "write");
 }
 
-pub fun artifact_product_name(p: *driver.Project) *u8 {
+pub fun artifact_product_name(p: *project.Project) *u8 {
     val nm: opt[str] = intern.get(?p.s.interner, p.config.bin_name);
     if (sel nm.some) { ret nm.some::*u8; }
     ret ""::*u8;
@@ -141,7 +143,7 @@ pub fun dnit_image_options(a: *A.Allocator, loaded: *LoadedImageOptions) {
     if (loaded.resource != nil)      { A.deallocate[target_of.ResourceInfo](a, loaded.resource, 1); }
 }
 
-pub fun load_image_options(p: *driver.Project, out_kind: catalog_artifact.Kind,
+pub fun load_image_options(p: *project.Project, out_kind: catalog_artifact.Kind,
     exe_path: *u8) res[LoadedImageOptions, fail.Fail] {
     var loaded: LoadedImageOptions;
     var handed: bool = false;
@@ -196,23 +198,23 @@ pub fun load_image_options(p: *driver.Project, out_kind: catalog_artifact.Kind,
 # reads the artifact resource `rel` declares, relative to the project root,
 # into `bytes`, recording its path; nothing when it declares none. `noun` names
 # the resource in a refusal
-fun declared_resource_read(p: *driver.Project, root: str, rel: intern.StrId, noun: str,
+fun declared_resource_read(p: *project.Project, root: str, rel: intern.StrId, noun: str,
     path: *str, bytes: *Vector[u8]) err[fail.Fail] {
     if (intern.str_is_nil(rel)) { ret err[fail.Fail].ok{}; }
     val rel_o: opt[str] = intern.get(?p.s.interner, rel);
-    if (sel rel_o.none) { ret err[fail.Fail].err{fail.message_of(build_plan.join_msg(p.alloc, "artifact ", noun, " path is not interned"))}; }
+    if (sel rel_o.none) { ret err[fail.Fail].err{fail.message_of(fail.join(p.alloc, "artifact ", noun, " path is not interned"))}; }
     val pr: res[str, A.Error] = types_path.join(p.alloc, root, rel_o.some);
     if (sel pr.err) { ret err[fail.Fail].err{fail.refused(pr.err)}; }
     @path = pr.ok;
     val rr: res[Vector[u8], fs.FsError] = fs.read_bytes(p.alloc, @path);
     if (sel rr.err) {
-        ret err[fail.Fail].err{fail.user_of(diagnostic_kind.ARTIFACT_RESOURCE_UNREADABLE, build_plan.join_msg(p.alloc,
+        ret err[fail.Fail].err{fail.user_of(diagnostic_kind.ARTIFACT_RESOURCE_UNREADABLE, fail.join(p.alloc,
             "cannot read artifact ", noun, " '", rel_o.some, "' (", @path, "): ", fail.fs_text(rr.err)))};
     }
     collections_vector.dnit[u8](bytes);
     @bytes = rr.ok;
     if (bytes.len == 0) {
-        ret err[fail.Fail].err{fail.user_of(diagnostic_kind.ARTIFACT_RESOURCE_EMPTY, build_plan.join_msg(p.alloc,
+        ret err[fail.Fail].err{fail.user_of(diagnostic_kind.ARTIFACT_RESOURCE_EMPTY, fail.join(p.alloc,
             "artifact ", noun, " '", rel_o.some, "' is empty"))};
     }
     ret err[fail.Fail].ok{};
@@ -236,7 +238,7 @@ fun free_read_bufs(alloc: *A.Allocator, bufs: *Vector[u8], cap: u32) {
     A.deallocate[Vector[u8]](alloc, bufs, cap::usize);
 }
 
-fun collect_defined_globals(p: *driver.Project, img: *target_of.ObjectImage, member: *ar.ArMember) err[fail.Fail] {
+fun collect_defined_globals(p: *project.Project, img: *target_of.ObjectImage, member: *ar.ArMember) err[fail.Fail] {
     member.sym_names = nil;
     member.sym_count = 0;
     var n: u32 = 0;
@@ -263,7 +265,7 @@ fun collect_defined_globals(p: *driver.Project, img: *target_of.ObjectImage, mem
     ret err[fail.Fail].ok{};
 }
 
-pub fun emit_static_archive(p: *driver.Project, destination: str, images: *target_of.ObjectImage, inputs: *target_of.ObjectInput, out_path: **u8) err[fail.Fail] {
+pub fun emit_static_archive(p: *project.Project, destination: str, images: *target_of.ObjectImage, inputs: *target_of.ObjectInput, out_path: **u8) err[fail.Fail] {
     val len: u32 = p.emit_len;
 
     val archive: str = destination;
@@ -291,9 +293,9 @@ pub fun emit_static_archive(p: *driver.Project, destination: str, images: *targe
 
     i = 0;
     for (i < len) {
-        val mid:     session.ModuleId    = p.topo[i];
-        val m:       *driver.ModuleEntry = driver.module_at(p, mid::u32);
-        val fqn_opt: opt[str]            = intern.get(?p.s.interner, m.fqn);
+        val mid:     session.ModuleId     = p.topo[i];
+        val m:       *project.ModuleEntry = project.module_at(p, mid::u32);
+        val fqn_opt: opt[str]             = intern.get(?p.s.interner, m.fqn);
         if (sel fqn_opt.none) { ret err[fail.Fail].err{fail.message("module FQN not interned")}; }
         members[i].name = fqn_opt.some;
 
@@ -319,11 +321,11 @@ pub fun emit_static_archive(p: *driver.Project, destination: str, images: *targe
     ret err[fail.Fail].ok{};
 }
 
-pub fun emit_shared_library(p: *driver.Project, destination: str, inputs: *target_of.ObjectInput, len: u32,
+pub fun emit_shared_library(p: *project.Project, destination: str, inputs: *target_of.ObjectInput, len: u32,
     dynlibs: *target_of.DynLib, dynlib_len: u32, out_path: **u8) err[fail.Fail] {
     val solib: str = destination;
 
-    val res_link: err[fail.Fail] = linker.link(p.s, ?p.diags, ?p.target, inputs, len, dynlibs, dynlib_len, destination, artifact_product_name(p), catalog_artifact.SHARED, p.req.pie, target_of.image_options_default(p.req.subsystem));
+    val res_link: err[fail.Fail] = linker.link(p.s, ?p.linkage, ?p.diags, ?p.target, inputs, len, dynlibs, dynlib_len, destination, artifact_product_name(p), catalog_artifact.SHARED, p.req.pie, target_of.image_options_default(p.req.subsystem));
     if (sel res_link.err) {
         ret err[fail.Fail].err{res_link.err};
     }
@@ -331,14 +333,14 @@ pub fun emit_shared_library(p: *driver.Project, destination: str, inputs: *targe
     ret err[fail.Fail].ok{};
 }
 
-pub fun link_shared_images(p: *driver.Project, images: *target_of.ObjectImage,
+pub fun link_shared_images(p: *project.Project, images: *target_of.ObjectImage,
     ext: *target_of.ObjectInput, ext_count: u32,
     dynlibs: *target_of.DynLib, dynlib_len: u32, destination: str, out_path: **u8) err[fail.Fail] {
     val res_ord: res[*target_of.ObjectImage, fail.Fail] = gather_topo_images(p, images);
     if (sel res_ord.err) { ret err[fail.Fail].err{fail.message("out of memory")}; }
     val ordered: *target_of.ObjectImage = res_ord.ok;
 
-    val res_link: err[fail.Fail] = linker.link_mixed(p.s, ?p.diags, ?p.target, ordered, p.emit_len, ext, ext_count,
+    val res_link: err[fail.Fail] = linker.link_mixed(p.s, ?p.linkage, ?p.diags, ?p.target, ordered, p.emit_len, ext, ext_count,
         dynlibs, dynlib_len, destination, artifact_product_name(p), catalog_artifact.SHARED, p.req.pie,
         target_of.image_options_default(p.req.subsystem));
     A.deallocate[target_of.ObjectImage](p.alloc, ordered, p.emit_len::usize);
@@ -349,17 +351,17 @@ pub fun link_shared_images(p: *driver.Project, images: *target_of.ObjectImage,
     ret err[fail.Fail].ok{};
 }
 
-pub fun link_executable(p: *driver.Project, inputs: *target_of.ObjectInput, len: u32,
+pub fun link_executable(p: *project.Project, inputs: *target_of.ObjectInput, len: u32,
     dynlibs: *target_of.DynLib, dynlib_len: u32, destination: str,
     image_options: target_of.ImageOptions) err[fail.Fail] {
-    val res_link: err[fail.Fail] = linker.link(p.s, ?p.diags, ?p.target, inputs, len, dynlibs, dynlib_len, destination, artifact_product_name(p), catalog_artifact.EXECUTABLE, p.req.pie, image_options);
+    val res_link: err[fail.Fail] = linker.link(p.s, ?p.linkage, ?p.diags, ?p.target, inputs, len, dynlibs, dynlib_len, destination, artifact_product_name(p), catalog_artifact.EXECUTABLE, p.req.pie, image_options);
     if (sel res_link.err) {
         ret err[fail.Fail].err{res_link.err};
     }
     ret err[fail.Fail].ok{};
 }
 
-fun gather_topo_images(p: *driver.Project, images: *target_of.ObjectImage) res[*target_of.ObjectImage, fail.Fail] {
+fun gather_topo_images(p: *project.Project, images: *target_of.ObjectImage) res[*target_of.ObjectImage, fail.Fail] {
     val len:     u32                                  = p.emit_len;
     val res_ord: res[*target_of.ObjectImage, A.Error] = A.allocate[target_of.ObjectImage](p.alloc, len::usize);
     if (sel res_ord.err) { ret res[*target_of.ObjectImage, fail.Fail].err{fail.refused(res_ord.err)}; }
@@ -372,13 +374,13 @@ fun gather_topo_images(p: *driver.Project, images: *target_of.ObjectImage) res[*
     ret res[*target_of.ObjectImage, fail.Fail].ok{ordered};
 }
 
-pub fun link_flat_images(p: *driver.Project, images: *target_of.ObjectImage, destination: str,
+pub fun link_flat_images(p: *project.Project, images: *target_of.ObjectImage, destination: str,
     image_options: target_of.ImageOptions) err[fail.Fail] {
     val res_ord: res[*target_of.ObjectImage, fail.Fail] = gather_topo_images(p, images);
     if (sel res_ord.err) { ret err[fail.Fail].err{fail.message("out of memory")}; }
     val ordered: *target_of.ObjectImage = res_ord.ok;
 
-    val res_link: err[fail.Fail] = linker.link_images(p.s, ?p.diags, ?p.target, ordered, p.emit_len, nil::*target_of.DynLib, 0, destination, artifact_product_name(p), catalog_artifact.EXECUTABLE, p.req.pie, image_options);
+    val res_link: err[fail.Fail] = linker.link_images(p.s, ?p.linkage, ?p.diags, ?p.target, ordered, p.emit_len, nil::*target_of.DynLib, 0, destination, artifact_product_name(p), catalog_artifact.EXECUTABLE, p.req.pie, image_options);
     A.deallocate[target_of.ObjectImage](p.alloc, ordered, p.emit_len::usize);
     if (sel res_link.err) {
         ret err[fail.Fail].err{res_link.err};
@@ -388,15 +390,15 @@ pub fun link_flat_images(p: *driver.Project, images: *target_of.ObjectImage, des
 
 # write the artifact entry module's object to `destination`. on a finished-module
 # format that object is the complete deliverable, so no other module takes part
-pub fun publish_entry_module(p: *driver.Project, images: *target_of.ObjectImage, destination: str) err[fail.Fail] {
+pub fun publish_entry_module(p: *project.Project, images: *target_of.ObjectImage, destination: str) err[fail.Fail] {
     val fqn_r: res[intern.StrId, fail.Fail] = driver.entry_module_fqn(p, p.target_entry);
     if (sel fqn_r.err) { ret err[fail.Fail].err{fqn_r.err}; }
-    val entry: opt[*driver.ModuleEntry] = driver.module_by_fqn(p, fqn_r.ok);
+    val entry: opt[*project.ModuleEntry] = project.module_by_fqn(p, fqn_r.ok);
     if (sel entry.none) { ret err[fail.Fail].err{fail.message("the artifact's entry module was not loaded")}; }
     var i: u32 = 0;
     for (i < p.emit_len) {
         val mid: session.ModuleId = p.topo[i];
-        if (driver.module_at(p, mid::u32) == entry.some) {
+        if (project.module_at(p, mid::u32) == entry.some) {
             val emitted: err[fail.Fail] = obj.emit_image(?images[mid::u32], ?p.target, destination);
             if (sel emitted.err) { ret err[fail.Fail].err{emitted.err}; }
             ret err[fail.Fail].ok{};
@@ -406,7 +408,7 @@ pub fun publish_entry_module(p: *driver.Project, images: *target_of.ObjectImage,
     ret err[fail.Fail].err{fail.message("the artifact's entry module emitted no object")};
 }
 
-pub fun link_mixed_images(p: *driver.Project, images: *target_of.ObjectImage,
+pub fun link_mixed_images(p: *project.Project, images: *target_of.ObjectImage,
     ext: *target_of.ObjectInput, ext_count: u32,
     dynlibs: *target_of.DynLib, dynlib_len: u32, destination: str,
     image_options: target_of.ImageOptions) err[fail.Fail] {
@@ -414,7 +416,7 @@ pub fun link_mixed_images(p: *driver.Project, images: *target_of.ObjectImage,
     if (sel res_ord.err) { ret err[fail.Fail].err{fail.message("out of memory")}; }
     val ordered: *target_of.ObjectImage = res_ord.ok;
 
-    val res_link: err[fail.Fail] = linker.link_mixed(p.s, ?p.diags, ?p.target, ordered, p.emit_len, ext, ext_count,
+    val res_link: err[fail.Fail] = linker.link_mixed(p.s, ?p.linkage, ?p.diags, ?p.target, ordered, p.emit_len, ext, ext_count,
         dynlibs, dynlib_len, destination, artifact_product_name(p), catalog_artifact.EXECUTABLE, p.req.pie, image_options);
     A.deallocate[target_of.ObjectImage](p.alloc, ordered, p.emit_len::usize);
     if (sel res_link.err) {
@@ -423,9 +425,9 @@ pub fun link_mixed_images(p: *driver.Project, images: *target_of.ObjectImage,
     ret err[fail.Fail].ok{};
 }
 
-fun count_external_tokens(p: *driver.Project, unit: *build_plan.BuildUnit) u32 {
-    var n:  u32                 = 0;
-    val te: *driver.TargetEntry = p.target_entry;
+fun count_external_tokens(p: *project.Project, unit: *build_plan.BuildUnit) u32 {
+    var n:  u32                  = 0;
+    val te: *project.TargetEntry = p.target_entry;
     if (te != nil) { n = n + te.lib_count; }
     n = n + p.config.cascade_lib_count;
     n = n + unit.link_inputs.len::u32;
@@ -434,12 +436,12 @@ fun count_external_tokens(p: *driver.Project, unit: *build_plan.BuildUnit) u32 {
 
 # the unit's static link inputs, each the user's (RELOC_INPUT), appended to
 # `inputs` after whatever it already holds
-pub fun append_external_inputs(p: *driver.Project, unit: *build_plan.BuildUnit,
+pub fun append_external_inputs(p: *project.Project, unit: *build_plan.BuildUnit,
     inputs: **target_of.ObjectInput, len: *u32,
     dynlibs: **target_of.DynLib, dynlib_len: *u32) err[fail.Fail] {
     @dynlibs    = nil;
     @dynlib_len = 0;
-    session.reset_link_providers(p.s);
+    linkage.providers_clear(?p.linkage);
     val extra: u32 = count_external_tokens(p, unit);
     if (extra == 0) { ret err[fail.Fail].ok{}; }
 
@@ -459,7 +461,7 @@ pub fun append_external_inputs(p: *driver.Project, unit: *build_plan.BuildUnit,
 
     var written: u32 = base;
 
-    val te: *driver.TargetEntry = p.target_entry;
+    val te: *project.TargetEntry = p.target_entry;
     if (te != nil) {
         var i: u32 = 0;
         for (i < te.lib_count) {
@@ -499,7 +501,7 @@ pub fun append_external_inputs(p: *driver.Project, unit: *build_plan.BuildUnit,
     ret err[fail.Fail].ok{};
 }
 
-fun store_fact(p: *driver.Project, li: *input.Input, inputs: *target_of.ObjectInput, written: *u32,
+fun store_fact(p: *project.Project, li: *input.Input, inputs: *target_of.ObjectInput, written: *u32,
     dynlibs: **target_of.DynLib, dynlib_len: *u32) err[fail.Fail] {
     val pr: err[fail.Fail] = register_link_provider(p, li);
     if (sel pr.err) { ret pr; }
@@ -517,7 +519,7 @@ fun store_fact(p: *driver.Project, li: *input.Input, inputs: *target_of.ObjectIn
     ret err[fail.Fail].ok{};
 }
 
-fun shrink_inputs(p: *driver.Project, inputs: **target_of.ObjectInput, len: *u32, written: u32, grown: u32) {
+fun shrink_inputs(p: *project.Project, inputs: **target_of.ObjectInput, len: *u32, written: u32, grown: u32) {
     var cap:        u32          = grown;
     val res_shrink: err[A.Error] = growth.resize[target_of.ObjectInput](p.alloc, inputs, ?cap, written::usize);
     if (sel res_shrink.err) {
@@ -527,7 +529,7 @@ fun shrink_inputs(p: *driver.Project, inputs: **target_of.ObjectInput, len: *u32
     @len = written;
 }
 
-fun append_dynlib(p: *driver.Project, li: *input.Input,
+fun append_dynlib(p: *project.Project, li: *input.Input,
     dynlibs: **target_of.DynLib, dynlib_len: *u32) err[fail.Fail] {
     val res_intern: res[intern.StrId, A.Error] = intern.add(?p.s.interner, li.text);
     if (sel res_intern.err) { ret err[fail.Fail].err{fail.refused(res_intern.err)}; }
@@ -583,7 +585,7 @@ test append_dynlib__reinterns_the_logical_name_and_refuses_a_second_loader_name 
     var s: session.Session = sr.ok;
     fin { session.dnit(?s); }
 
-    var p: driver.Project;
+    var p: project.Project;
     p.s     = ?s;
     p.alloc = ?alloc;
     var li: input.Input;
@@ -610,7 +612,7 @@ test append_dynlib__reinterns_the_logical_name_and_refuses_a_second_loader_name 
     ret 0;
 }
 
-fun dynlib_conflict_message(p: *driver.Project, name: intern.StrId,
+fun dynlib_conflict_message(p: *project.Project, name: intern.StrId,
     first: intern.StrId, second: intern.StrId) res[str, fail.Fail] {
     val r: res[str, types_string.StrError] = str_join(p.alloc,
         "link library '", intern.text(?p.s.interner, name), "' resolves to both '",
@@ -625,7 +627,7 @@ pub fun free_dynlibs(a: *A.Allocator, dynlibs: *target_of.DynLib, dynlib_len: u3
     }
 }
 
-fun resolve_and_store_input(p: *driver.Project, req: *manifest.LinkRequirement,
+fun resolve_and_store_input(p: *project.Project, req: *manifest.LinkRequirement,
     inputs: *target_of.ObjectInput, written: *u32,
     dynlibs: **target_of.DynLib, dynlib_len: *u32) err[fail.Fail] {
     val lr: res[input.Input, fail.Fail] = build_plan.resolve_requirement(p.alloc, ?p.s.interner, ?p.target,
@@ -654,29 +656,28 @@ fun resolve_and_store_input(p: *driver.Project, req: *manifest.LinkRequirement,
     ret err[fail.Fail].ok{};
 }
 
-fun register_link_provider(p: *driver.Project, li: *input.Input) err[fail.Fail] {
+fun register_link_provider(p: *project.Project, li: *input.Input) err[fail.Fail] {
     if (str_empty(li.library)) { ret err[fail.Fail].ok{}; }
     val nr: res[intern.StrId, A.Error] = intern.add(?p.s.interner, li.library);
     if (sel nr.err) {
         ret err[fail.Fail].err{fail.message("out of memory")};
     }
-    val rr: err[fail.Fail] = session.register_link_provider(
-        p.s, nr.ok, li.kind == input.STATIC);
+    val rr: err[fail.Fail] = linkage.register_provider(?p.linkage, nr.ok, li.kind == input.STATIC);
     if (sel rr.err) {
         ret err[fail.Fail].err{fail.message("out of memory")};
     }
     ret err[fail.Fail].ok{};
 }
 
-fun register_link_claims(p: *driver.Project, req: *manifest.LinkRequirement) err[fail.Fail] {
+fun register_link_claims(p: *project.Project, req: *manifest.LinkRequirement) err[fail.Fail] {
     var i: u32 = 0;
     for (i < req.symbol_count) {
-        val ln: res[intern.StrId, fail.Fail] = driver.link_name_for(p, req.symbols[i]);
+        val ln: res[intern.StrId, fail.Fail] = project.link_name_for(p, req.symbols[i]);
         if (sel ln.err) {
             ret err[fail.Fail].err{ln.err};
         }
         val sym:  intern.StrId = ln.ok;
-        val prev: intern.StrId = session.import_library(p.s, sym);
+        val prev: intern.StrId = linkage.import_library(?p.linkage, sym);
         if (!intern.str_is_nil(prev)) {
             val had: intern.StrId = prev;
             if (!intern.str_same(had, req.key)) {
@@ -686,7 +687,7 @@ fun register_link_claims(p: *driver.Project, req: *manifest.LinkRequirement) err
             i = i + 1;
             cnt;
         }
-        val register_import_library_r: err[fail.Fail] = session.register_import_library(p.s, sym, req.key);
+        val register_import_library_r: err[fail.Fail] = linkage.register_import_library(?p.linkage, sym, req.key);
         if (sel register_import_library_r.err) {
             ret err[fail.Fail].err{fail.message("out of memory")};
         }
@@ -704,9 +705,11 @@ test register_link_claims__pins_and_rejects_conflicts {
     var s: session.Session = sr.ok;
     fin { session.dnit(?s); }
 
-    var p: driver.Project;
-    p.s     = ?s;
-    p.alloc = ?alloc;
+    var p: project.Project;
+    p.s       = ?s;
+    p.alloc   = ?alloc;
+    p.linkage = linkage.init(?alloc);
+    fin { linkage.dnit(?p.linkage); }
 
     val sym_r: res[intern.StrId, A.Error] = intern.add(?s.interner, "Sleep");
     val pre_r: res[intern.StrId, A.Error] = intern.add(?s.interner, "_Sleep");
@@ -734,7 +737,7 @@ test register_link_claims__pins_and_rejects_conflicts {
 
     val register_link_claims_r: err[fail.Fail] = register_link_claims(?p, ?req);
     if (sel register_link_claims_r.err) { code = 1; }
-    val got: intern.StrId = session.import_library(?s, syms[0]);
+    val got: intern.StrId = linkage.import_library(?p.linkage, syms[0]);
     if (!(!intern.str_is_nil(got) && intern.str_same(got, req.key))) { code = 1; }
 
     val register_link_claims_r2: err[fail.Fail] = register_link_claims(?p, ?req);
@@ -745,16 +748,16 @@ test register_link_claims__pins_and_rejects_conflicts {
     val register_link_claims_r3: err[fail.Fail] = register_link_claims(?p, ?other);
     if (sel register_link_claims_r3.ok) { code = 1; }
 
-    session.reset_module_registry(?s);
+    linkage.clear(?p.linkage);
     val dr: res[lang_target.Binding, fail.Fail] = lang_target.t_select("x86_64", "darwin", "sysv64");
     if (sel dr.err) { ret 1; }
     p.target = dr.ok;
 
     val register_link_claims_r4: err[fail.Fail] = register_link_claims(?p, ?req);
     if (sel register_link_claims_r4.err) { code = 1; }
-    val dgot: intern.StrId = session.import_library(?s, pre_r.ok);
+    val dgot: intern.StrId = linkage.import_library(?p.linkage, pre_r.ok);
     if (!(!intern.str_is_nil(dgot) && intern.str_same(dgot, req.key))) { code = 1; }
-    val import_library_r: intern.StrId = session.import_library(?s, syms[0]);
+    val import_library_r: intern.StrId = linkage.import_library(?p.linkage, syms[0]);
     if (!intern.str_is_nil(import_library_r)) { code = 1; }
 
     val register_link_claims_r5: err[fail.Fail] = register_link_claims(?p, ?other);
@@ -763,7 +766,7 @@ test register_link_claims__pins_and_rejects_conflicts {
     ret code;
 }
 
-fun claim_conflict_message(p: *driver.Project, sym: intern.StrId,
+fun claim_conflict_message(p: *project.Project, sym: intern.StrId,
     first: intern.StrId, second: intern.StrId) res[str, fail.Fail] {
     val r: res[str, types_string.StrError] = str_join(p.alloc,
         "symbol '", intern.text(?p.s.interner, sym), "' is claimed by link library '",
@@ -773,7 +776,7 @@ fun claim_conflict_message(p: *driver.Project, sym: intern.StrId,
     ret res[str, fail.Fail].ok{r.ok};
 }
 
-fun static_claim_message(p: *driver.Project, req: *manifest.LinkRequirement) res[str, fail.Fail] {
+fun static_claim_message(p: *project.Project, req: *manifest.LinkRequirement) res[str, fail.Fail] {
     val r: res[str, types_string.StrError] = str_join(p.alloc,
         "link entry '", intern.text(?p.s.interner, req.text),
         "' resolves to a static input, which defines symbols rather than importing them; ",
@@ -802,7 +805,7 @@ fun write_object(w: *ObjectWrite, destination: str) err[fail.Fail] {
 
 # every module's object reaches `obj/` through a sibling temporary, since the
 # object cache reads it back; a module the cache restored is already there
-pub fun write_objects(p: *driver.Project, images: *target_of.ObjectImage,
+pub fun write_objects(p: *project.Project, images: *target_of.ObjectImage,
     destinations: *str, inputs_out: **target_of.ObjectInput) err[fail.Fail] {
     val len: u32 = p.emit_len;
     if (len == 0) {
@@ -819,10 +822,10 @@ pub fun write_objects(p: *driver.Project, images: *target_of.ObjectImage,
         if (!handed) { free_inputs(p.alloc, inputs, filled, len); }
     }
     for (i < len) {
-        val mid:         session.ModuleId    = p.topo[i];
-        val m:           *driver.ModuleEntry = driver.module_at(p, mid::u32);
-        val destination: str                 = destinations[i];
-        val copied:      res[str, A.Error]   = str_dup(p.alloc, destination);
+        val mid:         session.ModuleId     = p.topo[i];
+        val m:           *project.ModuleEntry = project.module_at(p, mid::u32);
+        val destination: str                  = destinations[i];
+        val copied:      res[str, A.Error]    = str_dup(p.alloc, destination);
         if (sel copied.err) { ret err[fail.Fail].err{fail.refused(copied.err)}; }
         # an object this build wrote: mach produced its bytes
         inputs[i].path   = copied.ok::*u8;
@@ -847,11 +850,11 @@ pub fun write_objects(p: *driver.Project, images: *target_of.ObjectImage,
 # each test object reaches `obj/` beside its module's object, the same way
 # ---
 # destinations: per emitted module, its test object's path, nil for a module without one
-pub fun write_test_objects(p: *driver.Project, destinations: *str) err[fail.Fail] {
+pub fun write_test_objects(p: *project.Project, destinations: *str) err[fail.Fail] {
     if (destinations == nil) { ret err[fail.Fail].ok{}; }
     var i: u32 = 0;
     for (i < p.emit_len) {
-        val m: *driver.ModuleEntry = driver.module_at(p, p.topo[i]::u32);
+        val m: *project.ModuleEntry = project.module_at(p, p.topo[i]::u32);
         if (destinations[i] == nil || cache.test_restored(p, m)) {
             i = i + 1;
             cnt;
