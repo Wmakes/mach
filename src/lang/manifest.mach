@@ -83,10 +83,6 @@ fwd mach.lang.manifest.load.read_at;
 
 fwd mach.lang.manifest.plan.BuildUnit;
 fwd mach.lang.manifest.plan.Scope;
-fwd mach.lang.manifest.plan.DEPENDENCY_ARTIFACT_DIR;
-fwd mach.lang.manifest.plan.CACHE_DIR;
-fwd mach.lang.manifest.plan.STEP_STAMP_DIR;
-fwd mach.lang.manifest.plan.STAGE_DIR;
 fwd mach.lang.manifest.plan.root_scope;
 fwd mach.lang.manifest.plan.dependency_scope;
 fwd mach.lang.manifest.plan.scope_is_dependency;

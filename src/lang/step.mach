@@ -22,6 +22,7 @@ use mach.lang.listing;
 use mach.lang.manifest;
 use mach.lang.manifest.template;
 use mach.lang.output;
+use mach.lang.output.layout;
 use mach.lang.readout;
 use mach.lang.session;
 use step_glob: mach.lang.step.glob;
@@ -756,7 +757,7 @@ fun step_stamp_path(a: *A.Allocator, root_project: str, root_out: str, owner_id:
     val d1_r: res[str, fail.Fail] = driver_load.join_path(a, root_project, root_out);
     if (sel d1_r.err) { ret d1_r; }
     val d1:   str                 = d1_r.ok;
-    val d2_r: res[str, fail.Fail] = driver_load.join_path(a, d1, manifest.STEP_STAMP_DIR);
+    val d2_r: res[str, fail.Fail] = driver_load.join_path(a, d1, layout.STEPS);
     str_free(a, d1);
     if (sel d2_r.err) { ret d2_r; }
     val d2:     str                 = d2_r.ok;
@@ -899,13 +900,13 @@ fun step_fingerprint(a: *A.Allocator, target_s: str, profile_s: str, program: st
 }
 
 fun step_staging_root(a: *A.Allocator, output_root: str, step_name: str) res[str, fail.Fail] {
-    ret fail.format(a, "{}/{}/{}", output_root, manifest.STAGE_DIR, step_name);
+    ret layout.within(a, output_root, layout.STAGE, step_name);
 }
 
 fun step_prepare_staging(a: *A.Allocator, output_root: str, staging_root: str, step_name: str) err[fail.Fail] {
-    val stage_r: err[fail.Fail] = step_walk.owned_directory_ensure(a, output_root, manifest.STAGE_DIR, "build step staging area");
+    val stage_r: err[fail.Fail] = step_walk.owned_directory_ensure(a, output_root, layout.STAGE, "build step staging area");
     if (sel stage_r.err) { ret stage_r; }
-    val rel_r: res[str, fail.Fail] = fail.format(a, "{}/{}", manifest.STAGE_DIR, step_name);
+    val rel_r: res[str, fail.Fail] = fail.format(a, "{}/{}", layout.STAGE, step_name);
     if (sel rel_r.err) { ret err[fail.Fail].err{rel_r.err}; }
     val rel: str = rel_r.ok;
     fin { str_free(a, rel); }

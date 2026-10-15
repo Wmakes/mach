@@ -23,7 +23,6 @@ use std.types.string.str_empty;
 use std.types.string.str_equals;
 use std.types.string.str_join;
 use std.types.string.str_len;
-use std.types.string.str_replace;
 use std.types.string.str_starts_with;
 
 use A: std.allocator;
@@ -41,6 +40,7 @@ use mach.lang.manifest;
 use mach.lang.manifest.target.host_target_table;
 use mach.lang.manifest.template;
 use mach.lang.me.pipeline;
+use mach.lang.output.layout;
 use mach.lang.session;
 use mach.lang.step;
 use lang_target:       mach.lang.target;
@@ -814,33 +814,33 @@ fun plan_unit(a: *A.Allocator, itn: *intern.Interner, reg: *lang_target.TargetRe
     if (sel od_r.err) { ret res[BuildUnit, fail.Fail].err{od_r.err}; }
     u.out_dir = od_r.ok;
 
-    val ob_r: res[str, fail.Fail] = join_template(a, itn, root, bu.obj_root, "project obj output dir: ");
+    val ob_r: res[str, fail.Fail] = layout.under(a, u.out_dir, layout.OBJ);
     if (sel ob_r.err) { ret res[BuildUnit, fail.Fail].err{ob_r.err}; }
     u.obj_dir = ob_r.ok;
 
-    val cb_r: res[str, fail.Fail] = join_template(a, itn, root, bu.cache_root, "project cache dir: ");
+    val cb_r: res[str, fail.Fail] = layout.under(a, u.out_dir, layout.CACHE);
     if (sel cb_r.err) { ret res[BuildUnit, fail.Fail].err{cb_r.err}; }
     u.cache_dir = cb_r.ok;
 
     u.ir_dir = "";
     if (req.emit_ir) {
-        val ib_r: res[str, fail.Fail] = join_template(a, itn, root, bu.ir_root, "project ir output dir: ");
+        val ib_r: res[str, fail.Fail] = layout.under(a, u.out_dir, layout.IR);
         if (sel ib_r.err) { ret res[BuildUnit, fail.Fail].err{ib_r.err}; }
         u.ir_dir = ib_r.ok;
     }
     u.asm_dir = "";
     if (req.emit_asm) {
-        val ab_r: res[str, fail.Fail] = join_template(a, itn, root, bu.asm_root, "project asm output dir: ");
+        val ab_r: res[str, fail.Fail] = layout.under(a, u.out_dir, layout.ASM);
         if (sel ab_r.err) { ret res[BuildUnit, fail.Fail].err{ab_r.err}; }
         u.asm_dir = ab_r.ok;
     }
 
-    val op_r: res[str, fail.Fail] = unit_out_path(a, itn, m, req, ?bu, u.obj_dir, is_required);
-    if (sel op_r.err) { ret res[BuildUnit, fail.Fail].err{op_r.err}; }
-    u.out_path = op_r.ok;
-    val td_r: res[str, fail.Fail] = unit_test_dir(a, itn, m, req, ?bu);
+    val td_r: res[str, fail.Fail] = unit_test_dir(a, itn, m, req, ?bu, u.out_dir);
     if (sel td_r.err) { ret res[BuildUnit, fail.Fail].err{td_r.err}; }
     u.test_dir = td_r.ok;
+    val op_r: res[str, fail.Fail] = unit_out_path(a, itn, m, req, ?bu, u.obj_dir, u.test_dir, is_required);
+    if (sel op_r.err) { ret res[BuildUnit, fail.Fail].err{op_r.err}; }
+    u.out_path = op_r.ok;
 
     u.link_inputs  = collections_vector.init[input.Input](a);
     u.dep_steps    = collections_vector.init[str](a);
@@ -913,7 +913,7 @@ pub fun finished_modules(tgt: *lang_target.Binding) bool {
 
 fun unit_out_path(a: *A.Allocator, itn: *intern.Interner, m: *manifest.Manifest,
     req: *request.BuildRequest, bu: *manifest.BuildUnit,
-    obj_dir: str, is_required: bool) res[str, fail.Fail] {
+    obj_dir: str, test_dir: str, is_required: bool) res[str, fail.Fail] {
     if (req.goal == request.GOAL_CHECK)     { ret res[str, fail.Fail].ok{""}; }
     if (req.goal == request.GOAL_OBJECTS)   { ret res[str, fail.Fail].ok{obj_dir}; }
     if (req.goal == request.GOAL_TEST_LIST) { ret res[str, fail.Fail].ok{""}; }
@@ -931,10 +931,8 @@ fun unit_out_path(a: *A.Allocator, itn: *intern.Interner, m: *manifest.Manifest,
 
     # the dispatcher is `test/<artifact>/<artifact>`
     if (req.goal == request.GOAL_TESTS) {
-        val dir_r: res[str, fail.Fail] = unit_test_dir(a, itn, m, req, bu);
-        if (sel dir_r.err) { ret dir_r; }
-        val full_r: res[str, A.Error] = types_path.join(a, dir_r.ok, tested_name(itn, m, bu));
-        if (sel full_r.err) { ret test_exe_fail(); }
+        val full_r: res[str, A.Error] = types_path.join(a, test_dir, tested_name(itn, m, bu));
+        if (sel full_r.err) { ret res[str, fail.Fail].err{fail.refused(full_r.err)}; }
         ret res[str, fail.Fail].ok{full_r.ok};
     }
 
@@ -967,19 +965,9 @@ fun tested_name(itn: *intern.Interner, m: *manifest.Manifest, bu: *manifest.Buil
 # `test/<artifact>`: where a test run's dispatcher object, dispatcher and logs go;
 # empty outside a test goal
 fun unit_test_dir(a: *A.Allocator, itn: *intern.Interner, m: *manifest.Manifest,
-    req: *request.BuildRequest, bu: *manifest.BuildUnit) res[str, fail.Fail] {
+    req: *request.BuildRequest, bu: *manifest.BuildUnit, out_dir: str) res[str, fail.Fail] {
     if (!request.test_goal(req.goal)) { ret res[str, fail.Fail].ok{""}; }
-    val tmpl_opt: opt[str] = intern.get(itn, bu.test_root);
-    if (sel tmpl_opt.none) { ret test_exe_fail(); }
-    val rel_r: res[str, types_string.StrError] = str_replace(a, tmpl_opt.some, "{name}", tested_name(itn, m, bu));
-    if (sel rel_r.err) { ret test_exe_fail(); }
-    val full_r: res[str, A.Error] = types_path.join(a, req.project_root, rel_r.ok);
-    if (sel full_r.err) { ret test_exe_fail(); }
-    ret res[str, fail.Fail].ok{full_r.ok};
-}
-
-fun test_exe_fail() res[str, fail.Fail] {
-    ret res[str, fail.Fail].err{fail.message("failed to resolve the test executable path; check the `tests` template in mach.toml")};
+    ret layout.within(a, out_dir, layout.TEST, tested_name(itn, m, bu));
 }
 
 fun derive_phases(a: *A.Allocator, itn: *intern.Interner, s: *manifest.Scope,

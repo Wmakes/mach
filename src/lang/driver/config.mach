@@ -44,6 +44,7 @@ use mach.lang.driver.project;
 use mach.lang.driver.toolchain;
 use mach.lang.driver.union;
 use mach.lang.output;
+use mach.lang.output.layout;
 
 #[testing]
 pub fun resolve_artifact_path(alloc: *A.Allocator, reg: *lang_target.TargetRegistry, project_root: str, selectors: *manifest.Selectors) res[str, fail.Fail] {
@@ -404,7 +405,7 @@ pub fun load_config_manifest(p: *project.Project, project_root: str, m: *manifes
 }
 
 pub fun module_obj_tree(a: *A.Allocator, proj_out: str, id: str) res[str, fail.Fail] {
-    ret fail.format(a, "{}/obj/{}", proj_out, id);
+    ret layout.within(a, proj_out, layout.OBJ, id);
 }
 
 pub fun path_in_module_obj_tree(path: str, tree: str) bool {
@@ -479,11 +480,11 @@ fun validate_step_outputs(p: *project.Project, m: *manifest.Manifest, proj_out: 
     if (sel tree_r.err) { ret err[fail.Fail].err{tree_r.err}; }
     val tree: str = tree_r.ok;
     fin { str_free(p.alloc, tree); }
-    val stage_tree_r: res[str, fail.Fail] = fail.format(p.alloc, "{}/{}", proj_out, manifest.STAGE_DIR);
+    val stage_tree_r: res[str, fail.Fail] = layout.under(p.alloc, proj_out, layout.STAGE);
     if (sel stage_tree_r.err) { ret err[fail.Fail].err{stage_tree_r.err}; }
     val stage_tree: str = stage_tree_r.ok;
     fin { str_free(p.alloc, stage_tree); }
-    val cache_tree_r: res[str, fail.Fail] = fail.format(p.alloc, "{}/{}", proj_out, manifest.CACHE_DIR);
+    val cache_tree_r: res[str, fail.Fail] = layout.under(p.alloc, proj_out, layout.CACHE);
     if (sel cache_tree_r.err) { ret err[fail.Fail].err{cache_tree_r.err}; }
     val cache_tree: str = cache_tree_r.ok;
     fin { str_free(p.alloc, cache_tree); }
