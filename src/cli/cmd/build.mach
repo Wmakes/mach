@@ -169,15 +169,37 @@ pub fun plan_invocation(a: *A.Allocator, root: str, cli: *args.CliArgs, goal: re
         if (sel worked.err) { ret plan_failure(a, ps, worked.err); }
     }
 
-    val resolved: res[Vector[manifest.Cell], fail.Fail] = manifest.resolve_cells(ps.alloc, ?ps.interner, ?m, ?cli.selectors, mode);
+    val selected: res[Planned, fail.Fail] = plan_selection(a, ps, ?m, root, cli, goal, mode, configure_deps);
+    if (sel selected.err) {
+        ret plan_failure(a, ps, selected.err);
+    }
+    var planned:  Planned        = selected.ok;
+    val disjoint: err[fail.Fail] = build_plan.check_plan_outputs(ps.alloc, ?planned.plans);
+    if (sel disjoint.err) {
+        ret plan_failure(a, ps, disjoint.err);
+    }
+    ret res[Planned, fail.Fail].ok{planned};
+}
+
+# resolve the selectors against a loaded manifest and plan every resolved cell,
+# one plan per profile. plans of different profiles are not checked against
+# each other: a caller that runs them all checks they write disjoint outputs
+# ---
+# a:   allocator for the requests
+# ps:  the session the manifest was loaded in; owns the plans
+# m:   the root manifest
+# ret: the plans; err from selection, a request, planning or dependency configuration
+pub fun plan_selection(a: *A.Allocator, ps: *session.Session, m: *manifest.Manifest, root: str, cli: *args.CliArgs,
+    goal: request.BuildGoal, mode: manifest.ArtifactDefault, configure_deps: bool) res[Planned, fail.Fail] {
+    val resolved: res[Vector[manifest.Cell], fail.Fail] = manifest.resolve_cells(ps.alloc, ?ps.interner, m, ?cli.selectors, mode);
     if (sel resolved.err) {
-        ret plan_failure(a, ps, args.selection_hint(ps.alloc, ?cli.selectors, resolved.err));
+        ret res[Planned, fail.Fail].err{args.selection_hint(ps.alloc, ?cli.selectors, resolved.err)};
     }
     var planned: Planned;
     planned.cells = resolved.ok;
     planned.plans = collections_vector.init[build_plan.BuildPlan](ps.alloc);
     if (cli.overrides.output != nil && planned.cells.len != 1) {
-        ret plan_failure(a, ps, manifest.single_selection_fail(ps.alloc, diagnostic_kind.OUTPUT_AMBIGUOUS, "-o names one output", ?planned.cells));
+        ret res[Planned, fail.Fail].err{manifest.single_selection_fail(ps.alloc, diagnostic_kind.OUTPUT_AMBIGUOUS, "-o names one output", ?planned.cells)};
     }
 
     var first: usize = 0;
@@ -191,40 +213,36 @@ pub fun plan_invocation(a: *A.Allocator, root: str, cli: *args.CliArgs, goal: re
         }
         first = next;
 
-        val res_req: res[request.BuildRequest, fail.Fail] = request.compose(a, ?ps.interner, ?m, ?cli.overrides, root, goal, profile);
+        val res_req: res[request.BuildRequest, fail.Fail] = request.compose(a, ?ps.interner, m, ?cli.overrides, root, goal, profile);
         if (sel res_req.err) {
-            ret plan_failure(a, ps, res_req.err);
+            ret res[Planned, fail.Fail].err{res_req.err};
         }
         val res_register: res[*lang_target.TargetRegistry, fail.Fail] = toolchain.registry();
         if (sel res_register.err) {
-            ret plan_failure(a, ps, res_register.err);
+            ret res[Planned, fail.Fail].err{res_register.err};
         }
-        val plan_r: res[build_plan.BuildPlan, fail.Fail] = build_plan.plan_cells(ps.alloc, ?ps.interner, res_register.ok, ?m,
+        val plan_r: res[build_plan.BuildPlan, fail.Fail] = build_plan.plan_cells(ps.alloc, ?ps.interner, res_register.ok, m,
             res_req.ok, ?group);
         if (sel plan_r.err) {
-            ret plan_failure(a, ps, plan_r.err);
+            ret res[Planned, fail.Fail].err{plan_r.err};
         }
         var bp: build_plan.BuildPlan = plan_r.ok;
 
-        val required: err[fail.Fail] = build_plan.plan_dependency_requirements(ps, ?m, ?bp);
+        val required: err[fail.Fail] = build_plan.plan_dependency_requirements(ps, m, ?bp);
         if (sel required.err) {
-            ret plan_failure(a, ps, required.err);
+            ret res[Planned, fail.Fail].err{required.err};
         }
 
         if (configure_deps) {
-            val configured: err[fail.Fail] = build_plan.configure(ps, ?m, ?bp);
+            val configured: err[fail.Fail] = build_plan.configure(ps, m, ?bp);
             if (sel configured.err) {
-                ret plan_failure(a, ps, configured.err);
+                ret res[Planned, fail.Fail].err{configured.err};
             }
         }
         val pushed: res[usize, A.Error] = collections_vector.push[build_plan.BuildPlan](?planned.plans, bp);
         if (sel pushed.err) {
-            ret plan_failure(a, ps, fail.refused(pushed.err));
+            ret res[Planned, fail.Fail].err{fail.refused(pushed.err)};
         }
-    }
-    val disjoint: err[fail.Fail] = build_plan.check_plan_outputs(ps.alloc, ?planned.plans);
-    if (sel disjoint.err) {
-        ret plan_failure(a, ps, disjoint.err);
     }
     ret res[Planned, fail.Fail].ok{planned};
 }
