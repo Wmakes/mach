@@ -101,6 +101,18 @@ pub rec Session {
 }
 
 pub fun init(alloc: *A.Allocator) res[Session, fail.Fail] {
+    ret made(alloc, intern.init(alloc));
+}
+
+# a session whose names are layered over `base`: every id `base` has issued
+# names the same string here, so what was planned in another session, its
+# manifests and its cells, is read here as it was planned. `base` outlives the
+# session and takes no new names while it lives
+pub fun init_over(alloc: *A.Allocator, base: *intern.Interner) res[Session, fail.Fail] {
+    ret made(alloc, intern.child_init(base, alloc));
+}
+
+fun made(alloc: *A.Allocator, names: intern.Interner) res[Session, fail.Fail] {
     var s: Session;
     s.alloc                 = alloc;
     s.parse_sequence        = 0;
@@ -114,7 +126,7 @@ pub fun init(alloc: *A.Allocator) res[Session, fail.Fail] {
     s.query_failure_message = nil;
     s.query_failure_places  = fail.reported();
 
-    s.interner            = intern.init(alloc);
+    s.interner            = names;
     s.module_count        = 0;
     s.module_fqns         = map.init[module.ModuleId, intern.StrId](alloc);
     s.module_root_project = map.init[module.ModuleId, bool](alloc);

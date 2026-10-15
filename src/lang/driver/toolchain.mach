@@ -18,6 +18,7 @@ use std.types.bool.false;
 
 use codegen_dwarf: mach.lang.be.codegen.dwarf;
 use mach.lang.fail;
+use mach.lang.intern;
 use mach.lang.session;
 use lang_target: mach.lang.target;
 
@@ -62,6 +63,14 @@ pub fun session_init(alloc: *A.Allocator) res[session.Session, fail.Fail] {
     val composed: res[*lang_target.TargetRegistry, fail.Fail] = registry();
     if (sel composed.err) { ret res[session.Session, fail.Fail].err{composed.err}; }
     ret session.init(alloc);
+}
+
+# `session_init` for a session layered over the names of `base`, as a build
+# cell's session is over its plan's
+pub fun session_init_over(alloc: *A.Allocator, base: *intern.Interner) res[session.Session, fail.Fail] {
+    val composed: res[*lang_target.TargetRegistry, fail.Fail] = registry();
+    if (sel composed.err) { ret res[session.Session, fail.Fail].err{composed.err}; }
+    ret session.init_over(alloc, base);
 }
 
 test session_init__publishes_the_catalog_and_leaks_nothing {
