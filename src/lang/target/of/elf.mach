@@ -620,54 +620,52 @@ fun section_flags_for(kind: target_of.SectionKind) u64 {
     ret f;
 }
 
-fun group_has_relocations(img: *target_of.ObjectImage, section: u32) bool {
+# which sections carry a relocation section, read once per object: each section's relocation
+# count, whether a group lists its relocations, and the header index of its relocation
+# section; every table holds one row per section
+rec RelaTables {
+    counts:  *u32;
+    grouped: *u32;
+    index:   *u32;
+    # the sections that carry one
+    present: u32;
+}
+
+fun rela_tables(img: *target_of.ObjectImage, counts: *u32, grouped: *u32, index: *u32) RelaTables {
     var i: u32 = 0;
+    for (i < img.reloc_count) {
+        val sec: u32 = target_of.section_index(img.relocations[i].section);
+        if (sec < img.section_count) { counts[sec] = counts[sec] + 1; }
+        i = i + 1;
+    }
+    i = 0;
     for (i < img.section_count) {
         val sec: *target_of.Section = ?img.sections[i];
         if (sec.native.format == target_of.ELF && sec.native.kind == SHT_GROUP) {
             var at: usize = 4;
             for (at < sec.len::usize) {
-                if (bin.read_u32_le(sec.bytes, at) == (target_of.NATIVE_GROUP_RELOC | (section + 1))) { ret true; }
+                val member: u32 = bin.read_u32_le(sec.bytes, at);
+                if ((member & target_of.NATIVE_GROUP_RELOC) != 0) {
+                    val listed: u32 = (member & ~target_of.NATIVE_GROUP_RELOC) - 1;
+                    if (listed < img.section_count) { grouped[listed] = 1; }
+                }
                 at = at + 4;
             }
         }
         i = i + 1;
     }
-    ret false;
-}
-
-fun has_reloc_section(img: *target_of.ObjectImage, section: u32) bool {
-    ret count_relocs_for_section(img, section) != 0 || group_has_relocations(img, section);
-}
-
-fun relocation_section_index(img: *target_of.ObjectImage, section: u32) u32 {
-    var index: u32 = img.section_count + 4;
-    var i:     u32 = 0;
-    for (i < section) {
-        if (has_reloc_section(img, i)) { index = index + 1; }
+    var t: RelaTables = RelaTables{counts: counts, grouped: grouped, index: index, present: 0};
+    i = 0;
+    for (i < img.section_count) {
+        index[i] = img.section_count + 4 + t.present;
+        if (rela_present(?t, i)) { t.present = t.present + 1; }
         i = i + 1;
     }
-    ret index;
+    ret t;
 }
 
-fun count_relocs_for_section(img: *target_of.ObjectImage, sec_idx: u32) u32 {
-    var len: u32 = 0;
-    var i:   u32 = 0;
-    for (i < img.reloc_count) {
-        if (target_of.section_index(img.relocations[i].section) == sec_idx) { len = len + 1; }
-        i = i + 1;
-    }
-    ret len;
-}
-
-fun sections_with_relocs(img: *target_of.ObjectImage) u32 {
-    var len: u32 = 0;
-    var s:   u32 = 0;
-    for (s < img.section_count) {
-        if (has_reloc_section(img, s)) { len = len + 1; }
-        s = s + 1;
-    }
-    ret len;
+fun rela_present(t: *RelaTables, section: u32) bool {
+    ret t.counts[section] != 0 || t.grouped[section] != 0;
 }
 
 val UNRESOLVED:         str = "unresolved relocation symbol: ";
@@ -867,6 +865,10 @@ rec ObjectScratch {
     rela_name_offsets: *u32;
     sec_rows:          *u32;
     rela_rows:         *u32;
+    rela_counts:       *u32;
+    rela_grouped:      *u32;
+    rela_index:        *u32;
+    rela_ends:         *usize;
     sym_remap:         *u32;
     num_secs:          u32;
     num_syms:          u32;
@@ -878,12 +880,20 @@ fun object_scratch_free(alloc: *A.Allocator, s: *ObjectScratch) {
     if (s.rela_name_offsets != nil) { A.deallocate[u32](alloc, s.rela_name_offsets, (s.num_secs + 1)::usize); }
     if (s.sec_rows != nil)          { A.deallocate[u32](alloc, s.sec_rows, (s.num_secs + 1)::usize); }
     if (s.rela_rows != nil)         { A.deallocate[u32](alloc, s.rela_rows, (s.num_secs + 1)::usize); }
+    if (s.rela_counts != nil)       { A.deallocate[u32](alloc, s.rela_counts, (s.num_secs + 1)::usize); }
+    if (s.rela_grouped != nil)      { A.deallocate[u32](alloc, s.rela_grouped, (s.num_secs + 1)::usize); }
+    if (s.rela_index != nil)        { A.deallocate[u32](alloc, s.rela_index, (s.num_secs + 1)::usize); }
+    if (s.rela_ends != nil)         { A.deallocate[usize](alloc, s.rela_ends, (s.num_secs + 1)::usize); }
     if (s.sym_remap != nil)         { A.deallocate[u32](alloc, s.sym_remap, s.num_syms::usize); }
     s.shstrtab          = nil;
     s.name_offsets      = nil;
     s.rela_name_offsets = nil;
     s.sec_rows          = nil;
     s.rela_rows         = nil;
+    s.rela_counts       = nil;
+    s.rela_grouped      = nil;
+    s.rela_index        = nil;
+    s.rela_ends         = nil;
     s.sym_remap         = nil;
 }
 
@@ -1013,7 +1023,35 @@ fun emit_object_image(tgt_isa: *target_of.ObjectTarget, img: *target_of.ObjectIm
     val num_secs: u32 = img.section_count;
     val num_syms: u32 = img.symbol_count;
 
-    val num_rela_secs: u32 = sections_with_relocs(img);
+    var scratch: ObjectScratch;
+    scratch.shstrtab          = nil;
+    scratch.name_offsets      = nil;
+    scratch.rela_name_offsets = nil;
+    scratch.sec_rows          = nil;
+    scratch.rela_rows         = nil;
+    scratch.rela_counts       = nil;
+    scratch.rela_grouped      = nil;
+    scratch.rela_index        = nil;
+    scratch.rela_ends         = nil;
+    scratch.sym_remap         = nil;
+    scratch.num_secs          = num_secs;
+    scratch.num_syms          = num_syms;
+    fin { object_scratch_free(alloc, ?scratch); }
+
+    val res_counts: res[*u32, fail.Fail] = object_scratch_table(alloc, num_secs, "relocation count table alloc failed");
+    if (sel res_counts.err) { ret err[fail.Fail].err{res_counts.err}; }
+    scratch.rela_counts = res_counts.ok;
+    val res_grouped: res[*u32, fail.Fail] = object_scratch_table(alloc, num_secs, "relocation group table alloc failed");
+    if (sel res_grouped.err) { ret err[fail.Fail].err{res_grouped.err}; }
+    scratch.rela_grouped = res_grouped.ok;
+    val res_index: res[*u32, fail.Fail] = object_scratch_table(alloc, num_secs, "relocation index table alloc failed");
+    if (sel res_index.err) { ret err[fail.Fail].err{res_index.err}; }
+    scratch.rela_index = res_index.ok;
+    val res_ends: res[*usize, A.Error] = A.zallocate[usize](alloc, (num_secs + 1)::usize);
+    if (sel res_ends.err) { ret err[fail.Fail].err{fail.refused(res_ends.err)}; }
+    scratch.rela_ends = res_ends.ok;
+    var rela:          RelaTables = rela_tables(img, scratch.rela_counts, scratch.rela_grouped, scratch.rela_index);
+    val num_rela_secs: u32        = rela.present;
 
     # a section indexed from SHN_LORESERVE up is named by its symbols through
     # .symtab_shndx, the last header
@@ -1023,17 +1061,6 @@ fun emit_object_image(tgt_isa: *target_of.ObjectTarget, img: *target_of.ObjectIm
     if (extended_symbols) { total_shdr = total_shdr + 1; }
     val numbering: res[SectionNumbering, fail.Fail] = section_numbering(total_shdr, num_secs::usize + 3);
     if (sel numbering.err) { ret err[fail.Fail].err{numbering.err}; }
-
-    var scratch: ObjectScratch;
-    scratch.shstrtab          = nil;
-    scratch.name_offsets      = nil;
-    scratch.rela_name_offsets = nil;
-    scratch.sec_rows          = nil;
-    scratch.rela_rows         = nil;
-    scratch.sym_remap         = nil;
-    scratch.num_secs          = num_secs;
-    scratch.num_syms          = num_syms;
-    fin { object_scratch_free(alloc, ?scratch); }
 
     var shstrtab_cap: usize = 1;
     var s:            u32   = 0;
@@ -1048,7 +1075,7 @@ fun emit_object_image(tgt_isa: *target_of.ObjectTarget, img: *target_of.ObjectIm
     if (extended_symbols) { shstrtab_cap = shstrtab_cap + str_len(SYMTAB_SHNDX_NAME) + 1; }
     s = 0;
     for (s < num_secs) {
-        if (has_reloc_section(img, s)) {
+        if (rela_present(?rela, s)) {
             val sn: str = bin.resolve_name(img.interner, img.sections[s].name);
             if (sn != nil) { shstrtab_cap = shstrtab_cap + 5 + str_len(sn) + 1; }
             or             { shstrtab_cap = shstrtab_cap + 5 + 1; }
@@ -1108,7 +1135,7 @@ fun emit_object_image(tgt_isa: *target_of.ObjectTarget, img: *target_of.ObjectIm
 
     s = 0;
     for (s < num_secs) {
-        if (has_reloc_section(img, s)) {
+        if (rela_present(?rela, s)) {
             rela_name_offsets[s]       = shstrtab_off::u32;
             shstrtab[shstrtab_off]     = '.';
             shstrtab[shstrtab_off + 1] = 'r';
@@ -1160,8 +1187,8 @@ fun emit_object_image(tgt_isa: *target_of.ObjectTarget, img: *target_of.ObjectIm
     s = 0;
     for (s < num_secs) {
         rela_rows[s] = of_plan.NO_ROW;
-        if (has_reloc_section(img, s)) {
-            val rc:        u32                   = count_relocs_for_section(img, s);
+        if (rela_present(?rela, s)) {
+            val rc:        u32                   = rela.counts[s];
             val rela_size: res[usize, fail.Fail] = of_plan.table(?fp, "relocations", rc::usize, lay.rela_size);
             if (sel rela_size.err) { ret err[fail.Fail].err{rela_size.err}; }
             val row: res[u32, fail.Fail] = of_plan.place(?fp, "relocations", target_of.section_id(s), lay.struct_align, rela_size.ok);
@@ -1224,7 +1251,7 @@ fun emit_object_image(tgt_isa: *target_of.ObjectTarget, img: *target_of.ObjectIm
                         val member: u32 = bin.read_u32_le(img.sections[s].bytes, at);
                         if ((member & target_of.NATIVE_GROUP_RELOC) != 0) {
                             bin.write_u32_le(buf, sec_offset + at,
-                                relocation_section_index(img, (member & ~target_of.NATIVE_GROUP_RELOC) - 1));
+                                rela.index[(member & ~target_of.NATIVE_GROUP_RELOC) - 1]);
                         }
                         at = at + 4;
                     }
@@ -1280,25 +1307,30 @@ fun emit_object_image(tgt_isa: *target_of.ObjectTarget, img: *target_of.ObjectIm
 
     memory.raw_copy((buf::usize + of_plan.offset(?fp, shstrtab_row))::ptr, shstrtab::ptr, shstrtab_len);
 
+    val rela_ends: *usize = scratch.rela_ends;
+    s = 0;
+    for (s < num_secs) {
+        if (rela_rows[s] != of_plan.NO_ROW) { rela_ends[s] = of_plan.offset(?fp, rela_rows[s]); }
+        s = s + 1;
+    }
+    var ri: u32 = 0;
+    for (ri < img.reloc_count) {
+        val rs: u32 = target_of.section_index(img.relocations[ri].section);
+        if (rs < num_secs && rela_rows[rs] != of_plan.NO_ROW) {
+            val rsi_r: res[u32, fail.Fail] = bin.reloc_sym_index(img, ?img.relocations[ri], UNRESOLVED, UNRESOLVED_UNNAMED);
+            if (sel rsi_r.err) { ret err[fail.Fail].err{rsi_r.err}; }
+            val rsi:        u32                 = rsi_r.ok;
+            val elf_type_r: res[u32, fail.Fail] = reloc_type_for(img.interner, alloc, img.relocations[ri].kind, tgt_isa, img.relocations[ri].origin);
+            if (sel elf_type_r.err) { ret err[fail.Fail].err{elf_type_r.err}; }
+            rela_ends[rs] = write_rela_at(buf, rela_ends[rs], ?lay, img.relocations[ri].offset::u64,
+                sym_remap[rsi], elf_type_r.ok, img.relocations[ri].addend);
+        }
+        ri = ri + 1;
+    }
     s = 0;
     for (s < num_secs) {
         if (rela_rows[s] != of_plan.NO_ROW) {
-            var ro: usize = of_plan.offset(?fp, rela_rows[s]);
-            var ri: u32   = 0;
-            for (ri < img.reloc_count) {
-                if (target_of.section_index(img.relocations[ri].section) == s) {
-                    val rsi_r: res[u32, fail.Fail] = bin.reloc_sym_index(img, ?img.relocations[ri], UNRESOLVED, UNRESOLVED_UNNAMED);
-                    if (sel rsi_r.err) { ret err[fail.Fail].err{rsi_r.err}; }
-                    val rsi:        u32                 = rsi_r.ok;
-                    val elf_type_r: res[u32, fail.Fail] = reloc_type_for(img.interner, alloc, img.relocations[ri].kind, tgt_isa, img.relocations[ri].origin);
-                    if (sel elf_type_r.err) { ret err[fail.Fail].err{elf_type_r.err}; }
-                    val elf_type: u32 = elf_type_r.ok;
-                    ro = write_rela_at(buf, ro, ?lay, img.relocations[ri].offset::u64,
-                        sym_remap[rsi], elf_type, img.relocations[ri].addend);
-                }
-                ri = ri + 1;
-            }
-            val rela_closed: err[fail.Fail] = of_plan.close(?fp, rela_rows[s], ro);
+            val rela_closed: err[fail.Fail] = of_plan.close(?fp, rela_rows[s], rela_ends[s]);
             if (sel rela_closed.err) { ret rela_closed; }
         }
         s = s + 1;
@@ -1360,7 +1392,7 @@ fun emit_object_image(tgt_isa: *target_of.ObjectTarget, img: *target_of.ObjectIm
     for (s < num_secs) {
         if (rela_rows[s] != of_plan.NO_ROW) {
             var flags: u64 = 0;
-            if (group_has_relocations(img, s)) { flags = 0x200; }
+            if (rela.grouped[s] != 0) { flags = 0x200; }
             shdr_pos = write_shdr(buf, shdr_pos, ?lay, rela_name_offsets[s], SHT_RELA, flags, 0,
                 of_plan.offset(?fp, rela_rows[s])::u64, of_plan.size(?fp, rela_rows[s])::u64,
                 symtab_shidx::u32, (s + 1)::u32,
