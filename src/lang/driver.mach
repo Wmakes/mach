@@ -874,6 +874,40 @@ pub fun begin_loaded(s: *session.Session, req: *request.BuildRequest) res[projec
     ret res[project.Project, fail.Fail].ok{p};
 }
 
+# the project at `root` analyzed as an editor analyzes it, through `analyze_project_tolerant`
+# over every artifact's closure on the cell `target` names, the default when empty, as far
+# as `phase`; a rejected analysis is released and answered as the rejection a build reports
+#[testing]
+pub fun union_analysis(s: *session.Session, root: str, target: str, phase: FrontendPhase) res[project.Project, fail.Fail] {
+    val read: res[manifest.Manifest, fail.Fail] = load_manifest(s, root);
+    if (sel read.err) { ret res[project.Project, fail.Fail].err{read.err}; }
+    var m: manifest.Manifest = read.ok;
+    fin { manifest.dnit(?m, s.build_alloc); }
+    var req: request.BuildRequest = request.defaults();
+    req.project_root = root;
+    req.target       = target;
+    val analyzed: res[project.Project, fail.Fail] = analyze_project_tolerant(s, ?m, ?req, project.ROOT_UNION, nil, 0, phase);
+    if (sel analyzed.err) { ret analyzed; }
+    var p:      project.Project  = analyzed.ok;
+    val status: fail.PhaseStatus = frontend.frontend_status(?p);
+    if (!sel status.kind.accepted) {
+        project.dnit_project(?p);
+        ret res[project.Project, fail.Fail].err{fail.phase_failure(status)};
+    }
+    ret res[project.Project, fail.Fail].ok{p};
+}
+
+# a project under a fresh temporary root, as `scaffold` writes it, analyzed as
+# `union_analysis` does on the default cell; the root is removed before this returns
+#[testing]
+pub fun scaffold_union(s: *session.Session, alloc: *A.Allocator, text: str, names: *str, texts: *str, n: u32,
+    phase: FrontendPhase) res[project.Project, fail.Fail] {
+    val root: res[str, fail.Fail] = scaffold(alloc, text, names, texts, n);
+    if (sel root.err) { ret res[project.Project, fail.Fail].err{root.err}; }
+    fin { fs.remove_all(alloc, root.ok); }
+    ret union_analysis(s, root.ok, "", phase);
+}
+
 # a load that failed: the frontend's recorded status wins over the loader's
 # own failure, and a loader message is the user's
 fun load_failure_of(p: *project.Project, f: fail.Fail) fail.Fail {
