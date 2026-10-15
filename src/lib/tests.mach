@@ -18,7 +18,6 @@ use driver_spirv_tests:          mach.lang.driver.tests.spirv;
 use driver_tags_tests:           mach.lang.driver.tests.tags;
 use driver_target_tests:         mach.lang.driver.tests.target;
 use driver_testing_marker_tests: mach.lang.driver.tests.testing_marker;
-use driver_union_tests:          mach.lang.driver.tests.union;
 use sema_tests:                  mach.lang.fe.sema.tests;
 use me_tests:                    mach.lang.me.tests;
 use readout_tests:               mach.lang.readout.tests;
