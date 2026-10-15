@@ -3641,7 +3641,9 @@ test flush_deferred__sym2_set_and_retry_consumes_flushed_prefix {
         ret 1;
     }
 
-    T.fail_at_ordinal(?t, T.attempt_count(?t) + 2);
+    # the flush allocates the three tables of its name index, then rec_a's relocation, then
+    # the growth of the symbols for sym_b's import, which fails
+    T.fail_at_ordinal(?t, T.attempt_count(?t) + 5);
     val r1: err[fail.Fail] = flush_deferred(?img, ?deferred);
     if (sel r1.ok) {
         deferred_dnit(?deferred);
