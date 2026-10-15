@@ -5047,3 +5047,156 @@ test static_library__keeps_what_its_modules_keep {
     }
     ret 0;
 }
+
+# a test is its qualified name in the test object, and the function of the same name is
+# the normal object's
+test linkage_name__test_declaration {
+    var alloc:  A.Allocator;
+    val make_r: err[A.Error] = page.make(?alloc);
+    if (sel make_r.err) { ret 1; }
+    val sr: res[session.Session, fail.Fail] = toolchain.session_init(?alloc);
+    if (sel sr.err) { ret 1; }
+    var s: session.Session = sr.ok;
+    fin { session.dnit(?s); }
+
+    var names: [1]str = [1]str{"main.mach"};
+    var texts: [1]str = [1]str{"fun probe() i32 { ret 0; }\ntest probe { ret probe(); }\nfun main() i32 { ret probe(); }\n"};
+    val pr:    res[project.Project, fail.Fail] = driver.scaffold_build(?s, ?alloc, driver.fixture_manifest(), ?names[0], ?texts[0], 1, "");
+    if (sel pr.err) { ret 1; }
+    var p: project.Project = pr.ok;
+    fin { project.dnit_project(?p); }
+    var req: request.BuildRequest = p.req;
+    req.goal = request.GOAL_TESTS;
+    val reconfigured: err[fail.Fail] = driver.reconfigure(?p, req);
+    if (sel reconfigured.err) { ret 1; }
+    val checked: err[fail.Fail] = driver.run_sema_pass(?p);
+    if (sel checked.err) { ret 1; }
+    val lowered: err[fail.Fail] = driver.run_lower_pass(?p);
+    if (sel lowered.err) { ret 2; }
+    val generated: err[fail.Fail] = driver.run_codegen_pass(?p);
+    if (sel generated.err) { ret 3; }
+    val tested: err[fail.Fail] = driver.run_test_pass(?p);
+    if (sel tested.err) { ret 4; }
+
+    val mid: session.ModuleId = project.module_named(?p, "uniontest.main");
+    if (module.is_nil(mid)) { ret 5; }
+    val normal: *me_ir.Module = project.module_at(?p, mid::u32).ir_module;
+    val tests:  *me_ir.Module = project.module_at(?p, mid::u32).test.ir_module;
+    if (tests == nil)                                                { ret 5; }
+    if (defined_fn_exact(?s, tests, "uniontest.main#probe") != 1)     { ret 6; }
+    if (defined_fn_exact(?s, tests, "uniontest.main.probe") != 0)     { ret 7; }
+    if (defined_fn_exact(?s, normal, "uniontest.main.probe") != 1)   { ret 8; }
+    if (defined_fn_exact(?s, normal, "uniontest.main#probe") != 0)   { ret 9; }
+    ret 0;
+}
+
+#[testing]
+val TESTING_HELPER: u32 = 1;
+#[testing]
+val TESTING_SLOT: u32 = 2;
+#[testing]
+val TESTING_CALLED: u32 = 4;
+#[testing]
+val TESTING_PLAIN: u32 = 8;
+# the normal object carried a `#[testing]` declaration, which only a test object may
+#[testing]
+val TESTING_LEAKED: u32 = 16;
+# the test object defined what its normal object defines instead of declaring it
+#[testing]
+val TESTING_REDEFINED: u32 = 32;
+# the test object reads and writes the private global its normal object defines
+#[testing]
+val TESTING_SHARED: u32 = 64;
+
+#[testing]
+fun image_names(image: *target_of.ObjectImage, itn: *intern.Interner, want: str) bool {
+    var i: u32 = 0;
+    for (i < image.symbol_count) {
+        val found: opt[str] = intern.get(itn, image.symbols[i].name);
+        if (sel found.some && str_contains(found.some, want) && !target_of.section_is_external(image.symbols[i].section)) { ret true; }
+        i = i + 1;
+    }
+    ret false;
+}
+
+#[testing]
+fun image_calls(image: *target_of.ObjectImage, itn: *intern.Interner, want: str) bool {
+    var i: u32 = 0;
+    for (i < image.reloc_count) {
+        val found: opt[str] = intern.get(itn, target_of.reloc_symbol_name(image, ?image.relocations[i]));
+        if (sel found.some && str_contains(found.some, want)) { ret true; }
+        i = i + 1;
+    }
+    ret false;
+}
+
+# builds a fixture whose test calls a `#[testing]` function of another module, whose own
+# test touches a private global, and reports which symbols the normal and test objects
+# define or reference
+#[testing]
+fun testing_objects(test_mode: bool, seen: *u32) i32 {
+    @seen = 0;
+    var alloc:  A.Allocator;
+    val make_r: err[A.Error] = page.make(?alloc);
+    if (sel make_r.err) { ret 1; }
+    val sr: res[session.Session, fail.Fail] = toolchain.session_init(?alloc);
+    if (sel sr.err) { ret 2; }
+    var s: session.Session = sr.ok;
+    fin { session.dnit(?s); }
+    var names: [2]str = [2]str{"main.mach", "api.mach"};
+    var texts: [2]str;
+    texts[0] = "use uniontest.api;\n#[symbol(\"_start\")]\npub fun start() { if (api.plain() == 0) { ret; } }\ntest calls_the_fixture { ret api.fixture_helper() + api.fixture_slot; }\n";
+    texts[1] = "#[testing]\npub fun fixture_helper() i32 { ret 0; }\n#[testing]\npub var fixture_slot: i32 = 0;\nvar hits: i32 = 0;\npub fun plain() i32 { hits = hits + 1; ret 1; }\ntest sees_the_normal_state { hits = 0; plain(); if (hits != 1) { ret 1; } ret 0; }\n";
+    val pr: res[project.Project, fail.Fail] = driver.scaffold_build(?s, ?alloc, manifest_x64_linux(), ?names[0], ?texts[0], 2, "lx64");
+    if (sel pr.err) { ret 5; }
+    var p: project.Project = pr.ok;
+    fin { project.dnit_project(?p); }
+    var req: request.BuildRequest = p.req;
+    if (test_mode) { req.goal = request.GOAL_TESTS; }
+    val reconfigured: err[fail.Fail] = driver.reconfigure(?p, req);
+    if (sel reconfigured.err) { ret 5; }
+    val checked: err[fail.Fail] = driver.run_sema_pass(?p);
+    if (sel checked.err) { ret 6; }
+    val lowered: err[fail.Fail] = driver.run_lower_pass(?p);
+    if (sel lowered.err) { ret 7; }
+    val generated: err[fail.Fail] = driver.run_codegen_pass(?p);
+    if (sel generated.err) { ret 8; }
+    if (test_mode) {
+        val tested: err[fail.Fail] = driver.run_test_pass(?p);
+        if (sel tested.err) { ret 9; }
+    }
+    val main_mid: session.ModuleId = project.module_named(?p, "uniontest.main");
+    val api_mid:  session.ModuleId = project.module_named(?p, "uniontest.api");
+    if (module.is_nil(main_mid) || module.is_nil(api_mid)) { ret 10; }
+    val main: *project.ModuleEntry = project.module_at(?p, main_mid::u32);
+    val api:  *project.ModuleEntry = project.module_at(?p, api_mid::u32);
+    if (main.object_image == nil || api.object_image == nil) { ret 11; }
+    if (image_names(api.object_image, ?s.interner, "plain"))  { @seen = @seen | TESTING_PLAIN; }
+    if (image_names(api.object_image, ?s.interner, "fixture_")
+        || image_calls(main.object_image, ?s.interner, "fixture_")) { @seen = @seen | TESTING_LEAKED; }
+    if (!test_mode) { ret 0; }
+
+    if (main.test.object_image == nil || api.test.object_image == nil)      { ret 12; }
+    if (image_calls(main.test.object_image, ?s.interner, "fixture_helper")) { @seen = @seen | TESTING_CALLED; }
+    if (image_names(api.test.object_image, ?s.interner, "fixture_helper"))  { @seen = @seen | TESTING_HELPER; }
+    if (image_names(api.test.object_image, ?s.interner, "fixture_slot"))    { @seen = @seen | TESTING_SLOT; }
+    if (image_names(api.test.object_image, ?s.interner, "plain")
+        || image_names(api.test.object_image, ?s.interner, "hits")
+        || image_names(main.test.object_image, ?s.interner, "start")) { @seen = @seen | TESTING_REDEFINED; }
+    if (image_names(api.object_image, ?s.interner, "uniontest.api.hits")
+        && image_calls(api.test.object_image, ?s.interner, "uniontest.api.hits")) { @seen = @seen | TESTING_SHARED; }
+    ret 0;
+}
+
+# a testing declaration is absent from ordinary objects and emitted in the test objects,
+# beside normal objects a test build leaves unchanged and reaches through their symbols
+test testing_mark__emitted_only_for_tests {
+    var seen:     u32 = 0;
+    val ordinary: i32 = testing_objects(false, ?seen);
+    if (ordinary != 0)         { ret ordinary; }
+    if (seen != TESTING_PLAIN) { ret 20; }
+    val tested: i32 = testing_objects(true, ?seen);
+    if (tested != 0)                                                                              { ret tested; }
+    if (seen != (TESTING_PLAIN | TESTING_HELPER | TESTING_SLOT | TESTING_CALLED | TESTING_SHARED)) { ret 30; }
+    ret 0;
+}
