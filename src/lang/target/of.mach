@@ -371,8 +371,13 @@ pub val SEC_FLAG_ASSOCIATED: u32 = 0x40;
 # plus one, NATIVE_GROUP_RELOC set on a member that is a section's relocations
 pub val SEC_FLAG_GROUP: u32 = 0x80;
 
+# the section holds NUL-terminated strings with no other NUL in them, each
+# at an offset a symbol names, so a link may merge equal strings and a
+# format with a string-section spelling (elf SHF_MERGE|SHF_STRINGS) uses it
+pub val SEC_FLAG_STRINGS: u32 = 0x100;
+
 val SEC_FLAG_MASK: u32 = SEC_FLAG_MERGEABLE | SEC_FLAG_INIT_FUNCS | SEC_FLAG_COALESCE | SEC_FLAG_RETAIN
-    | SEC_FLAG_UNWIND_INDEX | SEC_FLAG_UNWIND_FRAMES | SEC_FLAG_ASSOCIATED | SEC_FLAG_GROUP;
+    | SEC_FLAG_UNWIND_INDEX | SEC_FLAG_UNWIND_FRAMES | SEC_FLAG_ASSOCIATED | SEC_FLAG_GROUP | SEC_FLAG_STRINGS;
 
 pub val NATIVE_GROUP_RELOC: u32 = 0x80000000;
 
@@ -942,6 +947,7 @@ pub fun validate_object_view(image: *ObjectImage) err[fail.Fail] {
         if ((sec.flags & (SEC_FLAG_MERGEABLE | SEC_FLAG_INIT_FUNCS)) == (SEC_FLAG_MERGEABLE | SEC_FLAG_INIT_FUNCS)
             || (sec.native.format != 0 && (sec.flags & SEC_FLAG_COALESCE) != 0)
             || ((sec.flags & SEC_FLAG_MERGEABLE) != 0 && sec.kind == SK_BSS)
+            || ((sec.flags & SEC_FLAG_STRINGS) != 0 && ((sec.flags & SEC_FLAG_MERGEABLE) != 0 || sec.kind != SK_RODATA))
             || ((sec.flags & SEC_FLAG_INIT_FUNCS) != 0
             && sec.kind != SK_DATA && sec.kind != SK_RODATA && sec.kind != SK_RELRO)) {
             ret err[fail.Fail].err{fail.user(diagnostic_kind.OBJECT_MALFORMED, "object image has incompatible section flags")};

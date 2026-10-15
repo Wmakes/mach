@@ -72,6 +72,7 @@ val SHT_INIT_ARRAY:    u32 = 14;
 val SHT_FINI_ARRAY:    u32 = 15;
 val SHT_PREINIT_ARRAY: u32 = 16;
 val SHT_GROUP:         u32 = 17;
+val SHT_SYMTAB_SHNDX:  u32 = 18;
 
 val SHT_LOPROC: u32 = 0x70000000;
 val SHT_HIPROC: u32 = 0x7FFFFFFF;
@@ -82,6 +83,7 @@ val SHF_WRITE:      u64 = 1;
 val SHF_ALLOC:      u64 = 2;
 val SHF_EXECINSTR:  u64 = 4;
 val SHF_MERGE:      u64 = 0x10;
+val SHF_STRINGS:    u64 = 0x20;
 val SHF_LINK_ORDER: u64 = 0x80;
 val SHF_COMPRESSED: u64 = 0x800;
 
@@ -95,6 +97,12 @@ val STB_WEAK:     u8  = 2;
 val STV_INTERNAL: u8  = 1;
 val STV_HIDDEN:   u8  = 2;
 val SHN_ABS:      u16 = 0xFFF1;
+val SHN_COMMON:   u16 = 0xFFF2;
+val SHN_XINDEX:   u16 = 0xFFFF;
+
+# the first reserved section index: a section count or index from here up is
+# held outside the 16-bit header and symbol fields
+val SHN_LORESERVE: u32 = 0xFF00;
 
 val STT_NOTYPE: u8 = 0;
 val STT_OBJECT: u8 = 1;
@@ -319,6 +327,68 @@ fun write_shdr(buf: *u8, off: usize, lay: *ElfLayout,
     ret off + lay.shdr_size;
 }
 
+# how the file header spells a table of `count` section headers whose names
+# header `names` holds: a count or an index from SHN_LORESERVE up is extended,
+# e_shnum 0 or e_shstrndx SHN_XINDEX with the value in the null header's
+# sh_size or sh_link
+rec SectionNumbering {
+    e_shnum:    u16;
+    e_shstrndx: u16;
+    null_size:  u64;
+    null_link:  u32;
+}
+
+fun section_numbering(count: usize, names: usize) res[SectionNumbering, fail.Fail] {
+    if (count > 0xFFFFFFFF) { ret res[SectionNumbering, fail.Fail].err{fail.user(diagnostic_kind.LINK_SIZE_LIMIT, "section-header count exceeds the ELF section index width")}; }
+    if (names >= count)     { ret res[SectionNumbering, fail.Fail].err{fail.message("section name table index lies outside the section table")}; }
+    var n: SectionNumbering = SectionNumbering{e_shnum: 0, e_shstrndx: SHN_XINDEX, null_size: 0, null_link: 0};
+    if (count < SHN_LORESERVE::usize) { n.e_shnum = count::u16; }
+    or                                { n.null_size = count::u64; }
+    if (names < SHN_LORESERVE::usize) { n.e_shstrndx = names::u16; }
+    or                                { n.null_link = names::u32; }
+    ret res[SectionNumbering, fail.Fail].ok{n};
+}
+
+# the null header at `off`, which carries the extended section numbering
+fun write_null_shdr(buf: *u8, off: usize, lay: *ElfLayout, n: *SectionNumbering) usize {
+    ret write_shdr(buf, off, lay, 0, 0, 0, 0, 0, n.null_size, n.null_link, 0, 0, 0);
+}
+
+# where a file's section headers lie, how many there are and which one holds
+# their names, the count and the index read through the null header when the
+# file header extends them; no table at all is a count of 0
+rec SectionTable {
+    off:      usize;
+    entsize:  usize;
+    count:    u32;
+    shstrndx: u32;
+}
+
+fun section_table(buf: *u8, buf_size: usize, lay: *ElfLayout) res[SectionTable, fail.Fail] {
+    val w:     usize        = lay.addr_width::usize;
+    val tail:  usize        = 24 + 3 * w;
+    var t:     SectionTable = SectionTable{off: read_addr(buf, 24 + 2 * w, lay)::usize, entsize: bin.read_u16_le(buf, tail + 10)::usize, count: 0, shstrndx: 0};
+    val shnum: u16          = bin.read_u16_le(buf, tail + 12);
+    val names: u16          = bin.read_u16_le(buf, tail + 14);
+    if (t.off == 0) { ret res[SectionTable, fail.Fail].ok{t}; }
+    if (t.entsize < lay.shdr_size) { ret res[SectionTable, fail.Fail].err{fail.user(diagnostic_kind.OBJECT_MALFORMED, "section header entry too small")}; }
+    t.count    = shnum::u32;
+    t.shstrndx = names::u32;
+    if (shnum == 0 || names == SHN_XINDEX) {
+        val null_region: err[fail.Fail] = bin.require_region(buf_size, t.off, t.entsize, "section header table out of bounds");
+        if (sel null_region.err) { ret res[SectionTable, fail.Fail].err{null_region.err}; }
+        val null: ElfShdr = read_shdr(buf, t.off, lay);
+        if (shnum == 0) {
+            if (null.size > 0xFFFFFFFF) { ret res[SectionTable, fail.Fail].err{fail.user(diagnostic_kind.OBJECT_MALFORMED, "extended section count exceeds the ELF section index width")}; }
+            t.count = null.size::u32;
+        }
+        if (names == SHN_XINDEX) { t.shstrndx = null.link; }
+    }
+    val region: err[fail.Fail] = bin.require_region(buf_size, t.off, t.count::usize * t.entsize, "section header table out of bounds");
+    if (sel region.err) { ret res[SectionTable, fail.Fail].err{region.err}; }
+    ret res[SectionTable, fail.Fail].ok{t};
+}
+
 fun write_phdr_at(buf: *u8, off: usize, lay: *ElfLayout,
     ptype: u32, flags: u32, offset: u64, vaddr: u64, paddr: u64,
     filesz: u64, memsz: u64, align: u64) usize {
@@ -532,6 +602,7 @@ fun section_flags_for_section(sec: *target_of.Section) u64 {
     if (sec.native.format == target_of.ELF) { ret sec.native.flags; }
     var f: u64 = section_flags_for(sec.kind);
     if ((sec.flags & target_of.SEC_FLAG_MERGEABLE) != 0 && sec.kind != target_of.SK_BSS) { f = f | SHF_MERGE; }
+    if ((sec.flags & target_of.SEC_FLAG_STRINGS) != 0)                                   { f = f | SHF_MERGE | SHF_STRINGS; }
     if ((sec.flags & target_of.SEC_FLAG_RETAIN) != 0)                                    { f = f | SHF_GNU_RETAIN; }
     ret f;
 }
@@ -602,26 +673,36 @@ fun sections_with_relocs(img: *target_of.ObjectImage) u32 {
 val UNRESOLVED:         str = "unresolved relocation symbol: ";
 val UNRESOLVED_UNNAMED: str = "relocation references an unresolved symbol";
 
+# writes symbol `idx`, and returns the section index .symtab_shndx holds for
+# it: the real one when st_shndx says SHN_XINDEX, otherwise 0
 fun write_symbol(buf: *u8, sym_off: usize, lay: *ElfLayout, str_off: usize, str_pos: *usize,
-    img: *target_of.ObjectImage, idx: u32, binding: u8) {
+    img: *target_of.ObjectImage, idx: u32, binding: u8) u32 {
     val name_pos: usize = @str_pos;
     @str_pos = @str_pos + bin.write_str(buf, str_off + @str_pos, bin.resolve_name(img.interner, img.symbols[idx].name));
 
     var sym_type: u8  = STT_NOTYPE;
     var sec_idx:  u16 = 0;
+    var extended: u32 = 0;
     if (!target_of.section_is_external(img.symbols[idx].section) && target_of.section_index(img.symbols[idx].section) < img.section_count) {
-        sec_idx = (target_of.section_index(img.symbols[idx].section) + 1)::u16;
+        val full: u32 = target_of.section_index(img.symbols[idx].section) + 1;
+        if (full < SHN_LORESERVE) { sec_idx = full::u16; }
+        or {
+            sec_idx  = SHN_XINDEX;
+            extended = full;
+        }
     }
     if ((img.symbols[idx].flags & target_of.SYM_OBJ_FLAG_FUNCTION) != 0) { sym_type = STT_FUNC; }
     or ((img.symbols[idx].flags & target_of.SYM_OBJ_FLAG_OBJECT) != 0)   { sym_type = STT_OBJECT; }
 
     var symbol_value: u64 = img.symbols[idx].offset::u64;
     if ((img.symbols[idx].flags & target_of.SYM_OBJ_FLAG_COMMON) != 0) {
-        sec_idx      = 0xFFF2;
+        sec_idx      = SHN_COMMON;
+        extended     = 0;
         symbol_value = img.symbols[idx].align::u64;
     }
     if (target_of.section_is_absolute(img.symbols[idx].section)) {
-        sec_idx      = 0xFFF1;
+        sec_idx      = SHN_ABS;
+        extended     = 0;
         symbol_value = img.symbols[idx].absolute_value;
     }
     var other: u8 = 0;
@@ -634,6 +715,7 @@ fun write_symbol(buf: *u8, sym_off: usize, lay: *ElfLayout, str_off: usize, str_
     if (img.symbols[idx].native.format == target_of.ELF) { info = img.symbols[idx].native.kind::u8; }
     write_sym_at(buf, sym_off, lay, name_pos::u32, info, other, sec_idx,
         symbol_value, img.symbols[idx].size::u64);
+    ret extended;
 }
 
 rec SymtabBuild {
@@ -681,7 +763,16 @@ fun build_symtab_bytes(alloc: *A.Allocator, itn: *intern.Interner, lay: *ElfLayo
         val name_pos: usize = str_pos;
         str_pos = str_pos + bin.write_str(tbuf, str_pos, bin.resolve_name(itn, symtab[i].name));
 
-        val shndx: u16 = image_section_shndx(segs, seg_count, symtab[i].vaddr);
+        # an image's symbols name only its allocated sections, which come first
+        # and stay far below the reserved indexes, so it carries no .symtab_shndx
+        val section: u32 = image_section_shndx(segs, seg_count, symtab[i].vaddr);
+        var shndx:   u16 = SHN_ABS;
+        if (section >= SHN_LORESERVE) {
+            A.deallocate[u8](alloc, sbuf, symtab_sz);
+            A.deallocate[u8](alloc, tbuf, strtab_sz);
+            ret res[SymtabBuild, fail.Fail].err{fail.user(diagnostic_kind.LINK_SIZE_LIMIT, "an image symbol's section index needs extended section numbering")};
+        }
+        if (section != 0) { shndx = section::u16; }
 
         var st_type: u8 = STT_NOTYPE;
         if (symtab[i].kind == target_of.SYMT_FUNC)   { st_type = STT_FUNC; }
@@ -706,6 +797,14 @@ fun build_symtab_bytes(alloc: *A.Allocator, itn: *intern.Interner, lay: *ElfLayo
     out.strtab_size  = strtab_sz;
     out.local_count  = out.local_count + 1;
     ret res[SymtabBuild, fail.Fail].ok{out};
+}
+
+val SYMTAB_SHNDX_NAME: str = ".symtab_shndx";
+
+# the .symtab_shndx entry of ELF symbol `elf_idx`, when the object has the table
+fun put_symbol_shndx(buf: *u8, fp: *of_plan.FilePlan, row: u32, elf_idx: u32, index: u32) {
+    if (row == of_plan.NO_ROW) { ret; }
+    bin.write_u32_le(buf, of_plan.offset(fp, row) + elf_idx::usize * 4, index);
 }
 
 fun free_symtab_bytes(alloc: *A.Allocator, b: *SymtabBuild) {
@@ -916,10 +1015,14 @@ fun emit_object_image(tgt_isa: *target_of.ObjectTarget, img: *target_of.ObjectIm
 
     val num_rela_secs: u32 = sections_with_relocs(img);
 
-    if (num_secs > 0xFEFF || num_rela_secs > 0xFEFF) { ret err[fail.Fail].err{fail.user(diagnostic_kind.LINK_SIZE_LIMIT, "section-header count exceeds the ELF e_shnum limit")}; }
-    var total_shdr: u32 = 1 + num_secs + 3 + num_rela_secs;
-    if (attr != nil)         { total_shdr = total_shdr + 1; }
-    if (total_shdr > 0xFEFF) { ret err[fail.Fail].err{fail.user(diagnostic_kind.LINK_SIZE_LIMIT, "section-header count exceeds the ELF e_shnum limit")}; }
+    # a section indexed from SHN_LORESERVE up is named by its symbols through
+    # .symtab_shndx, the last header
+    val extended_symbols: bool  = num_secs >= SHN_LORESERVE;
+    var total_shdr:       usize = 1 + num_secs::usize + 3 + num_rela_secs::usize;
+    if (attr != nil)      { total_shdr = total_shdr + 1; }
+    if (extended_symbols) { total_shdr = total_shdr + 1; }
+    val numbering: res[SectionNumbering, fail.Fail] = section_numbering(total_shdr, num_secs::usize + 3);
+    if (sel numbering.err) { ret err[fail.Fail].err{numbering.err}; }
 
     var scratch: ObjectScratch;
     scratch.shstrtab          = nil;
@@ -941,7 +1044,8 @@ fun emit_object_image(tgt_isa: *target_of.ObjectTarget, img: *target_of.ObjectIm
         s = s + 1;
     }
     shstrtab_cap = shstrtab_cap + 8 + 8 + 10;
-    if (attr != nil) { shstrtab_cap = shstrtab_cap + str_len(attr.section) + 1; }
+    if (attr != nil)      { shstrtab_cap = shstrtab_cap + str_len(attr.section) + 1; }
+    if (extended_symbols) { shstrtab_cap = shstrtab_cap + str_len(SYMTAB_SHNDX_NAME) + 1; }
     s = 0;
     for (s < num_secs) {
         if (has_reloc_section(img, s)) {
@@ -995,6 +1099,11 @@ fun emit_object_image(tgt_isa: *target_of.ObjectTarget, img: *target_of.ObjectIm
     if (attr != nil) {
         attr_name_off = shstrtab_off::u32;
         shstrtab_off  = shstrtab_off + bin.write_str(shstrtab, shstrtab_off, attr.section);
+    }
+    var shndx_name_off: u32 = 0;
+    if (extended_symbols) {
+        shndx_name_off = shstrtab_off::u32;
+        shstrtab_off   = shstrtab_off + bin.write_str(shstrtab, shstrtab_off, SYMTAB_SHNDX_NAME);
     }
 
     s = 0;
@@ -1069,7 +1178,16 @@ fun emit_object_image(tgt_isa: *target_of.ObjectTarget, img: *target_of.ObjectIm
         attr_row = row.ok;
     }
 
-    val shdr_size: res[usize, fail.Fail] = of_plan.table(?fp, "section header table", total_shdr::usize, lay.shdr_size);
+    var shndx_row: u32 = of_plan.NO_ROW;
+    if (extended_symbols) {
+        val shndx_size: res[usize, fail.Fail] = of_plan.table(?fp, "symbol section indexes", (num_syms + 1)::usize, 4);
+        if (sel shndx_size.err) { ret err[fail.Fail].err{shndx_size.err}; }
+        val row: res[u32, fail.Fail] = of_plan.place(?fp, "symbol section indexes", target_of.no_section(), 4, shndx_size.ok);
+        if (sel row.err) { ret err[fail.Fail].err{row.err}; }
+        shndx_row = row.ok;
+    }
+
+    val shdr_size: res[usize, fail.Fail] = of_plan.table(?fp, "section header table", total_shdr, lay.shdr_size);
     if (sel shdr_size.err) { ret err[fail.Fail].err{shdr_size.err}; }
     val shdr_r: res[u32, fail.Fail] = of_plan.place(?fp, "section header table", target_of.no_section(), lay.struct_align, shdr_size.ok);
     if (sel shdr_r.err) { ret err[fail.Fail].err{shdr_r.err}; }
@@ -1078,11 +1196,6 @@ fun emit_object_image(tgt_isa: *target_of.ObjectTarget, img: *target_of.ObjectIm
     val sealed: res[usize, fail.Fail] = of_plan.seal(?fp);
     if (sel sealed.err) { ret err[fail.Fail].err{sealed.err}; }
     val total_file_size: usize = sealed.ok;
-
-    val shstrtab_idx: res[u16, fail.Fail] = of_plan.field_u16(?fp, (num_secs + 3)::usize, "e_shstrndx");
-    if (sel shstrtab_idx.err) { ret err[fail.Fail].err{shstrtab_idx.err}; }
-    val shnum: res[u16, fail.Fail] = shnum(?fp, total_shdr::usize);
-    if (sel shnum.err) { ret err[fail.Fail].err{shnum.err}; }
 
     if (num_syms > 0) {
         val res_remap: res[*u32, A.Error] = A.zallocate[u32](alloc, num_syms::usize);
@@ -1097,7 +1210,7 @@ fun emit_object_image(tgt_isa: *target_of.ObjectTarget, img: *target_of.ObjectIm
 
     write_elf_ident(buf, ?lay);
     write_ehdr(buf, ?lay, ET_REL, machine_for_arch(tgt_isa.arch_id), img.machine_flags,
-        0, 0, of_plan.offset(?fp, shdr_row)::u64, 0, shnum.ok, shstrtab_idx.ok);
+        0, 0, of_plan.offset(?fp, shdr_row)::u64, 0, numbering.ok.e_shnum, numbering.ok.e_shstrndx);
 
     s = 0;
     for (s < num_secs) {
@@ -1135,7 +1248,7 @@ fun emit_object_image(tgt_isa: *target_of.ObjectTarget, img: *target_of.ObjectIm
             cnt;
         }
         if (sym_remap != nil) { sym_remap[symi] = elf_idx; }
-        write_symbol(buf, sym_off, ?lay, strtab_offset, ?str_pos, img, symi, STB_LOCAL);
+        put_symbol_shndx(buf, ?fp, shndx_row, elf_idx, write_symbol(buf, sym_off, ?lay, strtab_offset, ?str_pos, img, symi, STB_LOCAL));
         sym_off = sym_off + lay.sym_size;
         elf_idx = elf_idx + 1;
         symi    = symi + 1;
@@ -1150,10 +1263,15 @@ fun emit_object_image(tgt_isa: *target_of.ObjectTarget, img: *target_of.ObjectIm
         if (sym_remap != nil) { sym_remap[symi] = elf_idx; }
         var bind: u8 = STB_GLOBAL;
         if ((img.symbols[symi].flags & target_of.SYM_OBJ_FLAG_WEAK) != 0) { bind = STB_WEAK; }
-        write_symbol(buf, sym_off, ?lay, strtab_offset, ?str_pos, img, symi, bind);
+        put_symbol_shndx(buf, ?fp, shndx_row, elf_idx, write_symbol(buf, sym_off, ?lay, strtab_offset, ?str_pos, img, symi, bind));
         sym_off = sym_off + lay.sym_size;
         elf_idx = elf_idx + 1;
         symi    = symi + 1;
+    }
+    put_symbol_shndx(buf, ?fp, shndx_row, 0, 0);
+    if (shndx_row != of_plan.NO_ROW) {
+        val shndx_closed: err[fail.Fail] = of_plan.close_size(?fp, shndx_row, (elf_idx::usize) * 4);
+        if (sel shndx_closed.err) { ret shndx_closed; }
     }
     val symtab_closed: err[fail.Fail] = of_plan.close(?fp, symtab_row, sym_off);
     if (sel symtab_closed.err) { ret symtab_closed; }
@@ -1192,18 +1310,17 @@ fun emit_object_image(tgt_isa: *target_of.ObjectTarget, img: *target_of.ObjectIm
         if (sel attr_closed.err) { ret attr_closed; }
     }
 
-    var shdr_pos: usize = of_plan.offset(?fp, shdr_row);
-    memory.raw_zero((buf::usize + shdr_pos)::ptr, lay.shdr_size);
-    shdr_pos = shdr_pos + lay.shdr_size;
+    var shdr_pos: usize = write_null_shdr(buf, of_plan.offset(?fp, shdr_row), ?lay, ?numbering.ok);
 
     s = 0;
     for (s < num_secs) {
         var sh_off: u64 = 0;
         if (sec_rows[s] != of_plan.NO_ROW) { sh_off = of_plan.offset(?fp, sec_rows[s])::u64; }
+        # a merged string is one byte wide, any other merged entry the whole section
         var entsize: u64 = 0;
-        if ((section_flags_for_section(?img.sections[s]) & SHF_MERGE) != 0) {
-            entsize = img.sections[s].len::u64;
-        }
+        val sh_flags: u64 = section_flags_for_section(?img.sections[s]);
+        if ((sh_flags & SHF_STRINGS) != 0)    { entsize = 1; }
+        or ((sh_flags & SHF_MERGE) != 0)      { entsize = img.sections[s].len::u64; }
         val declared_type: opt[u32] = section_type_for(img.sections[s].kind);
         if (sel declared_type.none) {
             ret err[fail.Fail].err{fail.message_of(target_of.section_kind_rejection(img.interner, img.alloc, img.sections[s].kind))};
@@ -1255,6 +1372,10 @@ fun emit_object_image(tgt_isa: *target_of.ObjectTarget, img: *target_of.ObjectIm
     if (attr_row != of_plan.NO_ROW) {
         shdr_pos = write_shdr(buf, shdr_pos, ?lay, attr_name_off, attr.sht, 0, 0,
             of_plan.offset(?fp, attr_row)::u64, attr_size::u64, 0, 0, 1, 0);
+    }
+    if (shndx_row != of_plan.NO_ROW) {
+        shdr_pos = write_shdr(buf, shdr_pos, ?lay, shndx_name_off, SHT_SYMTAB_SHNDX, 0, 0,
+            of_plan.offset(?fp, shndx_row)::u64, of_plan.size(?fp, shndx_row)::u64, symtab_shidx, 0, 4, 4);
     }
     val shdr_closed: err[fail.Fail] = of_plan.close(?fp, shdr_row, shdr_pos);
     if (sel shdr_closed.err) { ret shdr_closed; }
@@ -1504,9 +1625,13 @@ fun shared_identity(bytes: *u8, len: usize, arch_id: u32, path: *u8, out: *u8, c
 }
 
 fun soname_read(buf: *u8, len: usize, out: *u8, cap: usize) bool {
-    val e_shoff:     usize = bin.read_u64_le(buf, 40)::usize;
-    val e_shentsize: usize = bin.read_u16_le(buf, 58)::usize;
-    val e_shnum:     usize = bin.read_u16_le(buf, 60)::usize;
+    if (len < 64) { ret false; }
+    var lay:   ElfLayout                    = elf64_layout();
+    val table: res[SectionTable, fail.Fail] = section_table(buf, len, ?lay);
+    if (sel table.err) { ret false; }
+    val e_shoff:     usize = table.ok.off;
+    val e_shentsize: usize = table.ok.entsize;
+    val e_shnum:     usize = table.ok.count::usize;
     if (e_shoff == 0 || e_shnum == 0) { ret false; }
 
     var dyn_off:    usize = 0;
@@ -1981,6 +2106,7 @@ rec DebugSht {
     shstr_row:       u32;
     shstr_sz:        usize;
     shstr_name_rel:  usize;
+    numbering:       SectionNumbering;
 }
 
 fun debug_sht_plan(alloc: *A.Allocator, itn: *intern.Interner, lay: *ElfLayout, fp: *of_plan.FilePlan,
@@ -2001,6 +2127,7 @@ fun debug_sht_plan(alloc: *A.Allocator, itn: *intern.Interner, lay: *ElfLayout, 
     p.shstr_row       = of_plan.NO_ROW;
     p.shstr_sz        = 0;
     p.shstr_name_rel  = 0;
+    p.numbering       = SectionNumbering{e_shnum: 0, e_shstrndx: 0, null_size: 0, null_link: 0};
     val has_symtab: bool = sb.symtab_bytes != nil;
     if (debug_count == 0 && !has_symtab) { ret res[DebugSht, fail.Fail].ok{p}; }
 
@@ -2095,25 +2222,17 @@ fun debug_sht_plan(alloc: *A.Allocator, itn: *intern.Interner, lay: *ElfLayout, 
     ret res[DebugSht, fail.Fail].ok{p};
 }
 
-# e_shnum holds at most SHN_LORESERVE - 1 sections; the extended-count form
-# (e_shnum = 0 with the count in the null header) is not emitted
-val SHNUM_LIMIT: usize = 0xFEFF;
-
-fun shnum(fp: *of_plan.FilePlan, count: usize) res[u16, fail.Fail] {
-    if (count > SHNUM_LIMIT) { ret res[u16, fail.Fail].err{fail.user(diagnostic_kind.LINK_SIZE_LIMIT, "section-header count exceeds the ELF e_shnum limit")}; }
-    ret of_plan.field_u16(fp, count, "e_shnum");
-}
-
 fun debug_sht_header(fp: *of_plan.FilePlan, p: *DebugSht, e_shoff: *u64, e_shnum: *u16, e_shstrndx: *u16) err[fail.Fail] {
     @e_shoff    = 0;
     @e_shnum    = 0;
     @e_shstrndx = 0;
     if (!p.present) { ret err[fail.Fail].ok{}; }
     @e_shoff = of_plan.offset(fp, p.shdr_row)::u64;
-    val shnum: res[u16, fail.Fail] = shnum(fp, p.sht_count::usize);
-    if (sel shnum.err) { ret err[fail.Fail].err{shnum.err}; }
-    @e_shnum    = shnum.ok;
-    @e_shstrndx = @e_shnum - 1;
+    val numbering: res[SectionNumbering, fail.Fail] = section_numbering(p.sht_count::usize, p.shstrndx::usize);
+    if (sel numbering.err) { ret err[fail.Fail].err{numbering.err}; }
+    p.numbering = numbering.ok;
+    @e_shnum    = numbering.ok.e_shnum;
+    @e_shstrndx = numbering.ok.e_shstrndx;
     ret err[fail.Fail].ok{};
 }
 
@@ -2160,7 +2279,7 @@ fun debug_sht_write(buf: *u8, itn: *intern.Interner, lay: *ElfLayout, fp: *of_pl
     val names_closed: err[fail.Fail] = of_plan.close_size(fp, p.shstr_row, np);
     if (sel names_closed.err) { ret names_closed; }
 
-    var hp:    usize = of_plan.offset(fp, p.shdr_row) + lay.shdr_size;
+    var hp:    usize = write_null_shdr(buf, of_plan.offset(fp, p.shdr_row), lay, ?p.numbering);
     var shidx: u32   = 1;
     ai = 0;
     for (ai < aux_count) {
@@ -2327,7 +2446,8 @@ fun fill_image_section_aux(alloc: *A.Allocator, itn: *intern.Interner, fp: *of_p
 # the section header index an image address falls in, in the order
 # fill_image_section_aux writes: the allocated sections occupy 1..n in every
 # image this writer produces. an address inside no section is absolute
-fun image_section_shndx(segs: *target_of.LoadSegment, seg_count: u32, vaddr: u64) u16 {
+# the image section holding `vaddr`, 0 for an address no section holds
+fun image_section_shndx(segs: *target_of.LoadSegment, seg_count: u32, vaddr: u64) u32 {
     var idx: u32 = 1;
     var li:  u32 = 0;
     for (li < seg_count) {
@@ -2336,13 +2456,13 @@ fun image_section_shndx(segs: *target_of.LoadSegment, seg_count: u32, vaddr: u64
         for (i < segs[li].section_count) {
             val sec: *target_of.LoadSection = ?segs[li].sections[i];
             val lo:  u64                    = segs[li].vaddr + sec.offset::u64;
-            if (vaddr >= lo && vaddr < lo + sec.len::u64) { ret idx::u16; }
+            if (vaddr >= lo && vaddr < lo + sec.len::u64) { ret idx; }
             idx = idx + 1;
             i   = i + 1;
         }
         li = li + 1;
     }
-    ret SHN_ABS;
+    ret 0;
 }
 
 fun write_relative_relocs(buf: *u8, fp: *of_plan.FilePlan, row: u32, rel_type: u32,
@@ -2830,7 +2950,7 @@ fun emit_shared(img: *target_of.LinkedImage, dst: *of_destination.Destination) e
             if (exports[e].vaddr >= sv && exports[e].vaddr < sv + segs[sgi].memsz::u64) { shndx = (sgi + 1)::u16; }
             sgi = sgi + 1;
         }
-        if (exports[e].absolute) { shndx = 0xFFF1; }
+        if (exports[e].absolute) { shndx = SHN_ABS; }
         val name_field: res[u32, fail.Fail] = of_plan.field_u32(fp, exp_str[e], "export name offset");
         if (sel name_field.err) { ret err[fail.Fail].err{name_field.err}; }
         bin.write_u32_le(buf, sym_off, name_field.ok);
@@ -3997,16 +4117,15 @@ fun section_has_bytes(ty: u32, machine: u16) bool {
 }
 
 fun read_build_attributes(alloc: *A.Allocator, buf: *u8, buf_size: usize, lay: *ElfLayout,
-    e_machine: u16, e_shoff: usize, e_shentsize: u16, e_shnum: u16,
-    out: *target_of.ObjectImage) err[fail.Fail] {
+    e_machine: u16, table: *SectionTable, out: *target_of.ObjectImage) err[fail.Fail] {
     out.attributes     = nil;
     out.attributes_len = 0;
     val row: *IsaRow = row_for_machine(e_machine);
     if (row == nil || !row.has_attributes) { ret err[fail.Fail].ok{}; }
 
     var si: u32 = 0;
-    for (si < e_shnum::u32) {
-        val sh: ElfShdr = read_shdr(buf, e_shoff + si::usize * e_shentsize::usize, lay);
+    for (si < table.count) {
+        val sh: ElfShdr = read_shdr(buf, table.off + si::usize * table.entsize, lay);
         si = si + 1;
         if (sh.stype != row.attributes.sht) { cnt; }
 
@@ -4092,28 +4211,23 @@ fun parse_object_into(alloc: *A.Allocator, itn: *intern.Interner, buf: *u8, buf_
     if (!layout_from_class(buf[4], ?lay)) { ret err[fail.Fail].err{fail.user_of(diagnostic_kind.OBJECT_MALFORMED, bad_class_message(itn, alloc, buf[4]))}; }
     if (buf_size < lay.ehdr_size)         { ret err[fail.Fail].err{fail.user(diagnostic_kind.OBJECT_MALFORMED, "ELF object too small")}; }
 
-    val e_machine: u16   = bin.read_u16_le(buf, 18);
-    val hdr_tail:  usize = 24 + 3 * lay.addr_width::usize;
-    out.machine_flags = bin.read_u32_le(buf, hdr_tail);
-    val e_shoff:     usize = read_addr(buf, 24 + 2 * lay.addr_width::usize, ?lay)::usize;
-    val e_shentsize: u16   = bin.read_u16_le(buf, hdr_tail + 10);
-    val e_shnum:     u16   = bin.read_u16_le(buf, hdr_tail + 12);
-    val e_shstrndx:  u16   = bin.read_u16_le(buf, hdr_tail + 14);
-    if (e_shoff == 0 || e_shnum == 0) { ret err[fail.Fail].err{fail.user(diagnostic_kind.OBJECT_MALFORMED, "no section headers")}; }
+    val e_machine: u16 = bin.read_u16_le(buf, 18);
+    out.machine_flags = bin.read_u32_le(buf, 24 + 3 * lay.addr_width::usize);
+    val table: res[SectionTable, fail.Fail] = section_table(buf, buf_size, ?lay);
+    if (sel table.err) { ret err[fail.Fail].err{table.err}; }
+    val e_shoff:     usize = table.ok.off;
+    val e_shentsize: usize = table.ok.entsize;
+    val e_shnum:     u32   = table.ok.count;
+    val e_shstrndx:  u32   = table.ok.shstrndx;
+    if (e_shnum == 0) { ret err[fail.Fail].err{fail.user(diagnostic_kind.OBJECT_MALFORMED, "no section headers")}; }
 
-    if (e_shentsize::usize < lay.shdr_size) { ret err[fail.Fail].err{fail.user(diagnostic_kind.OBJECT_MALFORMED, "section header entry too small")}; }
-    val vsht: err[fail.Fail] = bin.require_region(buf_size, e_shoff,
-        e_shnum::usize * e_shentsize::usize, "section header table out of bounds");
-    if (sel vsht.err) { ret vsht; }
-
-    val vab: err[fail.Fail] = read_build_attributes(alloc, buf, buf_size, ?lay, e_machine, e_shoff,
-        e_shentsize, e_shnum, out);
+    val vab: err[fail.Fail] = read_build_attributes(alloc, buf, buf_size, ?lay, e_machine, ?table.ok, out);
     if (sel vab.err) { ret vab; }
 
     var shstr_off:  usize = 0;
     var have_shstr: bool  = false;
     if (e_shstrndx < e_shnum) {
-        val sh: ElfShdr = read_shdr(buf, e_shoff + e_shstrndx::usize * e_shentsize::usize, ?lay);
+        val sh: ElfShdr = read_shdr(buf, e_shoff + e_shstrndx::usize * e_shentsize, ?lay);
         shstr_off = sh.offset::usize;
         val shstr_size: usize          = sh.size::usize;
         val vss:        err[fail.Fail] = bin.require_region(buf_size, shstr_off, shstr_size,
@@ -4127,9 +4241,13 @@ fun parse_object_into(alloc: *A.Allocator, itn: *intern.Interner, buf: *u8, buf_
     var have_strtab:  bool  = false;
     var symtab:       *u8   = nil;
     var symtab_count: u32   = 0;
-    var sh:           u16   = 0;
+    var symtab_index: u32   = 0;
+    var xindex_link:  u32   = 0;
+    var xindex:       *u8   = nil;
+    var xindex_count: u32   = 0;
+    var sh:           u32   = 0;
     for (sh < e_shnum) {
-        val shh: ElfShdr = read_shdr(buf, e_shoff + sh::usize * e_shentsize::usize, ?lay);
+        val shh: ElfShdr = read_shdr(buf, e_shoff + sh::usize * e_shentsize, ?lay);
         if (shh.stype == SHT_SYMTAB) {
             val symtab_off: usize = shh.offset::usize;
             val ent:        usize = shh.entsize::usize;
@@ -4144,10 +4262,11 @@ fun parse_object_into(alloc: *A.Allocator, itn: *intern.Interner, buf: *u8, buf_
             val vsy: err[fail.Fail] = bin.require_region(buf_size, symtab_off,
                 symtab_count::usize * lay.sym_size, "symbol table out of bounds");
             if (sel vsy.err) { ret vsy; }
-            symtab = (buf::usize + symtab_off)::*u8;
+            symtab       = (buf::usize + symtab_off)::*u8;
+            symtab_index = sh;
             val link: u32 = shh.link;
-            if (link < e_shnum::u32) {
-                val lh: ElfShdr = read_shdr(buf, e_shoff + link::usize * e_shentsize::usize, ?lay);
+            if (link < e_shnum) {
+                val lh: ElfShdr = read_shdr(buf, e_shoff + link::usize * e_shentsize, ?lay);
                 strtab_off  = lh.offset::usize;
                 strtab_size = lh.size::usize;
                 val vst: err[fail.Fail] = bin.require_region(buf_size, strtab_off, strtab_size,
@@ -4156,14 +4275,23 @@ fun parse_object_into(alloc: *A.Allocator, itn: *intern.Interner, buf: *u8, buf_
                 have_strtab = true;
             }
         }
+        if (shh.stype == SHT_SYMTAB_SHNDX) {
+            val count: usize          = shh.size::usize / 4;
+            val vx:    err[fail.Fail] = bin.require_region(buf_size, shh.offset::usize, count * 4, "symbol section index table out of bounds");
+            if (sel vx.err) { ret vx; }
+            xindex       = (buf::usize + shh.offset::usize)::*u8;
+            xindex_count = count::u32;
+            xindex_link  = shh.link;
+        }
         sh = sh + 1;
     }
+    if (xindex != nil && (symtab == nil || xindex_link != symtab_index)) { xindex = nil; }
 
     var sec_n:     u32                                      = 0;
     var rel_total: lang_checked.Count[target_of.Relocation] = lang_checked.count[target_of.Relocation](0::usize);
     sh = 0;
     for (sh < e_shnum) {
-        val shh: ElfShdr = read_shdr(buf, e_shoff + sh::usize * e_shentsize::usize, ?lay);
+        val shh: ElfShdr = read_shdr(buf, e_shoff + sh::usize * e_shentsize, ?lay);
         if (section_has_bytes(shh.stype, e_machine)) { sec_n = sec_n + 1; }
         if (shh.stype == SHT_RELA) {
             val term: lang_checked.Count[target_of.Relocation] =
@@ -4217,7 +4345,7 @@ fun parse_object_into(alloc: *A.Allocator, itn: *intern.Interner, buf: *u8, buf_
     sh = 0;
     for (sh < e_shnum) {
         sec_map[sh] = -1;
-        val shh: ElfShdr = read_shdr(buf, e_shoff + sh::usize * e_shentsize::usize, ?lay);
+        val shh: ElfShdr = read_shdr(buf, e_shoff + sh::usize * e_shentsize, ?lay);
         val ty:  u32     = shh.stype;
         if (section_has_bytes(ty, e_machine)) {
             val flags: u64 = shh.flags;
@@ -4305,7 +4433,7 @@ fun parse_object_into(alloc: *A.Allocator, itn: *intern.Interner, buf: *u8, buf_
     sh = 0;
     for (sh < e_shnum) {
         if (sec_map[sh] >= 0) {
-            val header:  ElfShdr            = read_shdr(buf, e_shoff + sh::usize * e_shentsize::usize, ?lay);
+            val header:  ElfShdr            = read_shdr(buf, e_shoff + sh::usize * e_shentsize, ?lay);
             val section: *target_of.Section = ?out.sections[sec_map[sh]::u32];
             if (header.stype == SHT_INIT_ARRAY) { section.flags = section.flags | target_of.SEC_FLAG_INIT_FUNCS; }
             if (header.stype == SHT_GROUP) {
@@ -4317,15 +4445,15 @@ fun parse_object_into(alloc: *A.Allocator, itn: *intern.Interner, buf: *u8, buf_
                 var at: usize = 4;
                 for (at < section.len::usize) {
                     val member: u32 = bin.read_u32_le(section.bytes, at);
-                    if (member >= e_shnum::u32) {
+                    if (member >= e_shnum) {
                         A.deallocate[i32](alloc, sec_map, e_shnum::usize);
                         ret err[fail.Fail].err{fail.user(diagnostic_kind.OBJECT_MALFORMED, "section group member is out of range")};
                     }
                     var mapped: u32 = 0;
                     if (sec_map[member] >= 0) { mapped = sec_map[member]::u32 + 1; }
                     or {
-                        val relation: ElfShdr = read_shdr(buf, e_shoff + member::usize * e_shentsize::usize, ?lay);
-                        if (relation.stype != SHT_RELA || relation.info >= e_shnum::u32 || sec_map[relation.info] < 0) {
+                        val relation: ElfShdr = read_shdr(buf, e_shoff + member::usize * e_shentsize, ?lay);
+                        if (relation.stype != SHT_RELA || relation.info >= e_shnum || sec_map[relation.info] < 0) {
                             A.deallocate[i32](alloc, sec_map, e_shnum::usize);
                             ret err[fail.Fail].err{fail.user(diagnostic_kind.OBJECT_UNSUPPORTED, "section group has an unrepresented member")};
                         }
@@ -4336,7 +4464,7 @@ fun parse_object_into(alloc: *A.Allocator, itn: *intern.Interner, buf: *u8, buf_
                 }
             }
             or (header.link != 0) {
-                if (header.link >= e_shnum::u32 || sec_map[header.link] < 0) {
+                if (header.link >= e_shnum || sec_map[header.link] < 0) {
                     A.deallocate[i32](alloc, sec_map, e_shnum::usize);
                     ret err[fail.Fail].err{fail.user(diagnostic_kind.OBJECT_UNSUPPORTED, "section link has an unrepresented target")};
                 }
@@ -4354,6 +4482,17 @@ fun parse_object_into(alloc: *A.Allocator, itn: *intern.Interner, buf: *u8, buf_
             val sym:      ElfSym = read_sym(symtab, si::usize * lay.sym_size, ?lay);
             val st_info:  u8     = sym.info;
             val st_shndx: u16    = sym.shndx;
+            # an index in the reserved range names no section unless it is
+            # SHN_XINDEX, which defers to the symbol's .symtab_shndx entry
+            var section_index: u32 = e_shnum;
+            if (st_shndx == SHN_XINDEX) {
+                if (xindex == nil || si >= xindex_count) {
+                    A.deallocate[i32](alloc, sec_map, e_shnum::usize);
+                    ret err[fail.Fail].err{fail.user(diagnostic_kind.OBJECT_MALFORMED, "extended symbol section index has no .symtab_shndx entry")};
+                }
+                section_index = bin.read_u32_le(xindex, si::usize * 4);
+            }
+            or (st_shndx::u32 < SHN_LORESERVE) { section_index = st_shndx::u32; }
 
             val rnm: res[str, fail.Fail] = bin.cstr_at(buf, buf_size, strtab_off + sym.name::usize);
             if (sel rnm.err) {
@@ -4371,7 +4510,7 @@ fun parse_object_into(alloc: *A.Allocator, itn: *intern.Interner, buf: *u8, buf_
             out.symbols[idx].offset = sym.value::u32;
             out.symbols[idx].size   = sym.size::u32;
             out.symbols[idx].native = target_of.NativeSymbol{format: target_of.ELF, kind: st_info::u32, flags: sym.other::u32};
-            if (sym.size > 0xFFFFFFFF || (st_shndx != 0xFFF1 && sym.value > 0xFFFFFFFF)) {
+            if (sym.size > 0xFFFFFFFF || (st_shndx != SHN_ABS && sym.value > 0xFFFFFFFF)) {
                 A.deallocate[i32](alloc, sec_map, e_shnum::usize);
                 ret err[fail.Fail].err{fail.user(diagnostic_kind.OBJECT_UNSUPPORTED, "symbol extent exceeds represented width")};
             }
@@ -4386,12 +4525,12 @@ fun parse_object_into(alloc: *A.Allocator, itn: *intern.Interner, buf: *u8, buf_
                 flags                    = flags | target_of.SYM_OBJ_FLAG_EXTERN;
                 out.symbols[idx].section = target_of.external_section();
             }
-            or (st_shndx == 0xFFF1) {
+            or (st_shndx == SHN_ABS) {
                 out.symbols[idx].section        = target_of.absolute_section();
                 out.symbols[idx].offset         = 0;
                 out.symbols[idx].absolute_value = sym.value;
             }
-            or (st_shndx == 0xFFF2) {
+            or (st_shndx == SHN_COMMON) {
                 if (sym.value > 0xFFFFFFFF || sym.size > 0xFFFFFFFF) {
                     A.deallocate[i32](alloc, sec_map, e_shnum::usize);
                     ret err[fail.Fail].err{fail.user(diagnostic_kind.OBJECT_UNSUPPORTED, "common symbol exceeds represented size or alignment")};
@@ -4401,8 +4540,8 @@ fun parse_object_into(alloc: *A.Allocator, itn: *intern.Interner, buf: *u8, buf_
                 out.symbols[idx].offset  = 0;
                 out.symbols[idx].align   = sym.value::u32;
             }
-            or (st_shndx < e_shnum && sec_map[st_shndx] >= 0) {
-                out.symbols[idx].section = target_of.section_id(sec_map[st_shndx]::u32);
+            or (section_index < e_shnum && sec_map[section_index] >= 0) {
+                out.symbols[idx].section = target_of.section_id(sec_map[section_index]::u32);
             }
             or {
                 out.symbols[idx].section = target_of.external_section();
@@ -4416,7 +4555,7 @@ fun parse_object_into(alloc: *A.Allocator, itn: *intern.Interner, buf: *u8, buf_
     var rel_i: u32 = 0;
     sh = 0;
     for (sh < e_shnum) {
-        val shh: ElfShdr = read_shdr(buf, e_shoff + sh::usize * e_shentsize::usize, ?lay);
+        val shh: ElfShdr = read_shdr(buf, e_shoff + sh::usize * e_shentsize, ?lay);
         if (shh.stype == SHT_RELA) {
             val r_base:  usize = shh.offset::usize;
             val sh_info: u32   = shh.info;
@@ -4426,7 +4565,7 @@ fun parse_object_into(alloc: *A.Allocator, itn: *intern.Interner, buf: *u8, buf_
                 ret err[fail.Fail].err{fail.user(diagnostic_kind.OBJECT_MALFORMED, "relocation array out of bounds")};
             }
             var target_sec: i32 = -1;
-            if (sh_info < e_shnum::u32) { target_sec = sec_map[sh_info]; }
+            if (sh_info < e_shnum) { target_sec = sec_map[sh_info]; }
 
             var ri: u32 = 0;
             for (ri < count) {
@@ -5173,6 +5312,86 @@ test emit_object__section_flags_round_trip {
     }
     if (marked != 1)   { ret 1; }
     if (unmarked != 1) { ret 1; }
+    ret 0;
+}
+
+# an object past the 16-bit section count is numbered through the null
+# header and .symtab_shndx, and reads back whole: a symbol in a section
+# indexed past SHN_LORESERVE still names it, and a string section keeps its
+# merge spelling
+test emit_object__extended_section_numbering_round_trips {
+    var alloc: A.Allocator;
+    page.make(?alloc);
+    var i:      intern.Interner        = intern.init(?alloc);
+    var seam:   isa.RelocSeam          = t_seam();
+    var isa_vt: target_of.ObjectTarget = t_isa(catalog_arch.X86_64, ?seam);
+
+    val count: u32                              = SHN_LORESERVE + 16;
+    val made:  res[*target_of.Section, A.Error] = A.zallocate[target_of.Section](?alloc, count::usize);
+    if (sel made.err) { ret 1; }
+    val secs: *target_of.Section = made.ok;
+    var one:  [1]u8;
+    var text: [3]u8;
+    one[0]  = 0x5A;
+    text[0] = 'a';
+    text[1] = 'b';
+    text[2] = 0;
+    val rodata: intern.StrId = t_intern(?i, ".rodata");
+    var k:      u32          = 0;
+    for (k < count) {
+        secs[k] = target_of.Section{name: rodata, kind: target_of.SK_RODATA, bytes: ?one[0], len: 1, align: 1, flags: 0};
+        k       = k + 1;
+    }
+    secs[count - 1] = target_of.Section{name: t_intern(?i, ".rodata.str"), kind: target_of.SK_RODATA, bytes: ?text[0], len: 3,
+        align: 1, flags: target_of.SEC_FLAG_STRINGS};
+
+    var syms: [2]target_of.Symbol;
+    syms[0] = target_of.Symbol{name: t_intern(?i, "FIRST"), section: target_of.section_id(0), offset: 0, size: 1,
+        flags: target_of.SYM_OBJ_FLAG_GLOBAL | target_of.SYM_OBJ_FLAG_OBJECT, fallback: target_of.SYMBOL_NONE, align: 1};
+    syms[1] = target_of.Symbol{name: t_intern(?i, "LAST"), section: target_of.section_id(count - 1), offset: 0, size: 3,
+        flags: target_of.SYM_OBJ_FLAG_GLOBAL | target_of.SYM_OBJ_FLAG_OBJECT, fallback: target_of.SYMBOL_NONE, align: 1};
+
+    var img: target_of.ObjectImage = target_of.object_image_init(?alloc, ?i, t_intern(?i, "extended"));
+    img.sections      = secs;
+    img.section_count = count;
+    img.symbols       = ?syms[0];
+    img.symbol_count  = 2;
+
+    val tf_r: res[output_testing.Output, fail.Fail] = output_testing.create(?alloc, "elf_extended");
+    if (sel tf_r.err) { ret 2; }
+    var tf: output_testing.Output = tf_r.ok;
+    fin { output_testing.dnit(?tf); }
+    val tpath: str = output_testing.path(?tf);
+
+    val em: err[fail.Fail] = target_of.object_write(object_emit, ?isa_vt, ?img, tpath);
+    if (sel em.err) { ret 3; }
+    val rb: res[Vector[u8], fs.FsError] = fs.read_bytes(?alloc, tpath);
+    if (sel rb.err) { ret 4; }
+    val buf: Vector[u8] = rb.ok;
+    if (bin.read_u16_le(buf.data, 60) != 0 || bin.read_u16_le(buf.data, 62) != SHN_XINDEX) { ret 5; }
+
+    var out: target_of.ObjectImage;
+    val pr:  err[fail.Fail] = parse_object(?alloc, ?i, buf.data, buf.len, ?out);
+    if (sel pr.err)                  { ret 6; }
+    if (out.section_count != count) { ret 7; }
+    var found: u32 = 0;
+    var si:    u32 = 0;
+    for (si < out.symbol_count) {
+        val sym: *target_of.Symbol = ?out.symbols[si];
+        if (intern.str_same(sym.name, syms[0].name)) {
+            if (target_of.section_index(sym.section) != 0) { ret 8; }
+            found = found + 1;
+        }
+        if (intern.str_same(sym.name, syms[1].name)) {
+            if (target_of.section_index(sym.section) != count - 1) { ret 9; }
+            found = found + 1;
+        }
+        si = si + 1;
+    }
+    if (found != 2) { ret 10; }
+    val strings: *target_of.Section = ?out.sections[count - 1];
+    if ((strings.native.flags & (SHF_MERGE | SHF_STRINGS)) != (SHF_MERGE | SHF_STRINGS) || strings.native.entry_size != 1) { ret 11; }
+    if (strings.len != 3 || strings.bytes[1] != 'b') { ret 12; }
     ret 0;
 }
 
@@ -7994,7 +8213,10 @@ test emit_exec__refuses_a_misaligned_debug_placement {
     ret 0;
 }
 
-test emit_exec__refuses_a_section_count_past_e_shnum {
+# an image whose section table outgrows the 16-bit header fields numbers it
+# through the null header: the count in its sh_size, the name table's index
+# in its sh_link
+test emit_exec__numbers_a_section_count_past_e_shnum_through_the_null_header {
     var alloc: A.Allocator;
     page.make(?alloc);
     var i:      intern.Interner        = intern.init(?alloc);
@@ -8035,9 +8257,14 @@ test emit_exec__refuses_a_section_count_past_e_shnum {
     val tpath: str = output_testing.path(?tf);
 
     val em: err[fail.Fail] = target_of.image_write(emit_exec, target_of.LinkedImage{alloc: ?alloc, interner: ?i, target: ?isa_vt, segments: ?segs[0], segment_count: 1, page_size: 4096, image_base: 0x400000, entry: 0x401000, debug: dbg, debug_count: count, name: "shnum"::*u8, options: target_of.image_options_default(catalog_subsystem.CONSOLE), product: catalog_artifact.EXECUTABLE}, tpath);
-    if (sel em.ok)                                       { ret 2; }
-    if (!str_contains(fail.describe(em.err), "e_shnum")) { ret 3; }
-    if (!t_untouched(?alloc, tpath))                     { ret 4; }
+    if (sel em.err) { ret 2; }
+    val rb: res[Vector[u8], fs.FsError] = fs.read_bytes(?alloc, tpath);
+    if (sel rb.err) { ret 3; }
+    val buf: Vector[u8] = rb.ok;
+    if (bin.read_u16_le(buf.data, 60) != 0 || bin.read_u16_le(buf.data, 62) != SHN_XINDEX) { ret 4; }
+    val null_at: usize = bin.read_u64_le(buf.data, 40)::usize;
+    val total:   u64   = bin.read_u64_le(buf.data, null_at + 32);
+    if (total <= count::u64 || bin.read_u32_le(buf.data, null_at + 40)::u64 != total - 1) { ret 5; }
     ret 0;
 }
 
