@@ -8,6 +8,9 @@ use std.types.string.str_contains;
 use std.types.string.str_equals;
 
 use diagnostic_kind: mach.lang.diagnostic.kind;
+# the dudect probes, held to the leaky and constant-time references
+#[testing]
+use mach.lang.ct.probe;
 
 # an inline-asm block the constant-time scan refuses
 # ---
