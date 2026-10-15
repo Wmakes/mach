@@ -152,6 +152,13 @@ fun expr_has_c_variadic_call(sc: *sema_context.SemaContext, a: *ast.Ast, rr: *re
         ret false;
     }
     if (k == ast_expr.EXPR_KIND_STRUCT_LIT) {
+        var j: u32 = 0;
+        for (j < e.data.struct_lit.elems_len) {
+            val ix: u32 = e.data.struct_lit.elems_start + j;
+            if (ix::usize < a.expr_ids.len
+                && expr_has_c_variadic_call(sc, a, rr, a.expr_ids.data[ix], want_spread, seen)) { ret true; }
+            j = j + 1;
+        }
         var i: u32 = 0;
         for (i < e.data.struct_lit.fields_len) {
             val ix: u32 = e.data.struct_lit.fields_start + i;
