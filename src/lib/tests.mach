@@ -20,7 +20,6 @@ use driver_testing_marker_tests: mach.lang.driver.tests.testing_marker;
 use sema_tests:                  mach.lang.fe.sema.tests;
 use me_tests:                    mach.lang.me.tests;
 use readout_tests:               mach.lang.readout.tests;
-use session_tests:               mach.lang.session.tests;
 use mach.lang.target.isa.asm.crypto;
 use mach.lang.target.isa.asm.extensions;
 use mach.lang.target.isa.asm.host;
