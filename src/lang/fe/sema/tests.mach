@@ -1460,6 +1460,14 @@ test pack__forwards_into_a_c_variadic_tail {
     ret bad;
 }
 
+# a case literal carries its payload only in positional elements, which the reach scan visits
+test pack__forwards_into_a_c_variadic_tail_through_a_case_literal {
+    val decls: str = "ext fun printf(fmt: *u8, ...) i32;\ntag Reply: u8 { empty; value: i32; }\npub fun logf(fmt: *u8, va: ...) Reply { ret Reply.value{printf(fmt, va...)}; }\n";
+    if (ut_vec_diag(ut_cc_src(decls, "fun use_it() Reply { var c: u8 = 65; ret logf(\"%d\\n\", c); }\n"),
+        "is promoted to a 32-bit integer in a C-variadic argument") != 0) { ret 1; }
+    ret 0;
+}
+
 #[testing]
 fun ut_tag_corpus_range(first: usize, count: usize) i32 {
     var alloc:  A.Allocator;
