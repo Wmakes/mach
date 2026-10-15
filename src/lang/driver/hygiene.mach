@@ -1,9 +1,10 @@
-# the hygiene of the code that stays at the toolchain split, read from the
-# source tree under the working directory: each module is imported under one
-# name and each name imports one module, no pub declaration is named only in
-# its own file unless its doc comment says what reaches it, driver imports
-# nothing of build, and a file directly under src/lang is a foundation or the
-# facade of a shadow module
+# the compiler's own source held to its rules, read from the checkout: each module is
+# imported under one name and each name imports one module, no pub declaration is named
+# only in its own file unless its doc comment says what reaches it, driver imports nothing
+# of build, a file directly under src/lang is a foundation or the facade of a shadow
+# module, and the layers the imports form: the front and middle end reach no backend, the
+# target tree and the pipeline meet only in the contract, and no test import climbs above
+# its module's layer
 use std.allocator.arena;
 use std.allocator.page;
 use collections_vector: std.collections.vector;
@@ -15,6 +16,7 @@ use std.types.bool.bool;
 use std.types.bool.false;
 use std.types.bool.true;
 use std.types.error.err;
+use std.types.option.opt;
 use types_path: std.types.path;
 use std.types.result.res;
 use std.types.size.usize;
@@ -26,6 +28,7 @@ use std.types.string.str_region_equals;
 
 use A: std.allocator;
 
+use mach.lang.checkout;
 use mach.lang.diagnostic;
 use mach.lang.fail;
 use mach.lang.fe.ast;
@@ -35,6 +38,7 @@ use ast_module: mach.lang.fe.ast.module;
 use fe_lexer:   mach.lang.fe.lexer;
 use fe_parser:  mach.lang.fe.parser;
 use mach.lang.fe.parser.state;
+use mach.lang.fe.resolve;
 use mach.lang.fe.token;
 use mach.lang.intern;
 use mach.lang.listing;
@@ -120,15 +124,17 @@ rec Tree {
     by_fqn:   Vector[u32];
 }
 
-# a `use` in any file, leaving or staying, read for layering: the path it names
-# and the file of the module that path is or names a member of, NONE outside
-# the tree. the imports of file f run from starts[f] to the next file's start
+# a `use` in any file, leaving or staying, read for layering: the path it names,
+# the file of the module that path is or names a member of, NONE outside the tree,
+# and whether `#[testing]` confines it to tests. the imports of file f run from
+# starts[f] to the next file's start
 #[testing]
 rec Import {
-    file: u32;
-    line: usize;
-    path: intern.StrId;
-    to:   u32;
+    file:    u32;
+    line:    usize;
+    path:    intern.StrId;
+    to:      u32;
+    testing: bool;
 }
 
 # where a scan stands in a file's text, so lines are counted once
@@ -167,32 +173,6 @@ fun is_dir(path: str) bool {
     val r: res[bool, io_error.Error] = fs.is_dir(path);
     if (sel r.ok) { ret r.ok; }
     ret false;
-}
-
-#[testing]
-fun is_file(path: str) bool {
-    val r: res[bool, io_error.Error] = fs.is_file(path);
-    if (sel r.ok) { ret r.ok; }
-    ret false;
-}
-
-# the source root above the working directory: the one holding this module
-#[testing]
-fun find_src(alloc: *A.Allocator) res[str, fail.Fail] {
-    var prefix: str   = ".";
-    var depth:  usize = 0;
-    for (depth < 8) {
-        val rs: res[str, A.Error] = types_path.join(alloc, prefix, "src");
-        if (sel rs.err) { ret res[str, fail.Fail].err{fail.refused(rs.err)}; }
-        val rm: res[str, A.Error] = types_path.join(alloc, rs.ok, "lang/driver/tests/hygiene.mach");
-        if (sel rm.err)     { ret res[str, fail.Fail].err{fail.refused(rm.err)}; }
-        if (is_file(rm.ok)) { ret res[str, fail.Fail].ok{rs.ok}; }
-        val ru: res[str, A.Error] = types_path.join(alloc, prefix, "..");
-        if (sel ru.err) { ret res[str, fail.Fail].err{fail.refused(ru.err)}; }
-        prefix = ru.ok;
-        depth  = depth + 1;
-    }
-    ret res[str, fail.Fail].err{fail.message("hygiene: no source root above the working directory")};
 }
 
 # the line of `offset`, which no earlier call on the cursor passed
@@ -276,11 +256,11 @@ fun publishes(d: *ast_decl.Decl) bool {
 }
 
 #[testing]
-fun record(t: *Tree, f: u32, text: str, c: *Cursor, d: *ast_decl.Decl) err[fail.Fail] {
+fun record(t: *Tree, f: u32, text: str, c: *Cursor, d: *ast_decl.Decl, testing: bool) err[fail.Fail] {
     val path: lang_source.Span           = d.data.use_.path;
     val rp:   res[intern.StrId, A.Error] = intern.range_add(?t.itn, text, path.offset, path.len);
     if (sel rp.err) { ret err[fail.Fail].err{fail.refused(rp.err)}; }
-    val pushed: res[usize, A.Error] = collections_vector.push[Import](?t.imports, Import{file: f, line: line_at(c, d.span.offset), path: rp.ok, to: NONE});
+    val pushed: res[usize, A.Error] = collections_vector.push[Import](?t.imports, Import{file: f, line: line_at(c, d.span.offset), path: rp.ok, to: NONE, testing: testing});
     if (sel pushed.err) { ret err[fail.Fail].err{fail.refused(pushed.err)}; }
     ret err[fail.Fail].ok{};
 }
@@ -306,7 +286,7 @@ fun walk(t: *Tree, f: u32, text: str, c: *Cursor, a: *ast.Ast, start: u32, len: 
             cnt;
         }
         if (d.kind == ast_decl.DECL_KIND_USE) {
-            val recorded: err[fail.Fail] = record(t, f, text, c, d);
+            val recorded: err[fail.Fail] = record(t, f, text, c, d, resolve.declaration_testing(a, did));
             if (sel recorded.err) { ret recorded; }
             if (!stays)           { cnt; }
             val bound: err[fail.Fail] = bind(t, f, text, c, d);
@@ -422,15 +402,12 @@ fun load(alloc: *A.Allocator, backing: *A.Allocator, t: *Tree) bool {
     t.fqns     = collections_vector.init[intern.StrId](alloc);
     t.starts   = collections_vector.init[u32](alloc);
     t.imports  = collections_vector.init[Import](alloc);
-    val rs: res[str, fail.Fail] = find_src(alloc);
-    if (sel rs.err) {
-        print.eprintln(fail.describe(rs.err));
-        ret false;
-    }
-    t.src = rs.ok;
-    val walked: err[fail.Fail] = collect(t, rs.ok, rs.ok);
+    val rs: opt[str] = checkout.path(alloc, "src");
+    if (sel rs.none) { ret false; }
+    t.src = rs.some;
+    val walked: err[fail.Fail] = collect(t, rs.some, rs.some);
     if (sel walked.err) { ret false; }
-    val resolved: err[fail.Fail] = resolve(t);
+    val resolved: err[fail.Fail] = resolve_imports(t);
     if (sel resolved.err) {
         print.eprintln(fail.describe(resolved.err));
         ret false;
@@ -449,7 +426,7 @@ fun file_of(t: *Tree, id: intern.StrId) u32 {
 # each import's file: the module its path names, or the longest module prefix
 # of a member's path
 #[testing]
-fun resolve(t: *Tree) err[fail.Fail] {
+fun resolve_imports(t: *Tree) err[fail.Fail] {
     t.by_fqn = index(t);
     var f: usize = 0;
     for (f < t.fqns.len) {
@@ -537,8 +514,8 @@ fun surface_violations(t: *Tree) usize {
     ret count;
 }
 
-# the files of the driver, apart from its tests (which F4 #4439 moves out),
-# that import a module of build, each printed; build is the layer above
+# the files of the driver that import a module of build, each printed; build is
+# the layer above
 #[testing]
 fun driver_violations(t: *Tree) usize {
     var count: usize = 0;
@@ -547,8 +524,8 @@ fun driver_violations(t: *Tree) usize {
         val m:    *Import = ?t.imports.data[i];
         val from: str     = intern.text(?t.itn, t.fqns.data[m.file]);
         i = i + 1;
-        if (!under(from, "mach.lang.driver") || under(from, "mach.lang.driver.tests")) { cnt; }
-        if (!under(intern.text(?t.itn, m.path), "mach.lang.build"))                    { cnt; }
+        if (!under(from, "mach.lang.driver"))                       { cnt; }
+        if (!under(intern.text(?t.itn, m.path), "mach.lang.build")) { cnt; }
         print.eprintlnf("hygiene: {}:{}: the driver imports {}, of build, the layer above it", t.paths.data[m.file], m.line, intern.text(?t.itn, m.path));
         count = count + 1;
     }
@@ -663,6 +640,223 @@ fun loose_violations(t: *Tree) usize {
     ret count;
 }
 
+# the modules the front end and the middle end may read under the target tree: every
+# other target module is a backend member, contract or facade
+#[testing]
+fun is_description(name: str) bool {
+    if (under(name, "mach.lang.target.catalog") && !str_equals(name, "mach.lang.target.catalog")) { ret true; }
+    if (under(name, "mach.lang.target.extension") || under(name, "mach.lang.target.model"))       { ret true; }
+    ret str_equals(name, "mach.lang.target.definition") || str_equals(name, "mach.lang.target.resolved");
+}
+
+#[testing]
+fun is_backend(name: str) bool {
+    ret under(name, "mach.lang.be") || (under(name, "mach.lang.target") && !is_description(name));
+}
+
+#[testing]
+fun is_pipeline(name: str) bool {
+    ret under(name, "mach.lang.be");
+}
+
+#[testing]
+fun is_target(name: str) bool {
+    ret under(name, "mach.lang.target");
+}
+
+#[testing]
+fun is_contract(name: str) bool {
+    ret under(name, "mach.lang.mir");
+}
+
+# what the contract may not reach: the pipeline, and any target module but the description
+#[testing]
+fun is_contract_forbidden(name: str) bool {
+    ret is_pipeline(name) || (is_target(name) && !is_description(name));
+}
+
+#[testing]
+fun is_guarded(name: str) bool {
+    ret under(name, "mach.lang.fe") || under(name, "mach.lang.me");
+}
+
+# the layer a module sits in, lowest first: the target description, the front end, the
+# middle end, the backend contract, the backend with the target facade, and the
+# composition that drives them all. the middle end's pipeline drives its passes over a
+# selected target, so it sits with the backend. zero is a module outside the layers, such
+# as the session and the source map every layer shares
+#[testing]
+fun layer_of(name: str) u32 {
+    if (is_description(name))                                                                                        { ret 1; }
+    if (under(name, "mach.lang.fe"))                                                                                 { ret 2; }
+    if (str_equals(name, "mach.lang.me.pipeline"))                                                                   { ret 5; }
+    if (under(name, "mach.lang.me"))                                                                                 { ret 3; }
+    if (is_contract(name))                                                                                           { ret 4; }
+    if (is_backend(name))                                                                                            { ret 5; }
+    if (under(name, "mach.lang.driver") || (under(name, "mach.lang.build") && !str_equals(name, "mach.lang.build"))) { ret 6; }
+    if (str_equals(name, "mach.lang.step") || str_equals(name, "mach.lang.editor") || under(name, "mach.cli"))       { ret 6; }
+    ret 0;
+}
+
+#[testing]
+def NamePredicate: fun(str) bool;
+
+#[testing]
+fun fqn_of(t: *Tree, f: usize) str {
+    ret intern.text(?t.itn, t.fqns.data[f]);
+}
+
+# the end of file f's imports
+#[testing]
+fun imports_end(t: *Tree, f: usize) usize {
+    if (f + 1 < t.starts.len) { ret t.starts.data[f + 1]::usize; }
+    ret t.imports.len;
+}
+
+# by file, whether the imports from the files `seeds` marks reach it, the seeds included;
+# a test's import is followed only when `testing` is; by[f] is the file that first imported
+# f, NONE for a seed
+#[testing]
+fun reach(t: *Tree, seeds: *Vector[bool], testing: bool, by: *Vector[u32]) Vector[bool] {
+    var seen:  Vector[bool] = collections_vector.init[bool](t.alloc);
+    var queue: Vector[u32]  = collections_vector.init[u32](t.alloc);
+    var f:     usize        = 0;
+    for (f < t.paths.len) {
+        collections_vector.push[bool](?seen, seeds.data[f]);
+        collections_vector.push[u32](by, NONE);
+        if (seeds.data[f]) { collections_vector.push[u32](?queue, f::u32); }
+        f = f + 1;
+    }
+    var head: usize = 0;
+    for (head < queue.len) {
+        val from: usize = queue.data[head]::usize;
+        head = head + 1;
+        var i: usize = t.starts.data[from]::usize;
+        for (i < imports_end(t, from)) {
+            val m: *Import = ?t.imports.data[i];
+            i = i + 1;
+            if (m.to == NONE || seen.data[m.to] || (m.testing && !testing)) { cnt; }
+            seen.data[m.to] = true;
+            by.data[m.to]   = from::u32;
+            collections_vector.push[u32](?queue, m.to);
+        }
+    }
+    ret seen;
+}
+
+# by file, whether the compiler's entry reaches it through production imports
+#[testing]
+fun production(t: *Tree) Vector[bool] {
+    var seeds: Vector[bool] = collections_vector.init[bool](t.alloc);
+    var f:     usize        = 0;
+    for (f < t.paths.len) {
+        collections_vector.push[bool](?seeds, str_equals(fqn_of(t, f), "mach.bin.main"));
+        f = f + 1;
+    }
+    var by: Vector[u32] = collections_vector.init[u32](t.alloc);
+    ret reach(t, ?seeds, false, ?by);
+}
+
+# the files the production files `root` picks reach through production imports that
+# `forbidden` picks, each printed with the chain that imports it; NONE when `root` picks
+# none, since nothing would be checked
+#[testing]
+fun crossings(t: *Tree, live: *Vector[bool], root: NamePredicate, forbidden: NamePredicate, what: str) usize {
+    var seeds: Vector[bool] = collections_vector.init[bool](t.alloc);
+    var roots: usize        = 0;
+    var f:     usize        = 0;
+    for (f < t.paths.len) {
+        val picked: bool = live.data[f] && root(fqn_of(t, f));
+        collections_vector.push[bool](?seeds, picked);
+        if (picked) { roots = roots + 1; }
+        f = f + 1;
+    }
+    if (roots == 0) {
+        print.eprintlnf("hygiene: the entry reaches no module of {}, so nothing was checked", what);
+        ret NONE::usize;
+    }
+    var by:      Vector[u32]  = collections_vector.init[u32](t.alloc);
+    var seen:    Vector[bool] = reach(t, ?seeds, false, ?by);
+    var crossed: usize        = 0;
+    f = 0;
+    for (f < t.paths.len) {
+        if (seen.data[f] && forbidden(fqn_of(t, f))) {
+            crossed = crossed + 1;
+            print.eprintlnf("hygiene: {} is reached from {}:", fqn_of(t, f), what);
+            var step: u32 = by.data[f];
+            for (step != NONE) {
+                print.eprintlnf("    imported by {}", fqn_of(t, step::usize));
+                step = by.data[step];
+            }
+        }
+        f = f + 1;
+    }
+    ret crossed;
+}
+
+# the test imports of a file `from` picks that name a file `forbidden` picks, each printed
+#[testing]
+fun test_crossings(t: *Tree, from: NamePredicate, forbidden: NamePredicate, what: str) usize {
+    var crossed: usize = 0;
+    var i:       usize = 0;
+    for (i < t.imports.len) {
+        val m: *Import = ?t.imports.data[i];
+        i = i + 1;
+        if (!m.testing || m.to == NONE || !from(fqn_of(t, m.file::usize))) { cnt; }
+        if (!forbidden(fqn_of(t, m.to::usize)))                            { cnt; }
+        crossed = crossed + 1;
+        print.eprintlnf("hygiene: the tests of {} import {}, from {}", fqn_of(t, m.file::usize), fqn_of(t, m.to::usize), what);
+    }
+    ret crossed;
+}
+
+# the test imports of production files in a layer that name a file above it which the
+# file's production imports do not already reach, each printed; NONE when no layered
+# production file imports anything for its tests
+#[testing]
+fun climbs(t: *Tree, live: *Vector[bool]) usize {
+    var checked: usize = 0;
+    var crossed: usize = 0;
+    var f:       usize = 0;
+    for (f < t.paths.len) {
+        val rank:  u32   = layer_of(fqn_of(t, f));
+        var tests: bool  = false;
+        var i:     usize = t.starts.data[f]::usize;
+        for (i < imports_end(t, f)) {
+            if (t.imports.data[i].testing) { tests = true; }
+            i = i + 1;
+        }
+        if (!live.data[f] || rank == 0 || !tests) {
+            f = f + 1;
+            cnt;
+        }
+        checked = checked + 1;
+        var seeds: Vector[bool] = collections_vector.init[bool](t.alloc);
+        var g:     usize        = 0;
+        for (g < t.paths.len) {
+            collections_vector.push[bool](?seeds, g == f);
+            g = g + 1;
+        }
+        var by:   Vector[u32]  = collections_vector.init[u32](t.alloc);
+        var seen: Vector[bool] = reach(t, ?seeds, false, ?by);
+        i = t.starts.data[f]::usize;
+        for (i < imports_end(t, f)) {
+            val m: *Import = ?t.imports.data[i];
+            i = i + 1;
+            if (!m.testing || m.to == NONE || seen.data[m.to]) { cnt; }
+            if (layer_of(fqn_of(t, m.to::usize)) <= rank)      { cnt; }
+            crossed = crossed + 1;
+            print.eprintlnf("hygiene: {}:{}: the tests of {} import {}, a layer above it; give the module a fixture at its own layer", t.paths.data[f], m.line, fqn_of(t, f), fqn_of(t, m.to::usize));
+        }
+        f = f + 1;
+    }
+    if (checked == 0) {
+        print.eprintln("hygiene: no layered module imports anything for its tests, so nothing was checked");
+        ret NONE::usize;
+    }
+    ret crossed;
+}
+
 test hygiene__each_module_is_imported_under_one_name {
     var backing: A.Allocator;
     page.make(?backing);
@@ -720,5 +914,64 @@ test hygiene__each_loose_file_is_a_foundation_or_a_facade {
     if (!load(?alloc, ?backing, ?t)) { ret 1; }
     if (t.imports.len == 0)          { ret 2; }
     if (loose_violations(?t) != 0)   { ret 3; }
+    ret 0;
+}
+
+test layering__front_and_middle_end_reach_no_backend {
+    var backing: A.Allocator;
+    page.make(?backing);
+    var ar:    arena.Arena;
+    var alloc: A.Allocator;
+    val made:  err[A.Error] = arena.init(?ar, ?backing, 0);
+    if (sel made.err) { ret 1; }
+    arena.make(?alloc, ?ar);
+    var t: Tree;
+    if (!load(?alloc, ?backing, ?t)) { ret 1; }
+    var live:    Vector[bool] = production(?t);
+    val crossed: usize        = crossings(?t, ?live, is_guarded, is_backend, "the front or middle end");
+    if (crossed == NONE::usize) { ret 2; }
+    if (crossed != 0)           { ret 3; }
+    ret 0;
+}
+
+# the instruction-set members implement a contract both sides import, so the target tree
+# never calls back into the pipeline, not even from its tests, and the contract sits below
+# both
+test layering__target_and_pipeline_meet_only_in_the_contract {
+    var backing: A.Allocator;
+    page.make(?backing);
+    var ar:    arena.Arena;
+    var alloc: A.Allocator;
+    val made:  err[A.Error] = arena.init(?ar, ?backing, 0);
+    if (sel made.err) { ret 1; }
+    arena.make(?alloc, ?ar);
+    var t: Tree;
+    if (!load(?alloc, ?backing, ?t)) { ret 1; }
+    var live:   Vector[bool] = production(?t);
+    val target: usize        = crossings(?t, ?live, is_target, is_pipeline, "the target tree");
+    if (target == NONE::usize) { ret 2; }
+    val contract: usize = crossings(?t, ?live, is_contract, is_contract_forbidden, "the backend contract");
+    if (contract == NONE::usize)                                                                { ret 3; }
+    if (target + contract + test_crossings(?t, is_target, is_pipeline, "the target tree") != 0) { ret 4; }
+    ret 0;
+}
+
+# a module's tests may import what its own imports already reach, or anything in its layer
+# or below; an import only its tests make never reaches above its layer, since the mark is
+# no cycle escape and the edge would push the module up the graph
+test layering__a_test_import_climbs_no_layer {
+    var backing: A.Allocator;
+    page.make(?backing);
+    var ar:    arena.Arena;
+    var alloc: A.Allocator;
+    val made:  err[A.Error] = arena.init(?ar, ?backing, 0);
+    if (sel made.err) { ret 1; }
+    arena.make(?alloc, ?ar);
+    var t: Tree;
+    if (!load(?alloc, ?backing, ?t)) { ret 1; }
+    var live:    Vector[bool] = production(?t);
+    val crossed: usize        = climbs(?t, ?live);
+    if (crossed == NONE::usize) { ret 2; }
+    if (crossed != 0)           { ret 3; }
     ret 0;
 }

@@ -1,3 +1,4 @@
+use mach.lang.checkout;
 use mach.lang.fail;
 use std.allocator.page;
 use collections_vector: std.collections.vector;
@@ -88,30 +89,6 @@ pub fun lookup(table: *Boundary, n: usize, name: str) opt[AnswerFn] {
 }
 
 #[testing]
-fun join_path(alloc: *A.Allocator, dir: str, name: str) res[str, fail.Fail] {
-    val joined: res[str, A.Error] = types_path.join(alloc, dir, name);
-    if (sel joined.err) { ret res[str, fail.Fail].err{fail.refused(joined.err)}; }
-    ret res[str, fail.Fail].ok{joined.ok};
-}
-
-#[testing]
-fun find_root(alloc: *A.Allocator) opt[str] {
-    var prefix: str   = ".";
-    var depth:  usize = 0;
-    for (depth < 8) {
-        val rj: res[str, fail.Fail] = join_path(alloc, prefix, "test/fuzz/corpus");
-        if (sel rj.err) { ret opt[str].none{}; }
-        val is_dir_r: res[bool, io_error.Error] = fs.is_dir(rj.ok);
-        if ((sel is_dir_r.ok && is_dir_r.ok)) { ret opt[str].some{prefix}; }
-        val ru: res[str, fail.Fail] = join_path(alloc, prefix, "..");
-        if (sel ru.err) { ret opt[str].none{}; }
-        prefix = ru.ok;
-        depth  = depth + 1;
-    }
-    ret opt[str].none{};
-}
-
-#[testing]
 fun answer_file(alloc: *A.Allocator, answer: AnswerFn, path: str) i32 {
     val rb: res[Vector[u8], fs.FsError] = fs.read_bytes(alloc, path);
     if (sel rb.err) { ret FUZZ_HARNESS; }
@@ -143,9 +120,9 @@ fun answer_file(alloc: *A.Allocator, answer: AnswerFn, path: str) i32 {
 
 #[testing]
 fun answer_directory(alloc: *A.Allocator, root: str, name: str, answer: AnswerFn) i32 {
-    val rd: res[str, fail.Fail] = join_path(alloc, root, "test/fuzz/corpus");
+    val rd: res[str, A.Error] = types_path.join(alloc, root, "test/fuzz/corpus");
     if (sel rd.err) { ret FUZZ_HARNESS; }
-    val rf: res[str, fail.Fail] = join_path(alloc, rd.ok, name);
+    val rf: res[str, A.Error] = types_path.join(alloc, rd.ok, name);
     if (sel rf.err) { ret FUZZ_HARNESS; }
     val dir: str = rf.ok;
 
@@ -172,7 +149,7 @@ fun answer_directory(alloc: *A.Allocator, root: str, name: str, answer: AnswerFn
         val entry: str = @rg.some;
         i = i + 1;
         if (str_equals(entry, ".") || str_equals(entry, "..")) { cnt; }
-        val rj: res[str, fail.Fail] = join_path(alloc, dir, entry);
+        val rj: res[str, A.Error] = types_path.join(alloc, dir, entry);
         if (sel rj.err) { ret FUZZ_HARNESS; }
         val path:      str                       = rj.ok;
         val is_file_r: res[bool, io_error.Error] = fs.is_file(path);
@@ -191,7 +168,7 @@ fun answer_directory(alloc: *A.Allocator, root: str, name: str, answer: AnswerFn
 #[testing]
 fun every_corpus_directory_is_registered(alloc: *A.Allocator, root: str,
     table: *Boundary, n: usize) bool {
-    val rd: res[str, fail.Fail] = join_path(alloc, root, "test/fuzz/corpus");
+    val rd: res[str, A.Error] = types_path.join(alloc, root, "test/fuzz/corpus");
     if (sel rd.err) { ret false; }
     val dir:    str                                = rd.ok;
     val listed: res[Vector[fs.Listed], fs.FsError] = fs.read_dir(alloc, dir);
@@ -214,7 +191,7 @@ fun every_corpus_directory_is_registered(alloc: *A.Allocator, root: str,
         val entry: str = @rg.some;
         i = i + 1;
         if (str_equals(entry, ".") || str_equals(entry, "..")) { cnt; }
-        val rj: res[str, fail.Fail] = join_path(alloc, dir, entry);
+        val rj: res[str, A.Error] = types_path.join(alloc, dir, entry);
         if (sel rj.err) { ret false; }
         val is_dir_r: res[bool, io_error.Error] = fs.is_dir(rj.ok);
         if (!(sel is_dir_r.ok && is_dir_r.ok)) { cnt; }
@@ -240,11 +217,8 @@ fun replay_corpus() i32 {
     var alloc: A.Allocator;
     page.make(?alloc);
 
-    val rr: opt[str] = find_root(?alloc);
-    if (sel rr.none) {
-        print.eprintln("fuzz: cannot locate test/fuzz/corpus from the working directory");
-        ret FUZZ_HARNESS;
-    }
+    val rr: opt[str] = checkout.root(?alloc);
+    if (sel rr.none) { ret FUZZ_HARNESS; }
     val root: str = rr.some;
 
     var table: [BOUNDARY_CAP]Boundary;

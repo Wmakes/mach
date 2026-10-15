@@ -47,6 +47,9 @@ use mach.lang.fail;
 # the retained fuzz corpus, answered by every untrusted boundary the driver composes
 #[testing]
 use mach.lang.fuzz;
+# the compiler's own source held to its import, surface and layering rules
+#[testing]
+use mach.lang.driver.hygiene;
 use mach.lang.driver.toolchain;
 use mach.lang.module;
 
@@ -165,7 +168,7 @@ pub fun reconfigure(p: *project.Project, req: request.BuildRequest) err[fail.Fai
 }
 
 # a project that failed is released, its failure kept where the session presents it
-pub fun project_failure(p: *project.Project, failure: fail.Fail) res[project.Project, fail.Fail] {
+fun project_failure(p: *project.Project, failure: fail.Fail) res[project.Project, fail.Fail] {
     var lost:   bool      = false;
     val stable: fail.Fail = session.hold_failure(p.s, failure, ?lost);
     if (lost) { diagnostic.note_lost(?p.diags); }

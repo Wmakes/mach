@@ -586,12 +586,6 @@ pub fun work_apply(itn: *intern.Interner, work: str, m: *manifest.Manifest) err[
 # the rule `-w` keeps
 val WORK_CONSTRAINT: str = "-w must name a canonical path inside the project root: relative, with no . or .. component and no template";
 
-# `r`'s `-w` over the root manifest `m` it is built from, nothing when it names none
-pub fun request_work_apply(itn: *intern.Interner, r: *BuildRequest, m: *manifest.Manifest) err[fail.Fail] {
-    if (str_empty(r.work)) { ret err[fail.Fail].ok{}; }
-    ret work_apply(itn, r.work, m);
-}
-
 pub fun for_cell(base: *BuildRequest, owner: str, target: str, artifact: str,
     subsystem: catalog_subsystem.Subsystem, goal: BuildGoal) BuildRequest {
     var r: BuildRequest = @base;
