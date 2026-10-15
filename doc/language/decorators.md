@@ -669,8 +669,9 @@ fun f_hot(x: i64) i64 {
 pub var g_sec: u64 = 100;
 ```
 
-The named section is created if absent. Cross-section calls and accesses use
-ordinary relocations.
+The named section is created if absent, and the globals of one object that
+name it share that one section, each at its own aligned offset. Cross-section
+calls and accesses use ordinary relocations.
 
 ### `oblivious` — constant-time boundary
 
