@@ -27,7 +27,7 @@ pub rec TestScope;
 ## fun collect_scope
 
 ```mach
-pub fun collect_scope(p: *driver.Project, col: testrunner.Collected, sc: *TestScope) err[fail.Fail];
+pub fun collect_scope(p: *project.Project, col: testrunner.Collected, sc: *TestScope) err[fail.Fail];
 ```
 
 col is the unit's test declarations in module order; the scope owns it from here
@@ -35,13 +35,13 @@ col is the unit's test declarations in module order; the scope owns it from here
 ## fun free_scope
 
 ```mach
-pub fun free_scope(p: *driver.Project, sc: *TestScope);
+pub fun free_scope(p: *project.Project, sc: *TestScope);
 ```
 
 ## fun record_tests
 
 ```mach
-pub fun record_tests(p: *driver.Project, sc: *TestScope, exe: *u8, target: str, profile: str,
+pub fun record_tests(p: *project.Project, sc: *TestScope, exe: *u8, target: str, profile: str,
 bo: *outcome.BuildOutcome, oa: *A.Allocator) err[fail.Fail];
 ```
 
@@ -57,19 +57,19 @@ the dynamic libraries the artifact names
 ## fun collect_dispatch_inputs
 
 ```mach
-pub fun collect_dispatch_inputs(p: *driver.Project, unit: *build_plan.BuildUnit) res[DispatchInputs, fail.Fail];
+pub fun collect_dispatch_inputs(p: *project.Project, unit: *build_plan.BuildUnit) res[DispatchInputs, fail.Fail];
 ```
 
 ## fun free_dispatch_inputs
 
 ```mach
-pub fun free_dispatch_inputs(p: *driver.Project, di: *DispatchInputs);
+pub fun free_dispatch_inputs(p: *project.Project, di: *DispatchInputs);
 ```
 
 ## fun link_dispatcher
 
 ```mach
-pub fun link_dispatcher(p: *driver.Project, sc: *TestScope, di: *DispatchInputs,
+pub fun link_dispatcher(p: *project.Project, sc: *TestScope, di: *DispatchInputs,
 modules: *target_of.ObjectImage, module_len: u32, dispatcher: str, artifact: str) err[fail.Fail];
 ```
 
@@ -82,6 +82,6 @@ modules: the build's current images: normal and test objects in topological orde
 ## fun fingerprint_scope
 
 ```mach
-pub fun fingerprint_scope(s: *wire.Sink, p: *driver.Project, sc: *TestScope);
+pub fun fingerprint_scope(s: *wire.Sink, p: *project.Project, sc: *TestScope);
 ```
 

@@ -3,19 +3,19 @@
 ## fun emit_asm
 
 ```mach
-pub fun emit_asm(p: *driver.Project, destination: str, m: *me_ir.Module) err[fail.Fail];
+pub fun emit_asm(p: *project.Project, destination: str, m: *me_ir.Module) err[fail.Fail];
 ```
 
 ## fun emit_ir
 
 ```mach
-pub fun emit_ir(p: *driver.Project, destination: str, m: *me_ir.Module) err[fail.Fail];
+pub fun emit_ir(p: *project.Project, destination: str, m: *me_ir.Module) err[fail.Fail];
 ```
 
 ## fun artifact_product_name
 
 ```mach
-pub fun artifact_product_name(p: *driver.Project) *u8;
+pub fun artifact_product_name(p: *project.Project) *u8;
 ```
 
 ## rec LoadedImageOptions
@@ -33,27 +33,27 @@ pub fun dnit_image_options(a: *A.Allocator, loaded: *LoadedImageOptions);
 ## fun load_image_options
 
 ```mach
-pub fun load_image_options(p: *driver.Project, out_kind: catalog_artifact.Kind,
+pub fun load_image_options(p: *project.Project, out_kind: catalog_artifact.Kind,
 exe_path: *u8) res[LoadedImageOptions, fail.Fail];
 ```
 
 ## fun emit_static_archive
 
 ```mach
-pub fun emit_static_archive(p: *driver.Project, destination: str, images: *target_of.ObjectImage, inputs: *target_of.ObjectInput, out_path: **u8) err[fail.Fail];
+pub fun emit_static_archive(p: *project.Project, destination: str, images: *target_of.ObjectImage, inputs: *target_of.ObjectInput, out_path: **u8) err[fail.Fail];
 ```
 
 ## fun emit_shared_library
 
 ```mach
-pub fun emit_shared_library(p: *driver.Project, destination: str, inputs: *target_of.ObjectInput, len: u32,
+pub fun emit_shared_library(p: *project.Project, destination: str, inputs: *target_of.ObjectInput, len: u32,
 dynlibs: *target_of.DynLib, dynlib_len: u32, out_path: **u8) err[fail.Fail];
 ```
 
 ## fun link_shared_images
 
 ```mach
-pub fun link_shared_images(p: *driver.Project, images: *target_of.ObjectImage,
+pub fun link_shared_images(p: *project.Project, images: *target_of.ObjectImage,
 ext: *target_of.ObjectInput, ext_count: u32,
 dynlibs: *target_of.DynLib, dynlib_len: u32, destination: str, out_path: **u8) err[fail.Fail];
 ```
@@ -61,7 +61,7 @@ dynlibs: *target_of.DynLib, dynlib_len: u32, destination: str, out_path: **u8) e
 ## fun link_executable
 
 ```mach
-pub fun link_executable(p: *driver.Project, inputs: *target_of.ObjectInput, len: u32,
+pub fun link_executable(p: *project.Project, inputs: *target_of.ObjectInput, len: u32,
 dynlibs: *target_of.DynLib, dynlib_len: u32, destination: str,
 image_options: target_of.ImageOptions) err[fail.Fail];
 ```
@@ -69,14 +69,14 @@ image_options: target_of.ImageOptions) err[fail.Fail];
 ## fun link_flat_images
 
 ```mach
-pub fun link_flat_images(p: *driver.Project, images: *target_of.ObjectImage, destination: str,
+pub fun link_flat_images(p: *project.Project, images: *target_of.ObjectImage, destination: str,
 image_options: target_of.ImageOptions) err[fail.Fail];
 ```
 
 ## fun publish_entry_module
 
 ```mach
-pub fun publish_entry_module(p: *driver.Project, images: *target_of.ObjectImage, destination: str) err[fail.Fail];
+pub fun publish_entry_module(p: *project.Project, images: *target_of.ObjectImage, destination: str) err[fail.Fail];
 ```
 
 write the artifact entry module's object to `destination`. on a finished-module
@@ -85,7 +85,7 @@ format that object is the complete deliverable, so no other module takes part
 ## fun link_mixed_images
 
 ```mach
-pub fun link_mixed_images(p: *driver.Project, images: *target_of.ObjectImage,
+pub fun link_mixed_images(p: *project.Project, images: *target_of.ObjectImage,
 ext: *target_of.ObjectInput, ext_count: u32,
 dynlibs: *target_of.DynLib, dynlib_len: u32, destination: str,
 image_options: target_of.ImageOptions) err[fail.Fail];
@@ -94,7 +94,7 @@ image_options: target_of.ImageOptions) err[fail.Fail];
 ## fun append_external_inputs
 
 ```mach
-pub fun append_external_inputs(p: *driver.Project, unit: *build_plan.BuildUnit,
+pub fun append_external_inputs(p: *project.Project, unit: *build_plan.BuildUnit,
 inputs: **target_of.ObjectInput, len: *u32,
 dynlibs: **target_of.DynLib, dynlib_len: *u32) err[fail.Fail];
 ```
@@ -111,7 +111,7 @@ pub fun free_dynlibs(a: *A.Allocator, dynlibs: *target_of.DynLib, dynlib_len: u3
 ## fun write_objects
 
 ```mach
-pub fun write_objects(p: *driver.Project, images: *target_of.ObjectImage,
+pub fun write_objects(p: *project.Project, images: *target_of.ObjectImage,
 destinations: *str, inputs_out: **target_of.ObjectInput) err[fail.Fail];
 ```
 
@@ -121,7 +121,7 @@ object cache reads it back; a module the cache restored is already there
 ## fun write_test_objects
 
 ```mach
-pub fun write_test_objects(p: *driver.Project, destinations: *str) err[fail.Fail];
+pub fun write_test_objects(p: *project.Project, destinations: *str) err[fail.Fail];
 ```
 
 each test object reaches `obj/` beside its module's object, the same way

@@ -41,12 +41,6 @@ pub val FILE_TEXT: query.Kind = query.Kind;
 a file's text as the session loaded it, keyed by the file's index. the source map and the
 editor hold it across builds, so no released module takes it
 
-## rec LinkProvider
-
-```mach
-pub rec LinkProvider;
-```
-
 ## rec Session
 
 ```mach
@@ -58,6 +52,17 @@ pub rec Session;
 ```mach
 pub fun init(alloc: *A.Allocator) res[Session, fail.Fail];
 ```
+
+## fun init_over
+
+```mach
+pub fun init_over(alloc: *A.Allocator, base: *intern.Interner) res[Session, fail.Fail];
+```
+
+a session whose names are layered over `base`: every id `base` has issued
+names the same string here, so what was planned in another session, its
+manifests and its cells, is read here as it was planned. `base` outlives the
+session and takes no new names while it lives
 
 ## fun drop_query_failure
 
@@ -110,7 +115,7 @@ pub fun reset_module_registry(s: *Session);
 pub fun module_count(s: *Session) u32;
 ```
 
-one past the highest module id the session has an identity for
+one past the highest project module id the session has an identity for
 
 ## fun register_module_root_project
 
@@ -157,110 +162,20 @@ pub fun register_stable_mid(s: *Session, stable: module.StableModuleId, mid: mod
 pub fun module_id_for_stable(s: *Session, stable: module.StableModuleId) module.ModuleId;
 ```
 
-## fun register_export_name
-
-```mach
-pub fun register_export_name(s: *Session, mid: module.ModuleId, did: u32, name: intern.StrId) err[fail.Fail];
-```
-
-## fun forget_export_names
-
-```mach
-pub fun forget_export_names(s: *Session, mid: module.ModuleId, decl_count: u32);
-```
-
-drop every export name one module registered, before its syntax tree is replaced and
-its declaration ids no longer name the same declarations
-
-s: the session
-mid: the module whose names go
-decl_count: the declaration count of the AST they were registered against
-
-## fun export_name
-
-```mach
-pub fun export_name(s: *Session, mid: module.ModuleId, did: u32) intern.StrId;
-```
-
-## fun register_export_library
-
-```mach
-pub fun register_export_library(s: *Session, mid: module.ModuleId, did: u32, lib: intern.StrId) err[fail.Fail];
-```
-
-## fun export_library
-
-```mach
-pub fun export_library(s: *Session, mid: module.ModuleId, did: u32) intern.StrId;
-```
-
 ## fun reset_type_projection
 
 ```mach
 pub fun reset_type_projection(s: *Session) err[fail.Fail];
 ```
 
-## fun register_import_library
-
-```mach
-pub fun register_import_library(s: *Session, name: intern.StrId, lib: intern.StrId) err[fail.Fail];
-```
-
-## fun import_library
-
-```mach
-pub fun import_library(s: *Session, name: intern.StrId) intern.StrId;
-```
-
-## fun register_link_provider
-
-```mach
-pub fun register_link_provider(s: *Session, name: intern.StrId, is_static: bool) err[fail.Fail];
-```
-
-## fun link_provider
-
-```mach
-pub fun link_provider(s: *Session, name: intern.StrId) opt[LinkProvider];
-```
-
-## fun link_providers
-
-```mach
-pub fun link_providers(s: *Session) *LinkProvider;
-```
-
-## fun link_provider_count
-
-```mach
-pub fun link_provider_count(s: *Session) u32;
-```
-
-## fun reset_link_providers
-
-```mach
-pub fun reset_link_providers(s: *Session);
-```
-
-## fun record_link_publication
-
-```mach
-pub fun record_link_publication(s: *Session, path: str, revision: query.Revision, digest: *[32]u8) err[fail.Fail];
-```
-
-## fun link_publication_at
-
-```mach
-pub fun link_publication_at(s: *Session, path: str, revision: query.Revision) opt[[32]u8];
-```
-
-the digest the link at `revision` published to `path`, none when it published none there
-
 ## fun register_module_identity
 
 ```mach
 pub fun register_module_identity(s: *Session, mid: module.ModuleId, fqn: intern.StrId, stable: module.StableModuleId) err[fail.Fail];
 ```
+
+give the module `mid` its name and stable identity; a project's module also
+counts toward module_count, a standalone buffer's does not
 
 ## fun unregister_module_identity
 

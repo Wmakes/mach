@@ -402,6 +402,15 @@ pub fun format(a: *A.Allocator, fmt: str, va: ...) res[str, Fail];
 `fmt` formatted with `va` into `a`, which owns the text; a refusal to format
 is the failure instead
 
+## fun join
+
+```mach
+pub fun join(a: *A.Allocator, va: ...) res[str, Fail];
+```
+
+the texts `va` joined into `a`, which owns the result; a refusal to join is
+the failure instead
+
 ## fun formatted
 
 ```mach

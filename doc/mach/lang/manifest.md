@@ -408,6 +408,30 @@ fwd mach.lang.manifest.load.doc_dnit
 
 forwards [`mach.lang.manifest.load.doc_dnit`](manifest/load.md#fun-doc_dnit)
 
+## fwd mach.lang.manifest.load.MANIFEST_FILE
+
+```mach
+fwd mach.lang.manifest.load.MANIFEST_FILE
+```
+
+forwards [`mach.lang.manifest.load.MANIFEST_FILE`](manifest/load.md#val-manifest_file)
+
+## fwd mach.lang.manifest.load.parse_text
+
+```mach
+fwd mach.lang.manifest.load.parse_text
+```
+
+forwards [`mach.lang.manifest.load.parse_text`](manifest/load.md#fun-parse_text)
+
+## fwd mach.lang.manifest.load.read_at
+
+```mach
+fwd mach.lang.manifest.load.read_at
+```
+
+forwards [`mach.lang.manifest.load.read_at`](manifest/load.md#fun-read_at)
+
 ## fwd mach.lang.manifest.plan.BuildUnit
 
 ```mach
@@ -423,38 +447,6 @@ fwd mach.lang.manifest.plan.Scope
 ```
 
 forwards [`mach.lang.manifest.plan.Scope`](manifest/plan.md#rec-scope)
-
-## fwd mach.lang.manifest.plan.DEPENDENCY_ARTIFACT_DIR
-
-```mach
-fwd mach.lang.manifest.plan.DEPENDENCY_ARTIFACT_DIR
-```
-
-forwards [`mach.lang.manifest.plan.DEPENDENCY_ARTIFACT_DIR`](manifest/plan.md#val-dependency_artifact_dir)
-
-## fwd mach.lang.manifest.plan.CACHE_DIR
-
-```mach
-fwd mach.lang.manifest.plan.CACHE_DIR
-```
-
-forwards [`mach.lang.manifest.plan.CACHE_DIR`](manifest/plan.md#val-cache_dir)
-
-## fwd mach.lang.manifest.plan.STEP_STAMP_DIR
-
-```mach
-fwd mach.lang.manifest.plan.STEP_STAMP_DIR
-```
-
-forwards [`mach.lang.manifest.plan.STEP_STAMP_DIR`](manifest/plan.md#val-step_stamp_dir)
-
-## fwd mach.lang.manifest.plan.STAGE_DIR
-
-```mach
-fwd mach.lang.manifest.plan.STAGE_DIR
-```
-
-forwards [`mach.lang.manifest.plan.STAGE_DIR`](manifest/plan.md#val-stage_dir)
 
 ## fwd mach.lang.manifest.plan.root_scope
 
@@ -688,11 +680,11 @@ fwd mach.lang.manifest.select.resolve_cells
 
 forwards [`mach.lang.manifest.select.resolve_cells`](manifest/select.md#fun-resolve_cells)
 
-## val MANIFEST_FILE
+## fwd mach.lang.manifest.select.check_stack_keys
 
 ```mach
-pub val MANIFEST_FILE: str = "mach.toml"
+fwd mach.lang.manifest.select.check_stack_keys
 ```
 
-the file name of a project manifest, looked up in a project root
+forwards [`mach.lang.manifest.select.check_stack_keys`](manifest/select.md#fun-check_stack_keys)
 

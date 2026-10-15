@@ -1,4 +1,4 @@
-# mach.lang.build.cache.memo
+# mach.lang.driver.cache.memo
 
 the per-file digest memo: what a source file's bytes digest to, remembered
 under the path, size, modification time and identity the file had when it

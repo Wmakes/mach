@@ -27,7 +27,7 @@ ret: the executable; err from the manifest or selection, when the selection
 ## fun load_config_manifest
 
 ```mach
-pub fun load_config_manifest(p: *project.Project, project_root: str, m: *manifest.Manifest, c: *manifest.Cell,
+pub fun load_config_manifest(p: *project.Project, project_root: str, m: *manifest.Manifest, closure: *project.Closure, c: *manifest.Cell,
 owner: str, for_union: bool) err[fail.Fail];
 ```
 
@@ -36,6 +36,8 @@ configure a project for one build cell of `m`, or of one of its dependencies
 p: the project being configured
 project_root: the root project's directory
 m: the root manifest
+closure: `m`'s located closure, which the project borrows; nil to locate
+              one the project owns
 c: the cell; with `owner`, a target and artifact of that dependency and
               a profile of `m`
 owner: "" for a cell of `m`, or the id of the closure dependency whose export

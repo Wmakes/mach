@@ -1,4 +1,4 @@
-# mach.lang.build.fingerprint
+# mach.lang.fingerprint
 
 ## def Domain
 

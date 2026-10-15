@@ -28,6 +28,34 @@ a module's identity across sessions, keyed by its fully qualified name
 pub val STABLE_MODULE_NIL: StableModuleId = StableModuleId;
 ```
 
+## val BUFFER_BASE
+
+```mach
+pub val BUFFER_BASE: u32 = 0x80000000
+```
+
+a project numbers its modules from 0 below BUFFER_BASE, and a standalone
+editor buffer's module is BUFFER_BASE past its file's index, so no project
+module takes a buffer's id and a table keyed by module serves both
+
+## fun buffer_id
+
+```mach
+pub fun buffer_id(file: u32) opt[ModuleId];
+```
+
+the module of the standalone buffer over the file with index `file`, none
+past the last id the buffer range holds
+
+## fun buffer_file
+
+```mach
+pub fun buffer_file(m: ModuleId) opt[u32];
+```
+
+the index of the file whose standalone buffer is the module `m`, none when
+`m` is a project's module or nil
+
 ## fun id
 
 ```mach

@@ -1,4 +1,4 @@
-# mach.lang.build.cache.record
+# mach.lang.driver.cache.record
 
 the record an `obj/` object carries for the object cache (see
 target/of/record for the section it rides in): the key the object was built

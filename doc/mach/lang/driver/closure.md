@@ -48,20 +48,34 @@ whether the dependency root exists; err when it is anything but a physical direc
 ## fun locate
 
 ```mach
-pub fun locate(p: *project.Project, m: *manifest.Manifest, project_root: str, check: *Check) err[fail.Fail];
+pub fun locate(s: *session.Session, alloc: *A.Allocator, m: *manifest.Manifest, project_root: str,
+check: *Check) res[project.Closure, fail.Fail];
 ```
 
-locate a root manifest's dependency closure into `p.config.deps`, as a build reads it:
-every dependency is the directory its key names under dep/, read through its manifest.
-nothing is checked against git, a pin, a selector or the identity rule; `mach dep pull`
-realizes what is missing and `mach dep verify` checks what exists
+locate a root manifest's dependency closure as a build reads it: every
+dependency is the directory its key names under dep/, read through its
+manifest. nothing is checked against git, a pin, a selector or the identity
+rule; `mach dep pull` realizes what is missing and `mach dep verify` checks
+what exists. a root with no dependency still has its compiler range checked
 
-p: the project receiving the closure
+s: interns the names the manifests carry
+alloc: owns the closure
 m: the root manifest
 project_root: the root project's directory
 check: what each located edge is also held to, or nil for a build, which locates only
-ret: err naming a missing dependency, an unreadable manifest, a cycle or an
-              unaccepted compiler range, or the first edge that does not hold to `check`
+ret: the closure; err naming a missing dependency, an unreadable manifest, a
+              cycle or an unaccepted compiler range, or the first edge that does not hold
+              to `check`
+
+## fun adopt
+
+```mach
+pub fun adopt(p: *project.Project, c: *project.Closure) err[fail.Fail];
+```
+
+the cell `p` configures compiles against `c`: its `deps` borrow every entry
+
+c: outlives the project
 
 ## fun scope_closure_to_dependency
 
@@ -70,8 +84,8 @@ pub fun scope_closure_to_dependency(p: *project.Project, owner: str) err[fail.Fa
 ```
 
 make a resolved closure the closure of one of its dependencies: the dependency's
-entry moves to `p.config.owner` and `p.config.deps` keeps only what it reaches
-through its own edges, in closure order
+entry becomes `p.config.owner` and `p.config.deps` keeps only what it reaches
+through its own edges, in closure order. the entries stay the closure's
 
 p: a project whose `p.config.deps` holds the root's resolved closure
 owner: the dependency's project id

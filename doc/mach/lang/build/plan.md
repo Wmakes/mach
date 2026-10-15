@@ -87,19 +87,19 @@ label: the unit's artifact as requirements name it: `<artifact>` for the
 dep_requires: the labels of the dependency requirement cells this cell waits on;
               empty until `plan_dependency_requirements`
 
-## def BuildRequest
-
-```mach
-pub def BuildRequest: request.BuildRequest
-```
-
 ## rec BuildPlan
 
 ```mach
 pub rec BuildPlan;
 ```
 
-project: the root manifest's `[project].id`
+project:  the root manifest's `[project].id`
+names:    the interner the plan's names live in; a session runs the plan only
+          when it holds them
+manifest: the root manifest the plan was made from, borrowed; it outlives the plan
+closure:  the manifest's dependency closure, located once by
+          `plan_dependency_requirements`; every cell borrows it
+located:  whether `closure` was located, which running the plan requires
 
 ## fun plan
 
@@ -119,6 +119,19 @@ reg: the target registry
 m: the root manifest
 owned_req: the request; its `profile` is the plan's
 ret: the plan; err from request validation, selection or planning
+
+## fun plan_to_run
+
+```mach
+pub fun plan_to_run(a: *A.Allocator, s: *session.Session, reg: *lang_target.TargetRegistry,
+m: *manifest.Manifest, owned_req: request.BuildRequest) res[BuildPlan, fail.Fail];
+```
+
+`plan`, with the plan's dependency closure located in `s` as
+`plan_dependency_requirements` locates it, so the plan is ready to run there
+
+s: the session the plan's names live in; `itn` of `plan` is its interner
+ret: the plan; err from planning or from locating the closure
 
 ## fun plan_cells
 
@@ -143,30 +156,28 @@ ret: the plan; err from validation or a cell's planning, or when `-o`
 ## fun configure
 
 ```mach
-pub fun configure(s: *session.Session, m: *manifest.Manifest, bp: *BuildPlan) err[fail.Fail];
+pub fun configure(s: *session.Session, bp: *BuildPlan) err[fail.Fail];
 ```
 
-resolve every planned cell against the realized dependency closure, filling in
+resolve every planned cell against the plan's dependency closure, filling in
 the exported dependency steps and export link requirements each cell consumes.
-it configures projects through the same `driver.begin_build` a build runs, so a
-missing realization, an invalid dependency manifest or a dependency cycle is
-reported here exactly as the build would report it. nothing is fetched, no step
-runs and no output is written
+it configures projects through the same `driver.begin_build` a build runs, so
+what configuring a cell refuses is reported here exactly as the build would
+report it. nothing is fetched, no step runs and no output is written
 
 s: the session the plan was made in
-m: the root manifest
-bp: the plan, mutated in place; each unit becomes `configured`
+bp: the plan, its closure located; mutated in place, each unit becomes `configured`
 ret: ok; the configuration failure of the first cell that has one
 
 ## fun plan_dependency_requirements
 
 ```mach
-pub fun plan_dependency_requirements(s: *session.Session, m: *manifest.Manifest, bp: *BuildPlan) err[fail.Fail];
+pub fun plan_dependency_requirements(s: *session.Session, bp: *BuildPlan) err[fail.Fail];
 ```
 
-add the cells a dependency's export library requires to a plan made
-from the root manifest. the root's closure is located exactly as a build
-locates it; every cell compiled against a closure that holds a dependency
+locate the root's dependency closure, once, into the plan, and add the cells a
+dependency's export library requires to it. a plan runs only once this has
+located its closure; every cell compiled against a closure that holds a dependency
 waits on that dependency's requirement cells, which are planned before it with
 the root's profile, for every target they name in the dependency's manifest,
 and against the dependency's own closure in turn. a requirement reached through
@@ -174,9 +185,8 @@ several consumers is planned once. two cells that would write one output path
 are refused
 
 s: the session the plan was made in
-m: the root manifest
 bp: the plan, mutated in place
-ret: ok; err from closure realization, a dependency cell's planning, or an
+ret: ok; err from locating the closure, a dependency cell's planning, or an
      output collision
 
 ## fun check_plan_outputs
@@ -201,14 +211,6 @@ pub fun under_dir(path: str, dir: str) bool;
 
 whether `path` lies under the directory `dir`
 
-## fun replan_unit
-
-```mach
-pub fun replan_unit(a: *A.Allocator, itn: *intern.Interner, reg: *lang_target.TargetRegistry,
-s: *manifest.Scope, req: *request.BuildRequest,
-prior: *BuildUnit) res[BuildUnit, fail.Fail];
-```
-
 ## fun finished_modules
 
 ```mach
@@ -221,12 +223,6 @@ pub fun finished_modules(tgt: *lang_target.Binding) bool;
 pub fun resolve_requirement(a: *A.Allocator, itn: *intern.Interner, tgt: *lang_target.Binding,
 dirs: *Vector[str], root: str,
 req: *manifest.LinkRequirement) res[input.Input, fail.Fail];
-```
-
-## fun join_msg
-
-```mach
-pub fun join_msg(al: *A.Allocator, va: ...) res[str, fail.Fail];
 ```
 
 ## fun render

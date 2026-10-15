@@ -17,7 +17,7 @@ arch from its target, and the record owns everything else
 ## fun resolution_init
 
 ```mach
-pub fun resolution_init(r: *Resolution, alloc: *A.Allocator, itn: *intern.Interner,
+pub fun resolution_init(r: *Resolution, l: *linkage.Linkage, alloc: *A.Allocator, itn: *intern.Interner,
 format: *target_of.OfVTable, arch: *isa.IsaVTable, image_base: u64);
 ```
 

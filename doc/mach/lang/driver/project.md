@@ -30,6 +30,33 @@ pub rec TargetEntry;
 pub rec DepEntry;
 ```
 
+## rec Closure
+
+```mach
+pub rec Closure;
+```
+
+a root manifest's located dependency closure: every dependency realized under
+dep/, its manifest read once, and its direct edges. a plan locates it once and
+every cell it configures borrows it; a project configured without one locates
+and owns its own
+
+alloc: owns the entries, their manifests and their edges
+
+## fun closure_empty
+
+```mach
+pub fun closure_empty(alloc: *A.Allocator) Closure;
+```
+
+a closure that holds no dependency
+
+## fun closure_dnit
+
+```mach
+pub fun closure_dnit(c: *Closure);
+```
+
 ## rec ProjectConfig
 
 ```mach
@@ -41,12 +68,15 @@ what a configured build cell compiles and where it writes
 project_root: the directory of the project that declares the cell: the root
                   project, or for a dependency's cell the dependency's realization
 home_root: the root project's directory; `project_work` is rooted here
-owner: the dependency that declares the cell, moved out of the closure;
+owner: the dependency that declares the cell, as the closure holds it;
                   meaningful only with `dependency_owned`
 dependency_owned: the cell is a requirement of a dependency's default library
                   artifacts, built for the root project
+closure: the closure this project located itself, when it was configured
+                  without one to borrow; empty otherwise
 deps: the realized closure the cell compiles against: the root's whole
-                  closure, or a dependency cell's own transitive closure
+                  closure, or a dependency cell's own transitive closure. the array
+                  is the project's, each entry borrowed from the closure
 art_reqs: the requirements of the cell's artifact, in its declaring manifest
 req_scopes: one requirement scope per project the cell compiles, the declaring
                   project's first
@@ -176,14 +206,6 @@ pub fun init_project(p: *Project, s: *session.Session);
 ```mach
 pub fun free_dep_entries(alloc: *A.Allocator, deps: *DepEntry, count: u32, capacity: usize);
 ```
-
-## fun free_dep_entries_in_place
-
-```mach
-pub fun free_dep_entries_in_place(alloc: *A.Allocator, deps: *DepEntry, count: u32);
-```
-
-release what each entry owns, leaving the entries' own storage to the caller
 
 ## fun module_count
 

@@ -59,6 +59,19 @@ pub fun init(a: *A.Allocator) Interner;
 pub fun child_init(base: *Interner, a: *A.Allocator) Interner;
 ```
 
+an interner layered over `base`: it answers every id `base` and its own
+bases had issued when it was made, and issues its own past them. a base may
+itself be a child, so a session over a plan's interner layers its parallel
+workers over the session's
+
+## fun descends
+
+```mach
+pub fun descends(itn: *Interner, base: *Interner) bool;
+```
+
+whether `itn` answers every id `base` has issued: it is `base`, or layered over it
+
 ## fun dnit
 
 ```mach

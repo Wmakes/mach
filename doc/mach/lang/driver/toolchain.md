@@ -1,4 +1,4 @@
-# mach.lang.toolchain
+# mach.lang.driver.toolchain
 
 the toolchain's composition root: the one place the target catalog is
 registered. the toolchain owns one composed registry for the life of the
@@ -31,4 +31,13 @@ composed for every target it resolves
 
 alloc: backs the session
 ret: the session, released with `session.dnit`; err when the session or the catalog cannot be made
+
+## fun session_init_over
+
+```mach
+pub fun session_init_over(alloc: *A.Allocator, base: *intern.Interner) res[session.Session, fail.Fail];
+```
+
+`session_init` for a session layered over the names of `base`, as a build
+cell's session is over its plan's
 

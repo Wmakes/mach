@@ -86,6 +86,7 @@ comptime scope over its constants that this lowering owns, so what an instance b
 ```mach
 pub fun request(
 s: *session.Session,
+l: *linkage.Linkage,
 tgt: *resolved.Target,
 malloc: *A.Allocator,
 a: *ast.Ast,

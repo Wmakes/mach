@@ -1,6 +1,8 @@
 # mach.lang.output.remove
 
 descriptor-relative removal beneath a project root: every component is
+opened without following symlinks so no part of the path is resolved as a
+string and a link out of the tree is refused rather than followed
 
 ## rec Removal
 
