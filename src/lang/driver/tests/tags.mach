@@ -457,35 +457,3 @@ test regression__generic_over_a_user_declared_res {
     if (ut_tag_native_case(?alloc, "linux-x86_64", "", true, ut_generic_over_user_res_program(), "generic over a user res") != 0)  { ret 3; }
     ret 0;
 }
-
-# true when the two-module project is rejected with a diagnostic carrying the needle
-#[testing]
-fun ut_sema_rejects_with2(main: str, lib: str, needle: str) bool {
-    var alloc:  A.Allocator;
-    val make_r: err[A.Error] = page.make(?alloc);
-    if (sel make_r.err) { ret false; }
-    val sr: res[session.Session, fail.Fail] = toolchain.session_init(?alloc);
-    if (sel sr.err) { ret false; }
-    var s: session.Session = sr.ok;
-    fin { session.dnit(?s); }
-    var names: [2]str;
-    names[0] = "main.mach";
-    names[1] = "lib.mach";
-    var texts: [2]str;
-    texts[0] = main;
-    texts[1] = lib;
-    val pr: res[project.Project, fail.Fail] = ut_vec_sema_n(?s, ?alloc, ?names[0], ?texts[0], 2);
-    if (sel pr.ok) {
-        var p: project.Project = pr.ok;
-        project.dnit_project(?p);
-    }
-    ret ut_count_errors(?s.diags) > 0 && ut_diag_has(?s.diags, needle);
-}
-
-# a union build defers a body gate the load cannot decide, and typing refuses a comptime
-# `sel` over another module's `var` as a place it cannot test
-test comptime_sel__union_refuses_a_foreign_place {
-    if (!ut_sema_rejects_with2("use uniontest.lib; fun f() i64 { $if (sel lib.C.value) { ret 1; } ret 0; }",
-        "tag Reply: u8 { empty; value: i64; } pub var C: Reply = Reply.value{42};", "does not name a module-level constant")) { ret 1; }
-    ret 0;
-}

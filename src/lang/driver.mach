@@ -88,6 +88,14 @@ use std.types.string.str_region_equals;
 #[testing]
 use std.types.string.str_replace;
 #[testing]
+use io_error: std.io.error;
+#[testing]
+use ast_expr: mach.lang.fe.ast.expr;
+#[testing]
+use ast_stmt: mach.lang.fe.ast.stmt;
+#[testing]
+use session_embed: mach.lang.session.embed;
+#[testing]
 use mach.lang.fe.resolve;
 #[testing]
 use fe_sema:        mach.lang.fe.sema;
@@ -7310,5 +7318,524 @@ test context__a_change_after_the_freeze_is_refused_unless_reconfigured {
     if (sel reconfigured.err) { ret 6; }
     val read: err[fail.Fail] = run_sema_pass(?p);
     if (sel read.err) { ret 7; }
+    ret 0;
+}
+
+# the project at `root` loaded through build_project for the fixture target `target`
+#[testing]
+fun built_for(s: *session.Session, root: str, target: str) res[project.Project, fail.Fail] {
+    var pick: manifest.Selectors = manifest.t_selectors("", target, "");
+    ret build_project(s, root, ?pick);
+}
+
+# the project at `root` loaded for linux and typed
+#[testing]
+fun typed_at(s: *session.Session, root: str) res[project.Project, fail.Fail] {
+    val built: res[project.Project, fail.Fail] = built_for(s, root, "linux");
+    if (sel built.err) { ret built; }
+    var p:     project.Project = built.ok;
+    val typed: err[fail.Fail]  = run_sema_pass(?p);
+    if (sel typed.err) {
+        project.dnit_project(?p);
+        ret res[project.Project, fail.Fail].err{typed.err};
+    }
+    ret res[project.Project, fail.Fail].ok{p};
+}
+
+# the lowered module `fqn` of `p`, nil when it is not loaded or not lowered
+#[testing]
+fun lowered_named(p: *project.Project, fqn: str) *me_ir.Module {
+    val mid: session.ModuleId = project.module_named(p, fqn);
+    if (module.is_nil(mid)) { ret nil; }
+    ret project.module_at(p, mid::u32).ir_module;
+}
+
+# the functions `m` defines whose names contain `needle`
+#[testing]
+fun defined_count(s: *session.Session, m: *me_ir.Module, needle: str) u32 {
+    if (m == nil) { ret 0; }
+    var hits: u32 = 0;
+    var fi:   u32 = 0;
+    for (fi < m.function_len) {
+        val f: *me_ir.Function = ?m.functions[fi];
+        if ((f.flags & me_ir.FN_FLAG_EXTERN) == 0) {
+            val nm: opt[str] = intern.get(?s.interner, f.name);
+            if (sel nm.some && str_contains(nm.some, needle)) { hits = hits + 1; }
+        }
+        fi = fi + 1;
+    }
+    ret hits;
+}
+
+# the same parsed bracket is read as a generic call or an index as its names change, and the
+# reused syntax tree is never rewritten
+test bracket__reinterprets_without_rewriting_the_tree {
+    var alloc: A.Allocator;
+    page.make(?alloc);
+    val initialized: res[session.Session, fail.Fail] = toolchain.session_init(?alloc);
+    if (sel initialized.err) { ret 2; }
+    var s: session.Session = initialized.ok;
+    fin { session.dnit(?s); }
+    var names:    [2]str = [2]str{"main.mach", "lib.mach"};
+    var versions: [2]str = [2]str{
+        "pub def Key: i64;\npub fun item[T](v: T) T { ret v; }\n",
+        "pub val Key: u64 = 0;\nfun identity(v: i64) i64 { ret v; }\npub val item: [1]fun(i64) i64 = [1]fun(i64) i64{identity};\n"
+    };
+    var texts: [2]str = [2]str{
+        "use uniontest.lib.item;\nuse uniontest.lib.Key;\nfun main() i64 { ret item[Key](3); }\n", versions[0]
+    };
+    val made: res[str, fail.Fail] = scaffold(?alloc, fixture_manifest(), ?names[0], ?texts[0], 2);
+    if (sel made.err) { ret 4; }
+    val root: str = made.ok;
+    fin {
+        fs.remove_all(?alloc, root);
+        str_free(?alloc, root);
+    }
+    val joined: res[str, A.Error] = types_path.join(?alloc, root, "src/lib.mach");
+    if (sel joined.err) { ret 5; }
+    val filename: str = joined.ok;
+    fin { str_free(?alloc, filename); }
+    var saved: *ast_expr.Expr = nil;
+    var count: usize          = 0;
+    fin {
+        if (saved != nil) { A.deallocate[ast_expr.Expr](?alloc, saved, count); }
+    }
+    var owner:       *ast.Ast       = nil;
+    var incarnation: u64            = 0;
+    var selected:    ast_id.ExprId  = ast_id.EXPR_NIL;
+    var revision:    query.Revision = 0;
+    var round:       u32            = 0;
+    for (round < 3) {
+        val version: u32             = round % 2;
+        val wrote:   err[fs.FsError] = fs.write_bytes(filename, versions[version], str_len(versions[version]), 420);
+        if (sel wrote.err) { ret 6; }
+        val opened: res[project.Project, fail.Fail] = built_for(?s, root, "linux");
+        if (sel opened.err) { ret 7; }
+        var p: project.Project = opened.ok;
+        fin { project.dnit_project(?p); }
+        val mid: session.ModuleId = project.module_named(?p, "uniontest.main");
+        if (module.is_nil(mid)) { ret 8; }
+        val parsed: *ast.Ast = frontend.syntax(?p, project.module_at(?p, mid::u32));
+        if (parsed == nil) { ret 9; }
+        val current: query.Revision = query.peek_revision(?s.queries, ?frontend.PARSE, lang_source.file_index(project.module_at(?p, mid::u32).file_id)::u64);
+        if (round == 0) {
+            owner       = parsed;
+            incarnation = parsed.incarnation;
+            revision    = current;
+            count       = parsed.exprs.len;
+            val storage: res[*ast_expr.Expr, A.Error] = A.allocate[ast_expr.Expr](?alloc, count);
+            if (sel storage.err) { ret 10; }
+            saved = storage.ok;
+            memory.copy[ast_expr.Expr](saved, parsed.exprs.data, count);
+            var i: usize = 0;
+            for (i < count) {
+                if (saved[i].kind == ast_expr.EXPR_KIND_CALL && !ast_id.expr_is_nil(saved[i].data.call.index_callee)) {
+                    if (!ast_id.expr_is_nil(selected)) { ret 11; }
+                    selected = ast_id.expr(i::u32);
+                }
+                i = i + 1;
+            }
+            if (ast_id.expr_is_nil(selected) || revision == 0) { ret 12; }
+        }
+        if (parsed != owner || parsed.incarnation != incarnation || parsed.exprs.len != count || current != revision
+            || !memory.equal[ast_expr.Expr](saved, parsed.exprs.data, count)) { ret 13; }
+        val typed: err[fail.Fail] = run_sema_pass(?p);
+        if (sel typed.err) {
+            diagnostic.show(?s.diags);
+            ret 14;
+        }
+        val interpreted: res[ast_expr.Expr, fail.Fail] = resolve.expression(frontend.resolved(?p, project.module_at(?p, mid::u32)), parsed, selected);
+        if (sel interpreted.err) { ret 15; }
+        val node: ast_expr.Expr = interpreted.ok;
+        if (node.kind != ast_expr.EXPR_KIND_CALL || !ast_id.expr_is_nil(node.data.call.index_callee))                                                                   { ret 16; }
+        if (version == 0 && (node.data.call.type_args_len != 1 || !ast_id.expr_same(node.data.call.callee, saved[ast_id.expr_index(selected)].data.call.callee)))       { ret 17; }
+        if (version == 1 && (node.data.call.type_args_len != 0 || !ast_id.expr_same(node.data.call.callee, saved[ast_id.expr_index(selected)].data.call.index_callee))) { ret 18; }
+        val lowered: err[fail.Fail] = run_lower_pass(?p);
+        if (sel lowered.err)                                               { ret 19; }
+        if (!memory.equal[ast_expr.Expr](saved, parsed.exprs.data, count)) { ret 20; }
+        round = round + 1;
+    }
+    ret 0;
+}
+
+# an importer emits instances of another module's generic and comptime-parameter functions from
+# the template that module's interface published: with the exporter's own syntax tree wrecked
+# after typing, both still lower
+test instance__lowers_from_the_exporter_interface_not_its_tree {
+    var alloc: A.Allocator;
+    page.make(?alloc);
+    val sr: res[session.Session, fail.Fail] = toolchain.session_init(?alloc);
+    if (sel sr.err) { ret 1; }
+    var s: session.Session = sr.ok;
+    fin { session.dnit(?s); }
+    var names: [2]str = [2]str{"main.mach", "lib.mach"};
+    var texts: [2]str = [2]str{
+        "use uniontest.lib;\npub fun f() i64 { ret lib.keep[i64](41); }\npub fun g() i64 { ret lib.scale(3, 14); }\nfun main() i32 { ret 0; }\n",
+        "pub fun keep[T](x: T) T { val y: T = x; ret y; }\npub fun scale($k: i64, x: i64) i64 { ret x * k; }\n"
+    };
+    val built: res[project.Project, fail.Fail] = scaffold_build(?s, ?alloc, fixture_manifest(), ?names[0], ?texts[0], 2, "linux");
+    if (sel built.err) { ret 2; }
+    var p: project.Project = built.ok;
+    fin { project.dnit_project(?p); }
+    val typed: err[fail.Fail] = run_sema_pass(?p);
+    if (sel typed.err) { ret 3; }
+
+    val lib_mid: session.ModuleId = project.module_named(?p, "uniontest.lib");
+    if (module.is_nil(lib_mid)) { ret 4; }
+    val lib: *ast.Ast = frontend.syntax(?p, project.module_at(?p, lib_mid::u32));
+    if (lib == nil || lib.exprs.len == 0) { ret 5; }
+    var i: usize = 0;
+    for (i < lib.exprs.len) {
+        lib.exprs.data[i].kind = ast_expr.EXPR_KIND_ERROR;
+        i                      = i + 1;
+    }
+    i = 0;
+    for (i < lib.stmts.len) {
+        lib.stmts.data[i].kind = ast_stmt.STMT_KIND_ERROR;
+        i                      = i + 1;
+    }
+
+    val lowered: err[fail.Fail] = run_lower_pass(?p);
+    if (sel lowered.err) { ret 6; }
+    val m: *me_ir.Module = lowered_named(?p, "uniontest.main");
+    if (defined_count(?s, m, "keep") != 1)  { ret 7; }
+    if (defined_count(?s, m, "scale") != 1) { ret 8; }
+    ret 0;
+}
+
+# a same-module global cycle is refused at each global, and the rejected module leaves no
+# lower query product behind
+test global_init__cycle_is_refused_with_no_lower_product {
+    var alloc: A.Allocator;
+    page.make(?alloc);
+    val sr: res[session.Session, fail.Fail] = toolchain.session_init(?alloc);
+    if (sel sr.err) { ret 1; }
+    var s: session.Session = sr.ok;
+    fin { session.dnit(?s); }
+    var names: [1]str                          = [1]str{"main.mach"};
+    var texts: [1]str                          = [1]str{"val X: u64 = Y;\nval Y: u64 = X;\nfun main() i32 { ret 0; }\n"};
+    val built: res[project.Project, fail.Fail] = scaffold_build(?s, ?alloc, fixture_manifest(), ?names[0], ?texts[0], 1, "linux");
+    if (sel built.err) { ret 2; }
+    var p: project.Project = built.ok;
+    fin { project.dnit_project(?p); }
+    val typed: err[fail.Fail] = run_sema_pass(?p);
+    if (sel typed.err) { ret 3; }
+    val lowered: err[fail.Fail] = run_lower_pass(?p);
+    if (sel lowered.ok)                                                                              { ret 4; }
+    if (!fail.is_reported(lowered.err))                                                              { ret 5; }
+    if (diagnostic.error_count(?s.diags) != 2)                                                       { ret 6; }
+    if (!diagnostic.error_says(?s.diags, "global initialiser of `X` must be a constant expression")) { ret 7; }
+    if (!diagnostic.error_says(?s.diags, "global initialiser of `Y` must be a constant expression")) { ret 8; }
+    val mid: session.ModuleId = project.module_named(?p, "uniontest.main");
+    if (module.is_nil(mid) || project.module_at(?p, mid::u32).ir_module != nil) { ret 9; }
+    val stable: session.StableModuleId          = project.stable_named(?p, "uniontest.main");
+    val begun:  res[query.Operation, fail.Fail] = frontend.begin_query_phase(?p);
+    if (sel begun.err) { ret 10; }
+    val operation: query.Operation                 = begun.ok;
+    val acquired:  res[query.QueryView, fail.Fail] = query.get[project.Project](?p.queries, ?p, ?passes.LOWER, passes.back_half_key(stable, false));
+    val ended:     err[fail.Fail]                  = query.end(?s.queries, operation);
+    val discarded: err[fail.Fail]                  = query.discard(?s.queries, operation);
+    if (sel acquired.ok)                                  { ret 11; }
+    if (!fail.is_reported(acquired.err))                  { ret 12; }
+    if (sel ended.ok)                                     { ret 13; }
+    if (!fail.is_reported(ended.err))                     { ret 14; }
+    if (sel discarded.err)                                { ret 15; }
+    if (project.module_at(?p, mid::u32).ir_module != nil) { ret 16; }
+    ret 0;
+}
+
+# zero when typing the project of `main_src` beside the asset `asset` is refused with an
+# error that says `needle`
+#[testing]
+fun embed_refused(main_src: str, asset: str, needle: str) i32 {
+    var alloc: A.Allocator;
+    page.make(?alloc);
+    val sr: res[session.Session, fail.Fail] = toolchain.session_init(?alloc);
+    if (sel sr.err) { ret 1; }
+    var s: session.Session = sr.ok;
+    fin { session.dnit(?s); }
+    var names: [2]str              = [2]str{"main.mach", "asset.bin"};
+    var texts: [2]str              = [2]str{main_src, asset};
+    val made:  res[str, fail.Fail] = scaffold(?alloc, fixture_manifest(), ?names[0], ?texts[0], 2);
+    if (sel made.err) { ret 2; }
+    fin { fs.remove_all(?alloc, made.ok); }
+    val typed: res[project.Project, fail.Fail] = typed_at(?s, made.ok);
+    if (sel typed.ok) {
+        var p: project.Project = typed.ok;
+        project.dnit_project(?p);
+        ret 3;
+    }
+    if (!fail.is_reported(typed.err) || !diagnostic.error_says(?s.diags, needle)) { ret 4; }
+    ret 0;
+}
+
+#[testing]
+rec EmbedRefusal {
+    main:   str;
+    needle: str;
+}
+
+# each embed refusal: the size against the annotation, a missing file and a directory, the
+# declaration kind and annotation, the decorator's arguments, and a `[_]` outside an embed
+#[testing]
+val EMBED_REFUSALS: [13]EmbedRefusal = [13]EmbedRefusal{
+    EmbedRefusal{main: "#[embed(\"asset.bin\")]\nval A: [_]u8;\nfun main() i32 { val b: [9]u8 = A; ret b[0]::i32; }\n", needle: "found [3]u8"},
+    EmbedRefusal{main: "#[embed(\"asset.bin\")]\nval A: [4]u8;\nfun main() i32 { ret A[0]::i32; }\n", needle: "declares 4 bytes but the file holds 3"},
+    EmbedRefusal{main: "#[embed(\"nope.bin\")]\nval A: [_]u8;\nfun main() i32 { ret A[0]::i32; }\n", needle: "`embed` on `A` cannot read"},
+    EmbedRefusal{main: "#[embed(\"nope.bin\")]\nval A: [_]u8;\nfun main() i32 { ret A[0]::i32; }\n", needle: "no such file or directory"},
+    EmbedRefusal{main: "#[embed(\".\")]\nval A: [_]u8;\nfun main() i32 { ret A[0]::i32; }\n", needle: "is a directory"},
+    EmbedRefusal{main: "#[embed(\"asset.bin\")]\nvar A: [_]u8;\nfun main() i32 { ret A[0]::i32; }\n", needle: "applies only to a `val`"},
+    EmbedRefusal{main: "#[embed(\"asset.bin\")]\nval A: [_]u32;\nfun main() i32 { ret 0; }\n", needle: "element type must be `u8`"},
+    EmbedRefusal{main: "#[embed(\"asset.bin\")]\nval A: u8;\nfun main() i32 { ret A::i32; }\n", needle: "must be annotated `[_]u8` or `[N]u8`"},
+    EmbedRefusal{main: "#[embed()]\nval A: [_]u8;\nfun main() i32 { ret A[0]::i32; }\n", needle: "takes one string argument"},
+    EmbedRefusal{main: "#[embed(\"asset.bin\")]\nfun f() i32 { ret 0; }\nfun main() i32 { ret f(); }\n", needle: "applies only to a `val`"},
+    EmbedRefusal{main: "#[embed(\"asset.bin\")]\n#[embed(\"asset.bin\")]\nval A: [_]u8;\nfun main() i32 { ret A[0]::i32; }\n", needle: "only one `embed` decorator"},
+    EmbedRefusal{main: "val B: [1]u8 = [1]u8{1};\nval A: [_]u8 = B;\nfun main() i32 { ret A[0]::i32; }\n", needle: "needs an array literal initializer"},
+    EmbedRefusal{main: "#[embed(\"asset.bin\")]\nval A: [_][_]u8;\nfun main() i32 { ret 0; }\n", needle: "element type must be `u8`"}
+};
+
+test embed__refusals {
+    var i: usize = 0;
+    for (i < $length_of(EMBED_REFUSALS)) {
+        if (embed_refused(EMBED_REFUSALS[i].main, "abc", EMBED_REFUSALS[i].needle) != 0) { ret (i + 1)::i32; }
+        i = i + 1;
+    }
+    ret 0;
+}
+
+$if ($mach.build.os == $mach.os.linux) {
+    # an asset the build cannot read is refused with the reason the system gives
+    test embed__unreadable_asset_is_refused {
+        var alloc: A.Allocator;
+        page.make(?alloc);
+        val sr: res[session.Session, fail.Fail] = toolchain.session_init(?alloc);
+        if (sel sr.err) { ret 1; }
+        var s: session.Session = sr.ok;
+        fin { session.dnit(?s); }
+        var names: [2]str              = [2]str{"main.mach", "asset.bin"};
+        var texts: [2]str              = [2]str{"#[embed(\"asset.bin\")]\nval A: [_]u8;\nfun main() i32 { ret 0; }\n", "abc"};
+        val made:  res[str, fail.Fail] = scaffold(?alloc, fixture_manifest(), ?names[0], ?texts[0], 2);
+        if (sel made.err) { ret 2; }
+        val root: str = made.ok;
+        fin { fs.remove_all(?alloc, root); }
+        val asset: res[str, A.Error] = types_path.join(?alloc, root, "src/asset.bin");
+        if (sel asset.err) { ret 3; }
+        val removed: err[io_error.Error] = fs.remove_file(asset.ok);
+        if (sel removed.err) { ret 4; }
+        val wrote: err[fs.FsError] = fs.write_bytes(asset.ok, "abc", 3, 0);
+        if (sel wrote.err) { ret 5; }
+        val typed: res[project.Project, fail.Fail] = typed_at(?s, root);
+        if (sel typed.ok) {
+            var p: project.Project = typed.ok;
+            project.dnit_project(?p);
+            ret 6;
+        }
+        if (!fail.is_reported(typed.err) || !diagnostic.error_says(?s.diags, "permission denied")) { ret 7; }
+        ret 0;
+    }
+}
+
+# a malformed embed annotation is reported once, never again as a `[_]` outside an embed,
+# while a `[_]` local beside a failed embed still is
+test embed__rejection_does_not_cascade {
+    val needle: str = "an inferred array length `[_]`";
+    if (embed_refused("#[embed(\"asset.bin\")]\nval A: [_][_]u8;\nfun main() i32 { ret 0; }\n", "abc", needle) == 0)           { ret 1; }
+    if (embed_refused("#[embed(\"asset.bin\")]\nval A: *[_]u8;\nfun main() i32 { ret 0; }\n", "abc", needle) == 0)             { ret 2; }
+    if (embed_refused("#[embed(\"asset.bin\")]\nval A: [3][_]u8;\nfun main() i32 { ret 0; }\n", "abc", needle) == 0)           { ret 3; }
+    if (embed_refused("#[embed(\"nope.bin\")]\nval A: [_]u8;\nfun main() i32 { var q: [_]u8; ret 0; }\n", "abc", needle) != 0) { ret 4; }
+    ret 0;
+}
+
+# zero when an embed of the project's own asset types clean, or, `escaped`, when one naming
+# a file beside the project root is refused at the decorator with the file never read
+#[testing]
+fun embed_escape_arm(alloc: *A.Allocator, escaped: bool) i32 {
+    val sr: res[session.Session, fail.Fail] = toolchain.session_init(alloc);
+    if (sel sr.err) { ret 1; }
+    var s: session.Session = sr.ok;
+    fin { session.dnit(?s); }
+    var names: [2]str              = [2]str{"main.mach", "asset.bin"};
+    var texts: [2]str              = [2]str{"#[embed(\"asset.bin\")]\nval A: [_]u8;\nfun main() i32 { ret A[0]::i32; }\n", "abc"};
+    val made:  res[str, fail.Fail] = scaffold(alloc, fixture_manifest(), ?names[0], ?texts[0], 2);
+    if (sel made.err) { ret 2; }
+    val root: str = made.ok;
+    fin { fs.remove_all(alloc, root); }
+    val beside: res[str, std_format.FormatError] = std_format.sprint(alloc, "{}-outside.bin", root);
+    if (sel beside.err) { ret 3; }
+    val outside: str = beside.ok;
+    if (escaped) {
+        val main_path: res[str, A.Error] = types_path.join(alloc, root, "src/main.mach");
+        if (sel main_path.err) { ret 4; }
+        val spelled: res[str, std_format.FormatError] = std_format.sprint(alloc, "#[embed(\"../../{}\")]\nval A: [_]u8;\nfun main() i32 {{ ret A[0]::i32; }}\n", types_path.filename(outside));
+        if (sel spelled.err) { ret 5; }
+        val wrote: err[fs.FsError] = fs.write_bytes(main_path.ok, spelled.ok, str_len(spelled.ok), 420);
+        if (sel wrote.err) { ret 6; }
+        val planted: err[fs.FsError] = fs.write_bytes(outside, "xyz", 3, 420);
+        if (sel planted.err) { ret 7; }
+    }
+    fin {
+        if (escaped) { fs.remove_file(outside); }
+    }
+
+    val typed: res[project.Project, fail.Fail] = typed_at(?s, root);
+    if (sel typed.ok) {
+        var p:      project.Project = typed.ok;
+        val errors: bool            = diagnostic.has_errors(?s.diags);
+        project.dnit_project(?p);
+        if (escaped) { ret 8; }
+        if (errors)  { ret 9; }
+        ret 0;
+    }
+    if (!escaped)                                                                                  { ret 10; }
+    if (!diagnostic.error_says(?s.diags, "`embed` path escapes the project root"))                 { ret 11; }
+    if (!diagnostic.error_says(?s.diags, "must live inside the project and the file is not read")) { ret 12; }
+    val outside_id: res[intern.StrId, A.Error] = intern.add(?s.interner, outside);
+    if (sel outside_id.ok) {
+        val cached: opt[*session_embed.EmbedFile] = session_embed.get(?s.embeds, outside_id.ok);
+        if (sel cached.some) { ret 13; }
+    }
+    ret 0;
+}
+
+# an embed outside the project root is a refusal that never reads the file
+test embed__outside_the_project_root_is_refused_unread {
+    var alloc: A.Allocator;
+    page.make(?alloc);
+    val escaped: i32 = embed_escape_arm(?alloc, true);
+    if (escaped != 0) { ret 100 + escaped; }
+    val inside: i32 = embed_escape_arm(?alloc, false);
+    if (inside != 0) { ret 200 + inside; }
+    ret 0;
+}
+
+# an arm a comptime gate takes declares the same import as the arm it does not, so the
+# import still conflicts with another module's import of that name from another library
+test comptime_arm__does_not_mask_a_cross_module_import_conflict {
+    var alloc: A.Allocator;
+    page.make(?alloc);
+    val sr: res[session.Session, fail.Fail] = toolchain.session_init(?alloc);
+    if (sel sr.err) { ret 1; }
+    var s: session.Session = sr.ok;
+    fin { session.dnit(?s); }
+    var names: [3]str = [3]str{"main.mach", "a.mach", "b.mach"};
+    var texts: [3]str = [3]str{
+        "use uniontest.a;\nuse uniontest.b;\nfun main() i32 { a.call(); b.call(); ret 0; }\n",
+        "$if ($mach.build.os == $mach.os.windows) {\n    #[library(\"kernel32\")]\n    ext fun cx_probe();\n}\n$or {\n    #[library(\"kernel32\")]\n    ext fun cx_probe();\n}\n\npub fun call() { cx_probe(); }\n",
+        "#[library(\"user32\")]\next fun cx_probe();\npub fun call() { cx_probe(); }\n"
+    };
+    val built: res[project.Project, fail.Fail] = scaffold_build(?s, ?alloc, fixture_manifest(), ?names[0], ?texts[0], 3, "windows");
+    if (sel built.err) { ret 2; }
+    var p: project.Project = built.ok;
+    fin { project.dnit_project(?p); }
+    # the conflict is refused by whichever phase meets it first
+    var refused: err[fail.Fail] = run_sema_pass(?p);
+    val typed:   bool           = sel refused.ok;
+    if (typed)          { refused = run_lower_pass(?p); }
+    if (sel refused.ok) { ret 3; }
+    val message: str = fail.describe(refused.err);
+    if (!str_contains(message, "import 'cx_probe'")) { ret 4; }
+    if (!str_contains(message, "'kernel32'"))        { ret 5; }
+    if (!str_contains(message, "'user32'"))          { ret 6; }
+    if (!str_contains(message, "uniontest.a"))       { ret 7; }
+    if (!str_contains(message, "uniontest.b"))       { ret 8; }
+    ret 0;
+}
+
+# a manifest for a test's shader project: the bin `uniontest`, its entry `main.mach`, on the
+# logical spirv target
+#[testing]
+val SPIRV_MANIFEST: str = "[project]\nmach = \">=5\"\nid = \"uniontest\"\nversion = \"0.0.0\"\nsrc = \"src\"\nwork = \"out/{target.name}/{profile.name}\"\n\n[target.spirv]\nisa = \"spirv\"\nos = \"freestanding\"\nabi = \"spirv\"\n\n[artifact.uniontest]\nkind = \"bin\"\nentry = \"main.mach\"\nout = \"{project.work}/bin/uniontest\"\ntargets = [\"*\"]\nlink = []\nneed = []\n[profile.debug]\ndefault = true\noptimize = false\ndebug = false\nsimd = \"scalarize\"\n";
+
+# zero when sema over the entry of a shader project of `text` either reports or fails at every
+# allocation it refuses, never accepting the module silently
+#[testing]
+fun spirv_alloc_sweep(text: str) i32 {
+    var backing: A.Allocator;
+    page.make(?backing);
+    var t:      T.Testing;
+    val made_t: err[A.Error] = T.make(?t);
+    if (sel made_t.err) { ret 1; }
+    fin { T.dnit(?t); }
+    val sr: res[session.Session, fail.Fail] = toolchain.session_init(?backing);
+    if (sel sr.err) { ret 2; }
+    var s: session.Session = sr.ok;
+    fin { session.dnit(?s); }
+    var names: [1]str                          = [1]str{"main.mach"};
+    var texts: [1]str                          = [1]str{text};
+    val built: res[project.Project, fail.Fail] = scaffold_build(?s, ?backing, SPIRV_MANIFEST, ?names[0], ?texts[0], 1, "spirv");
+    if (sel built.err) { ret 3; }
+    var p: project.Project = built.ok;
+    fin { project.dnit_project(?p); }
+    val mid: session.ModuleId = project.module_named(?p, "uniontest.main");
+    if (module.is_nil(mid)) { ret 4; }
+    val m:    *project.ModuleEntry = project.module_at(?p, mid::u32);
+    var deps: fe_sema.SemaDeps     = fe_sema.SemaDeps{};
+    deps.entries = nil;
+    deps.count   = 0;
+
+    val real_alloc: *A.Allocator = s.alloc;
+    s.alloc = T.allocator_of(?t);
+    val pre0: usize                              = diagnostic.len(?s.diags);
+    val r0:   res[fe_sema.SemaResult, fail.Fail] = fe_sema.sema(?s, frontend.syntax(?p, m), frontend.resolved(?p, m), ?deps, ?m.load.ctx, mid, ?s.diags);
+    if (sel r0.ok) {
+        var first: fe_sema.SemaResult = r0.ok;
+        fe_sema.result_dnit(?first);
+    }
+    s.alloc = real_alloc;
+    val total: u32 = T.attempt_count(?t)::u32;
+    if (T.attempt_count(?t) - T.refused_count(?t) - T.total_count(?t) != 0) {
+        print.print("APPARATUS: the backing allocator failed during the baseline run; the sweep cannot tell a real failure from the injected one\n");
+        ret 5;
+    }
+    if (total == 0) {
+        print.print("APPARATUS: the baseline run made no allocations\n");
+        ret 6;
+    }
+    if (diagnostic.len(?s.diags) == pre0) {
+        print.print("APPARATUS: the baseline run reported nothing, so the fixture proves nothing\n");
+        ret 7;
+    }
+
+    var bad:     i32 = 0;
+    var fail_at: u32 = 1;
+    for (fail_at <= total) {
+        T.fail_at_ordinal(?t, T.attempt_count(?t) + fail_at::usize);
+        # each run reports into its own store: the session's store keeps one copy
+        # of a report, so a repeat run would add nothing to it
+        var run: diagnostic.DiagnosticStore = diagnostic.store_init(real_alloc);
+        s.alloc = T.allocator_of(?t);
+        val r:        res[fe_sema.SemaResult, fail.Fail] = fe_sema.sema(?s, frontend.syntax(?p, m), frontend.resolved(?p, m), ?deps, ?m.load.ctx, mid, ?run);
+        val accepted: bool                               = sel r.ok;
+        if (sel r.ok) {
+            var result: fe_sema.SemaResult = r.ok;
+            fe_sema.result_dnit(?result);
+        }
+        s.alloc = real_alloc;
+        T.clear_failure(?t);
+        if (T.attempt_count(?t) - T.refused_count(?t) - T.total_count(?t) != 0) {
+            bad = 8;
+            print.print("APPARATUS: the backing allocator failed at fail_at=");
+            print.u64(fail_at::u64);
+            print.print("; this is memory pressure, not a skipped check\n");
+        }
+        or (accepted && diagnostic.len(?run) == 0) {
+            bad = 9;
+            print.print("SKIPPED CHECK at fail_at=");
+            print.u64(fail_at::u64);
+            print.print("\n");
+        }
+        diagnostic.store_dnit(?run);
+        fail_at = fail_at + 1;
+    }
+    ret bad;
+}
+
+# an `op` declaration's refusals survive an allocation failure while the message is
+# built: the operand-relation, the texel-count and the data-type refusal each either
+# report or fail the phase, never accept the declaration
+test alloc_failure__op_refusals_never_accept {
+    if (spirv_alloc_sweep("#[handle(\"spirv\", \"image\", 2, 1, 0, 0, 0, 2, 33)]\npub def UImage2D;\n#[op(\"spirv\", \"core\", \"OpImageWrite\")] fun bad(img: UImage2D, at: i32x2, texel: f32x4);\n") != 0) { ret 1; }
+    if (spirv_alloc_sweep("#[handle(\"spirv\", \"image\", 2, 1, 0, 0, 0, 2, 33)]\npub def UImage2D;\n#[op(\"spirv\", \"core\", \"OpImageRead\")] fun bad(img: UImage2D, at: i32x2) u32x2;\n") != 0)          { ret 2; }
+    if (spirv_alloc_sweep("#[op(\"spirv\", \"core\", \"OpAtomicIAdd\")] fun bad(p: *f32, scope: u32, sem: u32, v: f32) f32;\n") != 0)                                                                        { ret 3; }
     ret 0;
 }

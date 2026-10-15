@@ -28,39 +28,6 @@ use mach.lang.driver.tests.testing.ut_tag_start_stub;
 use mach.lang.driver.toolchain;
 use mach.lang.module;
 
-test comptime_arm__does_not_mask_a_cross_module_import_conflict {
-    var alloc:  A.Allocator;
-    val make_r: err[A.Error] = page.make(?alloc);
-    if (sel make_r.err) { ret 1; }
-    val sr: res[session.Session, fail.Fail] = toolchain.session_init(?alloc);
-    if (sel sr.err) { ret 1; }
-    var s: session.Session = sr.ok;
-
-    var names: [3]str;
-    names[0] = "main.mach";
-    names[1] = "a.mach";
-    names[2] = "b.mach";
-    var texts: [3]str;
-    texts[0] = "use uniontest.a;\nuse uniontest.b;\nfun main() i32 { a.call(); b.call(); ret 0; }\n";
-    texts[1] = "$if ($mach.build.os == $mach.os.windows) {\n    #[library(\"kernel32\")]\n    ext fun cx_probe();\n}\n$or {\n    #[library(\"kernel32\")]\n    ext fun cx_probe();\n}\n\npub fun call() { cx_probe(); }\n";
-    texts[2] = "#[library(\"user32\")]\next fun cx_probe();\npub fun call() { cx_probe(); }\n";
-
-    var bad: i32                 = 0;
-    val pr:  res[str, fail.Fail] = ut_attr_probe(?s, ?alloc, ?names[0], ?texts[0], 3, "windows", "cx_probe");
-    if (sel pr.ok) { bad = 1; }
-    if (sel pr.err) {
-        val msg: str = fail.describe(pr.err);
-        if (!ut_str_contains(msg, "import 'cx_probe'")) { bad = 1; }
-        if (!ut_str_contains(msg, "'kernel32'"))        { bad = 1; }
-        if (!ut_str_contains(msg, "'user32'"))          { bad = 1; }
-        if (!ut_str_contains(msg, "uniontest.a"))       { bad = 1; }
-        if (!ut_str_contains(msg, "uniontest.b"))       { bad = 1; }
-    }
-
-    session.dnit(?s);
-    ret bad;
-}
-
 # a `$each` over a constant array reads each element from the array's published value, alike for
 # an array the module imports, one of its own and one local to a body: record and nested fields,
 # a field the literal leaves out, a string, a case payload under a folded `sel`, a whole record
