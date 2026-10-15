@@ -52,7 +52,7 @@ pub rec Template {
 pub fun none(alloc: *A.Allocator) Template {
     var t: Template = Template{alloc: alloc, present: false, source: nil};
     t.a        = ast.init(alloc, lang_source.FILE_NIL);
-    t.rr       = resolve.ResolveResult{alloc: alloc, param_index: map.init[u64, resolve.SymbolId](alloc), constants: comptime.bindings_init(alloc)};
+    t.rr       = resolve.ResolveResult{alloc: alloc, param_index: map.init[u64, resolve.SymbolId](alloc), nominals: map.init[u64, resolve.SymbolId](alloc), constants: comptime.bindings_init(alloc)};
     t.load     = comptime.bindings_init(alloc);
     t.resolved = comptime.bindings_init(alloc);
     t.typed    = comptime.bindings_init(alloc);
