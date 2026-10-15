@@ -242,6 +242,23 @@ one `{name}` of an asm block and the local it binds
 pub fun param_symbol(r: *ResolveResult, decl: ast_id.DeclId, slot: u32) SymbolId;
 ```
 
+## val SYMBOL_AMBIGUOUS
+
+```mach
+pub val SYMBOL_AMBIGUOUS: SymbolId = SymbolId;
+```
+
+a nominal the module defines named by more than one declaration
+
+## fun own_nominal
+
+```mach
+pub fun own_nominal(r: *ResolveResult, kind: SymKind, canon: intern.StrId) SymbolId;
+```
+
+the symbol of the record, union or tag of `kind` the module defines under `canon`: SYMBOL_NIL
+when it defines none, SYMBOL_AMBIGUOUS when more than one declaration does
+
 ## fun stable_of_module
 
 ```mach

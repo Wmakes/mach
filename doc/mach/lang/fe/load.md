@@ -82,6 +82,23 @@ reached: the union tuples a walk reached it under
 deps: the modules it imports
 consts: the public constants it exports to its importers' gates
 bindings: one record per import declaration the walk reached
+binders: where a demand finds each name a declaration list binds, built once per syntax
+              (see demand_index)
+
+## rec DemandIndex
+
+```mach
+pub rec DemandIndex;
+```
+
+the declarations a demand for a name reaches in one module's syntax, so a demand costs one
+lookup rather than a pass over its list
+
+names: the first `val` or `use` that binds a name in a declaration list, by demand_key of the
+         list's first pool position and the name, as its position in the declaration pool
+chains: the pool position of every `$if` chain in the module, ascending; a chain before the
+         binder may bind the name first in the arm it selects
+indexed: the two above describe the current syntax
 
 ## rec Row
 
