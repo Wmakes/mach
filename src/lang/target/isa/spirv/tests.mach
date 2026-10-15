@@ -83,7 +83,7 @@ fun diag_located_in(s: *session.Session, needle: str, path_suffix: str) bool {
 }
 
 #[testing]
-rec UtMirShape {
+rec MirShape {
     modules:     u32;
     max_gep:     u32;
     memzero:     u32;
@@ -95,7 +95,7 @@ rec UtMirShape {
 }
 
 #[testing]
-fun mir_count(mm: *lang_mir.MirModule, flat: bool, out: *UtMirShape) {
+fun mir_count(mm: *lang_mir.MirModule, flat: bool, out: *MirShape) {
     var fi: u32 = 0;
     for (fi < mm.function_len) {
         val mf: *lang_mir.MirFunction = ?mm.functions[fi];
@@ -133,8 +133,8 @@ fun mir_count(mm: *lang_mir.MirModule, flat: bool, out: *UtMirShape) {
 
 # lowers `src` for `tname` to MIR and counts its shapes over every module; false when nothing lowered
 #[testing]
-fun mir_shape(alloc: *A.Allocator, src: str, tname: str, out: *UtMirShape) bool {
-    @out = UtMirShape{modules: 0, max_gep: 0, memzero: 0, typed_slots: 0, memcpy: 0, loads: 0, sym_addr: 0, aggregate: 0};
+fun mir_shape(alloc: *A.Allocator, src: str, tname: str, out: *MirShape) bool {
+    @out = MirShape{modules: 0, max_gep: 0, memzero: 0, typed_slots: 0, memcpy: 0, loads: 0, sym_addr: 0, aggregate: 0};
     val sr: res[session.Session, fail.Fail] = toolchain.session_init(alloc);
     if (sel sr.err) { ret false; }
     var s: session.Session = sr.ok;
@@ -163,7 +163,7 @@ test mir_lower__logical_addressing_keeps_typed_shapes {
     var alloc:  A.Allocator;
     val make_r: err[A.Error] = page.make(?alloc);
     if (sel make_r.err) { ret 1; }
-    var sh: UtMirShape;
+    var sh: MirShape;
 
     val zs: str = "rec Pair { a: i64; b: i64; }\n#[output(0)] var o: i32;\n#[stage(\"vertex\")]\nfun vs() { var p: Pair; var v: f32x4; o = p.a::i32; }\nfun main() i32 { ret 0; }\n";
     val zf: str = "rec Pair { a: i64; b: i64; }\nfun rd() i64 { var p: Pair; var q: Pair; ret p.a + q.b; }\n#[symbol(\"main\")]\nfun main(argc: i64, argv: **u8) i32 { ret rd()::i32; }\n";
@@ -541,61 +541,61 @@ fun h_diag(alloc: *A.Allocator, tail: str, needle: str) bool {
 # 2^32 and 2^64 are refused rather than truncated, and a type-name argument is scoped
 # to `handle`, so anywhere else it is still not a value
 #[testing]
-rec UtHCase {
+rec HCase {
     tail:   str;
     needle: str;
 }
 
 #[testing]
-val H_REFUSALS: [48]UtHCase = [48]UtHCase{
-    UtHCase{tail: "fun f() i32 { val x: i32 = Sampler2D; ret 0; }\n\nfun main() i32 { ret 0; }\n", needle: "is a handle type, not a value"},
-    UtHCase{tail: "#[stage(\"fragment\")]\nfun frag_main() { val s: Sampler2D = albedo; out_colour = sample2(s, in_uv); }\n\nfun main() i32 { ret 0; }\n", needle: "cannot be a local binding"},
-    UtHCase{tail: "rec Material { tex: Sampler2D; }\n\nfun main() i32 { ret 0; }\n", needle: "cannot be a record or union field"},
-    UtHCase{tail: "fun take(p: *Sampler2D) f32x4 { ret sample2(@p, in_uv); }\nfun f(s: Sampler2D) f32x4 { ret take(?s); }\n\nfun main() i32 { ret 0; }\n", needle: "cannot take the address of a handle that is not its descriptor binding"},
-    UtHCase{tail: "fun f(s: Sampler2D) f32x4 { s = albedo; ret sample2(s, in_uv); }\n\nfun main() i32 { ret 0; }\n", needle: "a handle cannot be assigned"},
-    UtHCase{tail: "#[sampler(0, 1)] var other: Sampler2D;\nfun f() { albedo = other; }\n\nfun main() i32 { ret 0; }\n", needle: "a handle cannot be assigned"},
-    UtHCase{tail: "uni Either { tex: Sampler2D; n: i32; }\n\nfun main() i32 { ret 0; }\n", needle: "cannot be a record or union field"},
-    UtHCase{tail: "var unbound: Sampler2D;\n\nfun main() i32 { ret 0; }\n", needle: "needs a `#[sampler(set, binding)]` decorator"},
-    UtHCase{tail: "#[sampler(0, 1)] var p: *Sampler2D;\n\nfun main() i32 { ret 0; }\n", needle: "cannot sit behind a pointer or inside an array"},
-    UtHCase{tail: "#[sampler(0, 1)] var a: [4]Sampler2D;\n\nfun main() i32 { ret 0; }\n", needle: "cannot sit behind a pointer or inside an array"},
-    UtHCase{tail: "#[handle(\"spirv\", \"image\", 0, 1, 2, 0, 0, 1, 0)]\npub def T;\n\nfun main() i32 { ret 0; }\n", needle: "the `Depth` operand is neither `0` nor `1`"},
-    UtHCase{tail: "#[handle(\"spirv\", \"image\", 0, 0, 0, 0, 1, 1, 0)]\npub def T;\n\nfun main() i32 { ret 0; }\n", needle: "the `MS` operand is `1` on a `1D` image"},
-    UtHCase{tail: "#[handle(\"spirv\", \"image\", 0, 2, 0, 0, 1, 1, 0)]\npub def T;\n\nfun main() i32 { ret 0; }\n", needle: "the `MS` operand is `1` on a `3D` image"},
-    UtHCase{tail: "#[handle(\"spirv\", \"image\", 0, 3, 0, 0, 1, 1, 0)]\npub def T;\n\nfun main() i32 { ret 0; }\n", needle: "the `MS` operand is `1` on a `Cube` image"},
-    UtHCase{tail: "#[handle(\"spirv\", \"image\", 0, 5, 0, 0, 1, 1, 0)]\npub def T;\n\nfun main() i32 { ret 0; }\n", needle: "the `MS` operand is `1` on a `Buffer` image"},
-    UtHCase{tail: "#[handle(\"spirv\", \"image\", 0, 1, 0, 0, 2, 1, 0)]\npub def T;\n\nfun main() i32 { ret 0; }\n", needle: "the `MS` operand is neither `0` nor `1`"},
-    UtHCase{tail: "#[handle(\"spirv\", \"image\", 0, 1, 0, 0, 1, 1, 0)]\npub def T;\n#[handle(\"spirv\", \"sampled_image\", T)]\npub def S;\n\nfun main() i32 { ret 0; }\n", needle: "a sampled image cannot compose over a multisampled image"},
-    UtHCase{tail: "#[handle(\"spirv\", \"image\", 0, 4, 0, 0, 0, 1, 0)]\npub def T;\n\nfun main() i32 { ret 0; }\n", needle: "`Dim` operand names a dimensionality"},
-    UtHCase{tail: "#[handle(\"spirv\", \"image\", 0, 1, 0, 0, 0, 3, 0)]\npub def T;\n\nfun main() i32 { ret 0; }\n", needle: "`Sampled` operand is neither `1` nor `2`"},
-    UtHCase{tail: "#[handle(\"spirv\", \"image\", 0, 1, 0, 0, 0, 2, 21)]\npub def T;\n\nfun main() i32 { ret 0; }\n", needle: "does not match the texel-scalar operand"},
-    UtHCase{tail: "#[handle(\"spirv\", \"image\", 4, 1, 0, 0, 0, 2, 42)]\npub def T;\n\nfun main() i32 { ret 0; }\n", needle: "`Image Format` operand names no format at all"},
-    UtHCase{tail: "#[handle(\"spirv\", \"image\", 0, 5, 0, 1, 0, 2, 1)]\npub def T;\n\nfun main() i32 { ret 0; }\n", needle: "`Arrayed` operand is `1` on a `Buffer` image"},
-    UtHCase{tail: "#[handle(\"spirv\", \"image\", 0, 1, 0, 0, 0, 2, 1)]\npub def S;\n#[handle(\"spirv\", \"sampled_image\", S)]\npub def T;\n\nfun main() i32 { ret 0; }\n", needle: "the image named here is a storage image"},
-    UtHCase{tail: "#[handle(\"spirv\", \"image\", 0, 1, 0, 0, 0, 2, 1)]\npub def S;\n#[sampler(0, 5)] var s: S;\n\nfun main() i32 { ret 0; }\n", needle: "a storage image binds through `#[storage(set, binding)]`, not `#[sampler(set, binding)]`"},
-    UtHCase{tail: "#[storage(0, 5)] var t: Sampler2D;\n\nfun main() i32 { ret 0; }\n", needle: "this handle binds through `#[sampler(set, binding)]`, not `#[storage(set, binding)]`"},
-    UtHCase{tail: "#[handle(\"spirv\", \"image\", 4294967296, 1, 0, 0, 0, 1, 0)]\npub def T;\n\nfun main() i32 { ret 0; }\n", needle: "must fit one 32-bit word"},
-    UtHCase{tail: "#[handle(\"spirv\", \"image\", 18446744073709551616, 1, 0, 0, 0, 1, 0)]\npub def T;\n\nfun main() i32 { ret 0; }\n", needle: "must fit one 32-bit word"},
-    UtHCase{tail: "#[handle(\"spirv\", \"image\", 0, 1, 0)]\npub def T;\n\nfun main() i32 { ret 0; }\n", needle: "operand count does not match the constructor's"},
-    UtHCase{tail: "#[handle(\"spirv\", \"image\", 0, 1, 0, 0, 0, 1, 0, 1)]\npub def T;\n\nfun main() i32 { ret 0; }\n", needle: "operand count does not match the constructor's"},
-    UtHCase{tail: "#[handle(\"spirv\", \"sampled_imag\", Texture2D)]\npub def T;\n\nfun main() i32 { ret 0; }\n", needle: "defines no type constructor of this name"},
-    UtHCase{tail: "#[handle(\"spirv\", \"sampled_image\", Sampler)]\npub def T;\n\nfun main() i32 { ret 0; }\n", needle: "minted by the target's `image` constructor"},
-    UtHCase{tail: "rec Plain { a: i32; }\n#[handle(\"spirv\", \"sampled_image\", Plain)]\npub def T;\n\nfun main() i32 { ret 0; }\n", needle: "must name a handle the same target mints"},
-    UtHCase{tail: "rec Inner { a: i32; }\n#[align(Inner)]\nvar g: i32;\n\nfun main() i32 { ret 0; }\n", needle: "is a record type, not a value"},
-    UtHCase{tail: "#[handle(\"spirv\", \"sampler\")]\npub def T: i32;\n\nfun main() i32 { ret 0; }\n", needle: "a `handle` declaration has no body"},
-    UtHCase{tail: "rec Box[T] { v: T; }\nfun f(p: *Box[Sampler2D]) { }\n\nfun main() i32 { ret 0; }\n", needle: "this instantiation puts one there"},
-    UtHCase{tail: "rec Box[T] { v: T; }\nrec Outer[T] { b: Box[T]; }\nfun f(p: *Outer[Sampler2D]) { }\n\nfun main() i32 { ret 0; }\n", needle: "this instantiation puts one there"},
-    UtHCase{tail: "tag Opt[T]: u8 { some: T; none; }\nfun f(p: *Opt[*Sampler2D]) { }\n\nfun main() i32 { ret 0; }\n", needle: "this instantiation puts one there"},
-    UtHCase{tail: "rec Box[T] { v: T; }\nfun f[T](p: *Box[T]) { }\nfun g() { f[Sampler2D](nil); }\n\nfun main() i32 { ret 0; }\n", needle: "this instantiation puts one there"},
-    UtHCase{tail: "fun f(a: [2]Sampler2D) { }\n\nfun main() i32 { ret 0; }\n", needle: "a handle cannot sit inside an array"},
-    UtHCase{tail: "fun f[T](a: [2]T) { }\nfun g() { f[Sampler2D]([2]Sampler2D{albedo, albedo}); }\n\nfun main() i32 { ret 0; }\n", needle: "a handle cannot sit inside an array"},
-    UtHCase{tail: "fun f[T](p: *T) { }\nfun g() { f[[2]Sampler2D](nil); }\n\nfun main() i32 { ret 0; }\n", needle: "a handle cannot sit inside an array"},
-    UtHCase{tail: "fun f(p: **Sampler2D) { }\n\nfun main() i32 { ret 0; }\n", needle: "behind a pointer to a pointer"},
-    UtHCase{tail: "fun f() { var q: **Sampler2D = nil; }\n\nfun main() i32 { ret 0; }\n", needle: "behind a pointer to a pointer"},
-    UtHCase{tail: "fun f() **Sampler2D { ret nil; }\n\nfun main() i32 { ret 0; }\n", needle: "behind a pointer to a pointer"},
-    UtHCase{tail: "rec R { p: **Sampler2D; }\n\nfun main() i32 { ret 0; }\n", needle: "behind a pointer to a pointer"},
-    UtHCase{tail: "fun f[T](p: T) { }\nfun g() { f[**Sampler2D](nil); }\n\nfun main() i32 { ret 0; }\n", needle: "behind a pointer to a pointer"},
-    UtHCase{tail: "fun f[T](p: *T) { }\nfun g() { f[*Sampler2D](nil); }\n\nfun main() i32 { ret 0; }\n", needle: "behind a pointer to a pointer"},
-    UtHCase{tail: "fun f(p: ***Sampler2D) { }\n\nfun main() i32 { ret 0; }\n", needle: "behind a pointer to a pointer"}
+val H_REFUSALS: [48]HCase = [48]HCase{
+    HCase{tail: "fun f() i32 { val x: i32 = Sampler2D; ret 0; }\n\nfun main() i32 { ret 0; }\n", needle: "is a handle type, not a value"},
+    HCase{tail: "#[stage(\"fragment\")]\nfun frag_main() { val s: Sampler2D = albedo; out_colour = sample2(s, in_uv); }\n\nfun main() i32 { ret 0; }\n", needle: "cannot be a local binding"},
+    HCase{tail: "rec Material { tex: Sampler2D; }\n\nfun main() i32 { ret 0; }\n", needle: "cannot be a record or union field"},
+    HCase{tail: "fun take(p: *Sampler2D) f32x4 { ret sample2(@p, in_uv); }\nfun f(s: Sampler2D) f32x4 { ret take(?s); }\n\nfun main() i32 { ret 0; }\n", needle: "cannot take the address of a handle that is not its descriptor binding"},
+    HCase{tail: "fun f(s: Sampler2D) f32x4 { s = albedo; ret sample2(s, in_uv); }\n\nfun main() i32 { ret 0; }\n", needle: "a handle cannot be assigned"},
+    HCase{tail: "#[sampler(0, 1)] var other: Sampler2D;\nfun f() { albedo = other; }\n\nfun main() i32 { ret 0; }\n", needle: "a handle cannot be assigned"},
+    HCase{tail: "uni Either { tex: Sampler2D; n: i32; }\n\nfun main() i32 { ret 0; }\n", needle: "cannot be a record or union field"},
+    HCase{tail: "var unbound: Sampler2D;\n\nfun main() i32 { ret 0; }\n", needle: "needs a `#[sampler(set, binding)]` decorator"},
+    HCase{tail: "#[sampler(0, 1)] var p: *Sampler2D;\n\nfun main() i32 { ret 0; }\n", needle: "cannot sit behind a pointer or inside an array"},
+    HCase{tail: "#[sampler(0, 1)] var a: [4]Sampler2D;\n\nfun main() i32 { ret 0; }\n", needle: "cannot sit behind a pointer or inside an array"},
+    HCase{tail: "#[handle(\"spirv\", \"image\", 0, 1, 2, 0, 0, 1, 0)]\npub def T;\n\nfun main() i32 { ret 0; }\n", needle: "the `Depth` operand is neither `0` nor `1`"},
+    HCase{tail: "#[handle(\"spirv\", \"image\", 0, 0, 0, 0, 1, 1, 0)]\npub def T;\n\nfun main() i32 { ret 0; }\n", needle: "the `MS` operand is `1` on a `1D` image"},
+    HCase{tail: "#[handle(\"spirv\", \"image\", 0, 2, 0, 0, 1, 1, 0)]\npub def T;\n\nfun main() i32 { ret 0; }\n", needle: "the `MS` operand is `1` on a `3D` image"},
+    HCase{tail: "#[handle(\"spirv\", \"image\", 0, 3, 0, 0, 1, 1, 0)]\npub def T;\n\nfun main() i32 { ret 0; }\n", needle: "the `MS` operand is `1` on a `Cube` image"},
+    HCase{tail: "#[handle(\"spirv\", \"image\", 0, 5, 0, 0, 1, 1, 0)]\npub def T;\n\nfun main() i32 { ret 0; }\n", needle: "the `MS` operand is `1` on a `Buffer` image"},
+    HCase{tail: "#[handle(\"spirv\", \"image\", 0, 1, 0, 0, 2, 1, 0)]\npub def T;\n\nfun main() i32 { ret 0; }\n", needle: "the `MS` operand is neither `0` nor `1`"},
+    HCase{tail: "#[handle(\"spirv\", \"image\", 0, 1, 0, 0, 1, 1, 0)]\npub def T;\n#[handle(\"spirv\", \"sampled_image\", T)]\npub def S;\n\nfun main() i32 { ret 0; }\n", needle: "a sampled image cannot compose over a multisampled image"},
+    HCase{tail: "#[handle(\"spirv\", \"image\", 0, 4, 0, 0, 0, 1, 0)]\npub def T;\n\nfun main() i32 { ret 0; }\n", needle: "`Dim` operand names a dimensionality"},
+    HCase{tail: "#[handle(\"spirv\", \"image\", 0, 1, 0, 0, 0, 3, 0)]\npub def T;\n\nfun main() i32 { ret 0; }\n", needle: "`Sampled` operand is neither `1` nor `2`"},
+    HCase{tail: "#[handle(\"spirv\", \"image\", 0, 1, 0, 0, 0, 2, 21)]\npub def T;\n\nfun main() i32 { ret 0; }\n", needle: "does not match the texel-scalar operand"},
+    HCase{tail: "#[handle(\"spirv\", \"image\", 4, 1, 0, 0, 0, 2, 42)]\npub def T;\n\nfun main() i32 { ret 0; }\n", needle: "`Image Format` operand names no format at all"},
+    HCase{tail: "#[handle(\"spirv\", \"image\", 0, 5, 0, 1, 0, 2, 1)]\npub def T;\n\nfun main() i32 { ret 0; }\n", needle: "`Arrayed` operand is `1` on a `Buffer` image"},
+    HCase{tail: "#[handle(\"spirv\", \"image\", 0, 1, 0, 0, 0, 2, 1)]\npub def S;\n#[handle(\"spirv\", \"sampled_image\", S)]\npub def T;\n\nfun main() i32 { ret 0; }\n", needle: "the image named here is a storage image"},
+    HCase{tail: "#[handle(\"spirv\", \"image\", 0, 1, 0, 0, 0, 2, 1)]\npub def S;\n#[sampler(0, 5)] var s: S;\n\nfun main() i32 { ret 0; }\n", needle: "a storage image binds through `#[storage(set, binding)]`, not `#[sampler(set, binding)]`"},
+    HCase{tail: "#[storage(0, 5)] var t: Sampler2D;\n\nfun main() i32 { ret 0; }\n", needle: "this handle binds through `#[sampler(set, binding)]`, not `#[storage(set, binding)]`"},
+    HCase{tail: "#[handle(\"spirv\", \"image\", 4294967296, 1, 0, 0, 0, 1, 0)]\npub def T;\n\nfun main() i32 { ret 0; }\n", needle: "must fit one 32-bit word"},
+    HCase{tail: "#[handle(\"spirv\", \"image\", 18446744073709551616, 1, 0, 0, 0, 1, 0)]\npub def T;\n\nfun main() i32 { ret 0; }\n", needle: "must fit one 32-bit word"},
+    HCase{tail: "#[handle(\"spirv\", \"image\", 0, 1, 0)]\npub def T;\n\nfun main() i32 { ret 0; }\n", needle: "operand count does not match the constructor's"},
+    HCase{tail: "#[handle(\"spirv\", \"image\", 0, 1, 0, 0, 0, 1, 0, 1)]\npub def T;\n\nfun main() i32 { ret 0; }\n", needle: "operand count does not match the constructor's"},
+    HCase{tail: "#[handle(\"spirv\", \"sampled_imag\", Texture2D)]\npub def T;\n\nfun main() i32 { ret 0; }\n", needle: "defines no type constructor of this name"},
+    HCase{tail: "#[handle(\"spirv\", \"sampled_image\", Sampler)]\npub def T;\n\nfun main() i32 { ret 0; }\n", needle: "minted by the target's `image` constructor"},
+    HCase{tail: "rec Plain { a: i32; }\n#[handle(\"spirv\", \"sampled_image\", Plain)]\npub def T;\n\nfun main() i32 { ret 0; }\n", needle: "must name a handle the same target mints"},
+    HCase{tail: "rec Inner { a: i32; }\n#[align(Inner)]\nvar g: i32;\n\nfun main() i32 { ret 0; }\n", needle: "is a record type, not a value"},
+    HCase{tail: "#[handle(\"spirv\", \"sampler\")]\npub def T: i32;\n\nfun main() i32 { ret 0; }\n", needle: "a `handle` declaration has no body"},
+    HCase{tail: "rec Box[T] { v: T; }\nfun f(p: *Box[Sampler2D]) { }\n\nfun main() i32 { ret 0; }\n", needle: "this instantiation puts one there"},
+    HCase{tail: "rec Box[T] { v: T; }\nrec Outer[T] { b: Box[T]; }\nfun f(p: *Outer[Sampler2D]) { }\n\nfun main() i32 { ret 0; }\n", needle: "this instantiation puts one there"},
+    HCase{tail: "tag Opt[T]: u8 { some: T; none; }\nfun f(p: *Opt[*Sampler2D]) { }\n\nfun main() i32 { ret 0; }\n", needle: "this instantiation puts one there"},
+    HCase{tail: "rec Box[T] { v: T; }\nfun f[T](p: *Box[T]) { }\nfun g() { f[Sampler2D](nil); }\n\nfun main() i32 { ret 0; }\n", needle: "this instantiation puts one there"},
+    HCase{tail: "fun f(a: [2]Sampler2D) { }\n\nfun main() i32 { ret 0; }\n", needle: "a handle cannot sit inside an array"},
+    HCase{tail: "fun f[T](a: [2]T) { }\nfun g() { f[Sampler2D]([2]Sampler2D{albedo, albedo}); }\n\nfun main() i32 { ret 0; }\n", needle: "a handle cannot sit inside an array"},
+    HCase{tail: "fun f[T](p: *T) { }\nfun g() { f[[2]Sampler2D](nil); }\n\nfun main() i32 { ret 0; }\n", needle: "a handle cannot sit inside an array"},
+    HCase{tail: "fun f(p: **Sampler2D) { }\n\nfun main() i32 { ret 0; }\n", needle: "behind a pointer to a pointer"},
+    HCase{tail: "fun f() { var q: **Sampler2D = nil; }\n\nfun main() i32 { ret 0; }\n", needle: "behind a pointer to a pointer"},
+    HCase{tail: "fun f() **Sampler2D { ret nil; }\n\nfun main() i32 { ret 0; }\n", needle: "behind a pointer to a pointer"},
+    HCase{tail: "rec R { p: **Sampler2D; }\n\nfun main() i32 { ret 0; }\n", needle: "behind a pointer to a pointer"},
+    HCase{tail: "fun f[T](p: T) { }\nfun g() { f[**Sampler2D](nil); }\n\nfun main() i32 { ret 0; }\n", needle: "behind a pointer to a pointer"},
+    HCase{tail: "fun f[T](p: *T) { }\nfun g() { f[*Sampler2D](nil); }\n\nfun main() i32 { ret 0; }\n", needle: "behind a pointer to a pointer"},
+    HCase{tail: "fun f(p: ***Sampler2D) { }\n\nfun main() i32 { ret 0; }\n", needle: "behind a pointer to a pointer"}
 };
 
 # the accepting counterpart of every refusal above builds with no error at all
@@ -634,21 +634,21 @@ fun h_clean(alloc: *A.Allocator, tail: str) bool {
 # a pointer to a pointer to a handle draws one error at each site it is written or formed,
 # and no second refusal from the binding, field or array that holds it
 #[testing]
-rec UtHCount {
+rec HCount {
     tail:   str;
     errors: u32;
 }
 
 #[testing]
-val H_INDIRECTION_COUNTS: [8]UtHCount = [8]UtHCount{
-    UtHCount{tail: "fun f(p: **Sampler2D, q: **Sampler2D) { }\n\nfun main() i32 { ret 0; }\n", errors: 2},
-    UtHCount{tail: "fun f() { var q: **Sampler2D = nil; }\n\nfun main() i32 { ret 0; }\n", errors: 1},
-    UtHCount{tail: "rec R { p: **Sampler2D; }\n\nfun main() i32 { ret 0; }\n", errors: 1},
-    UtHCount{tail: "var g: **Sampler2D;\n\nfun main() i32 { ret 0; }\n", errors: 1},
-    UtHCount{tail: "fun f(p: ***Sampler2D) { }\n\nfun main() i32 { ret 0; }\n", errors: 1},
-    UtHCount{tail: "fun f(a: [2]**Sampler2D) { }\n\nfun main() i32 { ret 0; }\n", errors: 1},
-    UtHCount{tail: "rec Box[T] { v: T; }\nfun f(p: *Box[**Sampler2D]) { }\n\nfun main() i32 { ret 0; }\n", errors: 1},
-    UtHCount{tail: "fun f[T](p: *T) { var q: *T = p; }\nfun g() { f[*Sampler2D](nil); }\n\nfun main() i32 { ret 0; }\n", errors: 1}
+val H_INDIRECTION_COUNTS: [8]HCount = [8]HCount{
+    HCount{tail: "fun f(p: **Sampler2D, q: **Sampler2D) { }\n\nfun main() i32 { ret 0; }\n", errors: 2},
+    HCount{tail: "fun f() { var q: **Sampler2D = nil; }\n\nfun main() i32 { ret 0; }\n", errors: 1},
+    HCount{tail: "rec R { p: **Sampler2D; }\n\nfun main() i32 { ret 0; }\n", errors: 1},
+    HCount{tail: "var g: **Sampler2D;\n\nfun main() i32 { ret 0; }\n", errors: 1},
+    HCount{tail: "fun f(p: ***Sampler2D) { }\n\nfun main() i32 { ret 0; }\n", errors: 1},
+    HCount{tail: "fun f(a: [2]**Sampler2D) { }\n\nfun main() i32 { ret 0; }\n", errors: 1},
+    HCount{tail: "rec Box[T] { v: T; }\nfun f(p: *Box[**Sampler2D]) { }\n\nfun main() i32 { ret 0; }\n", errors: 1},
+    HCount{tail: "fun f[T](p: *T) { var q: *T = p; }\nfun g() { f[*Sampler2D](nil); }\n\nfun main() i32 { ret 0; }\n", errors: 1}
 };
 
 #[testing]
@@ -936,20 +936,20 @@ fun spv_build_constituents(w: *u32, n: u32, count: u32, int_lanes: bool) bool {
 }
 
 #[testing]
-rec UtWideBuild {
+rec WideBuild {
     src:       str;
     int_lanes: bool;
 }
 
 #[testing]
-val WIDE_BUILDS: [3]UtWideBuild = [3]UtWideBuild{
-    UtWideBuild{src: "#[input(0)] var in_x: i32;\n#[output(0)] var out_x: i32;\n\n#[stage(\"fragment\")]\nfun fs() {\n    val v: i32x20 = i32x20{in_x, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, in_x};\n    out_x = v[0] + v[17] + v[19];\n}\n\nfun main() i32 { ret 0; }\n", int_lanes: false},
-    UtWideBuild{src: "#[input(0)] var in_x: i32;\n#[output(0)] var out_x: i32;\n\n#[stage(\"fragment\")]\nfun fs() {\n    val v: i32x24 = i32x24{in_x, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, in_x};\n    val r: i32x20 = v[2, 20];\n    out_x = r[0] + r[17] + r[19];\n}\n\nfun main() i32 { ret 0; }\n", int_lanes: false},
-    UtWideBuild{src: "#[input(0)] var in_h: f16;\n#[output(0)] var out_x: i32;\n\n#[stage(\"fragment\")]\nfun fs() {\n    val v: f16x20 = f16x20{in_h, in_h, in_h, in_h, in_h, in_h, in_h, in_h, in_h, in_h, in_h, in_h, in_h, in_h, in_h, in_h, in_h, in_h, in_h, in_h};\n    val c: i32x20 = v::i32x20;\n    out_x = c[0] + c[19];\n}\n\nfun main() i32 { ret 0; }\n", int_lanes: true},
+val WIDE_BUILDS: [3]WideBuild = [3]WideBuild{
+    WideBuild{src: "#[input(0)] var in_x: i32;\n#[output(0)] var out_x: i32;\n\n#[stage(\"fragment\")]\nfun fs() {\n    val v: i32x20 = i32x20{in_x, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, in_x};\n    out_x = v[0] + v[17] + v[19];\n}\n\nfun main() i32 { ret 0; }\n", int_lanes: false},
+    WideBuild{src: "#[input(0)] var in_x: i32;\n#[output(0)] var out_x: i32;\n\n#[stage(\"fragment\")]\nfun fs() {\n    val v: i32x24 = i32x24{in_x, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, in_x};\n    val r: i32x20 = v[2, 20];\n    out_x = r[0] + r[17] + r[19];\n}\n\nfun main() i32 { ret 0; }\n", int_lanes: false},
+    WideBuild{src: "#[input(0)] var in_h: f16;\n#[output(0)] var out_x: i32;\n\n#[stage(\"fragment\")]\nfun fs() {\n    val v: f16x20 = f16x20{in_h, in_h, in_h, in_h, in_h, in_h, in_h, in_h, in_h, in_h, in_h, in_h, in_h, in_h, in_h, in_h, in_h, in_h, in_h, in_h};\n    val c: i32x20 = v::i32x20;\n    out_x = c[0] + c[19];\n}\n\nfun main() i32 { ret 0; }\n", int_lanes: true},
 };
 
 #[testing]
-fun spv_wide_build(alloc: *A.Allocator, c: *UtWideBuild) i32 {
+fun spv_wide_build(alloc: *A.Allocator, c: *WideBuild) i32 {
     val sr: res[session.Session, fail.Fail] = toolchain.session_init(alloc);
     if (sel sr.err) { ret 1; }
     var s: session.Session = sr.ok;
@@ -1387,7 +1387,7 @@ test interface__globals_follow_reachability_across_modules {
 # a built-in used by a stage its execution model does not define it in is refused naming the
 # built-in and both stages, and its own stages accept it. `own` 3 is every stage
 #[testing]
-rec UtBiCase {
+rec BiCase {
     name: str;
     ty:   str;
     use:  str;
@@ -1396,29 +1396,29 @@ rec UtBiCase {
 }
 
 #[testing]
-val BUILTINS: [14]UtBiCase = [14]UtBiCase{
-    UtBiCase{name: "position", ty: "f32x4", use: "b = sink.f;", own: 0, only: "only as an output of a vertex stage"},
-    UtBiCase{name: "point_size", ty: "f32", use: "b = sink.f[0];", own: 0, only: "only as an output of a vertex stage"},
-    UtBiCase{name: "vertex_index", ty: "u32", use: "sink.u = b;", own: 0, only: "only in a vertex stage"},
-    UtBiCase{name: "instance_index", ty: "u32", use: "sink.u = b;", own: 0, only: "only in a vertex stage"},
-    UtBiCase{name: "frag_coord", ty: "f32x4", use: "sink.f = b;", own: 1, only: "only in a fragment stage"},
-    UtBiCase{name: "global_invocation", ty: "u32x3", use: "sink.u = b[0];", own: 2, only: "only in a compute stage"},
-    UtBiCase{name: "local_invocation", ty: "u32x3", use: "sink.u = b[1];", own: 2, only: "only in a compute stage"},
-    UtBiCase{name: "workgroup_id", ty: "u32x3", use: "sink.u = b[2];", own: 2, only: "only in a compute stage"},
-    UtBiCase{name: "num_workgroups", ty: "u32x3", use: "sink.u = b[0];", own: 2, only: "only in a compute stage"},
-    UtBiCase{name: "local_invocation_index", ty: "u32", use: "sink.u = b;", own: 2, only: "only in a compute stage"},
-    UtBiCase{name: "subgroup_size", ty: "u32", use: "sink.u = b;", own: 3, only: ""},
-    UtBiCase{name: "subgroup_invocation", ty: "u32", use: "sink.u = b;", own: 3, only: ""},
-    UtBiCase{name: "subgroup_id", ty: "u32", use: "sink.u = b;", own: 2, only: "only in a compute stage"},
-    UtBiCase{name: "num_subgroups", ty: "u32", use: "sink.u = b;", own: 2, only: "only in a compute stage"}
+val BUILTINS: [14]BiCase = [14]BiCase{
+    BiCase{name: "position", ty: "f32x4", use: "b = sink.f;", own: 0, only: "only as an output of a vertex stage"},
+    BiCase{name: "point_size", ty: "f32", use: "b = sink.f[0];", own: 0, only: "only as an output of a vertex stage"},
+    BiCase{name: "vertex_index", ty: "u32", use: "sink.u = b;", own: 0, only: "only in a vertex stage"},
+    BiCase{name: "instance_index", ty: "u32", use: "sink.u = b;", own: 0, only: "only in a vertex stage"},
+    BiCase{name: "frag_coord", ty: "f32x4", use: "sink.f = b;", own: 1, only: "only in a fragment stage"},
+    BiCase{name: "global_invocation", ty: "u32x3", use: "sink.u = b[0];", own: 2, only: "only in a compute stage"},
+    BiCase{name: "local_invocation", ty: "u32x3", use: "sink.u = b[1];", own: 2, only: "only in a compute stage"},
+    BiCase{name: "workgroup_id", ty: "u32x3", use: "sink.u = b[2];", own: 2, only: "only in a compute stage"},
+    BiCase{name: "num_workgroups", ty: "u32x3", use: "sink.u = b[0];", own: 2, only: "only in a compute stage"},
+    BiCase{name: "local_invocation_index", ty: "u32", use: "sink.u = b;", own: 2, only: "only in a compute stage"},
+    BiCase{name: "subgroup_size", ty: "u32", use: "sink.u = b;", own: 3, only: ""},
+    BiCase{name: "subgroup_invocation", ty: "u32", use: "sink.u = b;", own: 3, only: ""},
+    BiCase{name: "subgroup_id", ty: "u32", use: "sink.u = b;", own: 2, only: "only in a compute stage"},
+    BiCase{name: "num_subgroups", ty: "u32", use: "sink.u = b;", own: 2, only: "only in a compute stage"}
 };
 
-# indexed by UtBiCase.own
+# indexed by BiCase.own
 #[testing]
 val STAGES: [3]str = [3]str{"vertex", "fragment", "compute"};
 
 #[testing]
-fun spv_builtin_stage_case(alloc: *A.Allocator, c: *UtBiCase, sx: usize) i32 {
+fun spv_builtin_stage_case(alloc: *A.Allocator, c: *BiCase, sx: usize) i32 {
     val stage: str                             = STAGES[sx];
     val sr:    res[session.Session, fail.Fail] = toolchain.session_init(alloc);
     if (sel sr.err) { ret 1; }
@@ -1683,7 +1683,7 @@ val VMM_STAGE: str = "#[stage(\"compute\")]\n#[workgroup(64, 1, 1)]\nfun cs() {\
 # doing the same for their texels, and whether it declares the model's extension and the
 # device-scope capability
 #[testing]
-rec UtVmm {
+rec Vmm {
     model:         u32;
     coherent:      u32;
     visible:       u32;
@@ -1695,8 +1695,8 @@ rec UtVmm {
 }
 
 #[testing]
-fun vmm_scan(w: *u32, n: u32) UtVmm {
-    var v: UtVmm;
+fun vmm_scan(w: *u32, n: u32) Vmm {
+    var v: Vmm;
     v.coherent     = spv_decor_count(w, n, isa_spirv.DECOR_COHERENT);
     v.extension    = spv_count(w, n, isa_spirv.OP_EXTENSION) != 0;
     v.device_scope = spv_has_cap(w, n, isa_spirv.CAP_VULKAN_MEMORY_MODEL_DEVICE_SCOPE);
@@ -1719,7 +1719,7 @@ fun vmm_scan(w: *u32, n: u32) UtVmm {
 # refusal, located at `line` and `col` of the stage when `line` is not 0, or, with an empty
 # needle, a module that validates under `target_env`, scanned into `out`
 #[testing]
-fun vmm_module(alloc: *A.Allocator, stage: str, env_line: str, target_env: str, needle: str, line: usize, col: usize, out: *UtVmm) i32 {
+fun vmm_module(alloc: *A.Allocator, stage: str, env_line: str, target_env: str, needle: str, line: usize, col: usize, out: *Vmm) i32 {
     val sr: res[session.Session, fail.Fail] = toolchain.session_init(alloc);
     if (sel sr.err) { ret 1; }
     var s: session.Session = sr.ok;
@@ -1783,7 +1783,7 @@ test vulkan_memory_model__selected_by_the_environment_and_the_declared_feature {
     var alloc:  A.Allocator;
     val make_r: err[A.Error] = page.make(?alloc);
     if (sel make_r.err) { ret 1; }
-    var v: UtVmm;
+    var v: Vmm;
     var r: i32 = vmm_module(?alloc, VMM_STAGE, "env = \"vulkan1.2\"\n", "vulkan1.2", "", 0, 0, ?v);
     if (r != 0)                                                                                                                                  { ret 10 + r; }
     if (v.model != isa_spirv.MEMORY_GLSL450 || v.coherent != 2 || v.visible + v.available + v.texel_visible + v.texel_avail != 0 || v.extension) { ret 20; }
@@ -1819,7 +1819,7 @@ test vulkan_memory_model__scopes_and_semantics_follow_the_model {
     val make_r: err[A.Error] = page.make(?alloc);
     if (sel make_r.err) { ret 1; }
     val device: str = "#[stage(\"compute\")]\n#[workgroup(64, 1, 1)]\nfun cs() { atomic_add(?cells.flag, DEVICE, 0x48, 1); }\n";
-    var v:      UtVmm;
+    var v:      Vmm;
     var r:      i32 = vmm_module(?alloc, device, "env = \"vulkan1.2\"\nextensions = [\"vulkan_memory_model\"]\n", "",
         "`OpAtomicIAdd` with the Device memory scope under the Vulkan memory model needs the `vulkan_memory_model_device_scope` extension", 0, 0, ?v);
     if (r != 0) { ret 10 + r; }
@@ -1851,7 +1851,7 @@ test vulkan_memory_model__sequentially_consistent_is_refused {
     if (sel make_r.err) { ret 1; }
     val stage:  str = "#[stage(\"compute\")]\n#[workgroup(64, 1, 1)]\nfun cs() { memory_barrier(WORKGROUP, 0x50); }\n";
     val needle: str = "`OpMemoryBarrier` with SequentiallyConsistent memory semantics is not allowed in a Vulkan environment (VUID-StandaloneSpirv-MemorySemantics-10866)";
-    var v:      UtVmm;
+    var v:      Vmm;
     var r:      i32 = vmm_module(?alloc, stage, "env = \"vulkan1.2\"\n", "", needle, 3, 12, ?v);
     if (r != 0) { ret 10 + r; }
     r = vmm_module(?alloc, stage, "env = \"vulkan1.3\"\n", "", needle, 3, 12, ?v);
@@ -2379,7 +2379,7 @@ val AGG_TY_PTR: u8 = 4;
 val AGG_TY_VOID: u8 = 5;
 
 #[testing]
-rec UtAggEval {
+rec AggEval {
     ty_kind:  [1024]u8;
     ty_words: [1024]u32;
     ty_bits:  [1024]u32;
@@ -2396,7 +2396,7 @@ rec UtAggEval {
 }
 
 #[testing]
-fun agg_reset(st: *UtAggEval) {
+fun agg_reset(st: *AggEval) {
     var i: u32 = 0;
     for (i < AGG_IDS) {
         st.ty_kind[i]  = AGG_TY_NONE;
@@ -2425,7 +2425,7 @@ fun agg_reset(st: *UtAggEval) {
 }
 
 #[testing]
-fun agg_member(st: *UtAggEval, ty: u32, k: u32, out_off: *u32, out_ty: *u32) bool {
+fun agg_member(st: *AggEval, ty: u32, k: u32, out_off: *u32, out_ty: *u32) bool {
     if (ty >= AGG_IDS || k >= st.ty_mcnt[ty]) { ret false; }
     if (st.ty_kind[ty] == AGG_TY_SEQ) {
         @out_off = k * st.ty_words[st.ty_elem[ty]];
@@ -2447,7 +2447,7 @@ fun agg_member(st: *UtAggEval, ty: u32, k: u32, out_off: *u32, out_ty: *u32) boo
 }
 
 #[testing]
-fun agg_copy(st: *UtAggEval, dblk: u32, doff: u32, sblk: u32, soff: u32, words: u32) bool {
+fun agg_copy(st: *AggEval, dblk: u32, doff: u32, sblk: u32, soff: u32, words: u32) bool {
     if (words == 0 || dblk >= AGG_IDS || sblk >= AGG_IDS)     { ret false; }
     if (doff + words > AGG_WORDS || soff + words > AGG_WORDS) { ret false; }
     var k: u32 = 0;
@@ -2459,7 +2459,7 @@ fun agg_copy(st: *UtAggEval, dblk: u32, doff: u32, sblk: u32, soff: u32, words: 
 }
 
 #[testing]
-fun agg_mask(st: *UtAggEval, ty: u32, v: u64) u64 {
+fun agg_mask(st: *AggEval, ty: u32, v: u64) u64 {
     if (ty >= AGG_IDS) { ret v; }
     val bits: u32 = st.ty_bits[ty];
     if (bits == 0 || bits >= 64) { ret v; }
@@ -2467,7 +2467,7 @@ fun agg_mask(st: *UtAggEval, ty: u32, v: u64) u64 {
 }
 
 #[testing]
-fun agg_prepare(st: *UtAggEval, w: *u32, n: u32) bool {
+fun agg_prepare(st: *AggEval, w: *u32, n: u32) bool {
     var i: u32 = 0;
     for (i < n) {
         val len: u32 = w[i] >> 16;
@@ -2612,7 +2612,7 @@ fun agg_entry_fn(w: *u32, n: u32) u32 {
 }
 
 #[testing]
-fun agg_body_start(st: *UtAggEval, w: *u32, n: u32, fn: u32) u32 {
+fun agg_body_start(st: *AggEval, w: *u32, n: u32, fn: u32) u32 {
     if (fn >= AGG_IDS || st.fn_at[fn] == 0) { ret 0; }
     var i: u32 = st.fn_at[fn];
     i = i + (w[i] >> 16);
@@ -2624,7 +2624,7 @@ fun agg_body_start(st: *UtAggEval, w: *u32, n: u32, fn: u32) u32 {
 }
 
 #[testing]
-fun agg_bind_params(st: *UtAggEval, w: *u32, n: u32, fn: u32, arg_first: u32, argc: u32) bool {
+fun agg_bind_params(st: *AggEval, w: *u32, n: u32, fn: u32, arg_first: u32, argc: u32) bool {
     if (fn >= AGG_IDS || st.fn_at[fn] == 0) { ret false; }
     var i: u32 = st.fn_at[fn];
     i = i + (w[i] >> 16);
@@ -2654,7 +2654,7 @@ fun agg_bind_params(st: *UtAggEval, w: *u32, n: u32, fn: u32, arg_first: u32, ar
 }
 
 #[testing]
-fun agg_exec(st: *UtAggEval, w: *u32, n: u32, entry: u32) bool {
+fun agg_exec(st: *AggEval, w: *u32, n: u32, entry: u32) bool {
     var i: u32 = agg_body_start(st, w, n, entry);
     if (i == 0) { ret false; }
 
@@ -2846,9 +2846,9 @@ fun spv_read_location(alloc: *A.Allocator, img: *target_of.ObjectImage, loc: u32
     val w: *u32 = spv_words(img, ?n);
     if (w == nil || n == 0) { ret AGG_BAD; }
 
-    val ar: res[*UtAggEval, A.Error] = A.allocate[UtAggEval](alloc, 1::usize);
+    val ar: res[*AggEval, A.Error] = A.allocate[AggEval](alloc, 1::usize);
     if (sel ar.err) { ret AGG_BAD; }
-    val st: *UtAggEval = ar.ok;
+    val st: *AggEval = ar.ok;
     agg_reset(st);
 
     var out:   u64 = AGG_BAD;
@@ -2861,7 +2861,7 @@ fun spv_read_location(alloc: *A.Allocator, img: *target_of.ObjectImage, loc: u32
         }
     }
 
-    A.deallocate[UtAggEval](alloc, st, 1::usize);
+    A.deallocate[AggEval](alloc, st, 1::usize);
     ret out;
 }
 
@@ -3183,7 +3183,7 @@ test int_width__vector_reinterpret_declares_no_scalar_integer {
 }
 
 #[testing]
-rec UtSeed {
+rec Seed {
     set:   u32;
     bind:  u32;
     words: *u64;
@@ -3192,14 +3192,14 @@ rec UtSeed {
 
 #[testing]
 fun spv_read_seeded(alloc: *A.Allocator, img: *target_of.ObjectImage, loc: u32,
-    seeds: *UtSeed, ns: u32) u64 {
+    seeds: *Seed, ns: u32) u64 {
     var n: u32  = 0;
     val w: *u32 = spv_words(img, ?n);
     if (w == nil || n == 0) { ret AGG_BAD; }
 
-    val ar: res[*UtAggEval, A.Error] = A.allocate[UtAggEval](alloc, 1::usize);
+    val ar: res[*AggEval, A.Error] = A.allocate[AggEval](alloc, 1::usize);
     if (sel ar.err) { ret AGG_BAD; }
-    val st: *UtAggEval = ar.ok;
+    val st: *AggEval = ar.ok;
     agg_reset(st);
 
     var out:    u64  = AGG_BAD;
@@ -3209,8 +3209,8 @@ fun spv_read_seeded(alloc: *A.Allocator, img: *target_of.ObjectImage, loc: u32,
     if (agg_prepare(st, w, n)) {
         var i: u32 = 0;
         for (i < ns) {
-            val sd: *UtSeed = ?seeds[i];
-            val v:  u32     = spv_descriptor_var(w, n, sd.set, sd.bind);
+            val sd: *Seed = ?seeds[i];
+            val v:  u32   = spv_descriptor_var(w, n, sd.set, sd.bind);
             if (v == 0 || v >= AGG_IDS || sd.n > AGG_WORDS) {
                 seeded = false;
                 i      = ns;
@@ -3231,7 +3231,7 @@ fun spv_read_seeded(alloc: *A.Allocator, img: *target_of.ObjectImage, loc: u32,
         }
     }
 
-    A.deallocate[UtAggEval](alloc, st, 1::usize);
+    A.deallocate[AggEval](alloc, st, 1::usize);
     ret out;
 }
 
@@ -3275,7 +3275,7 @@ test aggregate__descriptor_block_crosses_a_call_by_value {
     sw[0] = 6::u64;
     sw[1] = 7::u64;
     sw[2] = 8::u64;
-    var seeds: [2]UtSeed;
+    var seeds: [2]Seed;
     seeds[0].set   = 0;
     seeds[0].bind  = 0;
     seeds[0].words = ?uw[0];
@@ -3555,7 +3555,7 @@ test logical_reference__refusals {
 val BDA_STAGE: str = "rec Node { next: *Node; value: u32; }\nrec Head { first: *Node; base: *u32; addr: u64; total: u32; }\n#[storage(0, 0)] var head: Head;\n#[noinline] fun weigh(n: *Node, k: u32) u32 { ret n.value * k; }\n#[noinline] fun skip(n: *Node) *Node { ret n.next; }\n#[stage(\"compute\")]\n#[workgroup(1, 1, 1)]\nfun cs() {\n    var p: *Node = head.first;\n    var sum: u32 = 0;\n    val lo: *u32 = head.base;\n    val hi: *u32 = ?lo[4];\n    if (lo < hi) { sum = sum + hi[0]; }\n    for (p != nil) {\n        sum = sum + weigh(p, 2);\n        p = skip(p);\n    }\n    if (head.addr::*Node == head.first) { sum = sum + 1; }\n    head.addr = hi::u64;\n    head.first = nil;\n    @hi = sum;\n    head.total = sum;\n}\n";
 
 #[testing]
-rec UtBda {
+rec Bda {
     model:      u32;
     capability: bool;
     extension:  bool;
@@ -3569,8 +3569,8 @@ rec UtBda {
 }
 
 #[testing]
-fun bda_scan(alloc: *A.Allocator, w: *u32, n: u32) UtBda {
-    var v: UtBda;
+fun bda_scan(alloc: *A.Allocator, w: *u32, n: u32) Bda {
+    var v: Bda;
     v.model      = 0xFFFFFFFF;
     v.capability = false;
     v.extension  = false;
@@ -3651,7 +3651,7 @@ fun bda_scan(alloc: *A.Allocator, w: *u32, n: u32) UtBda {
 # refusal, or, with an empty needle, a module that validates under `target_env` in each,
 # scanned into `out`
 #[testing]
-fun bda_module(alloc: *A.Allocator, src: str, env_line: str, target_env: str, needle: str, out: *UtBda) i32 {
+fun bda_module(alloc: *A.Allocator, src: str, env_line: str, target_env: str, needle: str, out: *Bda) i32 {
     var profile: u32 = 0;
     for (profile < 2) {
         val sr: res[session.Session, fail.Fail] = toolchain.session_init(alloc);
@@ -3715,7 +3715,7 @@ test physical_pointer__a_linked_list_walk_validates_where_the_feature_is_held {
     var alloc:  A.Allocator;
     val make_r: err[A.Error] = page.make(?alloc);
     if (sel make_r.err) { ret 1; }
-    var v: UtBda;
+    var v: Bda;
     var e: u32 = 0;
     for (e < 3) {
         # the walk's u64 field and its address compares need shaderInt64
@@ -3751,7 +3751,7 @@ test physical_pointer__a_readonly_table_stores_through_its_pointers {
     val make_r: err[A.Error] = page.make(?alloc);
     if (sel make_r.err) { ret 1; }
     val src: str = "rec Shard { v: [64]u32; }\nrec Table { shards: [4]*Shard; }\n#[storage(0, 0, \"readonly\")] var table: Table;\n#[builtin(\"local_invocation_index\")] var lid: u32;\n#[stage(\"compute\")]\n#[workgroup(64, 1, 1)]\nfun cs() {\n    table.shards[0].v[lid] = lid;\n    val p: *Shard = table.shards[1];\n    p.v[lid] = lid;\n}\n";
-    var v:   UtBda;
+    var v:   Bda;
     ret bda_module(?alloc, src, "env = \"vulkan1.2\"\nextensions = [\"buffer_device_address\"]\n", "vulkan1.2", "", ?v);
 }
 
@@ -3771,7 +3771,7 @@ test physical_pointer__only_an_address_computation_needs_int64 {
 
     val bda: str = "env = \"vulkan1.2\"\nextensions = [\"buffer_device_address\"]\n";
 
-    var v: UtBda;
+    var v: Bda;
 
     val r: i32 = bda_module(?alloc, hold, bda, "vulkan1.2", "", ?v);
 
@@ -3801,15 +3801,15 @@ test physical_pointer__only_an_address_computation_needs_int64 {
 val BDA_ATOMIC_HEAD: str = "rec Node { next: *Node; n: u32; s: i32; q: u64; f: f32; d: f64; h: f16; }\nrec Head { first: *Node; }\n#[storage(0, 0)] var head: Head;\n#[op(\"spirv\", \"core\", \"OpAtomicIAdd\")] fun add(p: *u32, scope: u32, sem: u32, v: u32) u32;\n#[op(\"spirv\", \"core\", \"OpAtomicCompareExchange\")] fun cmpxchg(p: *u32, scope: u32, eq: u32, ne: u32, v: u32, cmp: u32) u32;\n#[op(\"spirv\", \"core\", \"OpAtomicLoad\")] fun load(p: *u32, scope: u32, sem: u32) u32;\n#[op(\"spirv\", \"core\", \"OpAtomicStore\")] fun store(p: *u32, scope: u32, sem: u32, v: u32);\n#[op(\"spirv\", \"core\", \"OpAtomicSMin\")] fun smin(p: *i32, scope: u32, sem: u32, v: i32) i32;\n#[op(\"spirv\", \"core\", \"OpAtomicIAdd\")] fun add64(p: *u64, scope: u32, sem: u32, v: u64) u64;\n#[op(\"spirv\", \"core\", \"OpAtomicExchange\")] fun xchgf(p: *f32, scope: u32, sem: u32, v: f32) f32;\n#[op(\"spirv\", \"core\", \"OpAtomicLoad\")] fun loadd(p: *f64, scope: u32, sem: u32) f64;\n#[op(\"spirv\", \"core\", \"OpAtomicFAddEXT\")] fun faddd(p: *f64, scope: u32, sem: u32, v: f64) f64;\n#[op(\"spirv\", \"core\", \"OpAtomicFMinEXT\")] fun fminf(p: *f32, scope: u32, sem: u32, v: f32) f32;\n#[op(\"spirv\", \"core\", \"OpAtomicExchange\")] fun xchgh(p: *f16, scope: u32, sem: u32, v: f16) f16;\n#[op(\"spirv\", \"core\", \"OpAtomicFAddEXT\")] fun faddh(p: *f16, scope: u32, sem: u32, v: f16) f16;\n#[op(\"spirv\", \"core\", \"OpAtomicFMaxEXT\")] fun fmaxh(p: *f16, scope: u32, sem: u32, v: f16) f16;\n#[stage(\"compute\")]\n#[workgroup(1, 1, 1)]\nfun cs() {\n    val p: *Node = head.first;\n";
 
 #[testing]
-val UT_BDA_ATOMIC_FEATURES: [8]UtAtomicFeature = [8]UtAtomicFeature{
-    UtAtomicFeature{call: "add64(?p.q, 1, 0, 1);", feature: "buffer_int64_atomics", other: "shared_int64_atomics"},
-    UtAtomicFeature{call: "xchgf(?p.f, 1, 0, 2.0);", feature: "buffer_float32_atomics", other: "shared_float32_atomics"},
-    UtAtomicFeature{call: "p.next.d = loadd(?p.d, 1, 0);", feature: "buffer_float64_atomics", other: "shared_float64_atomics"},
-    UtAtomicFeature{call: "faddd(?p.next.d, 1, 0, 1.0);", feature: "buffer_float64_atomic_add", other: "shared_float64_atomic_add"},
-    UtAtomicFeature{call: "fminf(?p.f, 1, 0, 1.0);", feature: "buffer_float32_atomic_min_max", other: "buffer_float32_atomic_add"},
-    UtAtomicFeature{call: "p.next.h = xchgh(?p.h, 1, 0, 2.0);", feature: "buffer_float16_atomics", other: "shared_float16_atomics"},
-    UtAtomicFeature{call: "faddh(?p.h, 1, 0, 1.0);", feature: "buffer_float16_atomic_add", other: "shared_float16_atomic_add"},
-    UtAtomicFeature{call: "fmaxh(?p.h, 1, 0, 1.0);", feature: "buffer_float16_atomic_min_max", other: "buffer_float16_atomic_add"},
+val BDA_ATOMIC_FEATURES: [8]AtomicFeature = [8]AtomicFeature{
+    AtomicFeature{call: "add64(?p.q, 1, 0, 1);", feature: "buffer_int64_atomics", other: "shared_int64_atomics"},
+    AtomicFeature{call: "xchgf(?p.f, 1, 0, 2.0);", feature: "buffer_float32_atomics", other: "shared_float32_atomics"},
+    AtomicFeature{call: "p.next.d = loadd(?p.d, 1, 0);", feature: "buffer_float64_atomics", other: "shared_float64_atomics"},
+    AtomicFeature{call: "faddd(?p.next.d, 1, 0, 1.0);", feature: "buffer_float64_atomic_add", other: "shared_float64_atomic_add"},
+    AtomicFeature{call: "fminf(?p.f, 1, 0, 1.0);", feature: "buffer_float32_atomic_min_max", other: "buffer_float32_atomic_add"},
+    AtomicFeature{call: "p.next.h = xchgh(?p.h, 1, 0, 2.0);", feature: "buffer_float16_atomics", other: "shared_float16_atomics"},
+    AtomicFeature{call: "faddh(?p.h, 1, 0, 1.0);", feature: "buffer_float16_atomic_add", other: "shared_float16_atomic_add"},
+    AtomicFeature{call: "fmaxh(?p.h, 1, 0, 1.0);", feature: "buffer_float16_atomic_min_max", other: "buffer_float16_atomic_add"},
 };
 
 test physical_pointer__atomics_take_the_buffer_features {
@@ -3817,7 +3817,7 @@ test physical_pointer__atomics_take_the_buffer_features {
     val make_r: err[A.Error] = page.make(?alloc);
     if (sel make_r.err) { ret 1; }
     val types: str = "env = \"vulkan1.3\"\nextensions = [\"int64\", \"float64\", \"int16\", \"float16\", \"storage_buffer_16bit_access\"";
-    var v:     UtBda;
+    var v:     Bda;
     val core:  str = concat(?alloc, BDA_ATOMIC_HEAD, "    store(?p.n, 1, 0, load(?p.next.n, 1, 0));\n    add(?p.n, 1, 0x48, 1);\n    cmpxchg(?p.next.n, 1, 0x48, 0x42, 2, 0);\n    smin(?p.s, 1, 0, -1);\n", "}\n");
     val bare:  str = concat(?alloc, types, "]\n", "");
     if (core == nil || bare == nil) { ret 1; }
@@ -3826,11 +3826,11 @@ test physical_pointer__atomics_take_the_buffer_features {
     if (v.atomics != 5 || v.unaligned != 0) { ret 20; }
     var k: usize = 0;
     for (k < 8) {
-        val c:    *UtAtomicFeature = ?UT_BDA_ATOMIC_FEATURES[k];
-        val src:  str              = concat(?alloc, BDA_ATOMIC_HEAD, c.call, "\n}\n");
-        val with: str              = concat(?alloc, types, ", \"", concat(?alloc, c.feature, "\"]\n", ""));
-        val near: str              = concat(?alloc, types, ", \"", concat(?alloc, c.other, "\"]\n", ""));
-        val need: str              = concat(?alloc, "needs the `", c.feature, "` extension");
+        val c:    *AtomicFeature = ?BDA_ATOMIC_FEATURES[k];
+        val src:  str            = concat(?alloc, BDA_ATOMIC_HEAD, c.call, "\n}\n");
+        val with: str            = concat(?alloc, types, ", \"", concat(?alloc, c.feature, "\"]\n", ""));
+        val near: str            = concat(?alloc, types, ", \"", concat(?alloc, c.other, "\"]\n", ""));
+        val need: str            = concat(?alloc, "needs the `", c.feature, "` extension");
         if (src == nil || with == nil || near == nil || need == nil) { ret 1; }
         val ok: i32 = bda_module(?alloc, src, with, "vulkan1.3", "", ?v);
         if (ok != 0 || v.atomics != 1) {
@@ -3873,7 +3873,7 @@ test physical_pointer__a_logical_pointer_has_no_address {
         "a logical pointer has no address",
         "an untyped `ptr` held in memory"
     };
-    var v: UtBda;
+    var v: Bda;
     var i: u32 = 0;
     for (i < 6) {
         val src: res[str, std_format.FormatError] = std_format.sprint(?alloc, "{}{}", head, cases[i]);
@@ -4937,7 +4937,7 @@ test tag__interface_variables_carry_and_block_members_are_refused {
 # an empty needle, a module that validates under `target_env` without the `forbid_cap` capability
 # and, when `want` is given, carries the specialization constants and workgroup form it names
 #[testing]
-fun l6_env(alloc: *A.Allocator, src: str, env_line: str, target_env: str, needle: str, forbid_cap: u32, want: *UtSpecWant) i32 {
+fun l6_env(alloc: *A.Allocator, src: str, env_line: str, target_env: str, needle: str, forbid_cap: u32, want: *SpecWant) i32 {
     ret l6_env_flat(alloc, src, env_line, target_env, needle, forbid_cap, want, -1, -1, 0, 0);
 }
 
@@ -4951,7 +4951,7 @@ fun l6_env_at(alloc: *A.Allocator, src: str, env_line: str, target_env: str, nee
 # where `zeroed` is not negative, that many outputs a stage zeroes (spv_stage_zeroed),
 # and where `line` is not 0, the refusal is located at `line` and `col`
 #[testing]
-fun l6_env_flat(alloc: *A.Allocator, src: str, env_line: str, target_env: str, needle: str, forbid_cap: u32, want: *UtSpecWant,
+fun l6_env_flat(alloc: *A.Allocator, src: str, env_line: str, target_env: str, needle: str, forbid_cap: u32, want: *SpecWant,
     flat: i32, zeroed: i32, line: usize, col: usize) i32 {
     ret l6_env_op(alloc, src, env_line, target_env, needle, forbid_cap, want, flat, zeroed, line, col, 0);
 }
@@ -4959,7 +4959,7 @@ fun l6_env_flat(alloc: *A.Allocator, src: str, env_line: str, target_env: str, n
 # l6_env_flat, and where `need_op` is not 0, the module holds that instruction, which
 # keeps a check spirv-val makes where the validator is absent
 #[testing]
-fun l6_env_op(alloc: *A.Allocator, src: str, env_line: str, target_env: str, needle: str, forbid_cap: u32, want: *UtSpecWant,
+fun l6_env_op(alloc: *A.Allocator, src: str, env_line: str, target_env: str, needle: str, forbid_cap: u32, want: *SpecWant,
     flat: i32, zeroed: i32, line: usize, col: usize, need_op: u32) i32 {
     val sr: res[session.Session, fail.Fail] = toolchain.session_init(alloc);
     if (sel sr.err) { ret 1; }
@@ -5071,20 +5071,20 @@ test env__the_f16_expansion_needs_no_64_bit_feature {
 # as an f16 is no conversion: none needs the narrow capability. a composite
 # keeps its members' widths, so one holding an f16 is refused naming the feature
 #[testing]
-rec UtCarriedCall {
+rec CarriedCall {
     body: str;
     cap:  u32;
 }
 
 #[testing]
-val CARRIED_CALLS: [7]UtCarriedCall = [7]UtCarriedCall{
-    UtCarriedCall{body: "fun h(bits: u16, s: u16) f16 { ret (bits + s):~f16; }\nfun cs_body() { out.v[1] = h(out.v[0]::u16, 0xfff0):~u16::u32; }\n", cap: isa_spirv.CAP_INT16},
-    UtCarriedCall{body: "fun h(x: f16) i16 { ret x:~i16 - 3; }\nfun cs_body() { out.v[1] = h(out.v[0]::u16:~f16)::i32::u32; }\n", cap: isa_spirv.CAP_INT16},
-    UtCarriedCall{body: "fun h(x: f16, y: f16) f16 { ret x * y; }\nfun cs_body() { out.v[1] = h(out.v[0]::f16, 0.5):~u16::u32; }\n", cap: isa_spirv.CAP_INT16},
-    UtCarriedCall{body: "fun g(x: u16) f16 { ret x:~f16; }\nfun h(x: u16) u16 { ret (g(x + 1) + 1.0):~u16; }\nfun cs_body() { out.v[1] = h(out.v[0]::u16)::u32; }\n", cap: isa_spirv.CAP_INT16},
-    UtCarriedCall{body: "fun p(x: *u16) { @x = @x + 0xfff0; }\nfun cs_body() { var f: u16 = out.v[0]::u16; p(?f); out.v[1] = f::u32; }\n", cap: isa_spirv.CAP_INT16},
-    UtCarriedCall{body: "fun p(x: *i8) { @x = @x - 100; }\nfun cs_body() { var f: i8 = out.v[0]::i8; p(?f); out.v[1] = f::i32::u32; }\n", cap: isa_spirv.CAP_INT8},
-    UtCarriedCall{body: "fun p(x: *f16) { @x = @x * 2.0; }\nfun cs_body() { var f: f16 = out.v[0]::f16; p(?f); out.v[1] = f:~u16::u32; }\n", cap: isa_spirv.CAP_INT16},
+val CARRIED_CALLS: [7]CarriedCall = [7]CarriedCall{
+    CarriedCall{body: "fun h(bits: u16, s: u16) f16 { ret (bits + s):~f16; }\nfun cs_body() { out.v[1] = h(out.v[0]::u16, 0xfff0):~u16::u32; }\n", cap: isa_spirv.CAP_INT16},
+    CarriedCall{body: "fun h(x: f16) i16 { ret x:~i16 - 3; }\nfun cs_body() { out.v[1] = h(out.v[0]::u16:~f16)::i32::u32; }\n", cap: isa_spirv.CAP_INT16},
+    CarriedCall{body: "fun h(x: f16, y: f16) f16 { ret x * y; }\nfun cs_body() { out.v[1] = h(out.v[0]::f16, 0.5):~u16::u32; }\n", cap: isa_spirv.CAP_INT16},
+    CarriedCall{body: "fun g(x: u16) f16 { ret x:~f16; }\nfun h(x: u16) u16 { ret (g(x + 1) + 1.0):~u16; }\nfun cs_body() { out.v[1] = h(out.v[0]::u16)::u32; }\n", cap: isa_spirv.CAP_INT16},
+    CarriedCall{body: "fun p(x: *u16) { @x = @x + 0xfff0; }\nfun cs_body() { var f: u16 = out.v[0]::u16; p(?f); out.v[1] = f::u32; }\n", cap: isa_spirv.CAP_INT16},
+    CarriedCall{body: "fun p(x: *i8) { @x = @x - 100; }\nfun cs_body() { var f: i8 = out.v[0]::i8; p(?f); out.v[1] = f::i32::u32; }\n", cap: isa_spirv.CAP_INT8},
+    CarriedCall{body: "fun p(x: *f16) { @x = @x * 2.0; }\nfun cs_body() { var f: f16 = out.v[0]::f16; p(?f); out.v[1] = f:~u16::u32; }\n", cap: isa_spirv.CAP_INT16},
 };
 
 test env__a_narrow_value_crosses_a_call_in_its_carrier {
@@ -5098,8 +5098,8 @@ test env__a_narrow_value_crosses_a_call_in_its_carrier {
     envs[1] = "vulkan1.2";
     var k: usize = 0;
     for (k < 7) {
-        val c:   *UtCarriedCall = ?CARRIED_CALLS[k];
-        val src: str            = concat(?alloc, head, c.body, tail);
+        val c:   *CarriedCall = ?CARRIED_CALLS[k];
+        val src: str          = concat(?alloc, head, c.body, tail);
         if (src == nil) { ret 1; }
         var i: usize = 0;
         for (i < 2) {
@@ -5141,7 +5141,7 @@ test env__the_float_remainder_needs_no_int64 {
 # selects it, at `col` of the function's line: the first expression or declaration of
 # the type
 #[testing]
-rec UtTypeFeature {
+rec TypeFeature {
     decl:    str;
     env:     str;
     feature: str;
@@ -5151,12 +5151,12 @@ rec UtTypeFeature {
 }
 
 #[testing]
-val TYPE_FEATURES: [5]UtTypeFeature = [5]UtTypeFeature{
-    UtTypeFeature{decl: "var h: u16 = gid[0]::u16; h = h * 300 + 7; out.v[0] = h::u32;", env: "vulkan1.0", feature: "int16", declare: "int16", carried: isa_spirv.CAP_INT16, col: 0},
-    UtTypeFeature{decl: "var h: u8 = gid[0]::u8; h = h * 3 + 7; out.v[0] = h::u32;", env: "vulkan1.2", feature: "int8", declare: "int8", carried: isa_spirv.CAP_INT8, col: 0},
-    UtTypeFeature{decl: "var r: Pair = Pair{a: gid[0]::u8, b: 1}; out.v[0] = r.a::u32 + r.b;", env: "vulkan1.2", feature: "int8", declare: "int8", carried: 0, col: 12},
-    UtTypeFeature{decl: "var d: u64 = gid[0]::u64 * 3; out.v[0] = (d >> 1)::u32;", env: "vulkan1.0", feature: "int64", declare: "int64", carried: 0, col: 25},
-    UtTypeFeature{decl: "var d: f64 = gid[0]::f64 * 1.5; out.v[0] = d::u32;", env: "vulkan1.3", feature: "float64", declare: "float64", carried: 0, col: 25},
+val TYPE_FEATURES: [5]TypeFeature = [5]TypeFeature{
+    TypeFeature{decl: "var h: u16 = gid[0]::u16; h = h * 300 + 7; out.v[0] = h::u32;", env: "vulkan1.0", feature: "int16", declare: "int16", carried: isa_spirv.CAP_INT16, col: 0},
+    TypeFeature{decl: "var h: u8 = gid[0]::u8; h = h * 3 + 7; out.v[0] = h::u32;", env: "vulkan1.2", feature: "int8", declare: "int8", carried: isa_spirv.CAP_INT8, col: 0},
+    TypeFeature{decl: "var r: Pair = Pair{a: gid[0]::u8, b: 1}; out.v[0] = r.a::u32 + r.b;", env: "vulkan1.2", feature: "int8", declare: "int8", carried: 0, col: 12},
+    TypeFeature{decl: "var d: u64 = gid[0]::u64 * 3; out.v[0] = (d >> 1)::u32;", env: "vulkan1.0", feature: "int64", declare: "int64", carried: 0, col: 25},
+    TypeFeature{decl: "var d: f64 = gid[0]::f64 * 1.5; out.v[0] = d::u32;", env: "vulkan1.3", feature: "float64", declare: "float64", carried: 0, col: 25},
 };
 
 test env__a_type_feature_is_declared_not_guaranteed {
@@ -5165,11 +5165,11 @@ test env__a_type_feature_is_declared_not_guaranteed {
     if (sel make_r.err) { ret 1; }
     var k: usize = 0;
     for (k < 5) {
-        val c:    *UtTypeFeature = ?TYPE_FEATURES[k];
-        val src:  str            = concat(?alloc, "rec Out { v: [4]u32; }\nrec Pair { a: u8; b: u32; }\n#[storage(0, 0)] var out: Out;\n#[builtin(\"global_invocation\")] var gid: u32x3;\n#[stage(\"compute\")]\n#[workgroup(1, 1, 1)]\nfun cs() { ", c.decl, " }\n");
-        val bare: str            = concat(?alloc, "env = \"", c.env, "\"\n");
-        val with: str            = concat(?alloc, bare, concat(?alloc, "extensions = [\"", c.declare, "\"]\n"), "");
-        val need: str            = concat(?alloc, "leaves to a device feature: name `", c.feature, "`");
+        val c:    *TypeFeature = ?TYPE_FEATURES[k];
+        val src:  str          = concat(?alloc, "rec Out { v: [4]u32; }\nrec Pair { a: u8; b: u32; }\n#[storage(0, 0)] var out: Out;\n#[builtin(\"global_invocation\")] var gid: u32x3;\n#[stage(\"compute\")]\n#[workgroup(1, 1, 1)]\nfun cs() { ", c.decl, " }\n");
+        val bare: str          = concat(?alloc, "env = \"", c.env, "\"\n");
+        val with: str          = concat(?alloc, bare, concat(?alloc, "extensions = [\"", c.declare, "\"]\n"), "");
+        val need: str          = concat(?alloc, "leaves to a device feature: name `", c.feature, "`");
         if (src == nil || bare == nil || with == nil || need == nil) { ret 1; }
         var without: i32 = 0;
         if (c.carried != 0) { without = l6_env(?alloc, src, bare, c.env, "", c.carried, nil); }
@@ -5542,21 +5542,21 @@ test op__every_32_bit_atomic_on_buffer_and_shared_elements_validates {
 # module declares the extension, and declares no Int8, which neither low environment
 # guarantees: the member keeps its width and the function computes in a wider one
 #[testing]
-rec UtStorageAccess {
+rec StorageAccess {
     src:     str;
     feature: str;
     low:     str;
 }
 
 #[testing]
-val STORAGE_ACCESS: [7]UtStorageAccess = [7]UtStorageAccess{
-    UtStorageAccess{src: "rec B { h: [4]u16; w: u32; }\n#[storage(0, 0)] var b: B;\n#[stage(\"compute\")]\n#[workgroup(1, 1, 1)]\nfun cs() { b.h[0] = b.h[1] + 1; b.h[3] = 9; b.w = b.h[2]::u32; }\n", feature: "storage_buffer_16bit_access", low: "vulkan1.0"},
-    UtStorageAccess{src: "rec B { h: [4]u8; w: u32; }\n#[storage(0, 0)] var b: B;\n#[stage(\"compute\")]\n#[workgroup(1, 1, 1)]\nfun cs() { b.h[0] = b.h[1] + 1; b.h[3] = 9; b.w = b.h[2]::u32; }\n", feature: "storage_buffer_8bit_access", low: "vulkan1.1"},
-    UtStorageAccess{src: "rec U { w: u32; h: u16; g: u16; }\n#[uniform(0, 1)] var u: U;\nrec O { w: u32; }\n#[storage(0, 0)] var o: O;\n#[stage(\"compute\")]\n#[workgroup(1, 1, 1)]\nfun cs() { o.w = u.h::u32 + u.w; }\n", feature: "uniform_and_storage_buffer_16bit_access", low: "vulkan1.0"},
-    UtStorageAccess{src: "rec U { w: u32; h: u8; g: u8; }\n#[uniform(0, 1)] var u: U;\nrec O { w: u32; }\n#[storage(0, 0)] var o: O;\n#[stage(\"compute\")]\n#[workgroup(1, 1, 1)]\nfun cs() { o.w = u.h::u32 + u.w; }\n", feature: "uniform_and_storage_buffer_8bit_access", low: "vulkan1.1"},
-    UtStorageAccess{src: "rec U { w: u32; h: u16; g: u16; }\n#[push] var u: U;\nrec O { w: u32; }\n#[storage(0, 0)] var o: O;\n#[stage(\"compute\")]\n#[workgroup(1, 1, 1)]\nfun cs() { o.w = u.h::u32 + u.w; }\n", feature: "storage_push_constant16", low: "vulkan1.0"},
-    UtStorageAccess{src: "rec U { w: u32; h: u8; g: u8; }\n#[push] var u: U;\nrec O { w: u32; }\n#[storage(0, 0)] var o: O;\n#[stage(\"compute\")]\n#[workgroup(1, 1, 1)]\nfun cs() { o.w = u.h::u32 + u.w; }\n", feature: "storage_push_constant8", low: "vulkan1.1"},
-    UtStorageAccess{src: "#[input(0)] var ih: u16;\n#[output(0)] var oh: u32;\n#[stage(\"fragment\")]\nfun fs() { oh = (ih + 1)::u32; }\n", feature: "storage_input_output16", low: "vulkan1.0"},
+val STORAGE_ACCESS: [7]StorageAccess = [7]StorageAccess{
+    StorageAccess{src: "rec B { h: [4]u16; w: u32; }\n#[storage(0, 0)] var b: B;\n#[stage(\"compute\")]\n#[workgroup(1, 1, 1)]\nfun cs() { b.h[0] = b.h[1] + 1; b.h[3] = 9; b.w = b.h[2]::u32; }\n", feature: "storage_buffer_16bit_access", low: "vulkan1.0"},
+    StorageAccess{src: "rec B { h: [4]u8; w: u32; }\n#[storage(0, 0)] var b: B;\n#[stage(\"compute\")]\n#[workgroup(1, 1, 1)]\nfun cs() { b.h[0] = b.h[1] + 1; b.h[3] = 9; b.w = b.h[2]::u32; }\n", feature: "storage_buffer_8bit_access", low: "vulkan1.1"},
+    StorageAccess{src: "rec U { w: u32; h: u16; g: u16; }\n#[uniform(0, 1)] var u: U;\nrec O { w: u32; }\n#[storage(0, 0)] var o: O;\n#[stage(\"compute\")]\n#[workgroup(1, 1, 1)]\nfun cs() { o.w = u.h::u32 + u.w; }\n", feature: "uniform_and_storage_buffer_16bit_access", low: "vulkan1.0"},
+    StorageAccess{src: "rec U { w: u32; h: u8; g: u8; }\n#[uniform(0, 1)] var u: U;\nrec O { w: u32; }\n#[storage(0, 0)] var o: O;\n#[stage(\"compute\")]\n#[workgroup(1, 1, 1)]\nfun cs() { o.w = u.h::u32 + u.w; }\n", feature: "uniform_and_storage_buffer_8bit_access", low: "vulkan1.1"},
+    StorageAccess{src: "rec U { w: u32; h: u16; g: u16; }\n#[push] var u: U;\nrec O { w: u32; }\n#[storage(0, 0)] var o: O;\n#[stage(\"compute\")]\n#[workgroup(1, 1, 1)]\nfun cs() { o.w = u.h::u32 + u.w; }\n", feature: "storage_push_constant16", low: "vulkan1.0"},
+    StorageAccess{src: "rec U { w: u32; h: u8; g: u8; }\n#[push] var u: U;\nrec O { w: u32; }\n#[storage(0, 0)] var o: O;\n#[stage(\"compute\")]\n#[workgroup(1, 1, 1)]\nfun cs() { o.w = u.h::u32 + u.w; }\n", feature: "storage_push_constant8", low: "vulkan1.1"},
+    StorageAccess{src: "#[input(0)] var ih: u16;\n#[output(0)] var oh: u32;\n#[stage(\"fragment\")]\nfun fs() { oh = (ih + 1)::u32; }\n", feature: "storage_input_output16", low: "vulkan1.0"},
 };
 
 #[testing]
@@ -5568,10 +5568,10 @@ test storage_access__narrow_members_need_the_feature_of_their_memory {
     if (sel make_r.err) { ret 1; }
     var k: usize = 0;
     for (k < 7) {
-        val c:    *UtStorageAccess = ?STORAGE_ACCESS[k];
-        val with: str              = concat(?alloc, "env = \"vulkan1.3\"\nextensions = [\"", c.feature, "\"]\n");
-        val low:  str              = concat(?alloc, concat(?alloc, "env = \"", c.low, "\"\nextensions = [\""), c.feature, "\"]\n");
-        val need: str              = concat(?alloc, "needs the `", c.feature, "` extension");
+        val c:    *StorageAccess = ?STORAGE_ACCESS[k];
+        val with: str            = concat(?alloc, "env = \"vulkan1.3\"\nextensions = [\"", c.feature, "\"]\n");
+        val low:  str            = concat(?alloc, concat(?alloc, "env = \"", c.low, "\"\nextensions = [\""), c.feature, "\"]\n");
+        val need: str            = concat(?alloc, "needs the `", c.feature, "` extension");
         if (with == nil || low == nil || need == nil) { ret 1; }
         val ok: i32 = l6_env(?alloc, c.src, with, "vulkan1.3", "", 0, nil);
         if (ok != 0) {
@@ -5841,7 +5841,7 @@ test half_layout__a_refused_member_is_spelled_as_f16 {
 # buffer's f16 member holds storage_buffer_16bit_access throughout, and an f16 atomic
 # operates on the OpTypeFloat 16 the memory is under float16
 #[testing]
-rec UtAtomicFeature {
+rec AtomicFeature {
     call:    str;
     feature: str;
     other:   str;
@@ -5851,24 +5851,24 @@ rec UtAtomicFeature {
 val ATOMIC_FEATURE_HEAD: str = "rec B { q: [8]u64; f: [8]f32; d: [8]f64; h: [8]f16; }\n#[storage(0, 0)] var b: B;\n#[shared] var sq: [8]u64;\n#[shared] var sf: [8]f32;\n#[shared] var sd: [8]f64;\n#[shared] var sh: [8]f16;\n#[builtin(\"global_invocation\")] var gid: u32x3;\n#[op(\"spirv\", \"core\", \"OpAtomicIAdd\")] fun add64(p: *u64, scope: u32, sem: u32, v: u64) u64;\n#[op(\"spirv\", \"core\", \"OpAtomicExchange\")] fun xchgf(p: *f32, scope: u32, sem: u32, v: f32) f32;\n#[op(\"spirv\", \"core\", \"OpAtomicLoad\")] fun loadf(p: *f32, scope: u32, sem: u32) f32;\n#[op(\"spirv\", \"core\", \"OpAtomicStore\")] fun storef(p: *f32, scope: u32, sem: u32, v: f32);\n#[op(\"spirv\", \"core\", \"OpAtomicFAddEXT\")] fun faddf(p: *f32, scope: u32, sem: u32, v: f32) f32;\n#[op(\"spirv\", \"core\", \"OpAtomicFAddEXT\")] fun faddd(p: *f64, scope: u32, sem: u32, v: f64) f64;\n#[op(\"spirv\", \"core\", \"OpAtomicFMinEXT\")] fun fminf(p: *f32, scope: u32, sem: u32, v: f32) f32;\n#[op(\"spirv\", \"core\", \"OpAtomicFMaxEXT\")] fun fmaxd(p: *f64, scope: u32, sem: u32, v: f64) f64;\n#[op(\"spirv\", \"core\", \"OpAtomicExchange\")] fun xchgh(p: *f16, scope: u32, sem: u32, v: f16) f16;\n#[op(\"spirv\", \"core\", \"OpAtomicLoad\")] fun loadh(p: *f16, scope: u32, sem: u32) f16;\n#[op(\"spirv\", \"core\", \"OpAtomicStore\")] fun storeh(p: *f16, scope: u32, sem: u32, v: f16);\n#[op(\"spirv\", \"core\", \"OpAtomicFAddEXT\")] fun faddh(p: *f16, scope: u32, sem: u32, v: f16) f16;\n#[op(\"spirv\", \"core\", \"OpAtomicFMinEXT\")] fun fminh(p: *f16, scope: u32, sem: u32, v: f16) f16;\n#[op(\"spirv\", \"core\", \"OpAtomicFMaxEXT\")] fun fmaxh(p: *f16, scope: u32, sem: u32, v: f16) f16;\n#[stage(\"compute\")]\n#[workgroup(8, 1, 1)]\nfun cs() {\n    val i: u32 = gid[0] % 8;\n";
 
 #[testing]
-val UT_ATOMIC_FEATURE_ENV: str = "env = \"vulkan1.3\"\nextensions = [\"int64\", \"float64\", \"int16\", \"float16\", \"storage_buffer_16bit_access\", \"";
+val ATOMIC_FEATURE_ENV: str = "env = \"vulkan1.3\"\nextensions = [\"int64\", \"float64\", \"int16\", \"float16\", \"storage_buffer_16bit_access\", \"";
 
 #[testing]
-val UT_ATOMIC_FEATURES: [14]UtAtomicFeature = [14]UtAtomicFeature{
-    UtAtomicFeature{call: "add64(?b.q[i], 1, 0, 1);", feature: "buffer_int64_atomics", other: "shared_int64_atomics"},
-    UtAtomicFeature{call: "add64(?sq[i], 2, 0, 1);", feature: "shared_int64_atomics", other: "buffer_int64_atomics"},
-    UtAtomicFeature{call: "xchgf(?b.f[i], 1, 0, 2.0);", feature: "buffer_float32_atomics", other: "shared_float32_atomics"},
-    UtAtomicFeature{call: "storef(?sf[i], 2, 0, loadf(?sf[i], 2, 0));", feature: "shared_float32_atomics", other: "buffer_float32_atomics"},
-    UtAtomicFeature{call: "faddf(?b.f[i], 1, 0, 1.0);", feature: "buffer_float32_atomic_add", other: "buffer_float32_atomics"},
-    UtAtomicFeature{call: "faddd(?sd[i], 2, 0, 1.0);", feature: "shared_float64_atomic_add", other: "buffer_float64_atomic_add"},
-    UtAtomicFeature{call: "fminf(?b.f[i], 1, 0, 1.0);", feature: "buffer_float32_atomic_min_max", other: "shared_float32_atomic_min_max"},
-    UtAtomicFeature{call: "fmaxd(?b.d[i], 1, 0, 1.0);", feature: "buffer_float64_atomic_min_max", other: "buffer_float32_atomic_min_max"},
-    UtAtomicFeature{call: "b.h[1] = xchgh(?b.h[i], 1, 0, 2.0);", feature: "buffer_float16_atomics", other: "shared_float16_atomics"},
-    UtAtomicFeature{call: "storeh(?sh[i], 2, 0, loadh(?sh[i], 2, 0));", feature: "shared_float16_atomics", other: "buffer_float16_atomics"},
-    UtAtomicFeature{call: "faddh(?b.h[i], 1, 0, 1.0);", feature: "buffer_float16_atomic_add", other: "buffer_float16_atomics"},
-    UtAtomicFeature{call: "faddh(?sh[i], 2, 0, 1.0);", feature: "shared_float16_atomic_add", other: "buffer_float16_atomic_add"},
-    UtAtomicFeature{call: "fminh(?b.h[i], 1, 0, 1.0);", feature: "buffer_float16_atomic_min_max", other: "shared_float16_atomic_min_max"},
-    UtAtomicFeature{call: "fmaxh(?sh[i], 2, 0, 1.0);", feature: "shared_float16_atomic_min_max", other: "buffer_float16_atomic_min_max"},
+val ATOMIC_FEATURES: [14]AtomicFeature = [14]AtomicFeature{
+    AtomicFeature{call: "add64(?b.q[i], 1, 0, 1);", feature: "buffer_int64_atomics", other: "shared_int64_atomics"},
+    AtomicFeature{call: "add64(?sq[i], 2, 0, 1);", feature: "shared_int64_atomics", other: "buffer_int64_atomics"},
+    AtomicFeature{call: "xchgf(?b.f[i], 1, 0, 2.0);", feature: "buffer_float32_atomics", other: "shared_float32_atomics"},
+    AtomicFeature{call: "storef(?sf[i], 2, 0, loadf(?sf[i], 2, 0));", feature: "shared_float32_atomics", other: "buffer_float32_atomics"},
+    AtomicFeature{call: "faddf(?b.f[i], 1, 0, 1.0);", feature: "buffer_float32_atomic_add", other: "buffer_float32_atomics"},
+    AtomicFeature{call: "faddd(?sd[i], 2, 0, 1.0);", feature: "shared_float64_atomic_add", other: "buffer_float64_atomic_add"},
+    AtomicFeature{call: "fminf(?b.f[i], 1, 0, 1.0);", feature: "buffer_float32_atomic_min_max", other: "shared_float32_atomic_min_max"},
+    AtomicFeature{call: "fmaxd(?b.d[i], 1, 0, 1.0);", feature: "buffer_float64_atomic_min_max", other: "buffer_float32_atomic_min_max"},
+    AtomicFeature{call: "b.h[1] = xchgh(?b.h[i], 1, 0, 2.0);", feature: "buffer_float16_atomics", other: "shared_float16_atomics"},
+    AtomicFeature{call: "storeh(?sh[i], 2, 0, loadh(?sh[i], 2, 0));", feature: "shared_float16_atomics", other: "buffer_float16_atomics"},
+    AtomicFeature{call: "faddh(?b.h[i], 1, 0, 1.0);", feature: "buffer_float16_atomic_add", other: "buffer_float16_atomics"},
+    AtomicFeature{call: "faddh(?sh[i], 2, 0, 1.0);", feature: "shared_float16_atomic_add", other: "buffer_float16_atomic_add"},
+    AtomicFeature{call: "fminh(?b.h[i], 1, 0, 1.0);", feature: "buffer_float16_atomic_min_max", other: "shared_float16_atomic_min_max"},
+    AtomicFeature{call: "fmaxh(?sh[i], 2, 0, 1.0);", feature: "shared_float16_atomic_min_max", other: "buffer_float16_atomic_min_max"},
 };
 
 test op__wide_and_float_atomics_need_their_vulkan_feature {
@@ -5877,11 +5877,11 @@ test op__wide_and_float_atomics_need_their_vulkan_feature {
     if (sel make_r.err) { ret 1; }
     var k: usize = 0;
     for (k < 14) {
-        val c:    *UtAtomicFeature = ?UT_ATOMIC_FEATURES[k];
-        val src:  str              = concat(?alloc, ATOMIC_FEATURE_HEAD, c.call, "\n}\n");
-        val with: str              = concat(?alloc, UT_ATOMIC_FEATURE_ENV, c.feature, "\"]\n");
-        val near: str              = concat(?alloc, UT_ATOMIC_FEATURE_ENV, c.other, "\"]\n");
-        val need: str              = concat(?alloc, "needs the `", c.feature, "` extension");
+        val c:    *AtomicFeature = ?ATOMIC_FEATURES[k];
+        val src:  str            = concat(?alloc, ATOMIC_FEATURE_HEAD, c.call, "\n}\n");
+        val with: str            = concat(?alloc, ATOMIC_FEATURE_ENV, c.feature, "\"]\n");
+        val near: str            = concat(?alloc, ATOMIC_FEATURE_ENV, c.other, "\"]\n");
+        val need: str            = concat(?alloc, "needs the `", c.feature, "` extension");
         if (src == nil || with == nil || near == nil || need == nil) { ret 1; }
         val ok: i32 = l6_env(?alloc, src, with, "vulkan1.3", "", 0, nil);
         if (ok != 0) {
@@ -5910,8 +5910,8 @@ test op__an_atomic_in_a_helper_needs_the_feature_of_the_callers_memory {
     for (k < 2) {
         val helper: str = concat(?alloc, ATOMIC_FEATURE_HEAD, "    bump(", args[k]);
         val src:    str = concat(?alloc, "#[noinline]\nfun bump(p: *u64) { add64(p, 2, 0, 1); }\n", helper, ");\n}\n");
-        val with:   str = concat(?alloc, UT_ATOMIC_FEATURE_ENV, feats[k], "\"]\n");
-        val near:   str = concat(?alloc, UT_ATOMIC_FEATURE_ENV, feats[1 - k], "\"]\n");
+        val with:   str = concat(?alloc, ATOMIC_FEATURE_ENV, feats[k], "\"]\n");
+        val near:   str = concat(?alloc, ATOMIC_FEATURE_ENV, feats[1 - k], "\"]\n");
         val need:   str = concat(?alloc, "needs the `", feats[k], "` extension");
         if (helper == nil || src == nil || with == nil || near == nil || need == nil) { ret 1; }
         val ok: i32 = l6_env(?alloc, src, with, "vulkan1.3", "", 0, nil);
@@ -5938,12 +5938,12 @@ test op__an_atomic_in_a_helper_needs_the_feature_of_the_callers_memory {
 val IMAGE_ATOMIC_HEAD: str = "#[handle(\"spirv\", \"image\", 2, 1, 0, 0, 0, 2, 33)]\npub def UImage2D;\n#[handle(\"spirv\", \"image\", 4, 1, 0, 0, 0, 2, 40)]\npub def U64Image2D;\n#[handle(\"spirv\", \"image\", 0, 1, 0, 0, 0, 2, 3)]\npub def FImage2D;\n#[op(\"spirv\", \"core\", \"OpImageTexelPointer\")] fun texel(image: *UImage2D, coord: i32x2, sample: u32) *u32;\n#[op(\"spirv\", \"core\", \"OpImageTexelPointer\")] fun texel64(image: *U64Image2D, coord: i32x2, sample: u32) *u64;\n#[op(\"spirv\", \"core\", \"OpImageTexelPointer\")] fun ftexel(image: *FImage2D, coord: i32x2, sample: u32) *f32;\n#[op(\"spirv\", \"core\", \"OpAtomicIAdd\")] fun add(p: *u32, scope: u32, sem: u32, v: u32) u32;\n#[op(\"spirv\", \"core\", \"OpAtomicLoad\")] fun load(p: *u32, scope: u32, sem: u32) u32;\n#[op(\"spirv\", \"core\", \"OpAtomicIAdd\")] fun add64(p: *u64, scope: u32, sem: u32, v: u64) u64;\n#[op(\"spirv\", \"core\", \"OpAtomicExchange\")] fun xchgf(p: *f32, scope: u32, sem: u32, v: f32) f32;\n#[op(\"spirv\", \"core\", \"OpAtomicFAddEXT\")] fun faddf(p: *f32, scope: u32, sem: u32, v: f32) f32;\n#[op(\"spirv\", \"core\", \"OpAtomicFMaxEXT\")] fun fmaxf(p: *f32, scope: u32, sem: u32, v: f32) f32;\n#[noinline]\nfun bump(image: *UImage2D) { add(texel(image, i32x2{2, 1}, 0), 1, 0, 1); }\n#[handle(\"spirv\", \"image\", 1, 1, 0, 0, 0, 2, 24)]\npub def IImage2D;\n#[handle(\"spirv\", \"image\", 3, 1, 0, 0, 0, 2, 41)]\npub def I64Image2D;\n#[op(\"spirv\", \"core\", \"OpImageTexelPointer\")] fun itexel(image: *IImage2D, coord: i32x2, sample: u32) *i32;\n#[op(\"spirv\", \"core\", \"OpImageTexelPointer\")] fun itexel64(image: *I64Image2D, coord: i32x2, sample: u32) *i64;\n#[op(\"spirv\", \"core\", \"OpAtomicSMax\")] fun smax(p: *i32, scope: u32, sem: u32, v: i32) i32;\n#[op(\"spirv\", \"core\", \"OpAtomicCompareExchange\")] fun icas(p: *i32, scope: u32, eq: u32, ne: u32, v: i32, cmp: i32) i32;\n#[op(\"spirv\", \"core\", \"OpAtomicIAdd\")] fun iadd64(p: *i64, scope: u32, sem: u32, v: i64) i64;\n";
 
 #[testing]
-val IMAGE_ATOMIC_FEATURES: [5]UtAtomicFeature = [5]UtAtomicFeature{
-    UtAtomicFeature{call: "#[storage(0, 3)] var q: U64Image2D;\n#[stage(\"compute\")]\n#[workgroup(1, 1, 1)]\nfun cs() { add64(texel64(?q, i32x2{1, 2}, 0), 1, 0, 1); }\n", feature: "image_int64_atomics", other: "buffer_int64_atomics"},
-    UtAtomicFeature{call: "#[storage(0, 3)] var f: FImage2D;\n#[stage(\"compute\")]\n#[workgroup(1, 1, 1)]\nfun cs() { xchgf(ftexel(?f, i32x2{1, 2}, 0), 1, 0, 2.0); }\n", feature: "image_float32_atomics", other: "buffer_float32_atomics"},
-    UtAtomicFeature{call: "#[storage(0, 3)] var f: FImage2D;\n#[stage(\"compute\")]\n#[workgroup(1, 1, 1)]\nfun cs() { faddf(ftexel(?f, i32x2{1, 2}, 0), 1, 0, 1.0); }\n", feature: "image_float32_atomic_add", other: "image_float32_atomics"},
-    UtAtomicFeature{call: "#[storage(0, 3)] var f: FImage2D;\n#[stage(\"compute\")]\n#[workgroup(1, 1, 1)]\nfun cs() { fmaxf(ftexel(?f, i32x2{1, 2}, 0), 1, 0, 1.0); }\n", feature: "image_float32_atomic_min_max", other: "image_float32_atomic_add"},
-    UtAtomicFeature{call: "#[storage(0, 3)] var s: I64Image2D;\n#[stage(\"compute\")]\n#[workgroup(1, 1, 1)]\nfun cs() { iadd64(itexel64(?s, i32x2{1, 2}, 0), 1, 0, -1); }\n", feature: "image_int64_atomics", other: "buffer_int64_atomics"},
+val IMAGE_ATOMIC_FEATURES: [5]AtomicFeature = [5]AtomicFeature{
+    AtomicFeature{call: "#[storage(0, 3)] var q: U64Image2D;\n#[stage(\"compute\")]\n#[workgroup(1, 1, 1)]\nfun cs() { add64(texel64(?q, i32x2{1, 2}, 0), 1, 0, 1); }\n", feature: "image_int64_atomics", other: "buffer_int64_atomics"},
+    AtomicFeature{call: "#[storage(0, 3)] var f: FImage2D;\n#[stage(\"compute\")]\n#[workgroup(1, 1, 1)]\nfun cs() { xchgf(ftexel(?f, i32x2{1, 2}, 0), 1, 0, 2.0); }\n", feature: "image_float32_atomics", other: "buffer_float32_atomics"},
+    AtomicFeature{call: "#[storage(0, 3)] var f: FImage2D;\n#[stage(\"compute\")]\n#[workgroup(1, 1, 1)]\nfun cs() { faddf(ftexel(?f, i32x2{1, 2}, 0), 1, 0, 1.0); }\n", feature: "image_float32_atomic_add", other: "image_float32_atomics"},
+    AtomicFeature{call: "#[storage(0, 3)] var f: FImage2D;\n#[stage(\"compute\")]\n#[workgroup(1, 1, 1)]\nfun cs() { fmaxf(ftexel(?f, i32x2{1, 2}, 0), 1, 0, 1.0); }\n", feature: "image_float32_atomic_min_max", other: "image_float32_atomic_add"},
+    AtomicFeature{call: "#[storage(0, 3)] var s: I64Image2D;\n#[stage(\"compute\")]\n#[workgroup(1, 1, 1)]\nfun cs() { iadd64(itexel64(?s, i32x2{1, 2}, 0), 1, 0, -1); }\n", feature: "image_int64_atomics", other: "buffer_int64_atomics"},
 };
 
 test op__atomics_on_storage_image_texels {
@@ -5967,11 +5967,11 @@ test op__atomics_on_storage_image_texels {
     }
     var k: usize = 0;
     for (k < 5) {
-        val c:    *UtAtomicFeature = ?IMAGE_ATOMIC_FEATURES[k];
-        val src:  str              = concat(?alloc, IMAGE_ATOMIC_HEAD, c.call, "");
-        val with: str              = concat(?alloc, "env = \"vulkan1.3\"\nextensions = [\"int64\", \"", c.feature, "\"]\n");
-        val near: str              = concat(?alloc, "env = \"vulkan1.3\"\nextensions = [\"int64\", \"", c.other, "\"]\n");
-        val need: str              = concat(?alloc, "needs the `", c.feature, "` extension");
+        val c:    *AtomicFeature = ?IMAGE_ATOMIC_FEATURES[k];
+        val src:  str            = concat(?alloc, IMAGE_ATOMIC_HEAD, c.call, "");
+        val with: str            = concat(?alloc, "env = \"vulkan1.3\"\nextensions = [\"int64\", \"", c.feature, "\"]\n");
+        val near: str            = concat(?alloc, "env = \"vulkan1.3\"\nextensions = [\"int64\", \"", c.other, "\"]\n");
+        val need: str            = concat(?alloc, "needs the `", c.feature, "` extension");
         if (src == nil || with == nil || near == nil || need == nil) { ret 1; }
         val ok: i32 = l6_env(?alloc, src, with, "vulkan1.3", "", 0, nil);
         if (ok != 0) {
@@ -6042,68 +6042,68 @@ test op__pointer_operands_take_the_call_site_storage_class {
 }
 
 #[testing]
-rec UtOpCase {
+rec OpCase {
     tail:   str;
     needle: str;
 }
 
 # sema refuses a declaration whose types disagree with its row's kinds, result and relations
 #[testing]
-val OP_SIGNATURES: [54]UtOpCase = [54]UtOpCase{
-    UtOpCase{tail: "#[op(\"spirv\", \"core\", \"OpGroupNonUniformBroadcastFirst\")] fun bad(scope: u32, v: Texture2D) Texture2D;\n", needle: "`OpGroupNonUniformBroadcastFirst` operates on its value, which must be a scalar or vector of integers or floats, not `Texture2D`"},
-    UtOpCase{tail: "rec Pair { a: f32; b: f32; }\n#[op(\"spirv\", \"GLSL.std.450\", \"FAbs\")] fun bad(x: Pair) Pair;\n", needle: "`FAbs` operates on its first operand, which must be a scalar or vector of floats, not `Pair`"},
-    UtOpCase{tail: "#[op(\"spirv\", \"GLSL.std.450\", \"FAbs\")] fun bad(x: i32) i32;\n", needle: "`FAbs` operates on its first operand, which must be a scalar or vector of floats, not `i32`"},
-    UtOpCase{tail: "#[op(\"spirv\", \"GLSL.std.450\", \"Frexp\")] fun bad(x: u32x4, e: *i32x4) u32x4;\n", needle: "`Frexp` operates on its first operand, which must be a scalar or vector of floats, not `u32x4`"},
-    UtOpCase{tail: "#[op(\"spirv\", \"core\", \"OpSampledImage\")] fun bad(t: Texture2D, s: u32) Sampler2D;\n", needle: "`s` must be a sampler, a handle the target mints whose constructor states how texels are sampled, not `u32`"},
-    UtOpCase{tail: "#[op(\"spirv\", \"core\", \"OpSampledImage\")] fun bad(t: Texture2D, s: Texture2D) Sampler2D;\n", needle: "`s` must be a sampler, a handle the target mints whose constructor states how texels are sampled, not `Texture2D`"},
-    UtOpCase{tail: "#[op(\"spirv\", \"core\", \"OpImageQuerySizeLod\")] fun bad(a: u32, b: u32) Texture2D;\n", needle: "the declaration returns a handle, and the instruction's row names no operand its result derives from"},
-    UtOpCase{tail: "#[handle(\"spirv\", \"sampler\")]\npub def Smp;\n#[op(\"spirv\", \"core\", \"OpSampledImage\")] fun bad(t: Texture2D, s: Smp) Texture2D;\n", needle: "the return type must be a handle composed over `Texture2D`, the type of `t`, and `Texture2D` is not one"},
-    UtOpCase{tail: "#[handle(\"spirv\", \"image\", 0, 2, 0, 0, 0, 1, 0)]\npub def Tex3D;\n#[handle(\"spirv\", \"sampler\")]\npub def Smp;\n#[op(\"spirv\", \"core\", \"OpSampledImage\")] fun bad(t: Tex3D, s: Smp) Sampler2D;\n", needle: "composed over `Tex3D`, the type of `t`, and `Sampler2D` is not one"},
-    UtOpCase{tail: "#[op(\"spirv\", \"core\", \"OpSampledImage\")] fun bad(a: u32, b: u32) Sampler2D;\n", needle: "`a` must be a handle the target mints, not `u32`"},
-    UtOpCase{tail: "#[op(\"spirv\", \"core\", \"OpControlBarrier\")] fun bad(exec: f32, mem: u32, sem: u32);\n", needle: "so the parameter must be an integer"},
-    UtOpCase{tail: "#[op(\"spirv\", \"core\", \"OpAtomicLoad\")] fun bad(p: u32, scope: u32, sem: u32) u32;\n", needle: "so the parameter must be a pointer"},
-    UtOpCase{tail: "#[op(\"spirv\", \"core\", \"OpAtomicIAdd\")] fun bad(p: *u32, scope: u32, sem: u32, v: *u32) u32;\n", needle: "so the parameter cannot be a pointer"},
-    UtOpCase{tail: "#[op(\"spirv\", \"core\", \"OpControlBarrier\")] fun bad(exec: u32, mem: u32, sem: u32) u32;\n", needle: "so the declaration returns nothing"},
-    UtOpCase{tail: "#[op(\"spirv\", \"core\", \"OpAtomicLoad\")] fun bad(p: *u32, scope: u32, sem: u32);\n", needle: "so the declaration must return its type"},
-    UtOpCase{tail: "#[op(\"spirv\", \"core\", \"OpImageTexelPointer\")] fun bad(image: *Texture2D, coord: i32x2, sample: u32) u32;\n", needle: "must return a pointer"},
-    UtOpCase{tail: "#[op(\"spirv\", \"core\", \"OpImageRead\")] fun bad(image: u32, coord: i32x2) f32x4;\n", needle: "so the parameter must be a handle type"},
-    UtOpCase{tail: "#[op(\"spirv\", \"core\", \"OpGroupNonUniformAll\")] fun bad(scope: u32, p: f32) u32;\n", needle: "so the parameter must be an integer such as `bool`"},
-    UtOpCase{tail: "#[op(\"spirv\", \"core\", \"OpGroupNonUniformElect\")] fun bad(scope: u32) f32;\n", needle: "so the declaration returns an integer such as `bool`"},
-    UtOpCase{tail: "#[op(\"spirv\", \"core\", \"OpAtomicIAdd\")] fun bad(p: *f32, scope: u32, sem: u32, v: f32) f32;\n", needle: "`OpAtomicIAdd` does not operate on `f32` in any storage class: an integer atomic takes only"},
-    UtOpCase{tail: "#[op(\"spirv\", \"core\", \"OpAtomicFAddEXT\")] fun bad(p: *u32, scope: u32, sem: u32, v: u32) u32;\n", needle: "`OpAtomicFAddEXT` does not operate on `u32` in any storage class: a float atomic add takes only"},
-    UtOpCase{tail: "#[op(\"spirv\", \"core\", \"OpAtomicIAdd\")] fun bad(p: *u32, scope: u32, sem: u32, v: u64) u32;\n", needle: "`v` must be the type pointed to by `p`, which is `u32`, not `u64`"},
-    UtOpCase{tail: "#[op(\"spirv\", \"core\", \"OpAtomicIAdd\")] fun bad(p: *u32, scope: u32, sem: u32, v: u32) i32;\n", needle: "the return type must be the type pointed to by `p`, which is `u32`, not `i32`"},
-    UtOpCase{tail: "#[handle(\"spirv\", \"image\", 2, 1, 0, 0, 0, 2, 33)]\npub def UImage2D;\n#[op(\"spirv\", \"core\", \"OpImageWrite\")] fun bad(img: UImage2D, at: i32x2, texel: f32x4);\n", needle: "`texel` must be a scalar or vector of the sampled type of `img`, which is `u32`, not `f32x4`"},
-    UtOpCase{tail: "#[handle(\"spirv\", \"image\", 2, 1, 0, 0, 1, 2, 33)]\npub def UImageMS;\n#[op(\"spirv\", \"core\", \"OpImageRead\")] fun bad(img: UImageMS, at: i32x2, mask: u32, sample: i32) i32x4;\n", needle: "the return type must be a vector of the sampled type of `img`, which is `u32`, not `i32x4`"},
-    UtOpCase{tail: "#[handle(\"spirv\", \"image\", 0, 1, 0, 0, 0, 2, 3)]\npub def R32f;\n#[op(\"spirv\", \"core\", \"OpImageRead\")] fun bad(img: R32f, at: i32x2) f32;\n", needle: "the return type has 1 component, and `OpImageRead` takes exactly 4: Vulkan requires the result of an image read to be a vector of four components (VUID-StandaloneSpirv-Result-04780)"},
-    UtOpCase{tail: "#[op(\"spirv\", \"core\", \"OpImageFetch\")] fun bad(img: Texture2D, at: i32x2) f32x3;\n", needle: "the return type has 3 components, and `OpImageFetch` takes exactly 4: SPIR-V requires the result of an image fetch to be a vector of four components"},
-    UtOpCase{tail: "#[op(\"spirv\", \"core\", \"OpImageSampleImplicitLod\")] fun bad(s: Sampler2D, uv: f32x2) f32x2;\n", needle: "the return type has 2 components, and `OpImageSampleImplicitLod` takes exactly 4: SPIR-V requires the result of an image sample to be a vector of four components"},
-    UtOpCase{tail: "#[op(\"spirv\", \"core\", \"OpImageSampleExplicitLod\")] fun bad(s: Sampler2D, uv: f32x2, mask: u32, lod: f32) f32;\n", needle: "the return type has 1 component, and `OpImageSampleExplicitLod` takes exactly 4"},
-    UtOpCase{tail: "#[op(\"spirv\", \"core\", \"OpImageGather\")] fun bad(s: Sampler2D, uv: f32x2, comp: u32) f32x2;\n", needle: "the return type has 2 components, and `OpImageGather` takes exactly 4: SPIR-V requires the result of an image gather to be a vector of four components, one from each texel"},
-    UtOpCase{tail: "#[op(\"spirv\", \"core\", \"OpImageSampleImplicitLod\")] fun bad(s: Sampler2D, uv: f32x2) u32x4;\n", needle: "the return type must be a vector of the sampled type of `s`, which is `f32`, not `u32x4`"},
-    UtOpCase{tail: "#[op(\"spirv\", \"core\", \"OpImageSampleImplicitLod\")] fun bad(s: u32, uv: f32x2) f32x4;\n", needle: "so the parameter must be a handle type"},
-    UtOpCase{tail: "#[handle(\"spirv\", \"image\", 0, 1, 0, 0, 0, 2, 4)]\npub def Rgba8;\n#[op(\"spirv\", \"core\", \"OpImageWrite\")] fun bad(img: Rgba8, at: i32x2, texel: f32x2);\n", needle: "`texel` has 2 components, and `OpImageWrite` takes at least 4, the components the format of `img` stores: Vulkan requires the texel of an image write to have at least as many components as the image's format (VUID-RuntimeSpirv-OpImageWrite-07112)"},
-    UtOpCase{tail: "#[op(\"spirv\", \"core\", \"OpImageTexelPointer\")] fun bad(image: *Texture2D, coord: i32x2, sample: u32) *f32;\n", needle: "this image's `Sampled` operand is `1`"},
-    UtOpCase{tail: "#[handle(\"spirv\", \"image\", 2, 1, 0, 0, 0, 2, 33)]\npub def UImage2D;\n#[op(\"spirv\", \"core\", \"OpImageTexelPointer\")] fun bad(image: *UImage2D, coord: i32x2, sample: u32) *i32;\n", needle: "the return type must be a pointer to the sampled type of `image`, which is `u32`, not `*i32`"},
-    UtOpCase{tail: "#[handle(\"spirv\", \"image\", 2, 1, 0, 0, 0, 2, 0)]\npub def AnyImage2D;\n#[op(\"spirv\", \"core\", \"OpImageTexelPointer\")] fun bad(image: *AnyImage2D, coord: i32x2, sample: u32) *u32;\n", needle: "an image atomic only on an image of `R32ui`, `R32i`, `R32f`, `R64ui` or `R64i` format"},
-    UtOpCase{tail: "#[op(\"spirv\", \"core\", \"OpImageSampleDrefImplicitLod\")] fun bad(s: Sampler2D, uv: f32x2, ref: f32) f32x4;\n", needle: "the return type has 4 components, and `OpImageSampleDrefImplicitLod` takes exactly 1: SPIR-V requires the result of a depth-comparison sample to be a scalar"},
-    UtOpCase{tail: "#[op(\"spirv\", \"core\", \"OpImageSampleDrefExplicitLod\")] fun bad(s: Sampler2D, uv: f32x2, ref: i32, mask: u32, lod: f32) f32;\n", needle: "`ref` must be `f32`, not `i32`: SPIR-V requires the depth-comparison reference of an `OpImage*Dref*` instruction to be a 32-bit float scalar"},
-    UtOpCase{tail: "#[op(\"spirv\", \"core\", \"OpImageDrefGather\")] fun bad(s: Sampler2D, uv: f32x2, ref: f32x2) f32x4;\n", needle: "`ref` must be `f32`, not `f32x2`"},
-    UtOpCase{tail: "#[op(\"spirv\", \"GLSL.std.450\", \"Modf\")] fun bad(x: f32, whole: *f64) f32;\n", needle: "`whole` must be a pointer to the type of `x`, which is `f32`, not `*f64`"},
-    UtOpCase{tail: "#[op(\"spirv\", \"GLSL.std.450\", \"Modf\")] fun bad(x: f32x4, whole: *f32x3) f32x4;\n", needle: "`whole` must be a pointer to the type of `x`, which is `f32x4`, not `*f32x3`"},
-    UtOpCase{tail: "#[op(\"spirv\", \"GLSL.std.450\", \"Modf\")] fun bad(x: f32, whole: *f32) f64;\n", needle: "the return type must be the type of `x`, which is `f32`, not `f64`"},
-    UtOpCase{tail: "#[op(\"spirv\", \"GLSL.std.450\", \"Frexp\")] fun bad(x: f32x4, e: *i32x2) f32x4;\n", needle: "`e` must be a pointer to `i32x4`, with as many components as `x`, which is `f32x4`, not `*i32x2`"},
-    UtOpCase{tail: "#[op(\"spirv\", \"GLSL.std.450\", \"Frexp\")] fun bad(x: f32, e: *u32) f32;\n", needle: "`e` must be a pointer to `i32`, with as many components as `x`, which is `f32`, not `*u32`: GLSL.std.450 requires the exponent `Frexp` stores to be a 32-bit integer"},
-    UtOpCase{tail: "#[op(\"spirv\", \"GLSL.std.450\", \"Frexp\")] fun bad(x: f32, e: i32) f32;\n", needle: "so the parameter must be a pointer"},
-    UtOpCase{tail: "#[op(\"spirv\", \"GLSL.std.450\", \"UMin\")] fun bad(x: i32, y: i32) i32;\n", needle: "`UMin` operates on its first operand, which must be a scalar or vector of unsigned integers, not `i32`"},
-    UtOpCase{tail: "#[op(\"spirv\", \"GLSL.std.450\", \"SClamp\")] fun bad(x: u32x4, lo: u32x4, hi: u32x4) u32x4;\n", needle: "`SClamp` operates on its first operand, which must be a scalar or vector of signed integers, not `u32x4`"},
-    UtOpCase{tail: "#[op(\"spirv\", \"GLSL.std.450\", \"SAbs\")] fun bad(x: f32) f32;\n", needle: "`SAbs` operates on its first operand, which must be a scalar or vector of signed integers, not `f32`"},
-    UtOpCase{tail: "#[op(\"spirv\", \"GLSL.std.450\", \"FindILsb\")] fun bad(x: f32x2) f32x2;\n", needle: "`FindILsb` operates on its first operand, which must be a scalar or vector of integers, not `f32x2`"},
-    UtOpCase{tail: "#[op(\"spirv\", \"GLSL.std.450\", \"UMax\")] fun bad(x: u32, y: i32) u32;\n", needle: "`y` must be the type of `x`, which is `u32`, not `i32`"},
-    UtOpCase{tail: "#[op(\"spirv\", \"GLSL.std.450\", \"FindUMsb\")] fun bad(x: u64) u64;\n", needle: "`FindUMsb` does not operate on `u64` in any storage class"},
-    UtOpCase{tail: "#[op(\"spirv\", \"GLSL.std.450\", \"FindSMsb\")] fun bad(x: i64x2) i64x2;\n", needle: "`FindSMsb` does not operate on `i64x2` in any storage class"},
-    UtOpCase{tail: "#[op(\"spirv\", \"GLSL.std.450\", \"FindILsb\")] fun bad(x: u16x4) u16x4;\n", needle: "`FindILsb` does not operate on `u16x4` in any storage class"},
-    UtOpCase{tail: "#[op(\"spirv\", \"core\", \"OpAtomicIAdd\")] fun bad(p: *u32x4, scope: u32, sem: u32, v: u32x4) u32x4;\n", needle: "`OpAtomicIAdd` does not operate on `u32x4`: an integer atomic takes a scalar, never a vector"}
+val OP_SIGNATURES: [54]OpCase = [54]OpCase{
+    OpCase{tail: "#[op(\"spirv\", \"core\", \"OpGroupNonUniformBroadcastFirst\")] fun bad(scope: u32, v: Texture2D) Texture2D;\n", needle: "`OpGroupNonUniformBroadcastFirst` operates on its value, which must be a scalar or vector of integers or floats, not `Texture2D`"},
+    OpCase{tail: "rec Pair { a: f32; b: f32; }\n#[op(\"spirv\", \"GLSL.std.450\", \"FAbs\")] fun bad(x: Pair) Pair;\n", needle: "`FAbs` operates on its first operand, which must be a scalar or vector of floats, not `Pair`"},
+    OpCase{tail: "#[op(\"spirv\", \"GLSL.std.450\", \"FAbs\")] fun bad(x: i32) i32;\n", needle: "`FAbs` operates on its first operand, which must be a scalar or vector of floats, not `i32`"},
+    OpCase{tail: "#[op(\"spirv\", \"GLSL.std.450\", \"Frexp\")] fun bad(x: u32x4, e: *i32x4) u32x4;\n", needle: "`Frexp` operates on its first operand, which must be a scalar or vector of floats, not `u32x4`"},
+    OpCase{tail: "#[op(\"spirv\", \"core\", \"OpSampledImage\")] fun bad(t: Texture2D, s: u32) Sampler2D;\n", needle: "`s` must be a sampler, a handle the target mints whose constructor states how texels are sampled, not `u32`"},
+    OpCase{tail: "#[op(\"spirv\", \"core\", \"OpSampledImage\")] fun bad(t: Texture2D, s: Texture2D) Sampler2D;\n", needle: "`s` must be a sampler, a handle the target mints whose constructor states how texels are sampled, not `Texture2D`"},
+    OpCase{tail: "#[op(\"spirv\", \"core\", \"OpImageQuerySizeLod\")] fun bad(a: u32, b: u32) Texture2D;\n", needle: "the declaration returns a handle, and the instruction's row names no operand its result derives from"},
+    OpCase{tail: "#[handle(\"spirv\", \"sampler\")]\npub def Smp;\n#[op(\"spirv\", \"core\", \"OpSampledImage\")] fun bad(t: Texture2D, s: Smp) Texture2D;\n", needle: "the return type must be a handle composed over `Texture2D`, the type of `t`, and `Texture2D` is not one"},
+    OpCase{tail: "#[handle(\"spirv\", \"image\", 0, 2, 0, 0, 0, 1, 0)]\npub def Tex3D;\n#[handle(\"spirv\", \"sampler\")]\npub def Smp;\n#[op(\"spirv\", \"core\", \"OpSampledImage\")] fun bad(t: Tex3D, s: Smp) Sampler2D;\n", needle: "composed over `Tex3D`, the type of `t`, and `Sampler2D` is not one"},
+    OpCase{tail: "#[op(\"spirv\", \"core\", \"OpSampledImage\")] fun bad(a: u32, b: u32) Sampler2D;\n", needle: "`a` must be a handle the target mints, not `u32`"},
+    OpCase{tail: "#[op(\"spirv\", \"core\", \"OpControlBarrier\")] fun bad(exec: f32, mem: u32, sem: u32);\n", needle: "so the parameter must be an integer"},
+    OpCase{tail: "#[op(\"spirv\", \"core\", \"OpAtomicLoad\")] fun bad(p: u32, scope: u32, sem: u32) u32;\n", needle: "so the parameter must be a pointer"},
+    OpCase{tail: "#[op(\"spirv\", \"core\", \"OpAtomicIAdd\")] fun bad(p: *u32, scope: u32, sem: u32, v: *u32) u32;\n", needle: "so the parameter cannot be a pointer"},
+    OpCase{tail: "#[op(\"spirv\", \"core\", \"OpControlBarrier\")] fun bad(exec: u32, mem: u32, sem: u32) u32;\n", needle: "so the declaration returns nothing"},
+    OpCase{tail: "#[op(\"spirv\", \"core\", \"OpAtomicLoad\")] fun bad(p: *u32, scope: u32, sem: u32);\n", needle: "so the declaration must return its type"},
+    OpCase{tail: "#[op(\"spirv\", \"core\", \"OpImageTexelPointer\")] fun bad(image: *Texture2D, coord: i32x2, sample: u32) u32;\n", needle: "must return a pointer"},
+    OpCase{tail: "#[op(\"spirv\", \"core\", \"OpImageRead\")] fun bad(image: u32, coord: i32x2) f32x4;\n", needle: "so the parameter must be a handle type"},
+    OpCase{tail: "#[op(\"spirv\", \"core\", \"OpGroupNonUniformAll\")] fun bad(scope: u32, p: f32) u32;\n", needle: "so the parameter must be an integer such as `bool`"},
+    OpCase{tail: "#[op(\"spirv\", \"core\", \"OpGroupNonUniformElect\")] fun bad(scope: u32) f32;\n", needle: "so the declaration returns an integer such as `bool`"},
+    OpCase{tail: "#[op(\"spirv\", \"core\", \"OpAtomicIAdd\")] fun bad(p: *f32, scope: u32, sem: u32, v: f32) f32;\n", needle: "`OpAtomicIAdd` does not operate on `f32` in any storage class: an integer atomic takes only"},
+    OpCase{tail: "#[op(\"spirv\", \"core\", \"OpAtomicFAddEXT\")] fun bad(p: *u32, scope: u32, sem: u32, v: u32) u32;\n", needle: "`OpAtomicFAddEXT` does not operate on `u32` in any storage class: a float atomic add takes only"},
+    OpCase{tail: "#[op(\"spirv\", \"core\", \"OpAtomicIAdd\")] fun bad(p: *u32, scope: u32, sem: u32, v: u64) u32;\n", needle: "`v` must be the type pointed to by `p`, which is `u32`, not `u64`"},
+    OpCase{tail: "#[op(\"spirv\", \"core\", \"OpAtomicIAdd\")] fun bad(p: *u32, scope: u32, sem: u32, v: u32) i32;\n", needle: "the return type must be the type pointed to by `p`, which is `u32`, not `i32`"},
+    OpCase{tail: "#[handle(\"spirv\", \"image\", 2, 1, 0, 0, 0, 2, 33)]\npub def UImage2D;\n#[op(\"spirv\", \"core\", \"OpImageWrite\")] fun bad(img: UImage2D, at: i32x2, texel: f32x4);\n", needle: "`texel` must be a scalar or vector of the sampled type of `img`, which is `u32`, not `f32x4`"},
+    OpCase{tail: "#[handle(\"spirv\", \"image\", 2, 1, 0, 0, 1, 2, 33)]\npub def UImageMS;\n#[op(\"spirv\", \"core\", \"OpImageRead\")] fun bad(img: UImageMS, at: i32x2, mask: u32, sample: i32) i32x4;\n", needle: "the return type must be a vector of the sampled type of `img`, which is `u32`, not `i32x4`"},
+    OpCase{tail: "#[handle(\"spirv\", \"image\", 0, 1, 0, 0, 0, 2, 3)]\npub def R32f;\n#[op(\"spirv\", \"core\", \"OpImageRead\")] fun bad(img: R32f, at: i32x2) f32;\n", needle: "the return type has 1 component, and `OpImageRead` takes exactly 4: Vulkan requires the result of an image read to be a vector of four components (VUID-StandaloneSpirv-Result-04780)"},
+    OpCase{tail: "#[op(\"spirv\", \"core\", \"OpImageFetch\")] fun bad(img: Texture2D, at: i32x2) f32x3;\n", needle: "the return type has 3 components, and `OpImageFetch` takes exactly 4: SPIR-V requires the result of an image fetch to be a vector of four components"},
+    OpCase{tail: "#[op(\"spirv\", \"core\", \"OpImageSampleImplicitLod\")] fun bad(s: Sampler2D, uv: f32x2) f32x2;\n", needle: "the return type has 2 components, and `OpImageSampleImplicitLod` takes exactly 4: SPIR-V requires the result of an image sample to be a vector of four components"},
+    OpCase{tail: "#[op(\"spirv\", \"core\", \"OpImageSampleExplicitLod\")] fun bad(s: Sampler2D, uv: f32x2, mask: u32, lod: f32) f32;\n", needle: "the return type has 1 component, and `OpImageSampleExplicitLod` takes exactly 4"},
+    OpCase{tail: "#[op(\"spirv\", \"core\", \"OpImageGather\")] fun bad(s: Sampler2D, uv: f32x2, comp: u32) f32x2;\n", needle: "the return type has 2 components, and `OpImageGather` takes exactly 4: SPIR-V requires the result of an image gather to be a vector of four components, one from each texel"},
+    OpCase{tail: "#[op(\"spirv\", \"core\", \"OpImageSampleImplicitLod\")] fun bad(s: Sampler2D, uv: f32x2) u32x4;\n", needle: "the return type must be a vector of the sampled type of `s`, which is `f32`, not `u32x4`"},
+    OpCase{tail: "#[op(\"spirv\", \"core\", \"OpImageSampleImplicitLod\")] fun bad(s: u32, uv: f32x2) f32x4;\n", needle: "so the parameter must be a handle type"},
+    OpCase{tail: "#[handle(\"spirv\", \"image\", 0, 1, 0, 0, 0, 2, 4)]\npub def Rgba8;\n#[op(\"spirv\", \"core\", \"OpImageWrite\")] fun bad(img: Rgba8, at: i32x2, texel: f32x2);\n", needle: "`texel` has 2 components, and `OpImageWrite` takes at least 4, the components the format of `img` stores: Vulkan requires the texel of an image write to have at least as many components as the image's format (VUID-RuntimeSpirv-OpImageWrite-07112)"},
+    OpCase{tail: "#[op(\"spirv\", \"core\", \"OpImageTexelPointer\")] fun bad(image: *Texture2D, coord: i32x2, sample: u32) *f32;\n", needle: "this image's `Sampled` operand is `1`"},
+    OpCase{tail: "#[handle(\"spirv\", \"image\", 2, 1, 0, 0, 0, 2, 33)]\npub def UImage2D;\n#[op(\"spirv\", \"core\", \"OpImageTexelPointer\")] fun bad(image: *UImage2D, coord: i32x2, sample: u32) *i32;\n", needle: "the return type must be a pointer to the sampled type of `image`, which is `u32`, not `*i32`"},
+    OpCase{tail: "#[handle(\"spirv\", \"image\", 2, 1, 0, 0, 0, 2, 0)]\npub def AnyImage2D;\n#[op(\"spirv\", \"core\", \"OpImageTexelPointer\")] fun bad(image: *AnyImage2D, coord: i32x2, sample: u32) *u32;\n", needle: "an image atomic only on an image of `R32ui`, `R32i`, `R32f`, `R64ui` or `R64i` format"},
+    OpCase{tail: "#[op(\"spirv\", \"core\", \"OpImageSampleDrefImplicitLod\")] fun bad(s: Sampler2D, uv: f32x2, ref: f32) f32x4;\n", needle: "the return type has 4 components, and `OpImageSampleDrefImplicitLod` takes exactly 1: SPIR-V requires the result of a depth-comparison sample to be a scalar"},
+    OpCase{tail: "#[op(\"spirv\", \"core\", \"OpImageSampleDrefExplicitLod\")] fun bad(s: Sampler2D, uv: f32x2, ref: i32, mask: u32, lod: f32) f32;\n", needle: "`ref` must be `f32`, not `i32`: SPIR-V requires the depth-comparison reference of an `OpImage*Dref*` instruction to be a 32-bit float scalar"},
+    OpCase{tail: "#[op(\"spirv\", \"core\", \"OpImageDrefGather\")] fun bad(s: Sampler2D, uv: f32x2, ref: f32x2) f32x4;\n", needle: "`ref` must be `f32`, not `f32x2`"},
+    OpCase{tail: "#[op(\"spirv\", \"GLSL.std.450\", \"Modf\")] fun bad(x: f32, whole: *f64) f32;\n", needle: "`whole` must be a pointer to the type of `x`, which is `f32`, not `*f64`"},
+    OpCase{tail: "#[op(\"spirv\", \"GLSL.std.450\", \"Modf\")] fun bad(x: f32x4, whole: *f32x3) f32x4;\n", needle: "`whole` must be a pointer to the type of `x`, which is `f32x4`, not `*f32x3`"},
+    OpCase{tail: "#[op(\"spirv\", \"GLSL.std.450\", \"Modf\")] fun bad(x: f32, whole: *f32) f64;\n", needle: "the return type must be the type of `x`, which is `f32`, not `f64`"},
+    OpCase{tail: "#[op(\"spirv\", \"GLSL.std.450\", \"Frexp\")] fun bad(x: f32x4, e: *i32x2) f32x4;\n", needle: "`e` must be a pointer to `i32x4`, with as many components as `x`, which is `f32x4`, not `*i32x2`"},
+    OpCase{tail: "#[op(\"spirv\", \"GLSL.std.450\", \"Frexp\")] fun bad(x: f32, e: *u32) f32;\n", needle: "`e` must be a pointer to `i32`, with as many components as `x`, which is `f32`, not `*u32`: GLSL.std.450 requires the exponent `Frexp` stores to be a 32-bit integer"},
+    OpCase{tail: "#[op(\"spirv\", \"GLSL.std.450\", \"Frexp\")] fun bad(x: f32, e: i32) f32;\n", needle: "so the parameter must be a pointer"},
+    OpCase{tail: "#[op(\"spirv\", \"GLSL.std.450\", \"UMin\")] fun bad(x: i32, y: i32) i32;\n", needle: "`UMin` operates on its first operand, which must be a scalar or vector of unsigned integers, not `i32`"},
+    OpCase{tail: "#[op(\"spirv\", \"GLSL.std.450\", \"SClamp\")] fun bad(x: u32x4, lo: u32x4, hi: u32x4) u32x4;\n", needle: "`SClamp` operates on its first operand, which must be a scalar or vector of signed integers, not `u32x4`"},
+    OpCase{tail: "#[op(\"spirv\", \"GLSL.std.450\", \"SAbs\")] fun bad(x: f32) f32;\n", needle: "`SAbs` operates on its first operand, which must be a scalar or vector of signed integers, not `f32`"},
+    OpCase{tail: "#[op(\"spirv\", \"GLSL.std.450\", \"FindILsb\")] fun bad(x: f32x2) f32x2;\n", needle: "`FindILsb` operates on its first operand, which must be a scalar or vector of integers, not `f32x2`"},
+    OpCase{tail: "#[op(\"spirv\", \"GLSL.std.450\", \"UMax\")] fun bad(x: u32, y: i32) u32;\n", needle: "`y` must be the type of `x`, which is `u32`, not `i32`"},
+    OpCase{tail: "#[op(\"spirv\", \"GLSL.std.450\", \"FindUMsb\")] fun bad(x: u64) u64;\n", needle: "`FindUMsb` does not operate on `u64` in any storage class"},
+    OpCase{tail: "#[op(\"spirv\", \"GLSL.std.450\", \"FindSMsb\")] fun bad(x: i64x2) i64x2;\n", needle: "`FindSMsb` does not operate on `i64x2` in any storage class"},
+    OpCase{tail: "#[op(\"spirv\", \"GLSL.std.450\", \"FindILsb\")] fun bad(x: u16x4) u16x4;\n", needle: "`FindILsb` does not operate on `u16x4` in any storage class"},
+    OpCase{tail: "#[op(\"spirv\", \"core\", \"OpAtomicIAdd\")] fun bad(p: *u32x4, scope: u32, sem: u32, v: u32x4) u32x4;\n", needle: "`OpAtomicIAdd` does not operate on `u32x4`: an integer atomic takes a scalar, never a vector"}
 };
 
 test op__refusals {
@@ -6143,14 +6143,14 @@ test op__refusals {
 val GROUP_OP_PRELUDE: str = "rec Sums { n: [64]u32; }\n#[storage(0, 0)] var sums: Sums;\n#[builtin(\"global_invocation\")] var gid: u32x3;\nval SUBGROUP: u32 = 3;\n#[op(\"spirv\", \"core\", \"OpGroupNonUniformIAdd\")] fun group_add(scope: u32, op: u32, v: u32) u32;\n#[op(\"spirv\", \"core\", \"OpGroupNonUniformIAdd\")] fun cluster_add(scope: u32, op: u32, v: u32, size: u32) u32;\n#[stage(\"compute\")]\n#[workgroup(64, 1, 1)]\nfun cs_main() {\n    val i: u32 = gid[0];\n";
 
 #[testing]
-fun ut_group_op_src(alloc: *A.Allocator, body: str) str {
+fun group_op_src(alloc: *A.Allocator, body: str) str {
     val r: res[str, std_format.FormatError] = std_format.sprint(alloc, "{}{}{}", GROUP_OP_PRELUDE, body, "}\n");
     if (sel r.err) { ret nil; }
     ret r.ok;
 }
 
 #[testing]
-rec UtGroupOpCase {
+rec GroupOpCase {
     env:    str;
     body:   str;
     needle: str;
@@ -6164,16 +6164,16 @@ rec UtGroupOpCase {
 # declaration's arity cannot carry, a value outside the enumeration, a missing feature
 # and an environment below SPIR-V 1.3 are refused
 #[testing]
-val GROUP_OP_CASES: [9]UtGroupOpCase = [9]UtGroupOpCase{
-    UtGroupOpCase{env: "env = \"vulkan1.1\"\nextensions = [\"subgroup_arithmetic\"]\n", body: "    sums.n[i] = group_add(SUBGROUP, 0, i) + group_add(SUBGROUP, 1, i) + group_add(SUBGROUP, 2, i);\n", needle: "", forbid: isa_spirv.CAP_GROUP_NON_UNIFORM_CLUSTERED},
-    UtGroupOpCase{env: "env = \"vulkan1.1\"\nextensions = [\"subgroup_clustered\"]\n", body: "    sums.n[i] = cluster_add(SUBGROUP, 3, i, 4);\n", needle: "", forbid: isa_spirv.CAP_GROUP_NON_UNIFORM_ARITHMETIC},
-    UtGroupOpCase{env: "env = \"vulkan1.3\"\nextensions = [\"subgroup_arithmetic\", \"subgroup_clustered\"]\n", body: "    sums.n[i] = group_add(SUBGROUP, 0, i) + cluster_add(SUBGROUP, 3, i, 4);\n", needle: "", forbid: 0},
-    UtGroupOpCase{env: "env = \"vulkan1.1\"\nextensions = [\"subgroup_arithmetic\", \"subgroup_clustered\"]\n", body: "    sums.n[i] = group_add(SUBGROUP, 3, i);\n", needle: "`OpGroupNonUniformIAdd` takes 4 operands with the literal values this call passes, and the declaration passes 3", forbid: 0},
-    UtGroupOpCase{env: "env = \"vulkan1.1\"\nextensions = [\"subgroup_arithmetic\", \"subgroup_clustered\"]\n", body: "    sums.n[i] = cluster_add(SUBGROUP, 0, i, 4);\n", needle: "takes 3 operands with the literal values this call passes, and the declaration passes 4", forbid: 0},
-    UtGroupOpCase{env: "env = \"vulkan1.1\"\nextensions = [\"subgroup_arithmetic\"]\n", body: "    sums.n[i] = group_add(SUBGROUP, 7, i);\n", needle: "operand 2 of `OpGroupNonUniformIAdd` is a `GroupOperation`, and 7 is not one of its values (Reduce, InclusiveScan, ExclusiveScan, ClusteredReduce)", forbid: 0},
-    UtGroupOpCase{env: "env = \"vulkan1.1\"\n", body: "    sums.n[i] = group_add(SUBGROUP, 0, i);\n", needle: "`OpGroupNonUniformIAdd` with `Reduce` needs the `subgroup_arithmetic` extension", forbid: 0},
-    UtGroupOpCase{env: "env = \"vulkan1.1\"\nextensions = [\"subgroup_arithmetic\"]\n", body: "    sums.n[i] = cluster_add(SUBGROUP, 3, i, 4);\n", needle: "`OpGroupNonUniformIAdd` with `ClusteredReduce` needs the `subgroup_clustered` extension", forbid: 0},
-    UtGroupOpCase{env: "env = \"vulkan1.0\"\nextensions = [\"subgroup_arithmetic\"]\n", body: "    sums.n[i] = group_add(SUBGROUP, 0, i);\n", needle: "needs the GroupNonUniformArithmetic capability, which SPIR-V defines from 1.3, and the `vulkan1.0` environment selects SPIR-V 1.0: raise `env` to `vulkan1.1`", forbid: 0},
+val GROUP_OP_CASES: [9]GroupOpCase = [9]GroupOpCase{
+    GroupOpCase{env: "env = \"vulkan1.1\"\nextensions = [\"subgroup_arithmetic\"]\n", body: "    sums.n[i] = group_add(SUBGROUP, 0, i) + group_add(SUBGROUP, 1, i) + group_add(SUBGROUP, 2, i);\n", needle: "", forbid: isa_spirv.CAP_GROUP_NON_UNIFORM_CLUSTERED},
+    GroupOpCase{env: "env = \"vulkan1.1\"\nextensions = [\"subgroup_clustered\"]\n", body: "    sums.n[i] = cluster_add(SUBGROUP, 3, i, 4);\n", needle: "", forbid: isa_spirv.CAP_GROUP_NON_UNIFORM_ARITHMETIC},
+    GroupOpCase{env: "env = \"vulkan1.3\"\nextensions = [\"subgroup_arithmetic\", \"subgroup_clustered\"]\n", body: "    sums.n[i] = group_add(SUBGROUP, 0, i) + cluster_add(SUBGROUP, 3, i, 4);\n", needle: "", forbid: 0},
+    GroupOpCase{env: "env = \"vulkan1.1\"\nextensions = [\"subgroup_arithmetic\", \"subgroup_clustered\"]\n", body: "    sums.n[i] = group_add(SUBGROUP, 3, i);\n", needle: "`OpGroupNonUniformIAdd` takes 4 operands with the literal values this call passes, and the declaration passes 3", forbid: 0},
+    GroupOpCase{env: "env = \"vulkan1.1\"\nextensions = [\"subgroup_arithmetic\", \"subgroup_clustered\"]\n", body: "    sums.n[i] = cluster_add(SUBGROUP, 0, i, 4);\n", needle: "takes 3 operands with the literal values this call passes, and the declaration passes 4", forbid: 0},
+    GroupOpCase{env: "env = \"vulkan1.1\"\nextensions = [\"subgroup_arithmetic\"]\n", body: "    sums.n[i] = group_add(SUBGROUP, 7, i);\n", needle: "operand 2 of `OpGroupNonUniformIAdd` is a `GroupOperation`, and 7 is not one of its values (Reduce, InclusiveScan, ExclusiveScan, ClusteredReduce)", forbid: 0},
+    GroupOpCase{env: "env = \"vulkan1.1\"\n", body: "    sums.n[i] = group_add(SUBGROUP, 0, i);\n", needle: "`OpGroupNonUniformIAdd` with `Reduce` needs the `subgroup_arithmetic` extension", forbid: 0},
+    GroupOpCase{env: "env = \"vulkan1.1\"\nextensions = [\"subgroup_arithmetic\"]\n", body: "    sums.n[i] = cluster_add(SUBGROUP, 3, i, 4);\n", needle: "`OpGroupNonUniformIAdd` with `ClusteredReduce` needs the `subgroup_clustered` extension", forbid: 0},
+    GroupOpCase{env: "env = \"vulkan1.0\"\nextensions = [\"subgroup_arithmetic\"]\n", body: "    sums.n[i] = group_add(SUBGROUP, 0, i);\n", needle: "needs the GroupNonUniformArithmetic capability, which SPIR-V defines from 1.3, and the `vulkan1.0` environment selects SPIR-V 1.0: raise `env` to `vulkan1.1`", forbid: 0},
 };
 
 test op__literal_enumerants_decide_shape_and_requirement {
@@ -6182,8 +6182,8 @@ test op__literal_enumerants_decide_shape_and_requirement {
     if (sel make_r.err) { ret 1; }
     var i: usize = 0;
     for (i < 9) {
-        val c:   *UtGroupOpCase = ?GROUP_OP_CASES[i];
-        val src: str            = ut_group_op_src(?alloc, c.body);
+        val c:   *GroupOpCase = ?GROUP_OP_CASES[i];
+        val src: str          = group_op_src(?alloc, c.body);
         if (src == nil) { ret 1; }
         var target_env: str = "vulkan1.1";
         if (i == 2) { target_env = "vulkan1.3"; }
@@ -6201,7 +6201,7 @@ test op__literal_enumerants_decide_shape_and_requirement {
 val SUBGROUP_PRELUDE: str = "rec Sums { n: [64]u32; f: [64]f32; m: u32x4; }\n#[storage(0, 0)] var sums: Sums;\n#[builtin(\"global_invocation\")] var gid: u32x3;\nval SUBGROUP: u32 = 3;\n#[op(\"spirv\", \"core\", \"OpGroupNonUniformElect\")] fun sg_elect(scope: u32) u32;\n#[op(\"spirv\", \"core\", \"OpGroupNonUniformAll\")] fun sg_all(scope: u32, p: u8) u32;\n#[op(\"spirv\", \"core\", \"OpGroupNonUniformAny\")] fun sg_any(scope: u32, p: u8) u32;\n#[op(\"spirv\", \"core\", \"OpGroupNonUniformAllEqual\")] fun sg_all_equal(scope: u32, v: u32) u32;\n#[op(\"spirv\", \"core\", \"OpGroupNonUniformBroadcast\")] fun sg_broadcast(scope: u32, v: u32, id: u32) u32;\n#[op(\"spirv\", \"core\", \"OpGroupNonUniformBroadcastFirst\")] fun sg_broadcast_first(scope: u32, v: u32) u32;\n#[op(\"spirv\", \"core\", \"OpGroupNonUniformBallot\")] fun sg_ballot(scope: u32, p: u8) u32x4;\n#[op(\"spirv\", \"core\", \"OpGroupNonUniformInverseBallot\")] fun sg_inverse_ballot(scope: u32, m: u32x4) u32;\n#[op(\"spirv\", \"core\", \"OpGroupNonUniformBallotBitExtract\")] fun sg_bit_extract(scope: u32, m: u32x4, i: u32) u32;\n#[op(\"spirv\", \"core\", \"OpGroupNonUniformBallotBitCount\")] fun sg_bit_count(scope: u32, op: u32, m: u32x4) u32;\n#[op(\"spirv\", \"core\", \"OpGroupNonUniformBallotFindLSB\")] fun sg_find_lsb(scope: u32, m: u32x4) u32;\n#[op(\"spirv\", \"core\", \"OpGroupNonUniformBallotFindMSB\")] fun sg_find_msb(scope: u32, m: u32x4) u32;\n#[op(\"spirv\", \"core\", \"OpGroupNonUniformShuffle\")] fun sg_shuffle(scope: u32, v: u32, id: u32) u32;\n#[op(\"spirv\", \"core\", \"OpGroupNonUniformShuffleXor\")] fun sg_shuffle_xor(scope: u32, v: u32, mask: u32) u32;\n#[op(\"spirv\", \"core\", \"OpGroupNonUniformShuffleUp\")] fun sg_shuffle_up(scope: u32, v: u32, delta: u32) u32;\n#[op(\"spirv\", \"core\", \"OpGroupNonUniformShuffleDown\")] fun sg_shuffle_down(scope: u32, v: u32, delta: u32) u32;\n#[op(\"spirv\", \"core\", \"OpGroupNonUniformQuadBroadcast\")] fun sg_quad_broadcast(scope: u32, v: u32, index: u32) u32;\n#[op(\"spirv\", \"core\", \"OpGroupNonUniformQuadSwap\")] fun sg_quad_swap(scope: u32, v: u32, direction: u32) u32;\n#[op(\"spirv\", \"core\", \"OpGroupNonUniformIAdd\")] fun sg_iadd(scope: u32, op: u32, v: u32) u32;\n#[op(\"spirv\", \"core\", \"OpGroupNonUniformIAdd\")] fun sg_iadd_clustered(scope: u32, op: u32, v: u32, size: u32) u32;\n#[op(\"spirv\", \"core\", \"OpGroupNonUniformIMul\")] fun sg_imul(scope: u32, op: u32, v: u32) u32;\n#[op(\"spirv\", \"core\", \"OpGroupNonUniformSMin\")] fun sg_smin(scope: u32, op: u32, v: i32) i32;\n#[op(\"spirv\", \"core\", \"OpGroupNonUniformUMin\")] fun sg_umin(scope: u32, op: u32, v: u32) u32;\n#[op(\"spirv\", \"core\", \"OpGroupNonUniformSMax\")] fun sg_smax(scope: u32, op: u32, v: i32) i32;\n#[op(\"spirv\", \"core\", \"OpGroupNonUniformUMax\")] fun sg_umax(scope: u32, op: u32, v: u32) u32;\n#[op(\"spirv\", \"core\", \"OpGroupNonUniformBitwiseAnd\")] fun sg_and(scope: u32, op: u32, v: u32) u32;\n#[op(\"spirv\", \"core\", \"OpGroupNonUniformBitwiseOr\")] fun sg_or(scope: u32, op: u32, v: u32) u32;\n#[op(\"spirv\", \"core\", \"OpGroupNonUniformBitwiseXor\")] fun sg_xor(scope: u32, op: u32, v: u32) u32;\n#[op(\"spirv\", \"core\", \"OpGroupNonUniformFAdd\")] fun sg_fadd(scope: u32, op: u32, v: f32) f32;\n#[op(\"spirv\", \"core\", \"OpGroupNonUniformFMul\")] fun sg_fmul(scope: u32, op: u32, v: f32) f32;\n#[op(\"spirv\", \"core\", \"OpGroupNonUniformFMin\")] fun sg_fmin(scope: u32, op: u32, v: f32) f32;\n#[op(\"spirv\", \"core\", \"OpGroupNonUniformFMax\")] fun sg_fmax(scope: u32, op: u32, v: f32) f32;\n#[op(\"spirv\", \"core\", \"OpGroupNonUniformLogicalAnd\")] fun sg_land(scope: u32, op: u32, p: u8) u32;\n#[op(\"spirv\", \"core\", \"OpGroupNonUniformLogicalOr\")] fun sg_lor(scope: u32, op: u32, p: u8) u32;\n#[op(\"spirv\", \"core\", \"OpGroupNonUniformLogicalXor\")] fun sg_lxor(scope: u32, op: u32, p: u8) u32;\n";
 
 #[testing]
-rec UtSubgroupCase {
+rec SubgroupCase {
     env:    str;
     body:   str;
     needle: str;
@@ -6212,18 +6212,18 @@ rec UtSubgroupCase {
 # needs only SPIR-V 1.3, and a graphics stage reaching an operation or a built-in needs
 # subgroup_graphics_stages, the built-in then decorated Flat as a fragment input
 #[testing]
-val SUBGROUP_CASES: [11]UtSubgroupCase = [11]UtSubgroupCase{
-    UtSubgroupCase{env: "env = \"vulkan1.1\"\nextensions = [\"subgroup_vote\", \"subgroup_arithmetic\", \"subgroup_ballot\", \"subgroup_shuffle\", \"subgroup_shuffle_relative\", \"subgroup_clustered\", \"subgroup_quad\"]\n", body: "#[builtin(\"subgroup_size\")] var sg_size: u32;\n#[builtin(\"subgroup_invocation\")] var sg_inv: u32;\n#[builtin(\"subgroup_id\")] var sg_id: u32;\n#[builtin(\"num_subgroups\")] var sg_count: u32;\n#[stage(\"compute\")]\n#[workgroup(64, 1, 1)]\nfun cs_main() {\n    val i: u32 = gid[0];\n    var acc: u32 = sg_size + sg_inv + sg_id + sg_count;\n    if (sg_elect(SUBGROUP) == 1) { acc = acc + 1; }\n    if (sg_all(SUBGROUP, i < 32) == 1) { acc = acc + 2; }\n    if (sg_any(SUBGROUP, i == 3) == 1) { acc = acc + 3; }\n    if (sg_all_equal(SUBGROUP, i) == 1) { acc = acc + 4; }\n    val mask: u32x4 = sg_ballot(SUBGROUP, i < 16);\n    sums.m = mask;\n    if (sg_inverse_ballot(SUBGROUP, mask) == 1) { acc = acc + 5; }\n    if (sg_bit_extract(SUBGROUP, mask, i) == 1) { acc = acc + 6; }\n    acc = acc + sg_bit_count(SUBGROUP, 1, mask) + sg_find_lsb(SUBGROUP, mask) + sg_find_msb(SUBGROUP, mask);\n    acc = acc + sg_broadcast(SUBGROUP, i, 0) + sg_broadcast_first(SUBGROUP, i);\n    acc = acc + sg_shuffle(SUBGROUP, i, 1) + sg_shuffle_xor(SUBGROUP, i, 1);\n    acc = acc + sg_shuffle_up(SUBGROUP, i, 1) + sg_shuffle_down(SUBGROUP, i, 1);\n    acc = acc + sg_quad_broadcast(SUBGROUP, i, 0) + sg_quad_swap(SUBGROUP, i, 2);\n    acc = acc + sg_iadd(SUBGROUP, 0, i) + sg_iadd(SUBGROUP, 1, i) + sg_iadd(SUBGROUP, 2, i) + sg_iadd_clustered(SUBGROUP, 3, i, 4);\n    acc = acc + sg_imul(SUBGROUP, 0, i) + sg_umin(SUBGROUP, 0, i) + sg_umax(SUBGROUP, 2, i);\n    acc = acc + sg_smin(SUBGROUP, 0, i::i32)::u32 + sg_smax(SUBGROUP, 1, i::i32)::u32;\n    acc = acc + sg_and(SUBGROUP, 0, i) + sg_or(SUBGROUP, 0, i) + sg_xor(SUBGROUP, 0, i);\n    val f: f32 = sums.f[i];\n    sums.f[i] = sg_fadd(SUBGROUP, 0, f) + sg_fmul(SUBGROUP, 1, f) + sg_fmin(SUBGROUP, 2, f) + sg_fmax(SUBGROUP, 0, f);\n    if (sg_land(SUBGROUP, 0, i < 8) == 1) { acc = acc + 7; }\n    if (sg_lor(SUBGROUP, 1, i < 8) == 1) { acc = acc + 8; }\n    if (sg_lxor(SUBGROUP, 2, i < 8) == 1) { acc = acc + 9; }\n    sums.n[i] = acc;\n}\n", needle: ""},
-    UtSubgroupCase{env: "env = \"vulkan1.1\"\nextensions = [\"subgroup_arithmetic\"]\n", body: "#[stage(\"compute\")]\n#[workgroup(64, 1, 1)]\nfun st() {\n    val i: u32 = 5;\n    sums.m = sg_ballot(SUBGROUP, i < 16);\n}\n", needle: "`OpGroupNonUniformBallot` needs the `subgroup_ballot` extension"},
-    UtSubgroupCase{env: "env = \"vulkan1.1\"\n", body: "#[stage(\"compute\")]\n#[workgroup(64, 1, 1)]\nfun st() {\n    val i: u32 = 5;\n    sums.n[0] = sg_shuffle_up(SUBGROUP, i, 1);\n}\n", needle: "`OpGroupNonUniformShuffleUp` needs the `subgroup_shuffle_relative` extension"},
-    UtSubgroupCase{env: "env = \"vulkan1.1\"\n", body: "#[stage(\"compute\")]\n#[workgroup(64, 1, 1)]\nfun st() {\n    val i: u32 = 5;\n    if (sg_any(SUBGROUP, i == 3) == 1) { sums.n[0] = 1; }\n}\n", needle: "`OpGroupNonUniformAny` needs the `subgroup_vote` extension"},
-    UtSubgroupCase{env: "env = \"vulkan1.1\"\n", body: "#[stage(\"compute\")]\n#[workgroup(64, 1, 1)]\nfun st() {\n    val i: u32 = 5;\n    sums.n[0] = sg_quad_swap(SUBGROUP, i, 0);\n}\n", needle: "`OpGroupNonUniformQuadSwap` needs the `subgroup_quad` extension"},
-    UtSubgroupCase{env: "env = \"vulkan1.1\"\n", body: "#[stage(\"compute\")]\n#[workgroup(64, 1, 1)]\nfun st() {\n    val i: u32 = 5;\n    if (sg_elect(SUBGROUP) == 1) { sums.n[0] = 1; }\n}\n", needle: ""},
-    UtSubgroupCase{env: "env = \"vulkan1.0\"\n", body: "#[stage(\"compute\")]\n#[workgroup(64, 1, 1)]\nfun st() {\n    val i: u32 = 5;\n    if (sg_elect(SUBGROUP) == 1) { sums.n[0] = 1; }\n}\n", needle: "`OpGroupNonUniformElect` needs the GroupNonUniform capability, which SPIR-V defines from 1.3, and the `vulkan1.0` environment selects SPIR-V 1.0: raise `env` to `vulkan1.1`"},
-    UtSubgroupCase{env: "env = \"vulkan1.0\"\n", body: "#[builtin(\"subgroup_size\")] var sg_size: u32;\n#[stage(\"compute\")]\n#[workgroup(64, 1, 1)]\nfun st() {\n    val i: u32 = 5;\n    sums.n[0] = sg_size;\n}\n", needle: "the `#[builtin(\"subgroup_size\")]` variable needs the GroupNonUniform capability, which SPIR-V defines from 1.3"},
-    UtSubgroupCase{env: "env = \"vulkan1.1\"\n", body: "#[output(0)] var colour: f32x4;\n#[stage(\"fragment\")]\nfun st() {\n    val i: u32 = 5;\n    if (sg_elect(SUBGROUP) == 1) { colour = f32x4{0.0, 0.0, 0.0, 1.0}; }\n    colour = f32x4{1.0, 1.0, 1.0, 1.0};\n}\n", needle: "`OpGroupNonUniformElect` is reached from a fragment stage, and Vulkan guarantees the GroupNonUniform capability only in compute stages: a use from another stage needs the `subgroup_graphics_stages` extension"},
-    UtSubgroupCase{env: "env = \"vulkan1.1\"\n", body: "#[builtin(\"subgroup_invocation\")] var sg_inv: u32;\n#[output(0)] var colour: f32x4;\n#[stage(\"fragment\")]\nfun st() {\n    val i: u32 = 5;\n    if (sg_inv == 0) { colour = f32x4{0.0, 0.0, 0.0, 1.0}; }\n    colour = f32x4{1.0, 1.0, 1.0, 1.0};\n}\n", needle: "used by `st` is reached from a fragment stage"},
-    UtSubgroupCase{env: "env = \"vulkan1.1\"\nextensions = [\"subgroup_graphics_stages\"]\n", body: "#[builtin(\"subgroup_invocation\")] var sg_inv: u32;\n#[builtin(\"subgroup_size\")] var sg_size: u32;\n#[output(0)] var colour: f32x4;\n#[stage(\"fragment\")]\nfun st() {\n    val i: u32 = 5;\n    if (sg_elect(SUBGROUP) == 1 && sg_inv == 0) { colour = f32x4{0.0, 0.0, 0.0, sg_size::f32}; }\n    colour = f32x4{1.0, 1.0, 1.0, 1.0};\n}\n", needle: ""}
+val SUBGROUP_CASES: [11]SubgroupCase = [11]SubgroupCase{
+    SubgroupCase{env: "env = \"vulkan1.1\"\nextensions = [\"subgroup_vote\", \"subgroup_arithmetic\", \"subgroup_ballot\", \"subgroup_shuffle\", \"subgroup_shuffle_relative\", \"subgroup_clustered\", \"subgroup_quad\"]\n", body: "#[builtin(\"subgroup_size\")] var sg_size: u32;\n#[builtin(\"subgroup_invocation\")] var sg_inv: u32;\n#[builtin(\"subgroup_id\")] var sg_id: u32;\n#[builtin(\"num_subgroups\")] var sg_count: u32;\n#[stage(\"compute\")]\n#[workgroup(64, 1, 1)]\nfun cs_main() {\n    val i: u32 = gid[0];\n    var acc: u32 = sg_size + sg_inv + sg_id + sg_count;\n    if (sg_elect(SUBGROUP) == 1) { acc = acc + 1; }\n    if (sg_all(SUBGROUP, i < 32) == 1) { acc = acc + 2; }\n    if (sg_any(SUBGROUP, i == 3) == 1) { acc = acc + 3; }\n    if (sg_all_equal(SUBGROUP, i) == 1) { acc = acc + 4; }\n    val mask: u32x4 = sg_ballot(SUBGROUP, i < 16);\n    sums.m = mask;\n    if (sg_inverse_ballot(SUBGROUP, mask) == 1) { acc = acc + 5; }\n    if (sg_bit_extract(SUBGROUP, mask, i) == 1) { acc = acc + 6; }\n    acc = acc + sg_bit_count(SUBGROUP, 1, mask) + sg_find_lsb(SUBGROUP, mask) + sg_find_msb(SUBGROUP, mask);\n    acc = acc + sg_broadcast(SUBGROUP, i, 0) + sg_broadcast_first(SUBGROUP, i);\n    acc = acc + sg_shuffle(SUBGROUP, i, 1) + sg_shuffle_xor(SUBGROUP, i, 1);\n    acc = acc + sg_shuffle_up(SUBGROUP, i, 1) + sg_shuffle_down(SUBGROUP, i, 1);\n    acc = acc + sg_quad_broadcast(SUBGROUP, i, 0) + sg_quad_swap(SUBGROUP, i, 2);\n    acc = acc + sg_iadd(SUBGROUP, 0, i) + sg_iadd(SUBGROUP, 1, i) + sg_iadd(SUBGROUP, 2, i) + sg_iadd_clustered(SUBGROUP, 3, i, 4);\n    acc = acc + sg_imul(SUBGROUP, 0, i) + sg_umin(SUBGROUP, 0, i) + sg_umax(SUBGROUP, 2, i);\n    acc = acc + sg_smin(SUBGROUP, 0, i::i32)::u32 + sg_smax(SUBGROUP, 1, i::i32)::u32;\n    acc = acc + sg_and(SUBGROUP, 0, i) + sg_or(SUBGROUP, 0, i) + sg_xor(SUBGROUP, 0, i);\n    val f: f32 = sums.f[i];\n    sums.f[i] = sg_fadd(SUBGROUP, 0, f) + sg_fmul(SUBGROUP, 1, f) + sg_fmin(SUBGROUP, 2, f) + sg_fmax(SUBGROUP, 0, f);\n    if (sg_land(SUBGROUP, 0, i < 8) == 1) { acc = acc + 7; }\n    if (sg_lor(SUBGROUP, 1, i < 8) == 1) { acc = acc + 8; }\n    if (sg_lxor(SUBGROUP, 2, i < 8) == 1) { acc = acc + 9; }\n    sums.n[i] = acc;\n}\n", needle: ""},
+    SubgroupCase{env: "env = \"vulkan1.1\"\nextensions = [\"subgroup_arithmetic\"]\n", body: "#[stage(\"compute\")]\n#[workgroup(64, 1, 1)]\nfun st() {\n    val i: u32 = 5;\n    sums.m = sg_ballot(SUBGROUP, i < 16);\n}\n", needle: "`OpGroupNonUniformBallot` needs the `subgroup_ballot` extension"},
+    SubgroupCase{env: "env = \"vulkan1.1\"\n", body: "#[stage(\"compute\")]\n#[workgroup(64, 1, 1)]\nfun st() {\n    val i: u32 = 5;\n    sums.n[0] = sg_shuffle_up(SUBGROUP, i, 1);\n}\n", needle: "`OpGroupNonUniformShuffleUp` needs the `subgroup_shuffle_relative` extension"},
+    SubgroupCase{env: "env = \"vulkan1.1\"\n", body: "#[stage(\"compute\")]\n#[workgroup(64, 1, 1)]\nfun st() {\n    val i: u32 = 5;\n    if (sg_any(SUBGROUP, i == 3) == 1) { sums.n[0] = 1; }\n}\n", needle: "`OpGroupNonUniformAny` needs the `subgroup_vote` extension"},
+    SubgroupCase{env: "env = \"vulkan1.1\"\n", body: "#[stage(\"compute\")]\n#[workgroup(64, 1, 1)]\nfun st() {\n    val i: u32 = 5;\n    sums.n[0] = sg_quad_swap(SUBGROUP, i, 0);\n}\n", needle: "`OpGroupNonUniformQuadSwap` needs the `subgroup_quad` extension"},
+    SubgroupCase{env: "env = \"vulkan1.1\"\n", body: "#[stage(\"compute\")]\n#[workgroup(64, 1, 1)]\nfun st() {\n    val i: u32 = 5;\n    if (sg_elect(SUBGROUP) == 1) { sums.n[0] = 1; }\n}\n", needle: ""},
+    SubgroupCase{env: "env = \"vulkan1.0\"\n", body: "#[stage(\"compute\")]\n#[workgroup(64, 1, 1)]\nfun st() {\n    val i: u32 = 5;\n    if (sg_elect(SUBGROUP) == 1) { sums.n[0] = 1; }\n}\n", needle: "`OpGroupNonUniformElect` needs the GroupNonUniform capability, which SPIR-V defines from 1.3, and the `vulkan1.0` environment selects SPIR-V 1.0: raise `env` to `vulkan1.1`"},
+    SubgroupCase{env: "env = \"vulkan1.0\"\n", body: "#[builtin(\"subgroup_size\")] var sg_size: u32;\n#[stage(\"compute\")]\n#[workgroup(64, 1, 1)]\nfun st() {\n    val i: u32 = 5;\n    sums.n[0] = sg_size;\n}\n", needle: "the `#[builtin(\"subgroup_size\")]` variable needs the GroupNonUniform capability, which SPIR-V defines from 1.3"},
+    SubgroupCase{env: "env = \"vulkan1.1\"\n", body: "#[output(0)] var colour: f32x4;\n#[stage(\"fragment\")]\nfun st() {\n    val i: u32 = 5;\n    if (sg_elect(SUBGROUP) == 1) { colour = f32x4{0.0, 0.0, 0.0, 1.0}; }\n    colour = f32x4{1.0, 1.0, 1.0, 1.0};\n}\n", needle: "`OpGroupNonUniformElect` is reached from a fragment stage, and Vulkan guarantees the GroupNonUniform capability only in compute stages: a use from another stage needs the `subgroup_graphics_stages` extension"},
+    SubgroupCase{env: "env = \"vulkan1.1\"\n", body: "#[builtin(\"subgroup_invocation\")] var sg_inv: u32;\n#[output(0)] var colour: f32x4;\n#[stage(\"fragment\")]\nfun st() {\n    val i: u32 = 5;\n    if (sg_inv == 0) { colour = f32x4{0.0, 0.0, 0.0, 1.0}; }\n    colour = f32x4{1.0, 1.0, 1.0, 1.0};\n}\n", needle: "used by `st` is reached from a fragment stage"},
+    SubgroupCase{env: "env = \"vulkan1.1\"\nextensions = [\"subgroup_graphics_stages\"]\n", body: "#[builtin(\"subgroup_invocation\")] var sg_inv: u32;\n#[builtin(\"subgroup_size\")] var sg_size: u32;\n#[output(0)] var colour: f32x4;\n#[stage(\"fragment\")]\nfun st() {\n    val i: u32 = 5;\n    if (sg_elect(SUBGROUP) == 1 && sg_inv == 0) { colour = f32x4{0.0, 0.0, 0.0, sg_size::f32}; }\n    colour = f32x4{1.0, 1.0, 1.0, 1.0};\n}\n", needle: ""}
 };
 
 test subgroup__families_features_and_stages {
@@ -6232,7 +6232,7 @@ test subgroup__families_features_and_stages {
     if (sel make_r.err) { ret 1; }
     var i: usize = 0;
     for (i < 11) {
-        val c: *UtSubgroupCase                  = ?SUBGROUP_CASES[i];
+        val c: *SubgroupCase                    = ?SUBGROUP_CASES[i];
         val r: res[str, std_format.FormatError] = std_format.sprint(?alloc, "{}{}", SUBGROUP_PRELUDE, c.body);
         if (sel r.err) { ret 1; }
         val got: i32 = l6_env(?alloc, r.ok, c.env, "vulkan1.1", c.needle, 0, nil);
@@ -6709,7 +6709,7 @@ test multisample__storage_image_is_gated_by_the_feature {
 }
 
 #[testing]
-rec UtMsCase {
+rec MsCase {
     tail:   str;
     needle: str;
 }
@@ -6718,17 +6718,17 @@ rec UtMsCase {
 # Image Operands mask it passes, all decided where the literal's value is known, with the
 # multisampled storage feature declared so that only the call is refused
 #[testing]
-val MS_REFUSALS: [10]UtMsCase = [10]UtMsCase{
-    UtMsCase{tail: "#[op(\"spirv\", \"core\", \"OpImageQuerySize\")] fun size2(img: Tex2D) i32x2;\n#[sampler(0, 0)] var tex: Tex2D;\n#[stage(\"compute\")]\n#[workgroup(1, 1, 1)]\nfun cs() { val sz: i32x2 = size2(tex); out.v[0] = f32x4{sz[0]::f32, 0.0, 0.0, 0.0}; }\n", needle: "a single-sampled sampled image has mip levels, so query the extent of one with `OpImageQuerySizeLod`"},
-    UtMsCase{tail: "#[op(\"spirv\", \"core\", \"OpImageFetch\")] fun fetch_bad(img: Tex2D, at: i32x2, mask: u32, sample: i32) f32x4;\n#[sampler(0, 0)] var tex: Tex2D;\n#[stage(\"compute\")]\n#[workgroup(1, 1, 1)]\nfun cs() { out.v[0] = fetch_bad(tex, i32x2{0, 0}, SAMPLE, 0); }\n", needle: "the `Sample` image operand names one sample of a multisampled image, and this image's `MS` operand is `0`"},
-    UtMsCase{tail: "#[op(\"spirv\", \"core\", \"OpImageFetch\")] fun fetch_bare(img: TexMS, at: i32x2) f32x4;\n#[sampler(0, 1)] var ms: TexMS;\n#[stage(\"compute\")]\n#[workgroup(1, 1, 1)]\nfun cs() { out.v[0] = fetch_bare(ms, i32x2{0, 0}); }\n", needle: "reading or writing it takes the `Sample` image operand"},
-    UtMsCase{tail: "#[sampler(0, 1)] var ms: TexMS;\n#[stage(\"compute\")]\n#[workgroup(1, 1, 1)]\nfun cs() { out.v[0] = fetch_ms(ms, i32x2{0, 0}, LOD, 0); }\n", needle: "reading or writing it takes the `Sample` image operand"},
-    UtMsCase{tail: "#[op(\"spirv\", \"core\", \"OpImageFetch\")] fun fetch_both(img: TexMS, at: i32x2, mask: u32, lod: i32, sample: i32) f32x4;\n#[sampler(0, 1)] var ms: TexMS;\n#[stage(\"compute\")]\n#[workgroup(1, 1, 1)]\nfun cs() { out.v[0] = fetch_both(ms, i32x2{0, 0}, SAMPLE | LOD, 0, 1); }\n", needle: "a fetch from one takes no `Lod` image operand"},
-    UtMsCase{tail: "#[op(\"spirv\", \"core\", \"OpImageQuerySizeLod\")] fun size_lod(img: TexMS, lod: i32) i32x2;\n#[sampler(0, 1)] var ms: TexMS;\n#[stage(\"compute\")]\n#[workgroup(1, 1, 1)]\nfun cs() { val sz: i32x2 = size_lod(ms, 0); out.v[0] = f32x4{sz[0]::f32, 0.0, 0.0, 0.0}; }\n", needle: "`OpImageQuerySizeLod` reads the extent of one mip level, and a multisampled image has a single level"},
-    UtMsCase{tail: "#[op(\"spirv\", \"core\", \"OpImageQuerySamples\")] fun one(img: Tex2D) i32;\n#[sampler(0, 0)] var tex: Tex2D;\n#[stage(\"compute\")]\n#[workgroup(1, 1, 1)]\nfun cs() { val k: i32 = one(tex); out.v[0] = f32x4{k::f32, 0.0, 0.0, 0.0}; }\n", needle: "a single-sampled image has one sample and nothing to query"},
-    UtMsCase{tail: "#[storage(0, 3)] var a: StoreMS;\n#[stage(\"compute\")]\n#[workgroup(1, 1, 1)]\nfun cs() { out.v[0] = read_ms(a, i32x2{0, 0}, 0x4, 0); }\n", needle: "is a `Image Operands`, and 4 is not a union of its values (Sample)"},
-    UtMsCase{tail: "#[storage(0, 3)] var a: StoreMS;\n#[stage(\"compute\")]\n#[workgroup(1, 1, 1)]\nfun cs() { out.v[0] = read_ms(a, i32x2{0, 0}, 0, 0); }\n", needle: "`OpImageRead` takes 3 operands with the literal values this call passes, and the declaration passes 4"},
-    UtMsCase{tail: "#[handle(\"spirv\", \"sampled_image\", Tex2D)]\npub def Sampled2D;\n#[op(\"spirv\", \"core\", \"OpImageSampleExplicitLod\")] fun lod0(s: Sampled2D, uv: f32x2, mask: u32) f32x4;\n#[sampler(0, 5)] var st: Sampled2D;\n#[stage(\"compute\")]\n#[workgroup(1, 1, 1)]\nfun cs() { out.v[0] = lod0(st, f32x2{0.5, 0.5}, 0); }\n", needle: "its Image Operands mask must set `Lod` and pass that level after it"}
+val MS_REFUSALS: [10]MsCase = [10]MsCase{
+    MsCase{tail: "#[op(\"spirv\", \"core\", \"OpImageQuerySize\")] fun size2(img: Tex2D) i32x2;\n#[sampler(0, 0)] var tex: Tex2D;\n#[stage(\"compute\")]\n#[workgroup(1, 1, 1)]\nfun cs() { val sz: i32x2 = size2(tex); out.v[0] = f32x4{sz[0]::f32, 0.0, 0.0, 0.0}; }\n", needle: "a single-sampled sampled image has mip levels, so query the extent of one with `OpImageQuerySizeLod`"},
+    MsCase{tail: "#[op(\"spirv\", \"core\", \"OpImageFetch\")] fun fetch_bad(img: Tex2D, at: i32x2, mask: u32, sample: i32) f32x4;\n#[sampler(0, 0)] var tex: Tex2D;\n#[stage(\"compute\")]\n#[workgroup(1, 1, 1)]\nfun cs() { out.v[0] = fetch_bad(tex, i32x2{0, 0}, SAMPLE, 0); }\n", needle: "the `Sample` image operand names one sample of a multisampled image, and this image's `MS` operand is `0`"},
+    MsCase{tail: "#[op(\"spirv\", \"core\", \"OpImageFetch\")] fun fetch_bare(img: TexMS, at: i32x2) f32x4;\n#[sampler(0, 1)] var ms: TexMS;\n#[stage(\"compute\")]\n#[workgroup(1, 1, 1)]\nfun cs() { out.v[0] = fetch_bare(ms, i32x2{0, 0}); }\n", needle: "reading or writing it takes the `Sample` image operand"},
+    MsCase{tail: "#[sampler(0, 1)] var ms: TexMS;\n#[stage(\"compute\")]\n#[workgroup(1, 1, 1)]\nfun cs() { out.v[0] = fetch_ms(ms, i32x2{0, 0}, LOD, 0); }\n", needle: "reading or writing it takes the `Sample` image operand"},
+    MsCase{tail: "#[op(\"spirv\", \"core\", \"OpImageFetch\")] fun fetch_both(img: TexMS, at: i32x2, mask: u32, lod: i32, sample: i32) f32x4;\n#[sampler(0, 1)] var ms: TexMS;\n#[stage(\"compute\")]\n#[workgroup(1, 1, 1)]\nfun cs() { out.v[0] = fetch_both(ms, i32x2{0, 0}, SAMPLE | LOD, 0, 1); }\n", needle: "a fetch from one takes no `Lod` image operand"},
+    MsCase{tail: "#[op(\"spirv\", \"core\", \"OpImageQuerySizeLod\")] fun size_lod(img: TexMS, lod: i32) i32x2;\n#[sampler(0, 1)] var ms: TexMS;\n#[stage(\"compute\")]\n#[workgroup(1, 1, 1)]\nfun cs() { val sz: i32x2 = size_lod(ms, 0); out.v[0] = f32x4{sz[0]::f32, 0.0, 0.0, 0.0}; }\n", needle: "`OpImageQuerySizeLod` reads the extent of one mip level, and a multisampled image has a single level"},
+    MsCase{tail: "#[op(\"spirv\", \"core\", \"OpImageQuerySamples\")] fun one(img: Tex2D) i32;\n#[sampler(0, 0)] var tex: Tex2D;\n#[stage(\"compute\")]\n#[workgroup(1, 1, 1)]\nfun cs() { val k: i32 = one(tex); out.v[0] = f32x4{k::f32, 0.0, 0.0, 0.0}; }\n", needle: "a single-sampled image has one sample and nothing to query"},
+    MsCase{tail: "#[storage(0, 3)] var a: StoreMS;\n#[stage(\"compute\")]\n#[workgroup(1, 1, 1)]\nfun cs() { out.v[0] = read_ms(a, i32x2{0, 0}, 0x4, 0); }\n", needle: "is a `Image Operands`, and 4 is not a union of its values (Sample)"},
+    MsCase{tail: "#[storage(0, 3)] var a: StoreMS;\n#[stage(\"compute\")]\n#[workgroup(1, 1, 1)]\nfun cs() { out.v[0] = read_ms(a, i32x2{0, 0}, 0, 0); }\n", needle: "`OpImageRead` takes 3 operands with the literal values this call passes, and the declaration passes 4"},
+    MsCase{tail: "#[handle(\"spirv\", \"sampled_image\", Tex2D)]\npub def Sampled2D;\n#[op(\"spirv\", \"core\", \"OpImageSampleExplicitLod\")] fun lod0(s: Sampled2D, uv: f32x2, mask: u32) f32x4;\n#[sampler(0, 5)] var st: Sampled2D;\n#[stage(\"compute\")]\n#[workgroup(1, 1, 1)]\nfun cs() { out.v[0] = lod0(st, f32x2{0.5, 0.5}, 0); }\n", needle: "its Image Operands mask must set `Lod` and pass that level after it"}
 };
 
 test multisample__image_operands_refusals {
@@ -6933,28 +6933,28 @@ test image_operands__depth_comparisons_validate {
 # each per-call refusal of an Image Operands bit: its operand kind, its shape against the
 # image, and the bits it combines with
 #[testing]
-val IMGOP_REFUSALS: [21]UtMsCase = [21]UtMsCase{
-    UtMsCase{tail: "#[stage(\"compute\")]\n#[workgroup(1, 1, 1)]\nfun cs() { out.v[0] = fetch_off(tex, i32x2{0, 0}, LOD | CONST_OFFSET, 0, i32x2{gid[0]::i32, 0}); }\n", needle: "operand 5 of `OpImageFetch` is an integer constant"},
-    UtMsCase{tail: "#[op(\"spirv\", \"core\", \"OpImageFetch\")] fun fetch_wide(img: Tex2D, at: i32x2, mask: u32, off: i32x3) f32x4;\n#[stage(\"compute\")]\n#[workgroup(1, 1, 1)]\nfun cs() { out.v[0] = fetch_wide(tex, i32x2{0, 0}, CONST_OFFSET, i32x3{1, 1, 1}); }\n", needle: "an offset image operand is an integer with one component per dimension"},
-    UtMsCase{tail: "#[op(\"spirv\", \"core\", \"OpImageSampleExplicitLod\")] fun cube_off(s: SampledCube, dir: f32x3, mask: u32, lod: f32, off: i32x3) f32x4;\n#[stage(\"compute\")]\n#[workgroup(1, 1, 1)]\nfun cs() { out.v[0] = cube_off(cube, f32x3{0.0, 0.0, 1.0}, LOD | CONST_OFFSET, 0.0, i32x3{1, 1, 1}); }\n", needle: "Vulkan admits no offset on a cube image"},
-    UtMsCase{tail: "#[op(\"spirv\", \"core\", \"OpImageSampleExplicitLod\")] fun both(s: Sampled2D, uv: f32x2, mask: u32, lod: f32, dx: f32x2, dy: f32x2) f32x4;\n#[stage(\"compute\")]\n#[workgroup(1, 1, 1)]\nfun cs() { out.v[0] = both(st, f32x2{0.5, 0.5}, LOD | GRAD, 0.0, f32x2{0.1, 0.0}, f32x2{0.0, 0.1}); }\n", needle: "the `Lod` and `Grad` image operands are two ways of choosing the level of detail"},
-    UtMsCase{tail: "#[op(\"spirv\", \"core\", \"OpImageSampleExplicitLod\")] fun lod_least(s: Sampled2D, uv: f32x2, mask: u32, lod: f32, least: f32) f32x4;\n#[stage(\"compute\")]\n#[workgroup(1, 1, 1)]\nfun cs() { out.v[0] = lod_least(st, f32x2{0.5, 0.5}, LOD | MIN_LOD, 0.0, 1.0); }\n", needle: "an explicit-lod sample takes it only with `Grad`"},
-    UtMsCase{tail: "#[op(\"spirv\", \"core\", \"OpImageSampleExplicitLod\")] fun grad_int(s: Sampled2D, uv: f32x2, mask: u32, dx: i32x2, dy: i32x2) f32x4;\n#[stage(\"compute\")]\n#[workgroup(1, 1, 1)]\nfun cs() { out.v[0] = grad_int(st, f32x2{0.5, 0.5}, GRAD, i32x2{1, 0}, i32x2{0, 1}); }\n", needle: "the `Grad` image operands are the coordinate's derivatives"},
-    UtMsCase{tail: "#[op(\"spirv\", \"core\", \"OpImageSampleExplicitLod\")] fun lod_ptr(s: Sampled2D, uv: f32x2, mask: u32, lod: *f32) f32x4;\n#[stage(\"compute\")]\n#[workgroup(1, 1, 1)]\nfun cs() { var l: f32 = 0.0; out.v[0] = lod_ptr(st, f32x2{0.5, 0.5}, LOD, ?l); }\n", needle: "operand 4 of `OpImageSampleExplicitLod` is an ordinary value the literal's value brings"},
-    UtMsCase{tail: "#[op(\"spirv\", \"core\", \"OpImageFetch\")] fun fetch_float(img: Tex2D, at: i32x2, mask: u32, off: f32x2) f32x4;\n#[stage(\"compute\")]\n#[workgroup(1, 1, 1)]\nfun cs() { out.v[0] = fetch_float(tex, i32x2{0, 0}, CONST_OFFSET, f32x2{1.0, 1.0}); }\n", needle: "operand 4 of `OpImageFetch` is an integer constant the literal's value brings"},
-    UtMsCase{tail: "#[stage(\"compute\")]\n#[workgroup(1, 1, 1)]\nfun cs() { out.v[0] = sample_bias(st, f32x2{0.5, 0.5}, BIAS | CONST_OFFSET, 0.5, SHIFT); }\n", needle: "only a fragment stage has, and this call is reached from a compute stage"},
-    UtMsCase{tail: "#[op(\"spirv\", \"core\", \"OpImageGather\")] fun gather_both(s: Sampled2D, uv: f32x2, comp: u32, mask: u32, a: i32x2, b: i32x2) f32x4;\n#[stage(\"compute\")]\n#[workgroup(1, 1, 1)]\nfun cs() { out.v[0] = gather_both(st, f32x2{0.5, 0.5}, 0, CONST_OFFSET | OFFSET, SHIFT, SHIFT); }\n", needle: "so an instruction takes one of them"},
-    UtMsCase{tail: "#[op(\"spirv\", \"core\", \"OpImageGather\")] fun gather3(s: Sampled3D, uvw: f32x3, comp: u32) f32x4;\n#[stage(\"compute\")]\n#[workgroup(1, 1, 1)]\nfun cs() { out.v[0] = gather3(vol, f32x3{0.5, 0.5, 0.5}, 0); }\n", needle: "a gather reads the four texels a bilinear sample of a `2D` or `Cube` image would filter"},
-    UtMsCase{tail: "#[stage(\"compute\")]\n#[workgroup(1, 1, 1)]\nfun cs() { out.v[0] = gather(st, f32x2{0.5, 0.5}, gid[0]); }\n", needle: "operand 3 of `OpImageGather` is an integer constant"},
-    UtMsCase{tail: "#[stage(\"compute\")]\n#[workgroup(1, 1, 1)]\nfun cs() { out.v[0] = gathers(st, f32x2{0.5, 0.5}, 0, CONST_OFFSETS, [4]i32x2{i32x2{gid[0]::i32, 0}, i32x2{1, 0}, i32x2{0, 1}, i32x2{1, 1}}); }\n", needle: "operand 5 of `OpImageGather` is an integer constant"},
-    UtMsCase{tail: "#[stage(\"compute\")]\n#[workgroup(1, 1, 1)]\nfun cs() { var t: [4]i32x2 = QUAD; t[2] = i32x2{gid[0]::i32, 0}; out.v[0] = gathers(st, f32x2{0.5, 0.5}, 0, CONST_OFFSETS, t); }\n", needle: "operand 5 of `OpImageGather` is an integer constant"},
-    UtMsCase{tail: "#[op(\"spirv\", \"core\", \"OpImageGather\")] fun gather3(s: Sampled2D, uv: f32x2, comp: u32, mask: u32, offs: [3]i32x2) f32x4;\n#[stage(\"compute\")]\n#[workgroup(1, 1, 1)]\nfun cs() { out.v[0] = gather3(st, f32x2{0.5, 0.5}, 0, CONST_OFFSETS, [3]i32x2{i32x2{0, 0}, i32x2{1, 0}, i32x2{0, 1}}); }\n", needle: "the `ConstOffsets` image operand is the offsets of the four texels a gather reads"},
-    UtMsCase{tail: "#[stage(\"compute\")]\n#[workgroup(1, 1, 1)]\nfun cs() { out.v[0] = gathers(st, f32x2{0.5, 0.5}, 0, CONST_OFFSET, QUAD); }\n", needle: "only the `ConstOffsets` of a gather is an array"},
-    UtMsCase{tail: "#[op(\"spirv\", \"core\", \"OpImageSampleDrefExplicitLod\")] fun compare_plain(s: Sampled2D, uv: f32x2, ref: f32, mask: u32, lod: f32) f32;\n#[stage(\"compute\")]\n#[workgroup(1, 1, 1)]\nfun cs() { out.v[0] = f32x4{compare_plain(st, f32x2{0.5, 0.5}, 0.5, LOD, 0.0), 0.0, 0.0, 0.0}; }\n", needle: "a depth comparison samples a depth image, and this image's `Depth` operand is `0`"},
-    UtMsCase{tail: "#[op(\"spirv\", \"core\", \"OpImageSampleDrefExplicitLod\")] fun compare_vol(s: ShadowVol, uvw: f32x3, ref: f32, mask: u32, lod: f32) f32;\n#[stage(\"compute\")]\n#[workgroup(1, 1, 1)]\nfun cs() { out.v[0] = f32x4{compare_vol(shadow_vol, f32x3{0.5, 0.5, 0.5}, 0.5, LOD, 0.0), 0.0, 0.0, 0.0}; }\n", needle: "a depth comparison does not sample a `3D` image: Vulkan admits `OpImage*Dref*` on a `1D`, `2D` or `Cube` image, arrayed or not (VUID-StandaloneSpirv-OpImage-04777)"},
-    UtMsCase{tail: "#[stage(\"compute\")]\n#[workgroup(1, 1, 1)]\nfun cs() { out.v[0] = f32x4{compare(shadow, f32x2{0.5, 0.5}, 0.5), 0.0, 0.0, 0.0}; }\n", needle: "`OpImageSampleDrefImplicitLod` derives its level of detail from the derivatives of its coordinate, which only a fragment stage has, and this call is reached from a compute stage: sample there with `OpImageSampleDrefExplicitLod`"},
-    UtMsCase{tail: "#[op(\"spirv\", \"core\", \"OpImageSampleDrefExplicitLod\")] fun compare_none(s: Shadow, uv: f32x2, ref: f32, mask: u32) f32;\n#[stage(\"compute\")]\n#[workgroup(1, 1, 1)]\nfun cs() { out.v[0] = f32x4{compare_none(shadow, f32x2{0.5, 0.5}, 0.5, 0), 0.0, 0.0, 0.0}; }\n", needle: "an explicit-lod sample reads the level of detail it is given"},
-    UtMsCase{tail: "#[op(\"spirv\", \"core\", \"OpImageDrefGather\")] fun compare_gather_vol(s: ShadowVol, uvw: f32x3, ref: f32) f32x4;\n#[stage(\"compute\")]\n#[workgroup(1, 1, 1)]\nfun cs() { out.v[0] = compare_gather_vol(shadow_vol, f32x3{0.5, 0.5, 0.5}, 0.5); }\n", needle: "a gather reads the four texels a bilinear sample of a `2D` or `Cube` image would filter"}
+val IMGOP_REFUSALS: [21]MsCase = [21]MsCase{
+    MsCase{tail: "#[stage(\"compute\")]\n#[workgroup(1, 1, 1)]\nfun cs() { out.v[0] = fetch_off(tex, i32x2{0, 0}, LOD | CONST_OFFSET, 0, i32x2{gid[0]::i32, 0}); }\n", needle: "operand 5 of `OpImageFetch` is an integer constant"},
+    MsCase{tail: "#[op(\"spirv\", \"core\", \"OpImageFetch\")] fun fetch_wide(img: Tex2D, at: i32x2, mask: u32, off: i32x3) f32x4;\n#[stage(\"compute\")]\n#[workgroup(1, 1, 1)]\nfun cs() { out.v[0] = fetch_wide(tex, i32x2{0, 0}, CONST_OFFSET, i32x3{1, 1, 1}); }\n", needle: "an offset image operand is an integer with one component per dimension"},
+    MsCase{tail: "#[op(\"spirv\", \"core\", \"OpImageSampleExplicitLod\")] fun cube_off(s: SampledCube, dir: f32x3, mask: u32, lod: f32, off: i32x3) f32x4;\n#[stage(\"compute\")]\n#[workgroup(1, 1, 1)]\nfun cs() { out.v[0] = cube_off(cube, f32x3{0.0, 0.0, 1.0}, LOD | CONST_OFFSET, 0.0, i32x3{1, 1, 1}); }\n", needle: "Vulkan admits no offset on a cube image"},
+    MsCase{tail: "#[op(\"spirv\", \"core\", \"OpImageSampleExplicitLod\")] fun both(s: Sampled2D, uv: f32x2, mask: u32, lod: f32, dx: f32x2, dy: f32x2) f32x4;\n#[stage(\"compute\")]\n#[workgroup(1, 1, 1)]\nfun cs() { out.v[0] = both(st, f32x2{0.5, 0.5}, LOD | GRAD, 0.0, f32x2{0.1, 0.0}, f32x2{0.0, 0.1}); }\n", needle: "the `Lod` and `Grad` image operands are two ways of choosing the level of detail"},
+    MsCase{tail: "#[op(\"spirv\", \"core\", \"OpImageSampleExplicitLod\")] fun lod_least(s: Sampled2D, uv: f32x2, mask: u32, lod: f32, least: f32) f32x4;\n#[stage(\"compute\")]\n#[workgroup(1, 1, 1)]\nfun cs() { out.v[0] = lod_least(st, f32x2{0.5, 0.5}, LOD | MIN_LOD, 0.0, 1.0); }\n", needle: "an explicit-lod sample takes it only with `Grad`"},
+    MsCase{tail: "#[op(\"spirv\", \"core\", \"OpImageSampleExplicitLod\")] fun grad_int(s: Sampled2D, uv: f32x2, mask: u32, dx: i32x2, dy: i32x2) f32x4;\n#[stage(\"compute\")]\n#[workgroup(1, 1, 1)]\nfun cs() { out.v[0] = grad_int(st, f32x2{0.5, 0.5}, GRAD, i32x2{1, 0}, i32x2{0, 1}); }\n", needle: "the `Grad` image operands are the coordinate's derivatives"},
+    MsCase{tail: "#[op(\"spirv\", \"core\", \"OpImageSampleExplicitLod\")] fun lod_ptr(s: Sampled2D, uv: f32x2, mask: u32, lod: *f32) f32x4;\n#[stage(\"compute\")]\n#[workgroup(1, 1, 1)]\nfun cs() { var l: f32 = 0.0; out.v[0] = lod_ptr(st, f32x2{0.5, 0.5}, LOD, ?l); }\n", needle: "operand 4 of `OpImageSampleExplicitLod` is an ordinary value the literal's value brings"},
+    MsCase{tail: "#[op(\"spirv\", \"core\", \"OpImageFetch\")] fun fetch_float(img: Tex2D, at: i32x2, mask: u32, off: f32x2) f32x4;\n#[stage(\"compute\")]\n#[workgroup(1, 1, 1)]\nfun cs() { out.v[0] = fetch_float(tex, i32x2{0, 0}, CONST_OFFSET, f32x2{1.0, 1.0}); }\n", needle: "operand 4 of `OpImageFetch` is an integer constant the literal's value brings"},
+    MsCase{tail: "#[stage(\"compute\")]\n#[workgroup(1, 1, 1)]\nfun cs() { out.v[0] = sample_bias(st, f32x2{0.5, 0.5}, BIAS | CONST_OFFSET, 0.5, SHIFT); }\n", needle: "only a fragment stage has, and this call is reached from a compute stage"},
+    MsCase{tail: "#[op(\"spirv\", \"core\", \"OpImageGather\")] fun gather_both(s: Sampled2D, uv: f32x2, comp: u32, mask: u32, a: i32x2, b: i32x2) f32x4;\n#[stage(\"compute\")]\n#[workgroup(1, 1, 1)]\nfun cs() { out.v[0] = gather_both(st, f32x2{0.5, 0.5}, 0, CONST_OFFSET | OFFSET, SHIFT, SHIFT); }\n", needle: "so an instruction takes one of them"},
+    MsCase{tail: "#[op(\"spirv\", \"core\", \"OpImageGather\")] fun gather3(s: Sampled3D, uvw: f32x3, comp: u32) f32x4;\n#[stage(\"compute\")]\n#[workgroup(1, 1, 1)]\nfun cs() { out.v[0] = gather3(vol, f32x3{0.5, 0.5, 0.5}, 0); }\n", needle: "a gather reads the four texels a bilinear sample of a `2D` or `Cube` image would filter"},
+    MsCase{tail: "#[stage(\"compute\")]\n#[workgroup(1, 1, 1)]\nfun cs() { out.v[0] = gather(st, f32x2{0.5, 0.5}, gid[0]); }\n", needle: "operand 3 of `OpImageGather` is an integer constant"},
+    MsCase{tail: "#[stage(\"compute\")]\n#[workgroup(1, 1, 1)]\nfun cs() { out.v[0] = gathers(st, f32x2{0.5, 0.5}, 0, CONST_OFFSETS, [4]i32x2{i32x2{gid[0]::i32, 0}, i32x2{1, 0}, i32x2{0, 1}, i32x2{1, 1}}); }\n", needle: "operand 5 of `OpImageGather` is an integer constant"},
+    MsCase{tail: "#[stage(\"compute\")]\n#[workgroup(1, 1, 1)]\nfun cs() { var t: [4]i32x2 = QUAD; t[2] = i32x2{gid[0]::i32, 0}; out.v[0] = gathers(st, f32x2{0.5, 0.5}, 0, CONST_OFFSETS, t); }\n", needle: "operand 5 of `OpImageGather` is an integer constant"},
+    MsCase{tail: "#[op(\"spirv\", \"core\", \"OpImageGather\")] fun gather3(s: Sampled2D, uv: f32x2, comp: u32, mask: u32, offs: [3]i32x2) f32x4;\n#[stage(\"compute\")]\n#[workgroup(1, 1, 1)]\nfun cs() { out.v[0] = gather3(st, f32x2{0.5, 0.5}, 0, CONST_OFFSETS, [3]i32x2{i32x2{0, 0}, i32x2{1, 0}, i32x2{0, 1}}); }\n", needle: "the `ConstOffsets` image operand is the offsets of the four texels a gather reads"},
+    MsCase{tail: "#[stage(\"compute\")]\n#[workgroup(1, 1, 1)]\nfun cs() { out.v[0] = gathers(st, f32x2{0.5, 0.5}, 0, CONST_OFFSET, QUAD); }\n", needle: "only the `ConstOffsets` of a gather is an array"},
+    MsCase{tail: "#[op(\"spirv\", \"core\", \"OpImageSampleDrefExplicitLod\")] fun compare_plain(s: Sampled2D, uv: f32x2, ref: f32, mask: u32, lod: f32) f32;\n#[stage(\"compute\")]\n#[workgroup(1, 1, 1)]\nfun cs() { out.v[0] = f32x4{compare_plain(st, f32x2{0.5, 0.5}, 0.5, LOD, 0.0), 0.0, 0.0, 0.0}; }\n", needle: "a depth comparison samples a depth image, and this image's `Depth` operand is `0`"},
+    MsCase{tail: "#[op(\"spirv\", \"core\", \"OpImageSampleDrefExplicitLod\")] fun compare_vol(s: ShadowVol, uvw: f32x3, ref: f32, mask: u32, lod: f32) f32;\n#[stage(\"compute\")]\n#[workgroup(1, 1, 1)]\nfun cs() { out.v[0] = f32x4{compare_vol(shadow_vol, f32x3{0.5, 0.5, 0.5}, 0.5, LOD, 0.0), 0.0, 0.0, 0.0}; }\n", needle: "a depth comparison does not sample a `3D` image: Vulkan admits `OpImage*Dref*` on a `1D`, `2D` or `Cube` image, arrayed or not (VUID-StandaloneSpirv-OpImage-04777)"},
+    MsCase{tail: "#[stage(\"compute\")]\n#[workgroup(1, 1, 1)]\nfun cs() { out.v[0] = f32x4{compare(shadow, f32x2{0.5, 0.5}, 0.5), 0.0, 0.0, 0.0}; }\n", needle: "`OpImageSampleDrefImplicitLod` derives its level of detail from the derivatives of its coordinate, which only a fragment stage has, and this call is reached from a compute stage: sample there with `OpImageSampleDrefExplicitLod`"},
+    MsCase{tail: "#[op(\"spirv\", \"core\", \"OpImageSampleDrefExplicitLod\")] fun compare_none(s: Shadow, uv: f32x2, ref: f32, mask: u32) f32;\n#[stage(\"compute\")]\n#[workgroup(1, 1, 1)]\nfun cs() { out.v[0] = f32x4{compare_none(shadow, f32x2{0.5, 0.5}, 0.5, 0), 0.0, 0.0, 0.0}; }\n", needle: "an explicit-lod sample reads the level of detail it is given"},
+    MsCase{tail: "#[op(\"spirv\", \"core\", \"OpImageDrefGather\")] fun compare_gather_vol(s: ShadowVol, uvw: f32x3, ref: f32) f32x4;\n#[stage(\"compute\")]\n#[workgroup(1, 1, 1)]\nfun cs() { out.v[0] = compare_gather_vol(shadow_vol, f32x3{0.5, 0.5, 0.5}, 0.5); }\n", needle: "a gather reads the four texels a bilinear sample of a `2D` or `Cube` image would filter"}
 };
 
 test image_operands__refusals {
@@ -7014,7 +7014,7 @@ test push__store_is_refused {
 # the specialization constants a module must carry, by SpecId and defining opcode, and
 # which of the two forms sizes its compute workgroup
 #[testing]
-rec UtSpecWant {
+rec SpecWant {
     ids:            [4]u32;
     ops:            [4]u32;
     count:          u32;
@@ -7036,7 +7036,7 @@ fun spv_const_opcode(w: *u32, n: u32, id: u32) u32 {
 }
 
 #[testing]
-fun spec_check(w: *u32, n: u32, want: *UtSpecWant) i32 {
+fun spec_check(w: *u32, n: u32, want: *SpecWant) i32 {
     if (spv_decor_count(w, n, isa_spirv.DECOR_SPEC_ID) != want.count) { ret 1; }
     var k: u32 = 0;
     for (k < want.count) {
@@ -7060,18 +7060,18 @@ test spec__constants_validate_and_size_the_workgroup_per_environment {
     val make_r: err[A.Error] = page.make(?alloc);
     if (sel make_r.err) { ret 1; }
     # vulkan1.3 guarantees maintenance4, so the workgroup is LocalSizeId over the spec constant
-    var want13: UtSpecWant = UtSpecWant{ids: [4]u32{0, 7, 0, 0}, ops: [4]u32{isa_spirv.OP_SPEC_CONSTANT, isa_spirv.OP_SPEC_CONSTANT, 0, 0},
+    var want13: SpecWant = SpecWant{ids: [4]u32{0, 7, 0, 0}, ops: [4]u32{isa_spirv.OP_SPEC_CONSTANT, isa_spirv.OP_SPEC_CONSTANT, 0, 0},
         count: 2, local_size_id: true, workgroup_size: false};
     val v13: i32 = l6_env(?alloc, SPEC_SRC, "env = \"vulkan1.3\"\n", "vulkan1.3", "", 0, ?want13);
     if (v13 != 0) { ret 10 + v13; }
     # vulkan1.0 has no LocalSizeId: the WorkgroupSize built-in over a spec composite
-    var want10: UtSpecWant = want13;
+    var want10: SpecWant = want13;
     want10.local_size_id  = false;
     want10.workgroup_size = true;
     val v10: i32 = l6_env(?alloc, SPEC_SRC, "env = \"vulkan1.0\"\n", "vulkan1.0", "", 0, ?want10);
     if (v10 != 0) { ret 40 + v10; }
     # a narrow integer spec constant carries its own width, and with it Int8, so it needs shaderInt8
-    var want8: UtSpecWant = UtSpecWant{ids: [4]u32{3, 0, 0, 0}, ops: [4]u32{isa_spirv.OP_SPEC_CONSTANT, 0, 0, 0},
+    var want8: SpecWant = SpecWant{ids: [4]u32{3, 0, 0, 0}, ops: [4]u32{isa_spirv.OP_SPEC_CONSTANT, 0, 0, 0},
         count: 1, local_size_id: false, workgroup_size: false};
     val v8: i32 = l6_env(?alloc, "rec Out { v: [4]u32; }\n#[storage(0, 0)] var out: Out;\n#[spec(3)] var fog: u8 = 1;\n#[stage(\"compute\")]\nfun cs() { out.v[0] = fog::u32; }\n",
         "env = \"vulkan1.3\"\nextensions = [\"int8\"]\n", "vulkan1.3", "", 0, ?want8);

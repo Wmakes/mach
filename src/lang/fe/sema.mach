@@ -2321,3 +2321,162 @@ test regression__loaded_gate_leaves_a_case_payload_bound {
     if (!sema_checked.sema_clean2(main, lib)) { ret 1; }
     ret 0;
 }
+
+test vector_sema__surface_typechecks {
+    if (!sema_checked.sema_clean("fun main() i32 {\n    val a: f32x4 = f32x4{1.0, 2.0, 3.0, 4.0};\n    val b: f32x4 = f32x4{5.0, 6.0, 7.0, 8.0};\n    val c: f32x4 = a + b;\n    val d: f32x4 = a * b;\n    val m: u32x4 = a == b;\n    val x: f32 = a[0];\n    var iv: i16x8 = i16x8{1, 2, 3, 4, 5, 6, 7, 8};\n    val iw: i16x8 = iv & iv;\n    val ip: i16x8 = iv * iv;\n    val iq: i16x8 = ~iv;\n    val im: u16x8 = iv == iv;\n    ret 0;\n}\n")) { ret 1; }
+    ret 0;
+}
+
+test vector_sema__diagnostics {
+    var bad: i32 = 0;
+
+    if (sema_checked.sema_diag("fun main() i32 { val v: f32x4 = f32x4{1.0, 2.0, 3.0}; ret 0; }\n",
+        "too few elements") != 0) { bad = 1; }
+    if (sema_checked.sema_diag("fun main() i32 { val v: f32x4 = f32x4{1.0, 2.0, 3.0, 4.0, 5.0}; ret 0; }\n",
+        "too many elements") != 0) { bad = 2; }
+    if (sema_checked.sema_diag("fun main(argc: i64, argv: **u8) i32 { val a: f32x4 = f32x4{1.0, 2.0, 3.0, 4.0}; val x: f32 = a[argc]; ret 0; }\n",
+        "dynamic lane index not supported") != 0) { bad = 3; }
+    if (sema_checked.sema_diag("fun main() i32 { val a: f32x4 = f32x4{1.0, 2.0, 3.0, 4.0}; val x: f32 = a[4]; ret 0; }\n",
+        "index 4 is out of bounds for `f32x4` of length 4") != 0) { bad = 4; }
+    if (sema_checked.sema_diag("fun main() i32 { val a: i32x4 = i32x4{1, 2, 3, 4}; val b: i32x4 = i32x4{1, 2, 3, 4}; val c: i32x4 = a % b; ret 0; }\n",
+        "vector `%` is not supported") != 0) { bad = 5; }
+    if (sema_checked.sema_diag("fun f(a: i32x4, b: u32x4) i32x4 { ret a / b; }\nfun main() i32 { ret 0; }\n",
+        "incompatible operand types") != 0) { bad = 6; }
+    if (sema_checked.sema_diag("fun main() i32 { val a: f32x4 = f32x4{1.0, 2.0, 3.0, 4.0}; val s: f32 = 1.0; val c: f32x4 = a + s; ret 0; }\n",
+        "mismatch") != 0) { bad = 7; }
+    if (sema_checked.sema_diag("fun main() i32 { val a: f32x4 = f32x4{1.0, 2.0, 3.0, 4.0}; val b: f32x4 = f32x4{1.0, 2.0, 3.0, 4.0}; if (a == b) { ret 1; } ret 0; }\n",
+        "vector is not a truth value") != 0) { bad = 8; }
+    if (sema_checked.sema_diag("rec Point { x: i64; y: i64; }\nfun main() i32 { val p: Point = Point{1, 2}; ret 0; }\n",
+        "positional-brace literal requires a vector type") != 0) { bad = 9; }
+    if (sema_checked.sema_diag("fun main() i32 { val a: f32x4 = f32x4{1.0, 2.0, 3.0, 4.0}; val x: f32 = a[-1]; ret 0; }\n",
+        "index -1 is out of bounds for `f32x4` of length 4") != 0) { bad = 10; }
+    if (sema_checked.sema_diag("fun main() i32 { val a: f32x4 = f32x4{1.0, 2.0, 3.0, 4.0}; val s: f32 = 1.0; val c: f32x4 = s + a; ret 0; }\n",
+        "mismatch") != 0) { bad = 11; }
+    ret bad;
+}
+
+# a vector shift is `vec << vec` or `vec >> vec` over one integer vector type,
+# each lane held to the scalar shift's constant count rule; a scalar count is
+# refused naming the literal that spells a uniform one
+test vector_sema__shift_diagnostics {
+    var bad: i32 = 0;
+    if (sema_checked.sema_diag("fun f(a: u32x4) u32x4 { ret a << 3; }\nfun main() i32 { ret 0; }\n",
+        "a vector shift count is a vector of the shifted type, never a scalar: write `u32x4{c, c, ...}` with the count in every lane for a uniform shift") != 0) { bad = 1; }
+    if (sema_checked.sema_diag("fun f(a: i16x8, n: i16) i16x8 { ret a >> n; }\nfun main() i32 { ret 0; }\n",
+        "write `i16x8{c, c, ...}`") != 0) { bad = 2; }
+    if (sema_checked.sema_diag("fun f(a: u8x16, n: u8) u8 { ret n << a; }\nfun main() i32 { ret 0; }\n",
+        "write `u8x16{c, c, ...}`") != 0) { bad = 3; }
+    if (sema_checked.sema_diag("fun f(a: i32x4, b: u32x4) i32x4 { ret a << b; }\nfun main() i32 { ret 0; }\n",
+        "incompatible operand types") != 0) { bad = 4; }
+    if (sema_checked.sema_diag("fun f(a: u32x4, b: u16x8) u32x4 { ret a >> b; }\nfun main() i32 { ret 0; }\n",
+        "incompatible operand types") != 0) { bad = 5; }
+    if (sema_checked.sema_diag("fun f(a: f32x4, b: f32x4) f32x4 { ret a << b; }\nfun main() i32 { ret 0; }\n",
+        "`f32x4` cannot be shifted: `<<` and `>>` apply to integer lanes") != 0) { bad = 6; }
+    if (sema_checked.sema_diag("fun f(a: u32x4) u32x4 { ret a << u32x4{1, 2, 32, 3}; }\nfun main() i32 { ret 0; }\n",
+        "shift count 32 is at least the width of `u32` (32 bits)") != 0) { bad = 7; }
+    if (sema_checked.sema_diag("fun f(a: i8x16) i8x16 { ret a >> i8x16{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -1}; }\nfun main() i32 { ret 0; }\n",
+        "shift count -1 is negative") != 0) { bad = 8; }
+    if (sema_checked.sema_diag("val K: u64 = 64;\nfun f(a: u64x2) u64x2 { ret a >> u64x2{K, K}; }\nfun main() i32 { ret 0; }\n",
+        "shift count 64 is at least the width of `u64` (64 bits)") != 0) { bad = 9; }
+    if (!sema_checked.sema_clean("fun f(a: i32x4, b: i32x4) i32x4 { ret a << b; }\nfun main() i32 { ret 0; }\n"))                                           { bad = 10; }
+    if (!sema_checked.sema_clean("fun f(a: u16x8, n: u16) u16x8 { ret a >> u16x8{n, n, n, n, n, n, n, n}; }\nfun main() i32 { ret 0; }\n"))                 { bad = 11; }
+    if (!sema_checked.sema_clean("fun f(a: i8x16) i8x16 { ret a >> i8x16{7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7}; }\nfun main() i32 { ret 0; }\n")) { bad = 12; }
+    if (!sema_checked.sema_clean("fun f(a: u64x2) u64x2 { ret a << u64x2{63, 0}; }\nfun main() i32 { ret 0; }\n"))                                          { bad = 13; }
+    ret bad;
+}
+
+# a type or generic parameter spelled as a vector type is refused whatever its kind or lane count;
+# a near-miss spelling and a value or function of that name are not
+test vector_type_name__declaration_rejected {
+    var bad:  i32 = 0;
+    val need: str = "cannot also name a type";
+
+    if (!sema_checked.sema_rejects_with("rec u8x16 { a: i64; }\nfun main() i64 { ret 0; }\n", need))               { bad = 1; }
+    if (!sema_checked.sema_rejects_with("uni i32x4 { a: i64; }\nfun main() i64 { ret 0; }\n", need))               { bad = 2; }
+    if (!sema_checked.sema_rejects_with("def f32x4: i64;\nfun main() i64 { ret 0; }\n", need))                     { bad = 3; }
+    if (!sema_checked.sema_rejects_with("rec f32x7 { a: i64; }\nfun main() i64 { ret 0; }\n", need))               { bad = 4; }
+    if (!sema_checked.sema_rejects_with("fun g[f32x4](x: i64) i64 { ret x; }\nfun main() i64 { ret 0; }\n", need)) { bad = 5; }
+    if (!sema_checked.sema_rejects_with("rec Box[u8x16] { a: i64; }\nfun main() i64 { ret 0; }\n", need))          { bad = 6; }
+
+    if (!sema_checked.sema_clean("rec f32x04 { a: i64; }\nfun main() i64 { ret 0; }\n")) { bad = 7; }
+    if (!sema_checked.sema_clean("def ptrx2: i64;\nfun main() i64 { ret 0; }\n"))        { bad = 8; }
+
+    if (!sema_checked.sema_clean("fun main() i64 { val f32x4: i64 = 7; ret f32x4; }\n"))           { bad = 9; }
+    if (!sema_checked.sema_clean("fun i32x4() i64 { ret 3; }\nfun main() i64 { ret i32x4(); }\n")) { bad = 10; }
+    if (!sema_checked.sema_clean("var u8x16: i64;\nfun main() i64 { ret u8x16; }\n"))              { bad = 11; }
+
+    ret bad;
+}
+
+# a declared type or generic parameter named after a primitive is refused; a value,
+# function or field of that name is not
+test builtin_type_name__declaration_rejected {
+    var bad:  i32 = 0;
+    val need: str = "is a built-in type";
+
+    if (!sema_checked.sema_rejects_with("rec f32 { a: i64; }\nfun main() i64 { ret 0; }\n", need))                 { bad = 1; }
+    if (!sema_checked.sema_rejects_with("uni u64 { a: i64; }\nfun main() i64 { ret 0; }\n", need))                 { bad = 2; }
+    if (!sema_checked.sema_rejects_with("def f16: u16;\nfun main() i64 { ret 0; }\n", need))                       { bad = 3; }
+    if (!sema_checked.sema_rejects_with("tag ptr: u8 { empty; }\nfun main() i64 { ret 0; }\n", need))              { bad = 4; }
+    if (!sema_checked.sema_rejects_with("fun id[i128](x: i64) i64 { ret x; }\nfun main() i64 { ret 0; }\n", need)) { bad = 5; }
+    if (!sema_checked.sema_rejects_with("rec Box[u8] { a: i64; }\nfun main() i64 { ret 0; }\n", need))             { bad = 6; }
+
+    if (!sema_checked.sema_clean("fun main() i64 { val f16: i64 = 7; ret f16; }\n"))                           { bad = 7; }
+    if (!sema_checked.sema_clean("fun u32() i64 { ret 3; }\nfun main() i64 { ret u32(); }\n"))                 { bad = 8; }
+    if (!sema_checked.sema_clean("rec P { f64: i64; }\nfun main() i64 { var p: P; p.f64 = 1; ret p.f64; }\n")) { bad = 9; }
+
+    ret bad;
+}
+
+# any lane count from 2 up is a vector form, odd or wider than the target, until it
+# cannot be represented; a near-miss spelling is an unresolved name
+test vector_type_form__bounds {
+    var bad: i32 = 0;
+
+    if (!sema_checked.sema_clean("fun main() i64 { var v: f32x7; ret 0; }\n"))  { bad = 1; }
+    if (!sema_checked.sema_clean("fun main() i64 { var v: f32x16; ret 0; }\n")) { bad = 2; }
+    if (!sema_checked.sema_clean("fun main() i64 { var v: f32x3; ret 0; }\n"))  { bad = 3; }
+    if (!sema_checked.sema_clean("fun main() i64 { var v: i8x9;  ret 0; }\n"))  { bad = 4; }
+    if (sema_checked.sema_rejects_with("fun main() i64 { var v: f32x8; ret 0; }\n",
+        "more than this target")) { bad = 5; }
+    if (sema_checked.sema_rejects_with("fun main() i64 { var v: f32x3; ret 0; }\n",
+        "narrower than this target")) { bad = 6; }
+
+    if (!sema_checked.sema_rejects_with("fun main() i64 { var v: u8x65536; ret 0; }\n",
+        "which the compiler cannot represent")) { bad = 7; }
+    if (!sema_checked.sema_rejects_with("fun main() i64 { var v: f32x1; ret 0; }\n",
+        "needs at least 2 lanes")) { bad = 8; }
+
+    if (!sema_checked.sema_rejects_with("fun main() i64 { var v: f32x04; ret 0; }\n",
+        "unresolved type name")) { bad = 9; }
+    if (!sema_checked.sema_rejects_with("fun main() i64 { var v: ptrx2; ret 0; }\n",
+        "unresolved type name")) { bad = 10; }
+
+    ret bad;
+}
+
+test packed__vector_field_rejected {
+    var bad:  i32 = 0;
+    val need: str = "a vector field is not allowed in a `#[packed]` record";
+
+    if (!sema_checked.sema_rejects_with("#[packed]\nrec P { a: u8; v: f32x4; }\nfun main() i64 { var r: P; ret 0; }\n", need))                    { bad = 1; }
+    if (!sema_checked.sema_rejects_with("#[packed]\nrec P { a: u8; v: [2]f32x4; }\nfun main() i64 { var r: P; ret 0; }\n", need))                 { bad = 2; }
+    if (!sema_checked.sema_rejects_with("rec In { v: f32x4; }\n#[packed]\nrec P { a: u8; i: In; }\nfun main() i64 { var r: P; ret 0; }\n", need)) { bad = 3; }
+
+    if (!sema_checked.sema_clean("rec In { v: f32x4; }\n#[packed]\nrec P { a: u8; i: *In; }\nfun main() i64 { var r: P; ret 0; }\n")) { bad = 4; }
+    if (!sema_checked.sema_clean("rec R { a: u8; v: f32x4; }\nfun main() i64 { var r: R; ret 0; }\n"))                                { bad = 5; }
+    if (!sema_checked.sema_clean("#[packed]\nrec P { a: u8; b: u32; c: f64; }\nfun main() i64 { var r: P; ret 0; }\n"))               { bad = 6; }
+    ret bad;
+}
+
+test volatile__decorator_rejections {
+    if (sema_checked.sema_diag("#[volatile(1)]\nrec V { reg: u32; }\nfun main() i64 { ret 0; }\n",
+        "`volatile` decorator takes no arguments") != 0) { ret 1; }
+    if (sema_checked.sema_diag("#[volatile]\nvar g: i64 = 0;\nfun main() i64 { ret 0; }\n",
+        "`volatile` decorator applies only to records, unions, and tags") != 0) { ret 2; }
+    if (sema_checked.sema_diag("#[volatile]\nfun f() {}\nfun main() i64 { ret 0; }\n",
+        "`volatile` decorator applies only to records, unions, and tags") != 0) { ret 3; }
+    if (!sema_checked.sema_clean("#[volatile]\nrec V { reg: u32; }\nfun main() i64 { var v: V; ret v.reg::i64; }\n"))     { ret 4; }
+    if (!sema_checked.sema_clean("#[volatile]\nuni U { a: u32; b: u32; }\nfun main() i64 { var u: U; ret u.a::i64; }\n")) { ret 5; }
+    ret 0;
+}

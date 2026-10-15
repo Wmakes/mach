@@ -1126,7 +1126,7 @@ fun ct_mul_query_program(alloc: *A.Allocator, op: u32, width: u8) str {
 }
 
 #[testing]
-rec UtCtTuple {
+rec CtTuple {
     isa_name: str;
     os_name:  str;
     abi_name: str;
@@ -1137,7 +1137,7 @@ rec UtCtTuple {
 # rows: the members are static data, so the registry's slot is pointed at the
 # copy and pointed back after
 #[testing]
-rec UtCtSwap {
+rec CtSwap {
     original: *isa.IsaVTable;
     index:    u32;
     vt:       isa.IsaVTable;
@@ -1147,7 +1147,7 @@ rec UtCtSwap {
 # install `rows` on the named instruction set, nothing when row_len is 0;
 # every swap is restored before its session goes
 #[testing]
-fun ct_mul_swap(kept: *UtCtSwap, isa_name: str, rows: *ct.CtMulForm, row_len: u32) {
+fun ct_mul_swap(kept: *CtSwap, isa_name: str, rows: *ct.CtMulForm, row_len: u32) {
     kept.original = nil;
     if (row_len == 0) { ret; }
     val reg: *lang_target.TargetRegistry = toolchain.t_registry();
@@ -1169,7 +1169,7 @@ fun ct_mul_swap(kept: *UtCtSwap, isa_name: str, rows: *ct.CtMulForm, row_len: u3
 }
 
 #[testing]
-fun ct_mul_restore(kept: *UtCtSwap) {
+fun ct_mul_restore(kept: *CtSwap) {
     if (kept.original == nil) { ret; }
     toolchain.t_registry().isa.members[kept.index] = kept.original;
 }
@@ -1178,13 +1178,13 @@ fun ct_mul_restore(kept: *UtCtSwap) {
 # its instruction set; the project, or the refusal's diagnostics searched for
 # `needle`
 #[testing]
-fun ct_mul_build(alloc: *A.Allocator, t: *UtCtTuple, rows: *ct.CtMulForm, row_len: u32,
+fun ct_mul_build(alloc: *A.Allocator, t: *CtTuple, rows: *ct.CtMulForm, row_len: u32,
     program: str, needle: str, mask: *ct.CtMulMask, found: *bool, gate: *i32) i32 {
     val sr: res[session.Session, fail.Fail] = toolchain.session_init(alloc);
     if (sel sr.err) { ret 1; }
     var s: session.Session = sr.ok;
     fin { session.dnit(?s); }
-    var kept: UtCtSwap;
+    var kept: CtSwap;
     ct_mul_swap(?kept, t.isa_name, rows, row_len);
     fin { ct_mul_restore(?kept); }
     var names:  [1]str              = [1]str{"main.mach"};
@@ -1218,7 +1218,7 @@ fun ct_mul_build(alloc: *A.Allocator, t: *UtCtTuple, rows: *ct.CtMulForm, row_le
 # op then width order, and `gate_ok` per low-half width whether a secret
 # multiply in an oblivious function lowered
 #[testing]
-fun ct_mul_run(alloc: *A.Allocator, t: *UtCtTuple, rows: *ct.CtMulForm, row_len: u32,
+fun ct_mul_run(alloc: *A.Allocator, t: *CtTuple, rows: *ct.CtMulForm, row_len: u32,
     mask: *ct.CtMulMask, admitted: *bool, gate_ok: *bool) i32 {
     var ci: usize = 0;
     var op: u32   = 1;
@@ -1258,7 +1258,7 @@ fun ct_mul_run(alloc: *A.Allocator, t: *UtCtTuple, rows: *ct.CtMulForm, row_len:
 # decision does and the lowering gate accepts a secret low-half multiply
 # exactly where the query admits it
 #[testing]
-fun ct_mul_agree(alloc: *A.Allocator, t: *UtCtTuple, rows: *ct.CtMulForm, row_len: u32) i32 {
+fun ct_mul_agree(alloc: *A.Allocator, t: *CtTuple, rows: *ct.CtMulForm, row_len: u32) i32 {
     var admitted: [28]bool;
     var gate_ok:  [4]bool;
     var mask:     ct.CtMulMask = ct.mul_mask_none();
@@ -1289,12 +1289,12 @@ test ct_mul_query__agrees_with_the_lowering_gate {
     var alloc:  A.Allocator;
     val make_r: err[A.Error] = page.make(?alloc);
     if (sel make_r.err) { ret 1; }
-    var tuples: [5]UtCtTuple = [5]UtCtTuple{
-        UtCtTuple{isa_name: "aarch64", os_name: "linux", abi_name: "aapcs64", of_name: "elf"},
-        UtCtTuple{isa_name: "aarch64", os_name: "freestanding", abi_name: "aapcs64", of_name: "elf"},
-        UtCtTuple{isa_name: "rv64gc_zkt", os_name: "linux", abi_name: "lp64d", of_name: "elf"},
-        UtCtTuple{isa_name: "rv64gc", os_name: "linux", abi_name: "lp64d", of_name: "elf"},
-        UtCtTuple{isa_name: "spirv", os_name: "freestanding", abi_name: "spirv", of_name: "spv"}
+    var tuples: [5]CtTuple = [5]CtTuple{
+        CtTuple{isa_name: "aarch64", os_name: "linux", abi_name: "aapcs64", of_name: "elf"},
+        CtTuple{isa_name: "aarch64", os_name: "freestanding", abi_name: "aapcs64", of_name: "elf"},
+        CtTuple{isa_name: "rv64gc_zkt", os_name: "linux", abi_name: "lp64d", of_name: "elf"},
+        CtTuple{isa_name: "rv64gc", os_name: "linux", abi_name: "lp64d", of_name: "elf"},
+        CtTuple{isa_name: "spirv", os_name: "freestanding", abi_name: "spirv", of_name: "spv"}
     };
     var ti: usize = 0;
     for (ti < 5) {
@@ -1319,7 +1319,7 @@ test ct_mul_query__agrees_on_a_synthetic_model {
         ct.CtMulForm{op: ct.CT_MUL_LOW, width: 32, lanes: 0, cond: ct.CT_MUL_ALWAYS, ext: 0},
         ct.CtMulForm{op: ct.CT_MUL_WIDE_S, width: 64, lanes: 0, cond: ct.CT_MUL_ALWAYS, ext: 0}
     };
-    var t:        UtCtTuple    = UtCtTuple{isa_name: "x86_64", os_name: "linux", abi_name: "sysv64", of_name: "elf"};
+    var t:        CtTuple      = CtTuple{isa_name: "x86_64", os_name: "linux", abi_name: "sysv64", of_name: "elf"};
     var admitted: [28]bool;
     var gate_ok:  [4]bool;
     var mask:     ct.CtMulMask = ct.mul_mask_none();
@@ -1465,13 +1465,13 @@ fun ct_mul_shape(alloc: *A.Allocator, text: *u8, len: usize, name: str, family: 
 # synthetic rows installed: 0 when it built, 1 when a gate refused a secret
 # multiply, 2 for any other failure
 #[testing]
-fun ct_mul_listing(alloc: *A.Allocator, t: *UtCtTuple, rows: *ct.CtMulForm, row_len: u32, program: str,
+fun ct_mul_listing(alloc: *A.Allocator, t: *CtTuple, rows: *ct.CtMulForm, row_len: u32, program: str,
     out: *u8, cap: usize, out_len: *usize) i32 {
     val sr: res[session.Session, fail.Fail] = toolchain.session_init(alloc);
     if (sel sr.err) { ret 2; }
     var s: session.Session = sr.ok;
     fin { session.dnit(?s); }
-    var kept: UtCtSwap;
+    var kept: CtSwap;
     ct_mul_swap(?kept, t.isa_name, rows, row_len);
     fin { ct_mul_restore(?kept); }
     var names:  [1]str              = [1]str{"main.mach"};
@@ -1522,7 +1522,7 @@ val CT_SHAPED: [4]str = [4]str{"ctmul.main.product", "ctmul.main.square", "ctmul
 # 0 when every probe at every width lowers to one multiply instruction and
 # nothing that branches
 #[testing]
-fun ct_mul_shapes(alloc: *A.Allocator, t: *UtCtTuple, rows: *ct.CtMulForm, row_len: u32, family: u32) i32 {
+fun ct_mul_shapes(alloc: *A.Allocator, t: *CtTuple, rows: *ct.CtMulForm, row_len: u32, family: u32) i32 {
     val cap: usize             = 65536;
     val br:  res[*u8, A.Error] = A.allocate[u8](alloc, cap);
     if (sel br.err) { ret 1; }
@@ -1562,11 +1562,11 @@ test ct_mul__lowers_to_one_multiply_on_each_isa {
     val make_r: err[A.Error] = page.make(?alloc);
     if (sel make_r.err) { ret 1; }
 
-    var rv:     UtCtTuple = UtCtTuple{isa_name: "rv64gc_zkt", os_name: "linux", abi_name: "lp64d", of_name: "elf"};
-    var x86:    UtCtTuple = UtCtTuple{isa_name: "x86_64", os_name: "freestanding", abi_name: "sysv64", of_name: "elf"};
-    var arm:    UtCtTuple = UtCtTuple{isa_name: "aarch64", os_name: "linux", abi_name: "aapcs64", of_name: "elf"};
-    var arm_dw: UtCtTuple = UtCtTuple{isa_name: "aarch64", os_name: "darwin", abi_name: "aapcs64", of_name: "macho"};
-    val rc:     i32       = ct_mul_shapes(?alloc, ?rv, nil, 0, CT_RISCV);
+    var rv:     CtTuple = CtTuple{isa_name: "rv64gc_zkt", os_name: "linux", abi_name: "lp64d", of_name: "elf"};
+    var x86:    CtTuple = CtTuple{isa_name: "x86_64", os_name: "freestanding", abi_name: "sysv64", of_name: "elf"};
+    var arm:    CtTuple = CtTuple{isa_name: "aarch64", os_name: "linux", abi_name: "aapcs64", of_name: "elf"};
+    var arm_dw: CtTuple = CtTuple{isa_name: "aarch64", os_name: "darwin", abi_name: "aapcs64", of_name: "macho"};
+    val rc:     i32     = ct_mul_shapes(?alloc, ?rv, nil, 0, CT_RISCV);
     if (rc != 0) { ret 3; }
     val xc: i32 = ct_mul_shapes(?alloc, ?x86, nil, 0, CT_X86);
     if (xc != 0) { ret 4; }
@@ -1580,10 +1580,10 @@ test ct_mul__lowers_to_one_multiply_on_each_isa {
 # 0 when a secret 64-bit multiply is refused on the tuple with its registered rows
 #[testing]
 fun ct_mul_refused(alloc: *A.Allocator, isa_name: str, os_name: str, abi_name: str, of_name: str) i32 {
-    var t:    UtCtTuple = UtCtTuple{isa_name: isa_name, os_name: os_name, abi_name: abi_name, of_name: of_name};
+    var t:    CtTuple = CtTuple{isa_name: isa_name, os_name: os_name, abi_name: abi_name, of_name: of_name};
     var buf:  [16384]u8;
-    var len:  usize     = 0;
-    val code: i32       = ct_mul_listing(alloc, ?t, nil, 0,
+    var len:  usize   = 0;
+    val code: i32     = ct_mul_listing(alloc, ?t, nil, 0,
         "#[noinline]\n#[oblivious]\npub fun product(a: ^u64, b: ^u64) ^u64 { ret a * b; }\n", ?buf[0], 16384, ?len);
     if (code != 1) {
         print.printf("ct_mul: {}-{}-{}-{} was not refused ({})\n", os_name, isa_name, abi_name, of_name, code);
@@ -1595,7 +1595,7 @@ fun ct_mul_refused(alloc: *A.Allocator, isa_name: str, os_name: str, abi_name: s
 # whether the object codegen emits for `program` on the tuple carries the DIT
 # need marker: 1 when it does, 0 when it does not, 2 when the build failed
 #[testing]
-fun ct_mul_marker(alloc: *A.Allocator, t: *UtCtTuple, program: str) i32 {
+fun ct_mul_marker(alloc: *A.Allocator, t: *CtTuple, program: str) i32 {
     val sr: res[session.Session, fail.Fail] = toolchain.session_init(alloc);
     if (sel sr.err) { ret 2; }
     var s: session.Session = sr.ok;
@@ -1648,14 +1648,14 @@ test ct_mul__dit_need_is_marked_only_for_a_dit_multiply {
     var alloc:  A.Allocator;
     val make_r: err[A.Error] = page.make(?alloc);
     if (sel make_r.err) { ret 1; }
-    val secret_mul: str       = "#[noinline]\n#[oblivious]\npub fun product(a: ^u64, b: ^u64) ^u64 { ret a * b; }\n";
-    val secret_add: str       = "#[noinline]\n#[oblivious]\npub fun sum(a: ^u64, b: ^u64) ^u64 { ret a + b; }\n";
-    val public_mul: str       = "#[noinline]\npub fun product(a: u64, b: u64) u64 { ret a * b; }\n";
-    val narrow_mul: str       = "#[noinline]\n#[oblivious]\npub fun product(a: ^u8, b: ^u8) ^u8 { ret a * b; }\n";
-    var arm:        UtCtTuple = UtCtTuple{isa_name: "aarch64", os_name: "linux", abi_name: "aapcs64", of_name: "elf"};
-    var arm_dw:     UtCtTuple = UtCtTuple{isa_name: "aarch64", os_name: "darwin", abi_name: "aapcs64", of_name: "macho"};
-    var x86:        UtCtTuple = UtCtTuple{isa_name: "x86_64", os_name: "linux", abi_name: "sysv64", of_name: "elf"};
-    var rv:         UtCtTuple = UtCtTuple{isa_name: "rv64gc_zkt", os_name: "linux", abi_name: "lp64d", of_name: "elf"};
+    val secret_mul: str     = "#[noinline]\n#[oblivious]\npub fun product(a: ^u64, b: ^u64) ^u64 { ret a * b; }\n";
+    val secret_add: str     = "#[noinline]\n#[oblivious]\npub fun sum(a: ^u64, b: ^u64) ^u64 { ret a + b; }\n";
+    val public_mul: str     = "#[noinline]\npub fun product(a: u64, b: u64) u64 { ret a * b; }\n";
+    val narrow_mul: str     = "#[noinline]\n#[oblivious]\npub fun product(a: ^u8, b: ^u8) ^u8 { ret a * b; }\n";
+    var arm:        CtTuple = CtTuple{isa_name: "aarch64", os_name: "linux", abi_name: "aapcs64", of_name: "elf"};
+    var arm_dw:     CtTuple = CtTuple{isa_name: "aarch64", os_name: "darwin", abi_name: "aapcs64", of_name: "macho"};
+    var x86:        CtTuple = CtTuple{isa_name: "x86_64", os_name: "linux", abi_name: "sysv64", of_name: "elf"};
+    var rv:         CtTuple = CtTuple{isa_name: "rv64gc_zkt", os_name: "linux", abi_name: "lp64d", of_name: "elf"};
     if (ct_mul_marker(?alloc, ?arm, secret_mul) != 1)    { ret 2; }
     if (ct_mul_marker(?alloc, ?arm, narrow_mul) != 1)    { ret 3; }
     if (ct_mul_marker(?alloc, ?arm_dw, secret_mul) != 1) { ret 4; }
@@ -1681,9 +1681,9 @@ test ct_mul__refuses_every_undeclared_isa_os_and_condition {
     if (ct_mul_refused(?alloc, "rv64imafd_zicsr_zifencei", "linux", "lp64d", "elf") != 0) { bad = bad | 8; }
     if (ct_mul_refused(?alloc, "rv64i_zkt", "linux", "lp64", "elf") != 0)                 { bad = bad | 16; }
     if (ct_mul_refused(?alloc, "aarch64", "freestanding", "aapcs64", "elf") != 0)         { bad = bad | 128; }
-    var control: UtCtTuple = UtCtTuple{isa_name: "rv64gc_zkt", os_name: "linux", abi_name: "lp64d", of_name: "elf"};
+    var control: CtTuple = CtTuple{isa_name: "rv64gc_zkt", os_name: "linux", abi_name: "lp64d", of_name: "elf"};
     var buf:     [16384]u8;
-    var len:     usize     = 0;
+    var len:     usize   = 0;
     if (ct_mul_listing(?alloc, ?control, nil, 0, "#[noinline]\n#[oblivious]\npub fun product(a: ^u64, b: ^u64) ^u64 { ret a * b; }\n", ?buf[0], 16384, ?len) != 0) { bad = bad | 256; }
     if (bad != 0) {
         print.printf("ct_mul: refusal branches failed: {}\n", bad);
@@ -1700,7 +1700,7 @@ test ct_mul_query__x86_64_answers {
     var alloc:  A.Allocator;
     val make_r: err[A.Error] = page.make(?alloc);
     if (sel make_r.err) { ret 1; }
-    var t:        UtCtTuple    = UtCtTuple{isa_name: "x86_64", os_name: "linux", abi_name: "sysv64", of_name: "elf"};
+    var t:        CtTuple      = CtTuple{isa_name: "x86_64", os_name: "linux", abi_name: "sysv64", of_name: "elf"};
     var admitted: [28]bool;
     var gate_ok:  [4]bool;
     var mask:     ct.CtMulMask = ct.mul_mask_none();

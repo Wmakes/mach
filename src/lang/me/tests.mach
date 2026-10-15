@@ -1081,7 +1081,7 @@ test oblivious_asm__admits_the_aes_and_carry_less_multiply_rows {
 }
 
 #[testing]
-rec UtAsmCase {
+rec AsmCase {
     target: str;
     src:    str;
     needle: str;
@@ -1091,27 +1091,27 @@ rec UtAsmCase {
 # parameter or a local, on each isa; a secret value is a secret address whatever
 # it points at, including the secret pointer `^*u32` and a segment base
 #[testing]
-val ASM_ADDRESSES: [11]UtAsmCase = [11]UtAsmCase{
-    UtAsmCase{target: "linux", src: "#[oblivious]\nfun f(k: ^u64) ^u64 { var r: ^u64 = k; asm x86_64 { mov rax, {r} } ret r; }\n#[symbol(\"main\")]\nfun main(argc: i64, argv: **u8) i32 { ret 0; }\n", needle: ""},
-    UtAsmCase{target: "linux", src: "#[oblivious]\nfun f(state: *^u32) { asm x86_64 { mov rax, {state}\n mov ecx, [rax]\n add ecx, 1\n mov [rax], ecx } }\n#[symbol(\"main\")]\nfun main(argc: i64, argv: **u8) i32 { ret 0; }\n", needle: ""},
-    UtAsmCase{target: "linux", src: "#[oblivious]\nfun f(state: *^u32, block: *^u8) { asm x86_64 { mov rax, {state}\n mov rcx, {block}\n movdqu xmm1, [rax]\n movdqu xmm2, [rax + 16]\n movdqu xmm0, [rcx]\n paddd xmm1, xmm0\n pxor xmm2, xmm0\n movdqu [rax], xmm1\n movdqu [rax + 16], xmm2 } }\n#[symbol(\"main\")]\nfun main(argc: i64, argv: **u8) i32 { ret 0; }\n", needle: ""},
-    UtAsmCase{target: "linux-arm64", src: "#[oblivious]\nfun f(state: *^u32) { asm aarch64 { ldr x0, {state}\n ldr w1, [x0]\n add w1, w1, 1\n str w1, [x0] } }\n#[symbol(\"main\")]\nfun main(argc: i64, argv: **u8) i32 { ret 0; }\n", needle: ""},
-    UtAsmCase{target: "linux-riscv64", src: "#[oblivious]\nfun f(state: *^u32) { asm riscv64 { ld a0, {state}\n lw a1, 0(a0)\n addi a1, a1, 1\n sw a1, 0(a0) } }\n#[symbol(\"main\")]\nfun main(argc: i64, argv: **u8) i32 { ret 0; }\n", needle: ""},
-    UtAsmCase{target: "linux", src: "#[oblivious]\nfun f(state: *^u32) { var p: *^u32 = state; asm x86_64 { mov rax, {p}\n mov ecx, [rax]\n mov [rax], ecx } }\n#[symbol(\"main\")]\nfun main(argc: i64, argv: **u8) i32 { ret 0; }\n", needle: ""},
-    UtAsmCase{target: "linux", src: "#[oblivious]\nfun f(k: ^u64) ^u64 { var r: ^u64 = k; asm x86_64 { mov rax, {r}\n mov rbx, [rax] } ret r; }\n#[symbol(\"main\")]\nfun main(argc: i64, argv: **u8) i32 { ret 0; }\n", needle: "addresses memory with a secret value"},
-    UtAsmCase{target: "linux", src: "#[oblivious]\nfun f(k: ^u64) { asm x86_64 { mov rax, {k}\n mov ecx, [rax] } }\n#[symbol(\"main\")]\nfun main(argc: i64, argv: **u8) i32 { ret 0; }\n", needle: "addresses memory with a secret value"},
-    UtAsmCase{target: "linux", src: "#[oblivious]\nfun f(q: ^*u32) { asm x86_64 { mov rax, {q}\n mov ecx, [rax] } }\n#[symbol(\"main\")]\nfun main(argc: i64, argv: **u8) i32 { ret 0; }\n", needle: "addresses memory with a secret value"},
-    UtAsmCase{target: "linux", src: "#[oblivious]\n#[extensions(fsgsbase)]\nfun f(q: ^*u32) { asm x86_64 { mov rax, {q}\n wrgsbase rax } }\n#[symbol(\"main\")]\nfun main(argc: i64, argv: **u8) i32 { ret 0; }\n", needle: "installs a secret value as an address base"},
-    UtAsmCase{target: "linux-arm64", src: "#[oblivious]\nfun f(q: ^*u32) { asm aarch64 { ldr x0, {q}\n ldr w1, [x0] } }\n#[symbol(\"main\")]\nfun main(argc: i64, argv: **u8) i32 { ret 0; }\n", needle: "addresses memory with a secret value"}
+val ASM_ADDRESSES: [11]AsmCase = [11]AsmCase{
+    AsmCase{target: "linux", src: "#[oblivious]\nfun f(k: ^u64) ^u64 { var r: ^u64 = k; asm x86_64 { mov rax, {r} } ret r; }\n#[symbol(\"main\")]\nfun main(argc: i64, argv: **u8) i32 { ret 0; }\n", needle: ""},
+    AsmCase{target: "linux", src: "#[oblivious]\nfun f(state: *^u32) { asm x86_64 { mov rax, {state}\n mov ecx, [rax]\n add ecx, 1\n mov [rax], ecx } }\n#[symbol(\"main\")]\nfun main(argc: i64, argv: **u8) i32 { ret 0; }\n", needle: ""},
+    AsmCase{target: "linux", src: "#[oblivious]\nfun f(state: *^u32, block: *^u8) { asm x86_64 { mov rax, {state}\n mov rcx, {block}\n movdqu xmm1, [rax]\n movdqu xmm2, [rax + 16]\n movdqu xmm0, [rcx]\n paddd xmm1, xmm0\n pxor xmm2, xmm0\n movdqu [rax], xmm1\n movdqu [rax + 16], xmm2 } }\n#[symbol(\"main\")]\nfun main(argc: i64, argv: **u8) i32 { ret 0; }\n", needle: ""},
+    AsmCase{target: "linux-arm64", src: "#[oblivious]\nfun f(state: *^u32) { asm aarch64 { ldr x0, {state}\n ldr w1, [x0]\n add w1, w1, 1\n str w1, [x0] } }\n#[symbol(\"main\")]\nfun main(argc: i64, argv: **u8) i32 { ret 0; }\n", needle: ""},
+    AsmCase{target: "linux-riscv64", src: "#[oblivious]\nfun f(state: *^u32) { asm riscv64 { ld a0, {state}\n lw a1, 0(a0)\n addi a1, a1, 1\n sw a1, 0(a0) } }\n#[symbol(\"main\")]\nfun main(argc: i64, argv: **u8) i32 { ret 0; }\n", needle: ""},
+    AsmCase{target: "linux", src: "#[oblivious]\nfun f(state: *^u32) { var p: *^u32 = state; asm x86_64 { mov rax, {p}\n mov ecx, [rax]\n mov [rax], ecx } }\n#[symbol(\"main\")]\nfun main(argc: i64, argv: **u8) i32 { ret 0; }\n", needle: ""},
+    AsmCase{target: "linux", src: "#[oblivious]\nfun f(k: ^u64) ^u64 { var r: ^u64 = k; asm x86_64 { mov rax, {r}\n mov rbx, [rax] } ret r; }\n#[symbol(\"main\")]\nfun main(argc: i64, argv: **u8) i32 { ret 0; }\n", needle: "addresses memory with a secret value"},
+    AsmCase{target: "linux", src: "#[oblivious]\nfun f(k: ^u64) { asm x86_64 { mov rax, {k}\n mov ecx, [rax] } }\n#[symbol(\"main\")]\nfun main(argc: i64, argv: **u8) i32 { ret 0; }\n", needle: "addresses memory with a secret value"},
+    AsmCase{target: "linux", src: "#[oblivious]\nfun f(q: ^*u32) { asm x86_64 { mov rax, {q}\n mov ecx, [rax] } }\n#[symbol(\"main\")]\nfun main(argc: i64, argv: **u8) i32 { ret 0; }\n", needle: "addresses memory with a secret value"},
+    AsmCase{target: "linux", src: "#[oblivious]\n#[extensions(fsgsbase)]\nfun f(q: ^*u32) { asm x86_64 { mov rax, {q}\n wrgsbase rax } }\n#[symbol(\"main\")]\nfun main(argc: i64, argv: **u8) i32 { ret 0; }\n", needle: "installs a secret value as an address base"},
+    AsmCase{target: "linux-arm64", src: "#[oblivious]\nfun f(q: ^*u32) { asm aarch64 { ldr x0, {q}\n ldr w1, [x0] } }\n#[symbol(\"main\")]\nfun main(argc: i64, argv: **u8) i32 { ret 0; }\n", needle: "addresses memory with a secret value"}
 };
 
 # 0 when every case builds, or is refused naming its needle
 #[testing]
-fun asm_cases(cases: *UtAsmCase, len: usize) i32 {
+fun asm_cases(cases: *AsmCase, len: usize) i32 {
     var i: usize = 0;
     for (i < len) {
-        val c:    *UtAsmCase = ?cases[i];
-        var code: i32        = 0;
+        val c:    *AsmCase = ?cases[i];
+        var code: i32      = 0;
         if (str_len(c.needle) == 0) { code = codegen_target_ok(c.src, c.target); }
         or                          { code = codegen_target_rejects(c.src, c.target, c.needle); }
         if (code != 0) {
@@ -1444,7 +1444,7 @@ test secret_tag__carriers_are_secret_on_x86_64_and_aarch64 {
 }
 
 #[testing]
-rec UtAsmFlagRow {
+rec AsmFlagRow {
     head:    str;
     row:     str;
     refused: bool;
@@ -1454,24 +1454,24 @@ rec UtAsmFlagRow {
 # a push, a setcc, and each control transfer); a defining row on public operands clears
 # them; a flag-writing row on a secret operand and a row whose flag effect is opaque taint them
 #[testing]
-val ASM_FLAG_ROWS: [17]UtAsmFlagRow = [17]UtAsmFlagRow{
-    UtAsmFlagRow{head: "mov rsi, {r}\n cmp rsi, 1\n ", row: "mov rbx, rdx", refused: true},
-    UtAsmFlagRow{head: "mov rsi, {r}\n cmp rsi, 1\n ", row: "inc rbx", refused: true},
-    UtAsmFlagRow{head: "mov rsi, {r}\n cmp rsi, 1\n ", row: "push rbx", refused: true},
-    UtAsmFlagRow{head: "mov rsi, {r}\n cmp rsi, 1\n ", row: "setb bl", refused: true},
-    UtAsmFlagRow{head: "mov rsi, {r}\n cmp rsi, 1\n ", row: "jmp 1f", refused: true},
-    UtAsmFlagRow{head: "mov rsi, {r}\n cmp rsi, 1\n ", row: "call 1f", refused: true},
-    UtAsmFlagRow{head: "mov rsi, {r}\n cmp rsi, 1\n ", row: "ret", refused: true},
-    UtAsmFlagRow{head: "mov rsi, {r}\n cmp rsi, 1\n ", row: "hlt", refused: true},
-    UtAsmFlagRow{head: "mov rsi, {r}\n cmp rsi, 1\n ", row: "add rbx, rdx", refused: false},
-    UtAsmFlagRow{head: "mov rsi, {r}\n cmp rsi, 1\n ", row: "cmp rbx, rdx", refused: false},
-    UtAsmFlagRow{head: "mov rsi, {r}\n cmp rsi, 1\n ", row: "neg rbx", refused: false},
-    UtAsmFlagRow{head: "mov rsi, {r}\n cmp rsi, 1\n ", row: "cmpxchg rbx, rdx", refused: false},
-    UtAsmFlagRow{head: "mov rax, {r}\n ", row: "add rax, rbx", refused: true},
-    UtAsmFlagRow{head: "mov rax, {r}\n ", row: "inc rax", refused: true},
-    UtAsmFlagRow{head: "mov rax, {r}\n ", row: "cmpxchg rbx, rax", refused: true},
-    UtAsmFlagRow{head: "mov rax, {r}\n ", row: "popfq", refused: true},
-    UtAsmFlagRow{head: "mov rax, {r}\n ", row: "syscall", refused: true}
+val ASM_FLAG_ROWS: [17]AsmFlagRow = [17]AsmFlagRow{
+    AsmFlagRow{head: "mov rsi, {r}\n cmp rsi, 1\n ", row: "mov rbx, rdx", refused: true},
+    AsmFlagRow{head: "mov rsi, {r}\n cmp rsi, 1\n ", row: "inc rbx", refused: true},
+    AsmFlagRow{head: "mov rsi, {r}\n cmp rsi, 1\n ", row: "push rbx", refused: true},
+    AsmFlagRow{head: "mov rsi, {r}\n cmp rsi, 1\n ", row: "setb bl", refused: true},
+    AsmFlagRow{head: "mov rsi, {r}\n cmp rsi, 1\n ", row: "jmp 1f", refused: true},
+    AsmFlagRow{head: "mov rsi, {r}\n cmp rsi, 1\n ", row: "call 1f", refused: true},
+    AsmFlagRow{head: "mov rsi, {r}\n cmp rsi, 1\n ", row: "ret", refused: true},
+    AsmFlagRow{head: "mov rsi, {r}\n cmp rsi, 1\n ", row: "hlt", refused: true},
+    AsmFlagRow{head: "mov rsi, {r}\n cmp rsi, 1\n ", row: "add rbx, rdx", refused: false},
+    AsmFlagRow{head: "mov rsi, {r}\n cmp rsi, 1\n ", row: "cmp rbx, rdx", refused: false},
+    AsmFlagRow{head: "mov rsi, {r}\n cmp rsi, 1\n ", row: "neg rbx", refused: false},
+    AsmFlagRow{head: "mov rsi, {r}\n cmp rsi, 1\n ", row: "cmpxchg rbx, rdx", refused: false},
+    AsmFlagRow{head: "mov rax, {r}\n ", row: "add rax, rbx", refused: true},
+    AsmFlagRow{head: "mov rax, {r}\n ", row: "inc rax", refused: true},
+    AsmFlagRow{head: "mov rax, {r}\n ", row: "cmpxchg rbx, rax", refused: true},
+    AsmFlagRow{head: "mov rax, {r}\n ", row: "popfq", refused: true},
+    AsmFlagRow{head: "mov rax, {r}\n ", row: "syscall", refused: true}
 };
 
 test oblivious_asm__flag_taint {
@@ -1480,7 +1480,7 @@ test oblivious_asm__flag_taint {
     if (sel make_r.err) { ret 1; }
     var i: usize = 0;
     for (i < 17) {
-        val row: *UtAsmFlagRow                    = ?ASM_FLAG_ROWS[i];
+        val row: *AsmFlagRow                      = ?ASM_FLAG_ROWS[i];
         val pr:  res[str, std_format.FormatError] = std_format.sprint(?alloc,
             "#[oblivious]\nfun f(k: ^u64) ^u64 {{ var r: ^u64 = k; asm x86_64 {{ {}{}\n jc 1f\n 1:\n nop }} ret r; }}\n#[symbol(\"main\")]\nfun main(argc: i64, argv: **u8) i32 {{ ret 0; }}\n",
             row.head, row.row);
