@@ -89,9 +89,11 @@ pub rec DepEntry {
     ref:             intern.StrId;
     chain:           intern.StrId;
     root_declared:   bool;
-    direct:          *intern.StrId;
-    direct_count:    u32;
-    manifest:        manifest.Manifest;
+    # the project each of its dependency declarations reaches, nil for one
+    # left out as never realized
+    direct:       *intern.StrId;
+    direct_count: u32;
+    manifest:     manifest.Manifest;
 }
 
 # a root manifest's located dependency closure: every dependency realized under

@@ -232,7 +232,7 @@ fun clone_step(alloc: *A.Allocator, src: *manifest.StepDef, out: *manifest.StepD
 fun closure_taken(p: *project.Project, m: *manifest.Manifest, project_root: str, closure: *project.Closure) err[fail.Fail] {
     var taken: *project.Closure = closure;
     if (taken == nil) {
-        val located: res[project.Closure, fail.Fail] = driver_closure.locate(p.s, p.alloc, m, project_root, nil);
+        val located: res[project.Closure, fail.Fail] = driver_closure.locate(p.s, p.alloc, m, project_root, nil, driver_closure.UNREALIZED_REFUSED);
         if (sel located.err) { ret err[fail.Fail].err{located.err}; }
         project.closure_dnit(?p.config.closure);
         p.config.closure = located.ok;

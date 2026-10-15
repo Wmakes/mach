@@ -288,9 +288,11 @@ fun build_project_impl(s: *session.Session, project_root: str, c: *manifest.Cell
 # s:            the session; its build allocator owns the closure
 # m:            the root manifest
 # project_root: the root project's directory
+# unrealized:   what a dependency nothing is realized for is
 # ret:          the closure, released with `project.closure_dnit`
-pub fun closure_locate(s: *session.Session, m: *manifest.Manifest, project_root: str) res[project.Closure, fail.Fail] {
-    ret closure_of(s, m, project_root, nil);
+pub fun closure_locate(s: *session.Session, m: *manifest.Manifest, project_root: str,
+    unrealized: driver_closure.Unrealized) res[project.Closure, fail.Fail] {
+    ret closure_of(s, m, project_root, nil, unrealized);
 }
 
 # locate a root manifest's dependency closure as `closure_locate` does, holding every edge
@@ -300,14 +302,14 @@ pub fun closure_locate(s: *session.Session, m: *manifest.Manifest, project_root:
 # ret:   the closure; err naming the first edge that does not locate or does not hold
 pub fun closure_checked(s: *session.Session, m: *manifest.Manifest, project_root: str,
     check: *driver_closure.Check) res[project.Closure, fail.Fail] {
-    ret closure_of(s, m, project_root, check);
+    ret closure_of(s, m, project_root, check, driver_closure.UNREALIZED_REFUSED);
 }
 
 fun closure_of(s: *session.Session, m: *manifest.Manifest, project_root: str,
-    check: *driver_closure.Check) res[project.Closure, fail.Fail] {
+    check: *driver_closure.Check, unrealized: driver_closure.Unrealized) res[project.Closure, fail.Fail] {
     val composed: err[fail.Fail] = registry_composed();
     if (sel composed.err) { ret res[project.Closure, fail.Fail].err{composed.err}; }
-    ret driver_closure.locate(s, s.build_alloc, m, project_root, check);
+    ret driver_closure.locate(s, s.build_alloc, m, project_root, check, unrealized);
 }
 
 # the driver resolves targets only through the registry the toolchain composed

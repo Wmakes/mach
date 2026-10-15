@@ -37,6 +37,7 @@ use build_plan: mach.lang.build.plan;
 use mach.lang.diagnostic;
 use diagnostic_kind: mach.lang.diagnostic.kind;
 use mach.lang.driver;
+use driver_closure: mach.lang.driver.closure;
 use mach.lang.driver.request;
 use mach.lang.driver.toolchain;
 use mach.lang.manifest;
@@ -63,12 +64,13 @@ rec CleanEntry {
 }
 
 # `mach clean`
-pub val COMMAND: args.CommandSpec = args.CommandSpec{name: "clean", aliases: nil, alias_n: 0, grammar: " <path>", summary: "remove project build output", effect: "remove every artifact and every object, IR, assembly, test, cache, staging and dependency tree a build of every cell writes, as the build plans it", exits: nil, exit_n: 0, terminator: "", tables: nil, table_n: 0, refused: nil, refused_n: 0, refusal: "", relations: nil, relation_n: 0, constraints: nil, constraint_n: 0, operand_min: 0, operand_max: args.OPERANDS_ANY, truncate_at_sep: false, actions: nil, action_n: 0, examples: nil, example_n: 0, run: run};
+pub val COMMAND: args.CommandSpec = args.CommandSpec{name: "clean", aliases: nil, alias_n: 0, grammar: " <path>", summary: "remove project build output", effect: "remove every artifact and every object, IR, assembly, test, cache, staging and dependency tree a build of every cell writes, as the build plans it; a dependency never pulled was never built and adds nothing", exits: nil, exit_n: 0, terminator: "", tables: nil, table_n: 0, refused: nil, refused_n: 0, refusal: "", relations: nil, relation_n: 0, constraints: nil, constraint_n: 0, operand_min: 0, operand_max: args.OPERANDS_ANY, truncate_at_sep: false, actions: nil, action_n: 0, examples: nil, example_n: 0, run: run};
 
 # `mach clean`: remove every path a build of every cell writes, as the build
 # plans it: each artifact's output and the object, IR, assembly, test, cache,
 # staging and dependency trees beneath each cell's work directory, dependency
-# requirement cells included. they are sorted, collapsed under their ancestors,
+# requirement cells included; a dependency never realized was never built, so
+# it adds no cell. they are sorted, collapsed under their ancestors,
 # and removed inside the project root; a path that escapes the root or crosses a symlink is refused. a missing path is
 # not an error; "nothing to clean" prints when nothing was removed
 # ---
@@ -131,8 +133,9 @@ fun planned_entries(a: *A.Allocator, ps: *session.Session, root: str) res[Vector
     cli.overrides     = request.overrides_init(ps.alloc);
     cli.selectors     = manifest.selectors_init(ps.alloc);
     cli.selectors.all = true;
+    # a dependency never realized was never built, so it adds no cell
     val planned_r: res[build.Planned, fail.Fail] = build.plan_selection(ps.alloc, ps, ?m, root, ?cli,
-        request.GOAL_ARTIFACT, manifest.ARTIFACT_DEFAULT_SET, false);
+        request.GOAL_ARTIFACT, manifest.ARTIFACT_DEFAULT_SET, false, driver_closure.UNREALIZED_UNBUILT);
     if (sel planned_r.err) { ret res[Vector[CleanEntry], fail.Fail].err{planned_r.err}; }
     val planned: build.Planned = planned_r.ok;
 
@@ -509,6 +512,35 @@ test build_clean_plan__dynamic_first_out_template_still_cleans {
 
     fs.remove_all(?a, root);
     ret bad;
+}
+
+# a dependency never pulled was never built: clean does not refuse it, and still
+# removes the project's own outputs
+test clean_project__an_unpulled_dependency_adds_nothing_and_is_not_refused {
+    var r: cli_diagnostic.Report;
+    cli_diagnostic.report_init(?r, cli_diagnostic.FORMAT_HUMAN);
+    var a:      A.Allocator;
+    val make_r: err[A.Error] = page.make(?a);
+    if (sel make_r.err) { ret 1; }
+    val created: res[output_testing.Output, fail.Fail] = output_testing.create(?a, "mach-clean-unpulled");
+    if (sel created.err) { ret 2; }
+    var owner: output_testing.Output = created.ok;
+    fin { output_testing.dnit(?owner); }
+    val root: str = owner.directory;
+
+    val toml_r: res[str, A.Error] = types_path.join(?a, root, "mach.toml");
+    if (sel toml_r.err) { ret 3; }
+    val body:  str             = "[project]\nmach = \">=5\"\nid = \"unpulled\"\nversion = \"0.0.0\"\nsrc = \"src\"\nwork = \"out\"\n\n[dep.leaf]\npath = \"dep/leaf\"\n\n[artifact.unpulled]\nkind = \"bin\"\nentry = \"src/main.mach\"\nout = \"{project.work}/bin/unpulled\"\ntargets = [\"*\"]\nlink = []\nneed = []\n[profile.debug]\ndefault = true\noptimize = false\ndebug = true\nsimd = \"scalarize\"\n";
+    val wrote: err[fs.FsError] = fs.write_bytes(toml_r.ok, body::*u8, str_len(body), 0o644);
+    if (sel wrote.err) { ret 3; }
+    val obj_r: res[str, A.Error] = types_path.join(?a, root, "out/obj");
+    if (sel obj_r.err) { ret 4; }
+    val made: err[fs.FsError] = fs.create_dir_all(?a, obj_r.ok, 0o755);
+    if (sel made.err) { ret 4; }
+
+    if (clean_project(?r, ?a, root::*u8) != 0) { ret 5; }
+    if (t_exists(?a, root, "out/obj"))         { ret 6; }
+    ret 0;
 }
 
 test build_clean_plan__unsupported_target_artifact_pairs_are_skipped_not_errored {

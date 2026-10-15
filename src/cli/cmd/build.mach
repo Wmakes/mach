@@ -44,6 +44,7 @@ use build_plan: mach.lang.build.plan;
 use mach.lang.diagnostic;
 use diagnostic_kind: mach.lang.diagnostic.kind;
 use mach.lang.driver;
+use driver_closure: mach.lang.driver.closure;
 use mach.lang.driver.request;
 use mach.lang.driver.toolchain;
 use mach.lang.manifest;
@@ -175,7 +176,8 @@ pub fun plan_invocation(a: *A.Allocator, root: str, cli: *args.CliArgs, goal: re
         if (sel worked.err) { ret plan_failure(a, ps, worked.err); }
     }
 
-    val selected: res[Planned, fail.Fail] = plan_selection(a, ps, m, root, cli, goal, mode, configure_deps);
+    val selected: res[Planned, fail.Fail] = plan_selection(a, ps, m, root, cli, goal, mode, configure_deps,
+        driver_closure.UNREALIZED_REFUSED);
     if (sel selected.err) {
         ret plan_failure(a, ps, selected.err);
     }
@@ -191,12 +193,14 @@ pub fun plan_invocation(a: *A.Allocator, root: str, cli: *args.CliArgs, goal: re
 # one plan per profile. plans of different profiles are not checked against
 # each other: a caller that runs them all checks they write disjoint outputs
 # ---
-# a:   allocator for the requests
-# ps:  the session the manifest was loaded in; owns the plans
-# m:   the root manifest
-# ret: the plans; err from selection, a request, planning or dependency configuration
+# a:          allocator for the requests
+# ps:         the session the manifest was loaded in; owns the plans
+# m:          the root manifest
+# unrealized: what a dependency nothing is realized for is
+# ret:        the plans; err from selection, a request, planning or dependency configuration
 pub fun plan_selection(a: *A.Allocator, ps: *session.Session, m: *manifest.Manifest, root: str, cli: *args.CliArgs,
-    goal: request.BuildGoal, mode: manifest.ArtifactDefault, configure_deps: bool) res[Planned, fail.Fail] {
+    goal: request.BuildGoal, mode: manifest.ArtifactDefault, configure_deps: bool,
+    unrealized: driver_closure.Unrealized) res[Planned, fail.Fail] {
     val resolved: res[Vector[manifest.Cell], fail.Fail] = manifest.resolve_cells(ps.alloc, ?ps.interner, m, ?cli.selectors, mode);
     if (sel resolved.err) {
         ret res[Planned, fail.Fail].err{args.selection_hint(ps.alloc, ?cli.selectors, resolved.err)};
@@ -235,7 +239,7 @@ pub fun plan_selection(a: *A.Allocator, ps: *session.Session, m: *manifest.Manif
         }
         var bp: build_plan.BuildPlan = plan_r.ok;
 
-        val required: err[fail.Fail] = build_plan.plan_dependency_requirements(ps, ?bp);
+        val required: err[fail.Fail] = build_plan.plan_dependency_requirements(ps, ?bp, unrealized);
         if (sel required.err) {
             ret res[Planned, fail.Fail].err{required.err};
         }

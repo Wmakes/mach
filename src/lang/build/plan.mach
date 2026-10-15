@@ -32,6 +32,7 @@ use diagnostic_kind: mach.lang.diagnostic.kind;
 use io_writer:       std.io.writer;
 
 use mach.lang.driver;
+use driver_closure: mach.lang.driver.closure;
 use mach.lang.driver.project;
 use mach.lang.driver.request;
 use mach.lang.driver.toolchain;
@@ -128,7 +129,8 @@ pub rec BuildUnit {
 # manifest: the root manifest the plan was made from, borrowed; it outlives the plan
 # closure:  the manifest's dependency closure, located once by
 #           `plan_dependency_requirements`; every cell borrows it
-# located:  whether `closure` was located, which running the plan requires
+# located:  whether `closure` was located as a build needs it, every dependency
+#           realized, which running the plan requires
 pub rec BuildPlan {
     request:  request.BuildRequest;
     project:  str;
@@ -181,7 +183,7 @@ pub fun plan_to_run(a: *A.Allocator, s: *session.Session, reg: *lang_target.Targ
     val planned: res[BuildPlan, fail.Fail] = plan(a, ?s.interner, reg, m, owned_req);
     if (sel planned.err) { ret planned; }
     var bp:      BuildPlan      = planned.ok;
-    val located: err[fail.Fail] = plan_dependency_requirements(s, ?bp);
+    val located: err[fail.Fail] = plan_dependency_requirements(s, ?bp, driver_closure.UNREALIZED_REFUSED);
     if (sel located.err) { ret res[BuildPlan, fail.Fail].err{located.err}; }
     ret res[BuildPlan, fail.Fail].ok{bp};
 }
@@ -411,20 +413,22 @@ fun in_dependency(a: *A.Allocator, owner_chain: str, f: fail.Fail) fail.Fail {
 # several consumers is planned once. two cells that would write one output path
 # are refused
 # ---
-# s:   the session the plan was made in
-# bp:  the plan, mutated in place
-# ret: ok; err from locating the closure, a dependency cell's planning, or an
-#      output collision
-pub fun plan_dependency_requirements(s: *session.Session, bp: *BuildPlan) err[fail.Fail] {
+# s:          the session the plan was made in
+# bp:         the plan, mutated in place
+# unrealized: what a dependency nothing is realized for is; a plan that leaves
+#             one out lists what was built and never runs
+# ret:        ok; err from locating the closure, a dependency cell's planning, or an
+#             output collision
+pub fun plan_dependency_requirements(s: *session.Session, bp: *BuildPlan, unrealized: driver_closure.Unrealized) err[fail.Fail] {
     val m: *manifest.Manifest = bp.manifest;
     if (bp.located) { ret err[fail.Fail].err{fail.message("internal: the plan's dependency closure is already located")}; }
     val toolchain_r: res[*lang_target.TargetRegistry, fail.Fail] = toolchain.registry();
     if (sel toolchain_r.err) { ret err[fail.Fail].err{toolchain_r.err}; }
     val toolchain: *lang_target.TargetRegistry     = toolchain_r.ok;
-    val realized:  res[project.Closure, fail.Fail] = driver.closure_locate(s, m, bp.request.project_root);
+    val realized:  res[project.Closure, fail.Fail] = driver.closure_locate(s, m, bp.request.project_root, unrealized);
     if (sel realized.err) { ret err[fail.Fail].err{realized.err}; }
     bp.closure = realized.ok;
-    bp.located = true;
+    bp.located = unrealized == driver_closure.UNREALIZED_REFUSED;
     if (bp.closure.count > 0) {
         val closure: *project.Closure  = ?bp.closure;
         val a:       *A.Allocator      = bp.units.a;
