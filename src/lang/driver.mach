@@ -62,7 +62,9 @@ use ast_module: mach.lang.fe.ast.module;
 #[testing]
 use mach.lang.fe.comptime;
 #[testing]
-use fe_load: mach.lang.fe.load;
+use comptime_path: mach.lang.fe.comptime.path;
+#[testing]
+use fe_load:       mach.lang.fe.load;
 #[testing]
 use mach.lang.growth;
 #[testing]
@@ -70,13 +72,19 @@ use catalog_os: mach.lang.target.catalog.os;
 #[testing]
 use std.allocator.page;
 #[testing]
+use T: std.allocator.testing;
+#[testing]
 use std.collections.map;
+#[testing]
+use std.print;
 #[testing]
 use types_string: std.types.string;
 #[testing]
 use std.types.string.str_contains;
 #[testing]
 use std.types.string.str_equals;
+#[testing]
+use std.types.string.str_region_equals;
 #[testing]
 use std.types.string.str_replace;
 
@@ -2473,4 +2481,1971 @@ fun count_named_diag(text: str, want_one: bool) i32 {
         round = round + 1;
     }
     ret 0;
+}
+
+#[testing]
+fun manifest_frontend() str {
+    ret "[project]\nmach = \">=5\"\nid = \"ctxcase\"\nversion = \"1.2.3\"\nsrc = \"src\"\nwork = \"out/{target.name}/{profile.name}\"\n\n[target.linux]\nisa = \"x86_64\"\nos = \"linux\"\nabi = \"sysv64\"\n\n[target.windows]\nisa = \"x86_64\"\nos = \"windows\"\nabi = \"win64\"\n\n[profile.release]\noptimize = true\ndebug = false\nsimd = \"scalarize\"\n\n[step.never]\nargv = [\"false\"]\nin = []\nout = [\"{project.work}/never\"]\nneed = []\n\n[artifact.alpha]\nkind = \"bin\"\nentry = \"alpha.mach\"\nout = \"{project.work}/bin/alpha\"\ntargets = [\"*\"]\nlink = []\nneed = []\n\n[artifact.beta]\nkind = \"bin\"\nentry = \"beta.mach\"\nout = \"{project.work}/bin/beta\"\ntargets = [\"*\"]\nlink = []\nneed = [\"step.never\"]\n";
+}
+
+# load the project a test goal builds for the selected cell
+# the project a test goal builds for the cell `artifact` and `target` name, begun and loaded
+#[testing]
+fun load_test_goal(s: *session.Session, root: str, artifact: str, target: str) res[project.Project, fail.Fail] {
+    var req: request.BuildRequest = request.defaults();
+    req.project_root = root;
+    req.target       = target;
+    req.artifact     = artifact;
+    req.goal         = request.GOAL_TESTS;
+    ret begin_loaded(s, ?req);
+}
+
+# whether an analysis was rejected: refused with a reported failure, or answered with a
+# rejected project, which is released
+#[testing]
+fun project_was_rejected(result: res[project.Project, fail.Fail]) bool {
+    if (sel result.ok) {
+        var p:        project.Project = result.ok;
+        val rejected: bool            = !fail.is_accepted(frontend_status(?p));
+        project.dnit_project(?p);
+        ret rejected;
+    }
+    ret fail.is_reported(result.err);
+}
+
+#[testing]
+fun vec_sema(s: *session.Session, alloc: *A.Allocator, src: str) res[project.Project, fail.Fail] {
+    var names: [1]str;
+    names[0] = "main.mach";
+    var texts: [1]str;
+    texts[0] = src;
+    ret vec_sema_n(s, alloc, ?names[0], ?texts[0], 1);
+}
+
+#[testing]
+fun vec_sema_n(s: *session.Session, alloc: *A.Allocator, names: *str, texts: *str, n: u32) res[project.Project, fail.Fail] {
+    val pr: res[project.Project, fail.Fail] = scaffold_build(s, alloc, fixture_manifest(), names, texts, n, "");
+    if (sel pr.err) { ret pr; }
+    var p:  project.Project = pr.ok;
+    val se: err[fail.Fail]  = run_sema_pass(?p);
+    if (sel se.err) {
+        project.dnit_project(?p);
+        ret res[project.Project, fail.Fail].err{se.err};
+    }
+    ret res[project.Project, fail.Fail].ok{p};
+}
+
+#[testing]
+fun single_sema_n(s: *session.Session, alloc: *A.Allocator, names: *str, texts: *str, n: u32) res[project.Project, fail.Fail] {
+    val root_r: res[str, fail.Fail] = scaffold(alloc, fixture_manifest(), names, texts, n);
+    if (sel root_r.err) { ret res[project.Project, fail.Fail].err{root_r.err}; }
+    val root:      str                             = root_r.ok;
+    var tsel_1294: manifest.Selectors              = manifest.t_selectors("", "linux", "");
+    val pr:        res[project.Project, fail.Fail] = build_project(s, root, ?tsel_1294);
+    fs.remove_all(alloc, root);
+    if (sel pr.err) { ret pr; }
+    var p:  project.Project = pr.ok;
+    val se: err[fail.Fail]  = run_sema_pass(?p);
+    if (sel se.err) {
+        project.dnit_project(?p);
+        ret res[project.Project, fail.Fail].err{se.err};
+    }
+    ret res[project.Project, fail.Fail].ok{p};
+}
+
+#[testing]
+fun single_result_n(names: *str, texts: *str, n: u32, needle: str, want_diag: bool) i32 {
+    var alloc:  A.Allocator;
+    val make_r: err[A.Error] = page.make(?alloc);
+    if (sel make_r.err) { ret 1; }
+    val sr: res[session.Session, fail.Fail] = toolchain.session_init(?alloc);
+    if (sel sr.err) { ret 1; }
+    var s: session.Session = sr.ok;
+    fin { session.dnit(?s); }
+    val pr: res[project.Project, fail.Fail] = single_sema_n(?s, ?alloc, names, texts, n);
+    if (sel pr.err) {
+        val expected: bool = want_diag
+            && fail.is_reported(pr.err)
+            && diagnostic.error_says(?s.diags, needle);
+        if (expected) { ret 0; }
+        ret 1;
+    }
+    var p:  project.Project = pr.ok;
+    var ok: bool            = diagnostic.error_count(?p.s.diags) == 0;
+    if (want_diag) { ok = false; }
+    project.dnit_project(?p);
+    if (ok) { ret 0; }
+    ret 1;
+}
+
+#[testing]
+fun single_ok(src: str) i32 {
+    var names: [1]str;
+    names[0] = "main.mach";
+    var texts: [1]str;
+    texts[0] = src;
+    ret single_result_n(?names[0], ?texts[0], 1, "", false);
+}
+
+#[testing]
+fun single_ok2(main: str, lib: str) i32 {
+    var names: [2]str;
+    names[0] = "main.mach";
+    names[1] = "lib.mach";
+    var texts: [2]str;
+    texts[0] = main;
+    texts[1] = lib;
+    ret single_result_n(?names[0], ?texts[0], 2, "", false);
+}
+
+#[testing]
+fun vec_diagnostic_n(names: *str, texts: *str, n: u32, needle: str, note: bool) i32 {
+    var alloc:  A.Allocator;
+    val make_r: err[A.Error] = page.make(?alloc);
+    if (sel make_r.err) { ret 1; }
+    val sr: res[session.Session, fail.Fail] = toolchain.session_init(?alloc);
+    if (sel sr.err) { ret 1; }
+    var s: session.Session = sr.ok;
+    fin { session.dnit(?s); }
+    val pr: res[project.Project, fail.Fail] = scaffold_build(?s, ?alloc, fixture_manifest(), names, texts, n, "");
+    if (sel pr.err) {
+        if (!fail.is_reported(pr.err)) { ret 1; }
+        if (note) {
+            if (diagnostic.note_says(?s.diags, needle)) { ret 0; }
+        }
+        or {
+            if (diagnostic.error_says(?s.diags, needle)) { ret 0; }
+        }
+        ret 1;
+    }
+    var p: project.Project = pr.ok;
+    fin { project.dnit_project(?p); }
+    val checked: err[fail.Fail] = run_sema_pass(?p);
+    if (sel checked.ok) {
+        if (!note) { ret 1; }
+    }
+    or (sel checked.err) {
+        if (!fail.is_reported(checked.err)) { ret 1; }
+    }
+    var hit: bool = diagnostic.error_says(?s.diags, needle);
+    if (note) { hit = diagnostic.note_says(?s.diags, needle); }
+    if (hit)  { ret 0; }
+    var di: usize = 0;
+    for (di < diagnostic.len(?s.diags)) {
+        print.println(s.diags.items.data[di].message);
+        di = di + 1;
+    }
+    ret 1;
+}
+
+#[testing]
+fun vec_diag(src: str, needle: str) i32 {
+    var names: [1]str = [1]str{"main.mach"};
+    var texts: [1]str = [1]str{src};
+    ret vec_diagnostic_n(?names[0], ?texts[0], 1, needle, false);
+}
+
+#[testing]
+fun sema_clean2(main: str, lib: str) bool {
+    var alloc:  A.Allocator;
+    val make_r: err[A.Error] = page.make(?alloc);
+    if (sel make_r.err) { ret false; }
+    val sr: res[session.Session, fail.Fail] = toolchain.session_init(?alloc);
+    if (sel sr.err) { ret false; }
+    var s: session.Session = sr.ok;
+    fin { session.dnit(?s); }
+
+    var names: [2]str;
+    names[0] = "main.mach";
+    names[1] = "lib.mach";
+    var texts: [2]str;
+    texts[0] = main;
+    texts[1] = lib;
+
+    val pr: res[project.Project, fail.Fail] = vec_sema_n(?s, ?alloc, ?names[0], ?texts[0], 2);
+    if (sel pr.err) { ret false; }
+    var p:     project.Project = pr.ok;
+    val clean: bool            = diagnostic.error_count(?s.diags) == 0;
+    project.dnit_project(?p);
+    ret clean;
+}
+
+#[testing]
+fun sema_lc(s: *session.Session, stable: session.StableModuleId) query.Revision {
+    val revision: query.Revision = query.peek_revision(?s.queries, ?frontend.SEMA, module.stable_index(stable)::u64);
+    if (revision == 0) { ret 0xFFFFFFFFFFFFFFFF; }
+    ret revision;
+}
+
+#[testing]
+fun sema_errs(text: str) i32 {
+    var alloc:  A.Allocator;
+    val make_r: err[A.Error] = page.make(?alloc);
+    if (sel make_r.err) { ret -1; }
+    val sr: res[session.Session, fail.Fail] = toolchain.session_init(?alloc);
+    if (sel sr.err) { ret -1; }
+    var s: session.Session = sr.ok;
+    fin { session.dnit(?s); }
+
+    var names: [1]str;
+    names[0] = "main.mach";
+    var texts: [1]str;
+    texts[0] = text;
+
+    val pr: res[project.Project, fail.Fail] = scaffold_build(?s, ?alloc, fixture_manifest(), ?names[0], ?texts[0], 1, "");
+    if (sel pr.err) { ret -1; }
+    var p: project.Project = pr.ok;
+
+    var errs: i32 = diagnostic.error_count(?s.diags)::i32;
+    if (errs == 0) {
+        errs = -1;
+        val sem: err[fail.Fail] = run_sema_pass(?p);
+        if (sel sem.ok) { errs = diagnostic.error_count(?s.diags)::i32; }
+        or (sel sem.err) {
+            if (fail.is_reported(sem.err)) {
+                val reported: usize = diagnostic.error_count(?s.diags);
+                if (reported > 0) { errs = reported::i32; }
+            }
+        }
+    }
+
+    project.dnit_project(?p);
+    ret errs;
+}
+
+#[testing]
+fun sema_clean(text: str) bool {
+    ret sema_errs(text) == 0;
+}
+
+#[testing]
+fun gate_diag_located(text: str, needle: str, want_file: str, want_line: usize,
+    want_col: usize, want_text: str) i32 {
+    var alloc:  A.Allocator;
+    val make_r: err[A.Error] = page.make(?alloc);
+    if (sel make_r.err) { ret 1; }
+    val sr: res[session.Session, fail.Fail] = toolchain.session_init(?alloc);
+    if (sel sr.err) { ret 1; }
+    var s: session.Session = sr.ok;
+    fin { session.dnit(?s); }
+    var names: [1]str;
+    names[0] = "main.mach";
+    var texts: [1]str;
+    texts[0] = text;
+    val root_r: res[str, fail.Fail] = scaffold(?alloc, fixture_manifest(), ?names[0], ?texts[0], 1);
+    if (sel root_r.err) { ret 1; }
+    val root:       str                             = root_r.ok;
+    var tsel_19570: manifest.Selectors              = manifest.t_selectors("", "linux", "");
+    val pr:         res[project.Project, fail.Fail] = build_project(?s, root, ?tsel_19570);
+    fs.remove_all(?alloc, root);
+
+    var code: i32   = 3;
+    var i:    usize = 0;
+    for (i < diagnostic.len(?s.diags)) {
+        val d: *diagnostic.Diagnostic = ?s.diags.items.data[i];
+        if (diagnostic_kind.is_error(d.kind) && str_contains(d.message, needle)) {
+            code = 0;
+            val f_opt: opt[*lang_source.SourceFile] = lang_source.get(?s.sources, d.loc.file);
+            if (sel f_opt.some) {
+                val f: *lang_source.SourceFile = f_opt.some;
+                if (!str_contains(f.path, want_file)) { code = 5; }
+                or {
+                    val pos: lang_source.Position = lang_source.position(f, d.loc.span.offset);
+                    if (pos.line != want_line)                                                    { code = 6; }
+                    or (pos.col != want_col)                                                      { code = 7; }
+                    or (!str_region_equals(f.text, d.loc.span.offset, d.loc.span.len, want_text)) { code = 8; }
+                }
+            }
+            i = diagnostic.len(?s.diags);
+        }
+        or { i = i + 1; }
+    }
+
+    if (sel pr.ok) {
+        var p: project.Project = pr.ok;
+        project.dnit_project(?p);
+    }
+    ret code;
+}
+
+# a module's load walks past a gate only layout decides, so an `ext` declared after it
+# keeps its C name and its library
+test layout_gate__a_later_ext_keeps_its_link_name {
+    var alloc:  A.Allocator;
+    val make_r: err[A.Error] = page.make(?alloc);
+    if (sel make_r.err) { ret 1; }
+    val sr: res[session.Session, fail.Fail] = toolchain.session_init(?alloc);
+    if (sel sr.err) { ret 1; }
+    var s: session.Session = sr.ok;
+    fin { session.dnit(?s); }
+
+    var names: [2]str;
+    var texts: [2]str;
+    names[0] = "main.mach";
+    texts[0] = "use uniontest.sys;\n\npub fun main() i64 { ret 0; }\n";
+    names[1] = "sys.mach";
+    texts[1] = "pub rec Pair { a: u64; b: u64; }\n\n$if ($size_of(Pair) != 16) {\n    $error(\"pair layout\");\n}\n\n#[library(\"libsystem\")]\npub ext fun getppid() i32;\n";
+    val root_r: res[str, fail.Fail] = scaffold(?alloc, fixture_manifest(), ?names[0], ?texts[0], 2);
+    if (sel root_r.err) { ret 2; }
+    val root: str = root_r.ok;
+
+    val pr: res[project.Project, fail.Fail] = load_test_goal(?s, root, "", "linux");
+    fs.remove_all(?alloc, root);
+    if (sel pr.err) { ret 3; }
+    var p: project.Project = pr.ok;
+    fin { project.dnit_project(?p); }
+
+    val mid: session.ModuleId = project.module_named(?p, "uniontest.sys");
+    if (module.is_nil(mid)) { ret 4; }
+    val m:     *project.ModuleEntry = project.module_at(?p, mid::u32);
+    var found: bool                 = false;
+    var di:    u32                  = 0;
+    for (di < frontend.syntax(?p, m).decls.len::u32) {
+        val d: *ast_decl.Decl = ?frontend.syntax(?p, m).decls.data[di];
+        if (d.kind == ast_decl.DECL_KIND_FUN && (d.flags & ast_decl.DECL_FLAG_EXT) != 0) {
+            found = true;
+            val link: intern.StrId = linkage.export_name(?p.linkage, mid, di);
+            if (intern.str_is_nil(link)) { ret 5; }
+            val text: opt[str] = intern.get(?s.interner, link);
+            if (!(sel text.some && str_equals(text.some, "getppid"))) { ret 6; }
+            val library: intern.StrId = linkage.export_library(?p.linkage, mid, di);
+            if (intern.str_is_nil(library)) { ret 7; }
+        }
+        di = di + 1;
+    }
+    if (!found) { ret 8; }
+    ret 0;
+}
+
+test analyze_project_tolerant__retains_the_selected_frontend {
+    var alloc:  A.Allocator;
+    val make_r: err[A.Error] = page.make(?alloc);
+    if (sel make_r.err) { ret 1; }
+    val sr: res[session.Session, fail.Fail] = toolchain.session_init(?alloc);
+    if (sel sr.err) { ret 1; }
+    var s: session.Session = sr.ok;
+
+    var names: [4]str;
+    names[0] = "alpha.mach";
+    names[1] = "beta.mach";
+    names[2] = "model.mach";
+    names[3] = "orphan.mach";
+    var texts: [4]str;
+    texts[0] = "fun main() i32 { ret no_such(); }\n";
+    texts[1] = "use ctxcase.model;\nfun main() i32 { var b: model.Box[model.Leaf]; ret model.take[model.Leaf](b); }\n";
+    texts[2] = "pub rec Leaf { n: i32; }\npub rec Box[T] { v: T; }\npub fun take[T](b: Box[T]) i32 { ret 7; }\n";
+    texts[3] = "fun broken() NoSuch { var x: AlsoMissing; ret x; }\n";
+    val root_r: res[str, fail.Fail] = scaffold(
+        ?alloc, manifest_frontend(), ?names[0], ?texts[0], 4);
+    if (sel root_r.err) {
+        session.dnit(?s);
+        ret 1;
+    }
+    val root: str = root_r.ok;
+
+    val mr: res[manifest.Manifest, fail.Fail] = load_manifest(?s, root);
+    if (sel mr.err) {
+        fs.remove_all(?alloc, root);
+        session.dnit(?s);
+        ret 1;
+    }
+    var mf:  manifest.Manifest    = mr.ok;
+    var req: request.BuildRequest = request.defaults();
+    req.project_root = root;
+    req.target       = "windows";
+    req.profile      = "release";
+    req.artifact     = "beta";
+    req.goal         = request.GOAL_OBJECTS;
+    req.opt          = pipeline.OPT_RELEASE;
+    req.pie          = true;
+
+    val pr: res[project.Project, fail.Fail] = analyze_project_tolerant(?s, ?mf, ?req, project.ROOT_ARTIFACT, nil, 0, FRONTEND_SEMA);
+    if (sel pr.err) {
+        manifest.dnit(?mf, ?alloc);
+        fs.remove_all(?alloc, root);
+        session.dnit(?s);
+        ret 1;
+    }
+    var p: project.Project = pr.ok;
+    manifest.dnit(?mf, ?alloc);
+
+    var bad: i32 = 0;
+    if (p.queries.db != ?s.queries)            { bad = 2; }
+    if (diagnostic.error_count(?s.diags) != 0) { bad = 3; }
+    if (project.loads(?p, "ctxcase.alpha"))    { bad = 4; }
+    if (project.loads(?p, "ctxcase.orphan"))   { bad = 5; }
+
+    val beta:  session.ModuleId = project.module_named(?p, "ctxcase.beta");
+    val model: session.ModuleId = project.module_named(?p, "ctxcase.model");
+    if (module.is_nil(beta) || module.is_nil(model)) { bad = 6; }
+    or {
+        val bm: *project.ModuleEntry = project.module_at(?p, beta::u32);
+        val mm: *project.ModuleEntry = project.module_at(?p, model::u32);
+        if (frontend.resolved(?p, bm) == nil || frontend.typed(?p, bm) == nil) { bad = 7; }
+        if (frontend.resolved(?p, mm) == nil || frontend.typed(?p, mm) == nil) { bad = 8; }
+        if (bm.ir_module != nil || bm.object_image != nil)                     { bad = 9; }
+        if (mm.ir_module != nil || mm.object_image != nil)                     { bad = 10; }
+
+        val c: *comptime.ComptimeCtx = ?bm.load.ctx;
+        if (c.env.build.mode_id != comptime_path.MODE_RELEASE || c.env.build.pie != 1) { bad = 11; }
+        if (c.env.target.pointer_width != 8)                                           { bad = 12; }
+        if (!project.id_is(?s.interner, c.env.build.project_id, "ctxcase"))            { bad = 13; }
+        if (!project.id_is(?s.interner, c.env.build.project_ver, "1.2.3"))             { bad = 14; }
+        if (!project.id_is(?s.interner, c.env.build.os_name, "windows"))               { bad = 15; }
+        if (!project.id_is(?s.interner, c.env.build.isa_name, "x86_64"))               { bad = 16; }
+        if (!project.id_is(?s.interner, c.env.build.abi_name, "win64"))                { bad = 17; }
+        if (!project.id_is(?s.interner, c.env.build.bin_name, "beta"))                 { bad = 18; }
+    }
+
+    project.dnit_project(?p);
+    fs.remove_all(?alloc, root);
+    session.dnit(?s);
+    ret bad;
+}
+
+test analyze_project_tolerant__loads_an_overlay_extra_root_through_a_pub_const_gate {
+    var alloc:  A.Allocator;
+    val make_r: err[A.Error] = page.make(?alloc);
+    if (sel make_r.err) { ret 1; }
+    val sr: res[session.Session, fail.Fail] = toolchain.session_init(?alloc);
+    if (sel sr.err) { ret 1; }
+    var s: session.Session = sr.ok;
+
+    var names: [4]str;
+    names[0] = "main.mach";
+    names[1] = "extra.mach";
+    names[2] = "flags.mach";
+    names[3] = "model.mach";
+    var texts: [4]str;
+    texts[0] = "fun main() i32 { ret 0; }\n";
+    texts[1] = "fun broken() NoSuch { var x: AlsoMissing; ret x; }\n";
+    texts[2] = "pub val ENABLE: i32 = 1;\n";
+    texts[3] = "pub rec Leaf { n: i32; }\npub rec Box[T] { v: T; }\npub fun take[T](b: Box[T]) i32 { ret 7; }\n";
+    val root_r: res[str, fail.Fail] = scaffold(?alloc, fixture_manifest(), ?names[0], ?texts[0], 4);
+    if (sel root_r.err) {
+        session.dnit(?s);
+        ret 1;
+    }
+    val root: str = root_r.ok;
+
+    val mr: res[manifest.Manifest, fail.Fail] = load_manifest(?s, root);
+    if (sel mr.err) {
+        fs.remove_all(?alloc, root);
+        session.dnit(?s);
+        ret 1;
+    }
+    var mf:  manifest.Manifest    = mr.ok;
+    var req: request.BuildRequest = request.defaults();
+    req.project_root = root;
+    req.target       = "linux";
+    req.artifact     = "uniontest";
+    req.goal         = request.GOAL_OBJECTS;
+
+    val base_r: res[project.Project, fail.Fail] = analyze_project_tolerant(?s, ?mf, ?req, project.ROOT_ARTIFACT, nil, 0, FRONTEND_SEMA);
+    if (sel base_r.err) {
+        manifest.dnit(?mf, ?alloc);
+        fs.remove_all(?alloc, root);
+        session.dnit(?s);
+        ret 1;
+    }
+    var base: project.Project = base_r.ok;
+    var bad:  i32             = 0;
+    if (project.loads(?base, "uniontest.extra")) { bad = 1; }
+    if (project.loads(?base, "uniontest.flags")) { bad = 1; }
+    if (project.loads(?base, "uniontest.model")) { bad = 1; }
+    project.dnit_project(?base);
+
+    val extra_path_joined: res[str, fail.Fail] = fail.join(?alloc, root, "/", "src/extra.mach");
+
+    if (sel extra_path_joined.err) { ret 90; }
+
+    val extra_path:    str            = extra_path_joined.ok;
+    val overlay:       str            = "use uniontest.flags.ENABLE;\n$if (ENABLE == 1) { use uniontest.model; }\npub fun probe() i32 { ret 7; }\n";
+    val set_overlay_r: err[fail.Fail] = session.set_overlay(?s, extra_path, overlay);
+    if (sel set_overlay_r.err) {
+        manifest.dnit(?mf, ?alloc);
+        fs.remove_all(?alloc, root);
+        session.dnit(?s);
+        ret 1;
+    }
+    val xid_r: res[intern.StrId, A.Error] = intern.add(?s.interner, "uniontest.extra");
+    if (sel xid_r.err) {
+        manifest.dnit(?mf, ?alloc);
+        fs.remove_all(?alloc, root);
+        session.dnit(?s);
+        ret 1;
+    }
+    var extra_roots: [1]intern.StrId;
+    extra_roots[0] = xid_r.ok;
+
+    val rooted_r: res[project.Project, fail.Fail] = analyze_project_tolerant(?s, ?mf, ?req, project.ROOT_ARTIFACT, ?extra_roots[0], 1, FRONTEND_SEMA);
+    if (sel rooted_r.err) {
+        manifest.dnit(?mf, ?alloc);
+        fs.remove_all(?alloc, root);
+        session.dnit(?s);
+        ret 1;
+    }
+    var p: project.Project = rooted_r.ok;
+    if (diagnostic.error_count(?s.diags) != 0)       { bad = 2; }
+    if (!project.loads(?p, "uniontest.extra"))       { bad = 3; }
+    if (!project.loads(?p, "uniontest.flags"))       { bad = 4; }
+    if (!project.loads(?p, "uniontest.model"))       { bad = 5; }
+    if (p.emit_len != 1 || p.topo_len <= p.emit_len) { bad = 6; }
+
+    val extra_mid: session.ModuleId = project.module_named(?p, "uniontest.extra");
+    val model_mid: session.ModuleId = project.module_named(?p, "uniontest.model");
+    if (module.is_nil(extra_mid) || module.is_nil(model_mid)) { bad = 7; }
+    or {
+        val em: *project.ModuleEntry = project.module_at(?p, extra_mid::u32);
+        val mm: *project.ModuleEntry = project.module_at(?p, model_mid::u32);
+        if (frontend.resolved(?p, em) == nil || frontend.typed(?p, em) == nil) { bad = 8; }
+        if (frontend.resolved(?p, mm) == nil || frontend.typed(?p, mm) == nil) { bad = 9; }
+        val eid_r: res[intern.StrId, A.Error] = intern.add(?s.interner, "ENABLE");
+        if (sel eid_r.ok) {
+            val enabled: opt[comptime.NamedConst] = comptime.lookup(
+                ?em.load.ctx, eid_r.ok);
+            if (sel enabled.some) {
+                val nc: comptime.NamedConst = enabled.some;
+                if (nc.value.kind != comptime.CT_KIND_INT || nc.value.data.i != 1) { bad = 12; }
+            }
+        }
+    }
+
+    project.dnit_project(?p);
+    manifest.dnit(?mf, ?alloc);
+    fs.remove_all(?alloc, root);
+    session.dnit(?s);
+    ret bad;
+}
+
+test analyze_project_tolerant__target_change_invalidates_typed_products {
+    var alloc:  A.Allocator;
+    val make_r: err[A.Error] = page.make(?alloc);
+    if (sel make_r.err) { ret 1; }
+    val sr: res[session.Session, fail.Fail] = toolchain.session_init(?alloc);
+    if (sel sr.err) { ret 1; }
+    var s: session.Session = sr.ok;
+    fin { session.dnit(?s); }
+
+    var names: [1]str;
+    names[0] = "main.mach";
+    var texts: [1]str;
+    texts[0] = "$if ($mach.build.os == $mach.os.windows) { val K: i32 = 2; } $or { val K: i32 = 1; }\nfun main() i32 { ret K; }\n";
+    val root_r: res[str, fail.Fail] = scaffold(?alloc, fixture_manifest(), ?names[0], ?texts[0], 1);
+    if (sel root_r.err) { ret 1; }
+    val root: str = root_r.ok;
+    fin { fs.remove_all(?alloc, root); }
+    val mr: res[manifest.Manifest, fail.Fail] = load_manifest(?s, root);
+    if (sel mr.err) { ret 1; }
+    var mf: manifest.Manifest = mr.ok;
+    fin { manifest.dnit(?mf, ?alloc); }
+    var req: request.BuildRequest = request.defaults();
+    req.project_root = root;
+    req.target       = "linux";
+    req.artifact     = "uniontest";
+    req.goal         = request.GOAL_OBJECTS;
+
+    val host_r: res[project.Project, fail.Fail] = analyze_project_tolerant(?s, ?mf, ?req, project.ROOT_ARTIFACT, nil, 0, FRONTEND_SEMA);
+    if (sel host_r.err) { ret 2; }
+    var host:   project.Project        = host_r.ok;
+    val stable: session.StableModuleId = project.stable_named(?host, "uniontest.main");
+    if (module.stable_is_nil(stable)) {
+        project.dnit_project(?host);
+        ret 3;
+    }
+    if (project.module_at(?host, project.module_named(?host, "uniontest.main")::u32).load.ctx.env.target.os_id != catalog_os.LINUX::u32) {
+        project.dnit_project(?host);
+        ret 4;
+    }
+    project.dnit_project(?host);
+    val target_1: query.Revision = query.peek_revision(?s.queries, ?context.TARGET, 0);
+    val sema_1:   query.Revision = sema_lc(?s, stable);
+    if (target_1 == 0 || sema_1 == 0) { ret 5; }
+
+    req.target = "windows";
+    val other_r: res[project.Project, fail.Fail] = analyze_project_tolerant(?s, ?mf, ?req, project.ROOT_ARTIFACT, nil, 0, FRONTEND_SEMA);
+    if (sel other_r.err) { ret 6; }
+    var other: project.Project = other_r.ok;
+    val os_2:  u32             = project.module_at(?other, project.module_named(?other, "uniontest.main")::u32).load.ctx.env.target.os_id;
+    project.dnit_project(?other);
+    if (os_2 != catalog_os.WINDOWS::u32) { ret 7; }
+    val target_2: query.Revision = query.peek_revision(?s.queries, ?context.TARGET, 0);
+    val sema_2:   query.Revision = sema_lc(?s, stable);
+    if (target_2 == target_1 || sema_2 == sema_1) { ret 8; }
+
+    val again_r: res[project.Project, fail.Fail] = analyze_project_tolerant(?s, ?mf, ?req, project.ROOT_ARTIFACT, nil, 0, FRONTEND_SEMA);
+    if (sel again_r.err) { ret 9; }
+    var again: project.Project = again_r.ok;
+    project.dnit_project(?again);
+    if (query.peek_revision(?s.queries, ?context.TARGET, 0) != target_2 || sema_lc(?s, stable) != sema_2) { ret 10; }
+    ret 0;
+}
+
+test analyze_project_tolerant__replays_cached_diagnostics {
+    var alloc:  A.Allocator;
+    val make_r: err[A.Error] = page.make(?alloc);
+    if (sel make_r.err) { ret 1; }
+    val sr: res[session.Session, fail.Fail] = toolchain.session_init(?alloc);
+    if (sel sr.err) { ret 1; }
+    var s: session.Session = sr.ok;
+
+    var names: [1]str;
+    names[0] = "main.mach";
+    var texts: [1]str;
+    texts[0] = "fun dup() i32 { ret 1; }\nfun dup() i32 { ret 2; }\nfun main() i32 { ret 0; }\n";
+    val root_r: res[str, fail.Fail] = scaffold(?alloc, fixture_manifest(), ?names[0], ?texts[0], 1);
+    if (sel root_r.err) {
+        session.dnit(?s);
+        ret 1;
+    }
+    val root: str                               = root_r.ok;
+    val mr:   res[manifest.Manifest, fail.Fail] = load_manifest(?s, root);
+    if (sel mr.err) {
+        fs.remove_all(?alloc, root);
+        session.dnit(?s);
+        ret 1;
+    }
+    var mf:  manifest.Manifest    = mr.ok;
+    var req: request.BuildRequest = request.defaults();
+    req.project_root = root;
+    req.target       = "linux";
+    req.artifact     = "uniontest";
+    req.goal         = request.GOAL_OBJECTS;
+
+    val cold_r: res[project.Project, fail.Fail] = analyze_project_tolerant(?s, ?mf, ?req, project.ROOT_ARTIFACT, nil, 0, FRONTEND_SEMA);
+    if (!project_was_rejected(cold_r)) {
+        manifest.dnit(?mf, ?alloc);
+        fs.remove_all(?alloc, root);
+        session.dnit(?s);
+        ret 1;
+    }
+    val fqn_r: res[intern.StrId, A.Error] = intern.add(?s.interner, "uniontest.main");
+    if (sel fqn_r.err) {
+        manifest.dnit(?mf, ?alloc);
+        fs.remove_all(?alloc, root);
+        session.dnit(?s);
+        ret 1;
+    }
+    val stable: session.StableModuleId = session.stable_module_id_lookup(?s, fqn_r.ok);
+    if (module.stable_is_nil(stable) || diagnostic.len(?s.diags) == 0) {
+        manifest.dnit(?mf, ?alloc);
+        fs.remove_all(?alloc, root);
+        session.dnit(?s);
+        ret 1;
+    }
+    val resolve_rev: query.Revision = query.peek_revision(?s.queries, ?frontend.RESOLVE, module.stable_index(stable)::u64);
+    val sema_rev:    query.Revision = query.peek_revision(?s.queries, ?frontend.SEMA, module.stable_index(stable)::u64);
+    if (resolve_rev == 0 || sema_rev == 0) {
+        manifest.dnit(?mf, ?alloc);
+        fs.remove_all(?alloc, root);
+        session.dnit(?s);
+        ret 1;
+    }
+    val snapshot_r: res[*diagnostic.DiagnosticStore, fail.Fail] = diagnostic.snapshot_from(?s.diags, 0, ?alloc);
+    if (sel snapshot_r.err) {
+        manifest.dnit(?mf, ?alloc);
+        fs.remove_all(?alloc, root);
+        session.dnit(?s);
+        ret 1;
+    }
+    val snapshot: *diagnostic.DiagnosticStore = snapshot_r.ok;
+
+    val warm_r: res[project.Project, fail.Fail] = analyze_project_tolerant(?s, ?mf, ?req, project.ROOT_ARTIFACT, nil, 0, FRONTEND_SEMA);
+    if (!project_was_rejected(warm_r)) {
+        diagnostic.store_dnit(snapshot);
+        A.deallocate[diagnostic.DiagnosticStore](?alloc, snapshot, 1::usize);
+        manifest.dnit(?mf, ?alloc);
+        fs.remove_all(?alloc, root);
+        session.dnit(?s);
+        ret 1;
+    }
+    var bad: i32 = 0;
+    if (!diagnostic.same(?s.diags, snapshot))                                                                { bad = 1; }
+    if (query.peek_revision(?s.queries, ?frontend.RESOLVE, module.stable_index(stable)::u64) != resolve_rev) { bad = 1; }
+    if (query.peek_revision(?s.queries, ?frontend.SEMA, module.stable_index(stable)::u64) != sema_rev)       { bad = 1; }
+
+    diagnostic.store_dnit(snapshot);
+    A.deallocate[diagnostic.DiagnosticStore](?alloc, snapshot, 1::usize);
+    manifest.dnit(?mf, ?alloc);
+    fs.remove_all(?alloc, root);
+    session.dnit(?s);
+    ret bad;
+}
+
+test analyze_project_tolerant__failure_cleans_partial_state {
+    var alloc:  A.Allocator;
+    val make_r: err[A.Error] = page.make(?alloc);
+    if (sel make_r.err) { ret 1; }
+    val sr: res[session.Session, fail.Fail] = toolchain.session_init(?alloc);
+    if (sel sr.err) { ret 1; }
+    var s: session.Session = sr.ok;
+
+    var names: [1]str;
+    names[0] = "other.mach";
+    var texts: [1]str;
+    texts[0] = "pub fun other() i32 { ret 1; }\n";
+    val root_r: res[str, fail.Fail] = scaffold(?alloc, fixture_manifest(), ?names[0], ?texts[0], 1);
+    if (sel root_r.err) {
+        session.dnit(?s);
+        ret 1;
+    }
+    val root: str                               = root_r.ok;
+    val mr:   res[manifest.Manifest, fail.Fail] = load_manifest(?s, root);
+    if (sel mr.err) {
+        fs.remove_all(?alloc, root);
+        session.dnit(?s);
+        ret 1;
+    }
+    var mf:  manifest.Manifest    = mr.ok;
+    var req: request.BuildRequest = request.defaults();
+    req.project_root = root;
+    req.target       = "linux";
+    req.artifact     = "uniontest";
+    req.goal         = request.GOAL_OBJECTS;
+
+    var bad:    i32                             = 0;
+    val failed: res[project.Project, fail.Fail] = analyze_project_tolerant(?s, ?mf, ?req, project.ROOT_ARTIFACT, nil, 0, FRONTEND_SEMA);
+    if (sel failed.ok) {
+        var stray: project.Project = failed.ok;
+        project.dnit_project(?stray);
+        bad = 1;
+    }
+    if (session.module_count(?s) != 0) { bad = 1; }
+
+    val main_path_joined: res[str, fail.Fail] = fail.join(?alloc, root, "/", "src/main.mach");
+
+    if (sel main_path_joined.err) { ret 90; }
+
+    val main_path:     str             = main_path_joined.ok;
+    val repaired_text: str             = "fun main() i32 { ret 0; }\n";
+    val write_err:     err[fs.FsError] = fs.write_bytes(
+        main_path, repaired_text, str_len(repaired_text), 420);
+    if (sel write_err.err) { bad = 1; }
+    if (sel write_err.ok) {
+        val repaired: res[project.Project, fail.Fail] = analyze_project_tolerant(?s, ?mf, ?req, project.ROOT_ARTIFACT, nil, 0, FRONTEND_SEMA);
+        if (sel repaired.err) { bad = 1; }
+        if (sel repaired.ok) {
+            var p:   project.Project  = repaired.ok;
+            val mid: session.ModuleId = project.module_named(?p, "uniontest.main");
+            if (module.is_nil(mid)) { bad = 1; }
+            or {
+                val me: *project.ModuleEntry = project.module_at(?p, mid::u32);
+                if (frontend.resolved(?p, me) == nil || frontend.typed(?p, me) == nil) { bad = 1; }
+            }
+            if (p.queries.db != ?s.queries) { bad = 1; }
+            project.dnit_project(?p);
+        }
+    }
+
+    manifest.dnit(?mf, ?alloc);
+    fs.remove_all(?alloc, root);
+    session.dnit(?s);
+    ret bad;
+}
+
+# a two-module project analyzed both ways: the tolerant entry point keeps the
+# project and the phase products (a parse-rejected module still types on its
+# recovered tree), the build-facing one answers reported
+#[testing]
+fun tolerant_pair(names: *str, texts: *str, defs_sema: bool, main_sema: bool) i32 {
+    var alloc:  A.Allocator;
+    val make_r: err[A.Error] = page.make(?alloc);
+    if (sel make_r.err) { ret 1; }
+    val sr: res[session.Session, fail.Fail] = toolchain.session_init(?alloc);
+    if (sel sr.err) { ret 1; }
+    var s: session.Session = sr.ok;
+    fin { session.dnit(?s); }
+
+    val root_r: res[str, fail.Fail] = scaffold(?alloc, fixture_manifest(), names, texts, 2);
+    if (sel root_r.err) { ret 1; }
+    val root: str = root_r.ok;
+    fin { fs.remove_all(?alloc, root); }
+    val mr: res[manifest.Manifest, fail.Fail] = load_manifest(?s, root);
+    if (sel mr.err) { ret 1; }
+    var mf:  manifest.Manifest    = mr.ok;
+    var req: request.BuildRequest = request.defaults();
+    req.project_root = root;
+    req.target       = "linux";
+    req.artifact     = "uniontest";
+    req.goal         = request.GOAL_OBJECTS;
+
+    var bad: i32 = 0;
+
+    val kept: res[project.Project, fail.Fail] = analyze_project_tolerant(
+        ?s, ?mf, ?req, project.ROOT_ARTIFACT, nil, 0, FRONTEND_SEMA);
+    if (sel kept.err) { bad = 3; }
+    if (sel kept.ok) {
+        var p:    project.Project  = kept.ok;
+        val defs: session.ModuleId = project.module_named(?p, "uniontest.defs");
+        val main: session.ModuleId = project.module_named(?p, "uniontest.main");
+        if (module.is_nil(defs) || module.is_nil(main)) { bad = 4; }
+        or {
+            val dm: *project.ModuleEntry = project.module_at(?p, defs::u32);
+            val mm: *project.ModuleEntry = project.module_at(?p, main::u32);
+            if (frontend.syntax(?p, dm) == nil || frontend.syntax(?p, mm) == nil)     { bad = 5; }
+            if (frontend.resolved(?p, dm) == nil || frontend.resolved(?p, mm) == nil) { bad = 6; }
+            if ((frontend.typed(?p, dm) != nil) != defs_sema)                         { bad = 7; }
+            if ((frontend.typed(?p, mm) != nil) != main_sema)                         { bad = 8; }
+        }
+        if (!fail.is_rejected(frontend.frontend_status(?p))) { bad = 9; }
+        if (diagnostic.error_count(?s.diags) == 0)           { bad = 10; }
+        project.dnit_project(?p);
+    }
+
+    manifest.dnit(?mf, ?alloc);
+    ret bad;
+}
+
+# a `use` naming no module is reported once by the load, binds nothing, and the
+# module still reaches the topo order and resolve; the build stays rejected
+test load__unbound_use_is_reported_once_and_the_module_still_resolves {
+    var alloc:  A.Allocator;
+    val make_r: err[A.Error] = page.make(?alloc);
+    if (sel make_r.err) { ret 1; }
+    val sr: res[session.Session, fail.Fail] = toolchain.session_init(?alloc);
+    if (sel sr.err) { ret 1; }
+    var s: session.Session = sr.ok;
+    fin { session.dnit(?s); }
+
+    var names: [1]str;
+    names[0] = "main.mach";
+    var texts: [1]str;
+    texts[0] = "use x: uniontest.nothere;\nfun main() i32 { ret keep() + x.gone(); }\nfun keep() i32 { ret 1; }\n";
+    val root_r: res[str, fail.Fail] = scaffold(?alloc, fixture_manifest(), ?names[0], ?texts[0], 1);
+    if (sel root_r.err) { ret 1; }
+    val root: str = root_r.ok;
+    fin { fs.remove_all(?alloc, root); }
+    val mr: res[manifest.Manifest, fail.Fail] = load_manifest(?s, root);
+    if (sel mr.err) { ret 1; }
+    var mf: manifest.Manifest = mr.ok;
+    fin { manifest.dnit(?mf, ?alloc); }
+    var req: request.BuildRequest = request.defaults();
+    req.project_root = root;
+    req.target       = "linux";
+    req.artifact     = "uniontest";
+    req.goal         = request.GOAL_OBJECTS;
+
+    val kept: res[project.Project, fail.Fail] = analyze_project_tolerant(
+        ?s, ?mf, ?req, project.ROOT_ARTIFACT, nil, 0, FRONTEND_SEMA);
+    if (sel kept.err) { ret 3; }
+    var p: project.Project = kept.ok;
+    fin { project.dnit_project(?p); }
+    if (!fail.is_rejected(frontend.frontend_status(?p))) { ret 4; }
+    if (!project.in_topo(?p, "uniontest.main"))          { ret 5; }
+    val m: *project.ModuleEntry = project.module_at(?p, project.module_named(?p, "uniontest.main")::u32);
+    if (frontend.resolved(?p, m) == nil || frontend.typed(?p, m) == nil) { ret 6; }
+
+    var named: u32   = 0;
+    var i:     usize = 0;
+    for (i < diagnostic.len(?s.diags)) {
+        val d: *diagnostic.Diagnostic = ?s.diags.items.data[i];
+        if (!diagnostic_kind.is_error(d.kind)) {
+            i = i + 1;
+            cnt;
+        }
+        if (!str_contains(d.message, "does not name a module")) { ret 7; }
+        named = named + 1;
+        i     = i + 1;
+    }
+    if (named != 1) { ret 8; }
+    ret 0;
+}
+
+# a path naming a symbol a surface forwards resolves to that symbol, never to
+# a module file whose name differs from it only in case
+test load__a_symbol_path_matches_a_module_file_only_by_exact_case {
+    var names: [4]str;
+    var texts: [4]str;
+    names[0] = "main.mach";
+    texts[0] = "use uniontest.m.Item;\nfun main() i32 {\n    var v: Item;\n    v.x = 1;\n    ret v.x::i32;\n}\n";
+    names[1] = "m.mach";
+    texts[1] = "use uniontest.m.inner;\nfwd inner.Item;\n";
+    names[2] = "m/inner.mach";
+    texts[2] = "pub rec Item { x: u8; }\n";
+    names[3] = "m/item.mach";
+    texts[3] = "pub fun unrelated() i32 { ret 0; }\n";
+    ret single_result_n(?names[0], ?texts[0], 4, "", false);
+}
+
+# a rejection is one module's answer, not the pass's: a module later in topo
+# order that does not depend on the rejected one still types
+test analyze_project_tolerant__types_past_a_rejected_module {
+    var alloc:  A.Allocator;
+    val make_r: err[A.Error] = page.make(?alloc);
+    if (sel make_r.err) { ret 1; }
+    val sr: res[session.Session, fail.Fail] = toolchain.session_init(?alloc);
+    if (sel sr.err) { ret 1; }
+    var s: session.Session = sr.ok;
+
+    var names: [4]str;
+    names[0] = "a.mach";
+    names[1] = "b.mach";
+    names[2] = "c.mach";
+    names[3] = "main.mach";
+    var texts: [4]str;
+    texts[0] = "pub fun af() i32 { ret 1; }\n";
+    texts[1] = "pub fun bf() i32 { val n: i32 = 1; val w: i64 = 4; ret n + w; }\n";
+    texts[2] = "pub fun cf() i32 { ret 3; }\n";
+    texts[3] = "use uniontest.a;\nuse uniontest.b;\nuse uniontest.c;\nfun main() i32 { ret a.af() + b.bf() + c.cf(); }\n";
+    val root_r: res[str, fail.Fail] = scaffold(?alloc, fixture_manifest(), ?names[0], ?texts[0], 4);
+    if (sel root_r.err) {
+        session.dnit(?s);
+        ret 1;
+    }
+    val root: str                               = root_r.ok;
+    val mr:   res[manifest.Manifest, fail.Fail] = load_manifest(?s, root);
+    if (sel mr.err) {
+        fs.remove_all(?alloc, root);
+        session.dnit(?s);
+        ret 1;
+    }
+    var mf:  manifest.Manifest    = mr.ok;
+    var req: request.BuildRequest = request.defaults();
+    req.project_root = root;
+    req.target       = "linux";
+    req.artifact     = "uniontest";
+    req.goal         = request.GOAL_OBJECTS;
+
+    var bad: i32 = 0;
+
+    val kept: res[project.Project, fail.Fail] = analyze_project_tolerant(
+        ?s, ?mf, ?req, project.ROOT_ARTIFACT, nil, 0, FRONTEND_SEMA);
+    if (sel kept.err) { bad = 3; }
+    if (sel kept.ok) {
+        var p:  project.Project  = kept.ok;
+        val ma: session.ModuleId = project.module_named(?p, "uniontest.a");
+        val mb: session.ModuleId = project.module_named(?p, "uniontest.b");
+        val mc: session.ModuleId = project.module_named(?p, "uniontest.c");
+        if (module.is_nil(ma) || module.is_nil(mb) || module.is_nil(mc)) { bad = 4; }
+        or {
+            # the case only bites when the rejected module is typed first
+            if (project.topo_index(?p, mb) >= project.topo_index(?p, mc))  { bad = 5; }
+            if (frontend.typed(?p, project.module_at(?p, ma::u32)) == nil) { bad = 6; }
+            if (frontend.typed(?p, project.module_at(?p, mb::u32)) == nil) { bad = 7; }
+            if (frontend.typed(?p, project.module_at(?p, mc::u32)) == nil) { bad = 8; }
+        }
+        if (!fail.is_rejected(frontend.frontend_status(?p))) { bad = 9; }
+        if (diagnostic.error_count(?s.diags) != 1)           { bad = 10; }
+        project.dnit_project(?p);
+    }
+
+    manifest.dnit(?mf, ?alloc);
+    fs.remove_all(?alloc, root);
+    session.dnit(?s);
+    ret bad;
+}
+
+test analyze_project_tolerant__keeps_products_through_type_and_parse_errors {
+    var names: [2]str;
+    names[0] = "defs.mach";
+    names[1] = "main.mach";
+    var texts: [2]str;
+    texts[0] = "pub val watched: i64 = 4;\n";
+    texts[1] = "use uniontest.defs;\nfun main() i32 { val n: i32 = 1; ret n + defs.watched; }\n";
+    val typed: i32 = tolerant_pair(?names[0], ?texts[0], true, true);
+    if (typed != 0) { ret 10 + typed; }
+    texts[0] = "pub val watched: i32 = 4;\n";
+    texts[1] = "use uniontest.defs;\nfun main() i32 { val n: i32 = 1\n ret n + defs.watched; }\n";
+    val parsed: i32 = tolerant_pair(?names[0], ?texts[0], true, true);
+    if (parsed != 0) { ret 20 + parsed; }
+    ret 0;
+}
+
+# a module reached by two artifacts is the primary artifact's when the primary reaches
+# it. when an edit makes the primary reach modules only `shaded` reached before, in the
+# same walk order as before, they are attributed again and typed again rather than
+# replayed from the session: the cell's configuration (same root, same request) and the
+# module numbering are unchanged, so only the attribution says the answer moved
+test attribution__a_module_the_primary_comes_to_reach_is_typed_under_it {
+    var alloc:  A.Allocator;
+    val make_r: err[A.Error] = page.make(?alloc);
+    if (sel make_r.err) { ret 1; }
+    val sr: res[session.Session, fail.Fail] = toolchain.session_init(?alloc);
+    if (sel sr.err) { ret 1; }
+    var s: session.Session = sr.ok;
+    fin { session.dnit(?s); }
+
+    val shaded: str                 = "use lessons.common;\n\npub fun run() i32 { ret common.check(); }\n\nfun main() i32 { ret run(); }\n";
+    val root_r: res[str, fail.Fail] = scaffold_lessons(?alloc, shaded);
+    if (sel root_r.err) { ret 1; }
+    val root: str = root_r.ok;
+    fin { fs.remove_all(?alloc, root); }
+    # a body gate is decided by sema, so the attribution reaches it through no load product
+    val common_path_joined: res[str, fail.Fail] = fail.join(?alloc, root, "/", "src/common.mach");
+    if (sel common_path_joined.err) { ret 90; }
+    val common_path: str             = common_path_joined.ok;
+    val common:      str             = "pub fun check() i32 {\n    $if ($bin.name != \"hello\") { $error(\"wrong artifact\"); }\n    ret 0;\n}\n";
+    val wrote:       err[fs.FsError] = fs.write_bytes(common_path, common, str_len(common), 420);
+    if (sel wrote.err) { ret 1; }
+
+    val mr: res[manifest.Manifest, fail.Fail] = load_manifest(?s, root);
+    if (sel mr.err) { ret 1; }
+    var mf: manifest.Manifest = mr.ok;
+    fin { manifest.dnit(?mf, ?alloc); }
+
+    var bad: i32 = 0;
+
+    # only `shaded` reaches `common`, so it reads `shaded` and refuses
+    val first: res[project.Project, fail.Fail] = analyze_lessons(?s, ?mf, root, project.ROOT_UNION);
+    if (sel first.err) { ret 2; }
+    var fp: project.Project = first.ok;
+    if (!diagnostic.error_says(?s.diags, "wrong artifact"))                   { bad = 3; }
+    if (!str_equals(project.artifact_named(?fp, "lessons.common"), "shaded")) { bad = 4; }
+    val stable: session.StableModuleId = project.stable_named(?fp, "lessons.common");
+    val number: session.ModuleId       = project.module_named(?fp, "lessons.common");
+    val sema_1: query.Revision         = sema_lc(?s, stable);
+    project.dnit_project(?fp);
+    if (bad != 0) { ret bad; }
+
+    # `hello` now reaches `shaded` and through it `common`, in the order the union walk
+    # already registered them: the primary's attribution wins and the body types clean
+    val hello_path_joined: res[str, fail.Fail] = fail.join(?alloc, root, "/", "src/hello.mach");
+    if (sel hello_path_joined.err) { ret 90; }
+    val hello_path: str            = hello_path_joined.ok;
+    val overlay:    str            = "use lessons.shaded;\n\nfun main() i32 { ret shaded.run(); }\n";
+    val laid:       err[fail.Fail] = session.set_overlay(?s, hello_path, overlay);
+    if (sel laid.err) { ret 5; }
+    val second: res[project.Project, fail.Fail] = analyze_lessons(?s, ?mf, root, project.ROOT_UNION);
+    if (sel second.err) { ret 6; }
+    var sp: project.Project = second.ok;
+    if (!module.same(project.module_named(?sp, "lessons.common"), number))   { bad = 7; }
+    if (diagnostic.error_count(?s.diags) != 0)                               { bad = 8; }
+    if (!str_equals(project.artifact_named(?sp, "lessons.common"), "hello")) { bad = 9; }
+    if (!str_equals(project.artifact_named(?sp, "lessons.shaded"), "hello")) { bad = 10; }
+    if (sema_lc(?s, stable) == sema_1)                                       { bad = 11; }
+    project.dnit_project(?sp);
+    ret bad;
+}
+
+# a module first reached behind a gate that reads a constant a later `use` imports is
+# attributed to the importing module's artifact rather than the cell's: `late.mach`
+# enters through `shaded.mach`'s gate and reads `shaded`
+test attribution__a_module_behind_a_gate_on_a_later_use_reads_its_importer {
+    var alloc:  A.Allocator;
+    val make_r: err[A.Error] = page.make(?alloc);
+    if (sel make_r.err) { ret 1; }
+    val sr: res[session.Session, fail.Fail] = toolchain.session_init(?alloc);
+    if (sel sr.err) { ret 1; }
+    var s: session.Session = sr.ok;
+    fin { session.dnit(?s); }
+
+    val shaded: str                 = "$if (flags.LATE == 1) {\n    use lessons.late;\n}\n\nuse lessons.flags;\n\nfun main() i32 { ret late.answer(); }\n";
+    val root_r: res[str, fail.Fail] = scaffold_lessons(?alloc, shaded);
+    if (sel root_r.err) { ret 1; }
+    val root: str = root_r.ok;
+    fin { fs.remove_all(?alloc, root); }
+    val flags_path_joined: res[str, fail.Fail] = fail.join(?alloc, root, "/", "src/flags.mach");
+    if (sel flags_path_joined.err) { ret 90; }
+    val flags_path: str             = flags_path_joined.ok;
+    val flags:      str             = "pub val LATE: u8 = 1;\n";
+    val wrote_f:    err[fs.FsError] = fs.write_bytes(flags_path, flags, str_len(flags), 420);
+    if (sel wrote_f.err) { ret 1; }
+    val late_path_joined: res[str, fail.Fail] = fail.join(?alloc, root, "/", "src/late.mach");
+    if (sel late_path_joined.err) { ret 90; }
+    val late_path: str             = late_path_joined.ok;
+    val late:      str             = "$if ($bin.name != \"shaded\") { $error(\"wrong artifact\"); }\n\npub fun answer() i32 { ret 0; }\n";
+    val wrote_l:   err[fs.FsError] = fs.write_bytes(late_path, late, str_len(late), 420);
+    if (sel wrote_l.err) { ret 1; }
+
+    val mr: res[manifest.Manifest, fail.Fail] = load_manifest(?s, root);
+    if (sel mr.err) { ret 1; }
+    var mf: manifest.Manifest = mr.ok;
+    fin { manifest.dnit(?mf, ?alloc); }
+
+    var bad:  i32                             = 0;
+    val wide: res[project.Project, fail.Fail] = analyze_lessons(?s, ?mf, root, project.ROOT_UNION);
+    if (sel wide.err) { ret 2; }
+    var wp: project.Project = wide.ok;
+    if (!project.loads(?wp, "lessons.late"))                                { bad = 3; }
+    if (diagnostic.error_count(?s.diags) != 0)                              { bad = 4; }
+    if (!str_equals(project.artifact_named(?wp, "lessons.late"), "shaded")) { bad = 5; }
+    project.dnit_project(?wp);
+    ret bad;
+}
+
+# one refused load of the module past a full 63-module table, with the session,
+# the project and its module table all over `t`; the request `fail_at` counts
+# from the start of the load
+#[testing]
+fun refused_slot_load(alloc: *A.Allocator, t: *T.Testing, root: str, preload: u32, fail_at: u32) i32 {
+    val ta: *A.Allocator                    = T.allocator_of(t);
+    val sr: res[session.Session, fail.Fail] = toolchain.session_init(ta);
+    if (sel sr.err) { ret 1; }
+    var s: session.Session = sr.ok;
+    fin { session.dnit(?s); }
+    val pr: res[project.Project, fail.Fail] = union_analysis(?s, root, "", FRONTEND_RESOLVE);
+    if (sel pr.err) { ret 1; }
+    var p: project.Project = pr.ok;
+    fin { project.dnit_project(?p); }
+    if (project.module_count(?p) != 1) { ret 1; }
+
+    var pj: u32 = 0;
+    for (pj < preload) {
+        val nm_r: res[str, std_format.FormatError] = std_format.sprint(alloc, "uniontest.c{}", pj);
+        if (sel nm_r.err) { ret 1; }
+        val nm:    str                        = nm_r.ok;
+        val fqn_r: res[intern.StrId, A.Error] = intern.add(?s.interner, nm);
+        A.deallocate[u8](alloc, nm::*u8, str_len(nm) + 1);
+        if (sel fqn_r.err) { ret 1; }
+        val lr: res[session.ModuleId, fail.Fail] = driver_load.module_load(?p, fqn_r.ok);
+        if (sel lr.err) { ret 1; }
+        pj = pj + 1;
+    }
+    if (project.module_count(?p) != 1 + preload) { ret 1; }
+
+    val fqn_r: res[intern.StrId, A.Error] = intern.add(?s.interner, "uniontest.c63");
+    if (sel fqn_r.err) { ret 1; }
+    val fqn:      intern.StrId = fqn_r.ok;
+    val baseline: u32          = project.module_count(?p);
+
+    val chunks_before: usize = p.modules.chunks.len;
+    val live_before:   usize = T.live_count(t);
+    T.fail_at_ordinal(t, T.attempt_count(t) + fail_at::usize);
+    val cr: res[session.ModuleId, fail.Fail] = driver_load.module_load(?p, fqn);
+    T.clear_failure(t);
+
+    if (sel cr.ok) { ret 2; }
+    # a chunk the table kept is owned capacity, not a leak; everything else is released
+    val kept: usize = p.modules.chunks.len - chunks_before;
+    if (project.module_count(?p) != baseline)  { ret 3; }
+    if (project.loads(?p, "uniontest.c63"))    { ret 3; }
+    if (T.live_count(t) != live_before + kept) { ret 4; }
+    ret 0;
+}
+
+test dfs_load__allocation_failure_leaks_nothing {
+    var alloc:  A.Allocator;
+    val make_r: err[A.Error] = page.make(?alloc);
+    if (sel make_r.err) { ret 1; }
+
+    var base_names: [1]str;
+    base_names[0] = "main.mach";
+    var base_texts: [1]str;
+    base_texts[0] = "fun main() i32 { ret 0; }\n";
+    val root_r: res[str, fail.Fail] = scaffold(?alloc, fixture_manifest(), ?base_names[0], ?base_texts[0], 1);
+    if (sel root_r.err) { ret 1; }
+    val root: str = root_r.ok;
+
+    # one module short of a full 64-entry chunk, so the probed load grows the table
+    val preload:   u32 = 63;
+    var pi:        u32 = 0;
+    var setup_bad: i32 = 0;
+    for (pi < preload + 1 && setup_bad == 0) {
+        val name_r: res[str, std_format.FormatError] = std_format.sprint(?alloc, "c{}.mach", pi);
+        if (sel name_r.err) {
+            setup_bad = 1;
+            brk;
+        }
+        val name:     str                 = name_r.ok;
+        val name_cap: usize               = str_len(name) + 1;
+        val text:     str                 = "pub fun leaf() i32 { ret 0; }\n";
+        val fp:       res[str, fail.Fail] = fail.join(?alloc, root, "/src/", name);
+        if (sel fp.err) {
+            setup_bad = 1;
+            brk;
+        }
+        val we: err[fs.FsError] = fs.write_bytes(fp.ok, text, str_len(text), 420);
+        A.deallocate[u8](?alloc, name::*u8, name_cap);
+        if (sel we.err) {
+            setup_bad = 1;
+            brk;
+        }
+        pi = pi + 1;
+    }
+    if (setup_bad != 0) {
+        fs.remove_all(?alloc, root);
+        ret 1;
+    }
+
+    var bad:         i32 = 0;
+    var fail_at:     u32 = 1;
+    val max_fail_at: u32 = 2;
+    for (fail_at <= max_fail_at && bad == 0) {
+        var t:      T.Testing;
+        val made_t: err[A.Error] = T.make(?t);
+        if (sel made_t.err) {
+            bad = 1;
+            brk;
+        }
+        bad = refused_slot_load(?alloc, ?t, root, preload, fail_at);
+        # teardown released everything the load and the project held
+        if (bad == 0 && !T.clean(?t)) { bad = 4; }
+        T.dnit(?t);
+        fail_at = fail_at + 1;
+    }
+
+    if (bad == 0) {
+        val sr: res[session.Session, fail.Fail] = toolchain.session_init(?alloc);
+        if (sel sr.err) { bad = 5; }
+        if (sel sr.ok) {
+            var s:  session.Session                 = sr.ok;
+            val pr: res[project.Project, fail.Fail] = union_analysis(?s, root, "", FRONTEND_RESOLVE);
+            if (sel pr.err) {
+                session.dnit(?s);
+                bad = 5;
+            }
+            if (sel pr.ok) {
+                var p:  project.Project = pr.ok;
+                var pj: u32             = 0;
+                for (pj < preload && bad == 0) {
+                    val nm_r: res[str, std_format.FormatError] = std_format.sprint(?alloc, "uniontest.c{}", pj);
+                    if (sel nm_r.err) {
+                        bad = 5;
+                        brk;
+                    }
+                    val nm:    str                        = nm_r.ok;
+                    val fqn_r: res[intern.StrId, A.Error] = intern.add(?s.interner, nm);
+                    A.deallocate[u8](?alloc, nm::*u8, str_len(nm) + 1);
+                    if (sel fqn_r.err) {
+                        bad = 5;
+                        brk;
+                    }
+                    val lr: res[session.ModuleId, fail.Fail] = driver_load.module_load(?p, fqn_r.ok);
+                    if (sel lr.err) {
+                        bad = 5;
+                        brk;
+                    }
+                    pj = pj + 1;
+                }
+                if (bad == 0) {
+                    val fqn_r: res[intern.StrId, A.Error] = intern.add(?s.interner, "uniontest.c63");
+                    if (sel fqn_r.ok) {
+                        val lr: res[session.ModuleId, fail.Fail] = driver_load.module_load(?p, fqn_r.ok);
+                        if (sel lr.err || project.module_count(?p) != 2 + preload) { bad = 5; }
+                    }
+                }
+                project.dnit_project(?p);
+            }
+            session.dnit(?s);
+        }
+    }
+
+    fs.remove_all(?alloc, root);
+    ret bad;
+}
+
+test layout_gate__awaits_type_registration {
+    var bad: i32 = 0;
+
+    if (vec_diag("rec Pair { a: u64; b: u64; }\n$if ($size_of(Pair) == 16) { $error(\"Y\"); } $or { $error(\"N\"); }\nfun main() i32 { ret 0; }\n",
+        "Y") != 0) { bad = 1; }
+    if (vec_diag("rec Pair { a: u64; b: u64; }\n$if ($size_of(Pair) == 16) { $error(\"Y\"); } $or { $error(\"N\"); }\nfun main() i32 { ret 0; }\n",
+        "N") == 0) { bad = 2; }
+
+    if (vec_diag("rec Pair { a: u64; b: u64; }\n$if ($size_of(Pair) == 8) { $error(\"Y\"); } $or { $error(\"N\"); }\nfun main() i32 { ret 0; }\n",
+        "N") != 0) { bad = 3; }
+    if (vec_diag("rec Pair { a: u64; b: u64; }\n$if ($size_of(Pair) == 8) { $error(\"Y\"); } $or { $error(\"N\"); }\nfun main() i32 { ret 0; }\n",
+        "Y") == 0) { bad = 4; }
+
+    var alloc:  A.Allocator;
+    val make_r: err[A.Error] = page.make(?alloc);
+    if (sel make_r.err) { ret 1; }
+    val sr: res[session.Session, fail.Fail] = toolchain.session_init(?alloc);
+    if (sel sr.err) { ret 1; }
+    var s: session.Session = sr.ok;
+    # `$offset_of` answers from the checked layout once types are registered, like `$size_of`
+    val src: str                             = "rec Pair { a: u64; b: u64; }\n$if ($offset_of(Pair, b) == 8) { $error(\"Y\"); } $or { $error(\"N\"); }\nfun main() i32 { ret 0; }\n";
+    val pr:  res[project.Project, fail.Fail] = vec_sema(?s, ?alloc, src);
+    if (!project_was_rejected(pr)) {
+        session.dnit(?s);
+        ret 5;
+    }
+    if (!diagnostic.error_says(?s.diags, "Y")) { bad = 6; }
+    if (diagnostic.len(?s.diags) != 1)         { bad = 7; }
+    session.dnit(?s);
+
+    ret bad;
+}
+
+# builds main, flags and the chain modules, and checks main's gates were decided by the load
+#[testing]
+fun def_chain_gate(flags: str, want_diag: str) i32 {
+    var alloc:  A.Allocator;
+    val make_r: err[A.Error] = page.make(?alloc);
+    if (sel make_r.err) { ret 1; }
+    val sr: res[session.Session, fail.Fail] = toolchain.session_init(?alloc);
+    if (sel sr.err) { ret 1; }
+    var s: session.Session = sr.ok;
+    fin { session.dnit(?s); }
+    var names: [5]str = [5]str{"main.mach", "flags.mach", "word.mach", "bits.mach", "raw.mach"};
+    var texts: [5]str = [5]str{
+        "use uniontest.flags;\n$if (flags.ON) {\n    fun pick() i32 { ret 1; }\n}\n$or {\n    use uniontest.missing;\n    fun pick() i32 { ret missing.value(); }\n}\n$if (flags.ON == 1) {\n    fun again() i32 { ret 2; }\n}\nfun main() i32 { ret pick() + again(); }\n",
+        flags,
+        "use uniontest.bits.Byte;\npub def Word: Byte;\npub def Wide: i32;\npub rec Pair { a: u8; b: u8; }\n",
+        "fwd uniontest.raw.Byte;\n",
+        "pub def Byte: u8;\n"
+    };
+    val root_r: res[str, fail.Fail] = scaffold(?alloc, fixture_manifest(), ?names[0], ?texts[0], 5);
+    if (sel root_r.err) { ret 1; }
+    val root: str = root_r.ok;
+    fin { fs.remove_all(?alloc, root); }
+    var pick: manifest.Selectors              = manifest.t_selectors("", "linux", "");
+    val pr:   res[project.Project, fail.Fail] = build_project(?s, root, ?pick);
+    if (sel pr.err) {
+        if (str_len(want_diag) > 0 && diagnostic.error_says(?s.diags, want_diag)) { ret 0; }
+        ret 2;
+    }
+    var p: project.Project = pr.ok;
+    fin { project.dnit_project(?p); }
+    if (str_len(want_diag) > 0) {
+        if (diagnostic.error_says(?s.diags, want_diag)) { ret 0; }
+        ret 3;
+    }
+    if (diagnostic.error_count(?s.diags) != 0) { ret 4; }
+    val mid: session.ModuleId = project.module_named(?p, "uniontest.main");
+    if (module.is_nil(mid)) { ret 5; }
+    val m: *project.ModuleEntry = project.module_at(?p, mid::u32);
+    if (comptime.gate_state(?m.load.ctx, first_gate_cond(frontend.syntax(?p, m))) == comptime.GATE_STATE_UNKNOWN) { ret 6; }
+    val se: err[fail.Fail] = run_sema_pass(?p);
+    if (sel se.err)                            { ret 7; }
+    if (diagnostic.error_count(?s.diags) != 0) { ret 8; }
+    ret 0;
+}
+
+test gate__reads_a_def_chain_across_modules_at_load {
+    # Flag -> word.Word -> Byte (a symbol import) -> raw.Byte (a fwd) -> u8
+    val chain: i32 = def_chain_gate("use uniontest.word;\npub def Flag: word.Word;\npub val ON: Flag = 1;\n", "");
+    if (chain != 0) { ret 10 + chain; }
+    # the same chain read from a constant in the gate's own module's import
+    val direct: i32 = def_chain_gate("use uniontest.word.Word;\npub val ON: Word = 1;\n", "");
+    if (direct != 0) { ret 20 + direct; }
+    # a chain ending at a signed primitive keeps its width, so the gate refuses it as not u8
+    val wide: i32 = def_chain_gate("use uniontest.word;\npub def Flag: word.Wide;\npub val ON: Flag = 1;\n", "condition must have type u8");
+    if (wide != 0) { ret 30 + wide; }
+    # a chain ending outside the integers is refused at the gate, naming the chain
+    val pair: i32 = def_chain_gate("use uniontest.word;\npub def Flag: word.Pair;\npub val ON: Flag = 1;\n",
+        "`ON` is not an integer constant, so no gate can read it: its type follows the def chain `Flag` -> `word.Pair`");
+    if (pair != 0) { ret 40 + pair; }
+    val pointer: i32 = def_chain_gate("pub def Flag: Handle;\ndef Handle: *u8;\npub val ON: Flag = 1;\n",
+        "its type follows the def chain `Flag` -> `Handle` -> `*u8`, which ends outside the integer primitives");
+    if (pointer != 0) { ret 50 + pointer; }
+    # a def declared under a gate is read in the arm the gate selects, decided on demand
+    val gated: i32 = def_chain_gate("pub val ON: Flag = 1;\n$if ($mach.build.os == $mach.os.linux) { pub def Flag: u8; } $or { pub def Flag: u16; }\n", "");
+    if (gated != 0) { ret 60 + gated; }
+    val gated_wide: i32 = def_chain_gate("pub val ON: Flag = 1;\n$if ($mach.build.os != $mach.os.linux) { pub def Flag: u8; } $or { pub def Flag: u16; }\n", "condition must have type u8");
+    if (gated_wide != 0) { ret 70 + gated_wide; }
+    ret 0;
+}
+
+test gate__invalid_condition_survives_a_deferred_dependency {
+    var names: [2]str;
+    names[0] = "main.mach";
+    names[1] = "dep.mach";
+    var texts: [2]str;
+    texts[0] = "use uniontest.dep;\n$if (NOPE) { }\nfun main() i32 { ret 0; }\n";
+    texts[1] = "def Flag: u8;\nval C: Flag = 1;\n$if (C) { pub fun ready() i32 { ret 1; } }\n";
+    if (union_gate_result_n(?names[0], ?texts[0], 2, "NOPE", "") != 0) { ret 1; }
+    ret 0;
+}
+
+test gate__diagnostic_is_reported_once_across_decl_and_body_inference {
+    var alloc:  A.Allocator;
+    val make_r: err[A.Error] = page.make(?alloc);
+    if (sel make_r.err) { ret 1; }
+    val sr: res[session.Session, fail.Fail] = toolchain.session_init(?alloc);
+    if (sel sr.err) { ret 1; }
+    var s:     session.Session = sr.ok;
+    var names: [1]str;
+    names[0] = "main.mach";
+    var texts: [1]str;
+    texts[0] = "def Flag: u8x4;\nval C: Flag = u8x4{1, 2, 3, 4};\n$if (C) { }\nfun main() i32 { ret 0; }\n";
+    val pr: res[project.Project, fail.Fail] = single_sema_n(?s, ?alloc, ?names[0], ?texts[0], 1);
+    if (sel pr.ok) {
+        var p: project.Project = pr.ok;
+        project.dnit_project(?p);
+        session.dnit(?s);
+        ret 1;
+    }
+    if (!fail.is_reported(pr.err)) {
+        session.dnit(?s);
+        ret 1;
+    }
+    var bad: i32 = 0;
+    if (!diagnostic.error_says(?s.diags, "a vector is not a truth value")) { bad = 2; }
+    if (diagnostic.len(?s.diags) != 1)                                     { bad = 3; }
+    session.dnit(?s);
+    ret bad;
+}
+
+# a lib that refuses itself in a decided arm, beside every way an importer reaches its names
+#[testing]
+fun refusal_counts(lib: str, main: str, needles: *str, counts: *u32, n: u32) bool {
+    var names: [2]str;
+    names[0] = "main.mach";
+    names[1] = "lib.mach";
+    var texts: [2]str;
+    texts[0] = main;
+    texts[1] = lib;
+    ret refusal_counts_n(?names[0], ?texts[0], 2, needles, counts, n);
+}
+
+# the modules' project is rejected, with counts[i] errors naming needles[i]
+#[testing]
+fun refusal_counts_n(names: *str, texts: *str, modules: u32, needles: *str, counts: *u32, n: u32) bool {
+    var alloc:  A.Allocator;
+    val make_r: err[A.Error] = page.make(?alloc);
+    if (sel make_r.err) { ret false; }
+    val sr: res[session.Session, fail.Fail] = toolchain.session_init(?alloc);
+    if (sel sr.err) { ret false; }
+    var s:        session.Session                 = sr.ok;
+    val pr:       res[project.Project, fail.Fail] = vec_sema_n(?s, ?alloc, names, texts, modules);
+    val rejected: bool                            = project_was_rejected(pr);
+    var i:        u32                             = 0;
+    for (i < n) {
+        counts[i] = diagnostic.errors_saying(?s.diags, needles[i])::u32;
+        i         = i + 1;
+    }
+    session.dnit(?s);
+    ret rejected;
+}
+
+# a module's `$error` refusal is its only diagnostic: nothing it would have exported is
+# reported again by an importer, a nested refusal fires whatever its position, and an
+# unselected one does not fire
+test module_refusal__is_the_only_diagnostic {
+    val lib:     str = "$if (0 == 1) { use impl: uniontest.main; }\n$or { $error(\"LIB REFUSED\"); }\nfwd impl.X;\nfwd nowhere.thing;\npub val X: u64 = 1;\npub fun h() u64 { ret impl.X; }\n";
+    val main:    str = "use lib: uniontest.lib;\nuse sx: uniontest.lib.X;\nfwd uniontest.lib.Y;\nuse T: uniontest.lib.Ty;\nfun f(t: T) u64 { ret lib.X + sx + Y + lib.Z; }\nfun main() i64 { ret nope; }\n";
+    var needles: [7]str;
+    needles[0] = "LIB REFUSED";
+    needles[1] = "unresolved identifier `nope`";
+    needles[2] = "unresolved";
+    needles[3] = "exported";
+    needles[4] = "dep set";
+    needles[5] = "`sx`";
+    needles[6] = "`T`";
+    var counts: [7]u32;
+    if (!refusal_counts(lib, main, ?needles[0], ?counts[0], 7))               { ret 1; }
+    if (counts[0] != 1)                                                       { ret 2; }
+    if (counts[1] != 1 || counts[2] != 1)                                     { ret 3; }
+    if (counts[3] != 0 || counts[4] != 0 || counts[5] != 0 || counts[6] != 0) { ret 4; }
+
+    val nested: str = "fwd nowhere.thing;\npub val X: u64 = 1;\n$if (1 == 1) { $if (0 == 1) { pub val Y: u64 = 2; } $or { $error(\"NESTED REFUSED\"); } }\n";
+    needles[0] = "NESTED REFUSED";
+    needles[1] = "dep set";
+    if (!refusal_counts(nested, "use lib: uniontest.lib;\nfun main() i64 { ret lib.X::i64; }\n", ?needles[0], ?counts[0], 2)) { ret 5; }
+    if (counts[0] != 1 || counts[1] != 0)                                                                                     { ret 6; }
+
+    val unselected: str = "$if (1 == 1) { pub val X: u64 = 1; }\n$or { $error(\"NOT FIRED\"); }\n$if (0 == 1) { $error(\"NOT FIRED EITHER\"); }\n";
+    if (!sema_clean2("use uniontest.lib;\nfun main() i64 { ret lib.X::i64; }\n", unselected)) { ret 7; }
+    ret 0;
+}
+
+# a module-scope gate on another module's constant, which the load decides
+#[testing]
+fun fixpoint_refusal_texts(cap: str, names: *str, texts: *str) {
+    names[0] = "main.mach";
+    names[1] = "b.mach";
+    names[2] = "c.mach";
+    names[3] = "cap.mach";
+    texts[0] = "use uniontest.b;\nuse bx: uniontest.b.X;\nfun main() i64 { ret b.g() + bx + b.missing + nope; }\n";
+    texts[1] = "use uniontest.cap;\n$if (cap.ON == 1) { use uniontest.c; fwd c.X; }\n$or { $error(\"B REFUSED\"); }\npub fun g() i64 { ret c.X + X; }\n";
+    texts[2] = "pub val X: i64 = 1;\n";
+    texts[3] = cap;
+}
+
+#[testing]
+fun fixpoint_refusal(cap: str, b: str) i32 {
+    var names: [4]str;
+    var texts: [4]str;
+    fixpoint_refusal_texts(cap, ?names[0], ?texts[0]);
+    if (b != nil) { texts[1] = b; }
+    var needles: [6]str;
+    needles[0] = "B REFUSED";
+    needles[1] = "unresolved identifier `nope`";
+    needles[2] = "unresolved";
+    needles[3] = "`c`";
+    needles[4] = "`X`";
+    needles[5] = "missing";
+    var counts: [6]u32;
+    if (!refusal_counts_n(?names[0], ?texts[0], 4, ?needles[0], ?counts[0], 6)) { ret 1; }
+    if (counts[0] != 1)                                                         { ret 2; }
+    if (counts[1] != 1 || counts[2] != 1)                                       { ret 3; }
+    if (counts[3] != 0 || counts[4] != 0 || counts[5] != 0)                     { ret 4; }
+    ret 0;
+}
+
+# a refusal in the arm a load-decided gate selects is still its module's only diagnostic,
+# in either arm, and the other arm builds clean
+test module_refusal__load_decided {
+    val refused_false: i32 = fixpoint_refusal("pub val ON: u8 = 0;\n", nil);
+    if (refused_false != 0) { ret 10 + refused_false; }
+    val refused_true: i32 = fixpoint_refusal("pub val ON: u8 = 1;\n",
+        "use uniontest.cap;\n$if (cap.ON == 1) { $error(\"B REFUSED\"); }\n$or { use uniontest.c; fwd c.X; }\npub fun g() i64 { ret c.X + X; }\n");
+    if (refused_true != 0) { ret 20 + refused_true; }
+
+    var names: [4]str;
+    var texts: [4]str;
+    fixpoint_refusal_texts("pub def flag: u8;\npub val ON: flag = 1;\n", ?names[0], ?texts[0]);
+    texts[0] = "use uniontest.b;\nfun main() i64 { ret b.g(); }\n";
+    var alloc:  A.Allocator;
+    val make_r: err[A.Error] = page.make(?alloc);
+    if (sel make_r.err) { ret 1; }
+    val sr: res[session.Session, fail.Fail] = toolchain.session_init(?alloc);
+    if (sel sr.err) { ret 1; }
+    var s: session.Session = sr.ok;
+    fin { session.dnit(?s); }
+    val pr: res[project.Project, fail.Fail] = vec_sema_n(?s, ?alloc, ?names[0], ?texts[0], 4);
+    if (sel pr.err) { ret 2; }
+    var p: project.Project = pr.ok;
+    project.dnit_project(?p);
+    if (diagnostic.error_count(?s.diags) != 0) { ret 3; }
+    ret 0;
+}
+
+#[testing]
+val DEFERRED_LIB: str = "pub val ON: u8 = 1;\npub val OFF: u8 = 0;\n";
+
+# every unresolved name in the arm sema selects is reported exactly once, whatever position
+# it sits in, and none of them as the unbound-identifier internal error; a discarded
+# arm reports nothing, nested gates report only the selected path, and a statement gate binds
+# beside a declaration gate the load decides on the same constant
+test deferred_gate__reports_only_the_selected_path {
+    val main:    str = "use lib: uniontest.lib;\nrec Box[T] { v: T; }\nfun f(k: u64) u64 {\n    $if (lib.ON) {\n        var a: NoA = 0;\n        val b: u64 = k::NoB;\n        var c: Box[NoC];\n        {\n            var d: [2]NoD;\n        }\n        ret nope_e;\n    }\n    ret 0;\n}\nfun main() i64 { ret f(1)::i64; }\n";
+    var needles: [7]str;
+    needles[0] = "unresolved type name `NoA`";
+    needles[1] = "unresolved type name `NoB`";
+    needles[2] = "unresolved type name `NoC`";
+    needles[3] = "unresolved type name `NoD`";
+    needles[4] = "unresolved identifier `nope_e`";
+    needles[5] = "internal";
+    needles[6] = "unresolved";
+    var counts: [7]u32;
+    if (!refusal_counts(DEFERRED_LIB, main, ?needles[0], ?counts[0], 7)) { ret 1; }
+    var i: u32 = 0;
+    for (i < 5) {
+        if (counts[i] != 1) { ret 10 + i::i32; }
+        i = i + 1;
+    }
+    if (counts[5] != 0) { ret 20; }
+    if (counts[6] != 5) { ret 21; }
+
+    val discarded: str = "use lib: uniontest.lib;\nrec Box[T] { v: T; }\nfun f(k: u64) u64 {\n    $if (lib.OFF) {\n        var a: NoA = nope;\n        var c: Box[NoC];\n        ret lib.missing;\n    }\n    $or {\n        ret k;\n    }\n    ret 0;\n}\nfun main() i64 { ret f(1)::i64; }\n";
+    if (!sema_clean2(discarded, DEFERRED_LIB)) { ret 30; }
+    # outer selected, inner discarded
+    if (!sema_clean2("use lib: uniontest.lib;\nfun f(k: u64) u64 {\n    $if (lib.ON) {\n        $if (lib.OFF) { ret nope; }\n        $or { ret k; }\n    }\n    ret 0;\n}\nfun main() i64 { ret f(1)::i64; }\n", DEFERRED_LIB)) { ret 31; }
+    # outer discarded, inner selected
+    if (!sema_clean2("use lib: uniontest.lib;\nfun f(k: u64) u64 {\n    $if (lib.OFF) {\n        $if (lib.ON) { ret nope; }\n    }\n    ret k;\n}\nfun main() i64 { ret f(1)::i64; }\n", DEFERRED_LIB)) { ret 32; }
+    # both selected
+    needles[0] = "unresolved identifier `nope`";
+    needles[1] = "internal";
+    if (!refusal_counts(DEFERRED_LIB, "use lib: uniontest.lib;\nfun f(k: u64) u64 {\n    $if (lib.ON) {\n        $if (lib.ON) { ret nope; }\n    }\n    ret k;\n}\nfun main() i64 { ret f(1)::i64; }\n", ?needles[0], ?counts[0], 2)) { ret 33; }
+    if (counts[0] != 1 || counts[1] != 0)                                                                                                                                                                                             { ret 34; }
+
+    val flag_lib: str = "pub def flag: u8;\npub val ON: flag = 1;\n";
+    val beside:   str = "use lib: uniontest.lib;\n$if (lib.ON) { fun selected() i64 { ret 1; } }\nfun f(k: u64) u64 {\n    $if (lib.ON) {\n        var r: u64 = k;\n        ret r;\n    }\n    ret 0;\n}\nfun main() i64 { ret f(1)::i64 + selected(); }\n";
+    if (!sema_clean2(beside, flag_lib)) { ret 35; }
+    ret 0;
+}
+
+test deferred_gate__in_a_generic_reports_once_across_instances {
+    val main:    str = "use lib: uniontest.lib;\nfun g[T](x: T) T {\n    $if (lib.ON) {\n        ret nope_g;\n    }\n    ret x;\n}\nfun main() i64 {\n    val a: u64 = g[u64](1);\n    val b: i64 = g[i64](2);\n    ret b;\n}\n";
+    var needles: [2]str;
+    needles[0] = "unresolved identifier `nope_g`";
+    needles[1] = "internal";
+    var counts: [2]u32;
+    if (!refusal_counts(DEFERRED_LIB, main, ?needles[0], ?counts[0], 2)) { ret 1; }
+    if (counts[0] != 1)                                                  { ret 2; }
+    if (counts[1] != 0)                                                  { ret 3; }
+    val clean: str = "use lib: uniontest.lib;\nfun g[T](x: T) T {\n    $if (lib.ON) {\n        ret x;\n    }\n    ret x;\n}\nfun main() i64 {\n    val a: u64 = g[u64](1);\n    ret g[i64](2);\n}\n";
+    if (!sema_clean2(clean, DEFERRED_LIB)) { ret 4; }
+    ret 0;
+}
+
+#[testing]
+fun module_gate_state(p: *project.Project, s: *session.Session, fqn: str, cond: ast_id.ExprId) comptime.GateState {
+    val idr: res[intern.StrId, A.Error] = intern.add(?s.interner, fqn);
+    if (sel idr.err) { ret comptime.GATE_STATE_UNKNOWN; }
+    var name: intern.StrId           = idr.ok;
+    val mr:   opt[*session.ModuleId] = map.get[intern.StrId, session.ModuleId](?p.loader.by_name, ?name);
+    if (sel mr.none) { ret comptime.GATE_STATE_UNKNOWN; }
+    val mid: session.ModuleId = mr.some[0];
+    ret comptime.gate_state(?project.module_at(p, mid::u32).load.ctx, cond);
+}
+
+test gate__decides_the_same_in_every_phase {
+    var alloc:  A.Allocator;
+    val make_r: err[A.Error] = page.make(?alloc);
+    if (sel make_r.err) { ret 1; }
+    val sr: res[session.Session, fail.Fail] = toolchain.session_init(?alloc);
+    if (sel sr.err) { ret 1; }
+    var s: session.Session = sr.ok;
+
+    var names: [2]str;
+    names[0] = "main.mach";
+    names[1] = "lib.mach";
+    var texts: [2]str;
+    texts[0] = "val FLAG: u8 = 1;\n$if (FLAG) { use uniontest.lib; fun picked() i32 { ret lib.value(); } } $or { use uniontest.missing; }\nfun probe[T](x: T) i32 { $if (FLAG) { ret 1; } ret 0; }\nfun main() i32 { ret picked() + probe[i32](1); }\n";
+    texts[1] = "pub fun value() i32 { ret 7; }\n";
+
+    val root_r: res[str, fail.Fail] = scaffold(?alloc, fixture_manifest(), ?names[0], ?texts[0], 2);
+    if (sel root_r.err) {
+        session.dnit(?s);
+        ret 1;
+    }
+    val root:       str                             = root_r.ok;
+    var tsel_19516: manifest.Selectors              = manifest.t_selectors("", "linux", "");
+    val pr:         res[project.Project, fail.Fail] = build_project(?s, root, ?tsel_19516);
+    fs.remove_all(?alloc, root);
+    if (sel pr.err) {
+        session.dnit(?s);
+        ret 3;
+    }
+    var p: project.Project = pr.ok;
+
+    var bad: i32      = 0;
+    val a:   *ast.Ast = frontend.syntax_named(?p, "uniontest.main");
+    if (a == nil) { bad = 4; }
+    val cond: ast_id.ExprId = first_gate_cond(a);
+    if (bad == 0 && ast_id.expr_is_nil(cond)) { bad = 5; }
+
+    if (bad == 0 && !project.loads(?p, "uniontest.lib"))                                           { bad = 6; }
+    if (bad == 0 && project.loads(?p, "uniontest.missing"))                                        { bad = 7; }
+    if (bad == 0 && module_gate_state(?p, ?s, "uniontest.main", cond) != comptime.GATE_STATE_TRUE) { bad = 8; }
+
+    if (bad == 0) {
+        val se: err[fail.Fail] = run_sema_pass(?p);
+        if (sel se.err)                                                                    { bad = 9; }
+        or (diagnostic.error_count(?p.s.diags) != 0)                                       { bad = 10; }
+        or (module_gate_state(?p, ?s, "uniontest.main", cond) != comptime.GATE_STATE_TRUE) { bad = 11; }
+    }
+    if (bad == 0) {
+        val le: err[fail.Fail] = run_lower_pass(?p);
+        if (sel le.err)                                                                    { bad = 12; }
+        or (module_gate_state(?p, ?s, "uniontest.main", cond) != comptime.GATE_STATE_TRUE) { bad = 13; }
+    }
+
+    project.dnit_project(?p);
+    session.dnit(?s);
+    ret bad;
+}
+
+# a declaring gate reads its constants in the order they depend on each other, not the order they
+# are written in: a constant declared later, one declared under a later gate, one read through a
+# later constant and one behind a later `use` are all decided in the one load walk; gates that lead
+# back to themselves are refused
+test gate__decided_over_its_constants_in_demand_order {
+    if (!sema_clean("$if (C == 4) { pub val B: u32 = 4; }\nval C: u32 = 4;\nfun main() i32 { ret B::i32; }\n"))                                                                        { ret 1; }
+    if (!sema_clean("$if (D == 5) { pub val B: u32 = 4; }\nval D: u32 = C + 1;\nval C: u32 = 4;\nfun main() i32 { ret B::i32; }\n"))                                                   { ret 2; }
+    if (!sema_clean("$if (C == 4) { pub val B: u32 = 4; }\n$if ($mach.build.os == $mach.os.linux) { val C: u32 = 4; } $or { val C: u32 = 2 + 2; }\nfun main() i32 { ret B::i32; }\n")) { ret 3; }
+    if (single_ok("$if (LATER == 1) { fun picked() i32 { ret 3; } } $or { use uniontest.missing; }\nval LATER: u8 = 1;\nfun main() i32 { ret picked(); }\n") != 0)                     { ret 6; }
+    if (single_ok2("$if (lib.LATER) { fun picked() i32 { ret 3; } }\nuse uniontest.lib;\nfun main() i32 { ret picked(); }\n", "pub val LATER: u8 = 1;\n") != 0)                        { ret 7; }
+    if (gate_diag_located("$if (A == 4) { pub val B: u32 = 4; }\n$if (B == 4) { pub val A: u32 = 4; }\nfun main() i32 { ret 0; }\n",
+        "no order decides them: `$if (A == 4)` -> `$if (B == 4)` -> `$if (A == 4)`", "main.mach", 1, 6, "A == 4") != 0) { ret 4; }
+    if (gate_diag_located("$if (X == 4) { pub val B: u32 = 4; }\nval X: u32 = Y;\nval Y: u32 = X;\nfun main() i32 { ret 0; }\n",
+        "no order decides them: `X` -> `Y` -> `X`", "main.mach", 1, 6, "X == 4") != 0) { ret 5; }
+    ret 0;
+}
+
+# the load refuses a gate it cannot decide as it refuses any other declaration: the load is rejected,
+# and its report is located at the gate and names the constant, with no unlocated line beside it
+test gate__undecidable_rejects_the_load_located_at_the_gate {
+    var alloc:  A.Allocator;
+    val make_r: err[A.Error] = page.make(?alloc);
+    if (sel make_r.err) { ret 1; }
+    val sr: res[session.Session, fail.Fail] = toolchain.session_init(?alloc);
+    if (sel sr.err) { ret 1; }
+    var s:     session.Session = sr.ok;
+    var names: [1]str;
+    names[0] = "main.mach";
+    var texts: [1]str;
+    texts[0] = "val OTHER: u8 = 1;\nfun helper() i32 { ret 0; }\n$if (NEVER_BOUND) { fun picked() i32 { ret 3; } }\nfun main() i32 { ret helper(); }\n";
+    val root_r: res[str, fail.Fail] = scaffold(?alloc, fixture_manifest(), ?names[0], ?texts[0], 1);
+    if (sel root_r.err) {
+        session.dnit(?s);
+        ret 1;
+    }
+    val root:       str                             = root_r.ok;
+    var tsel_19625: manifest.Selectors              = manifest.t_selectors("", "linux", "");
+    val pr:         res[project.Project, fail.Fail] = build_project(?s, root, ?tsel_19625);
+    fs.remove_all(?alloc, root);
+
+    var code: i32 = 0;
+    if (sel pr.ok) {
+        var p:        project.Project  = pr.ok;
+        val standing: fail.PhaseStatus = frontend_status(?p);
+        if (sel standing.kind.accepted) { code = 3; }
+        project.dnit_project(?p);
+    }
+    if (sel pr.err) {
+        val f: fail.Fail = pr.err;
+        if (!sel f.reported) { code = 4; }
+    }
+    var located: bool  = false;
+    var i:       usize = 0;
+    for (i < diagnostic.len(?s.diags)) {
+        val d: *diagnostic.Diagnostic = ?s.diags.items.data[i];
+        if (str_contains(d.message, "could not be resolved"))                                               { code = 6; }
+        if (diagnostic_kind.is_error(d.kind) && str_contains(d.message, "is never decided: `NEVER_BOUND`")) { located = true; }
+        i = i + 1;
+    }
+    if (!located && code == 0) { code = 7; }
+    session.dnit(?s);
+    if (code != 0) { ret code; }
+    ret gate_diag_located(texts[0], "is never decided: `NEVER_BOUND`", "main.mach", 3, 6, "NEVER_BOUND");
+}
+
+# a union analysis that keeps the project when only sema rejects, so the gate products it ran stay readable
+#[testing]
+fun gate_rebuild_rejected(s: *session.Session, root: str, out: *project.Project) i32 {
+    val pr: res[project.Project, fail.Fail] = union_analysis(s, root, "", FRONTEND_RESOLVE);
+    if (sel pr.err) { ret 1; }
+    @out = pr.ok;
+    val se: err[fail.Fail] = run_sema_pass(out);
+    if (sel se.ok) { ret 2; }
+    ret 0;
+}
+
+# helper's gate reads a constant of a module it imports only after the gate, so the load walks that
+# `use` on demand; main has no gate of its own, so only helper's view tells the two states apart
+test gate__reads_a_constant_behind_a_later_use {
+    var alloc:  A.Allocator;
+    val make_r: err[A.Error] = page.make(?alloc);
+    if (sel make_r.err) { ret 1; }
+    var names: [3]str = [3]str{"main.mach", "helper.mach", "cfg.mach"};
+    var texts: [3]str = [3]str{
+        "use uniontest.helper;\nfun main() i32 { ret helper.one(); }\n",
+        "$if (cfg.FLAG == 1) {\n    pub fun one() i32 { ret 1; }\n}\n\nuse uniontest.cfg;\n",
+        VIEW_CFG_ON
+    };
+    var s:      session.Session;
+    val root_r: res[str, fail.Fail] = gate_session(?alloc, ?names[0], ?texts[0], 3, ?s);
+    if (sel root_r.err) { ret 2; }
+    val root: str = root_r.ok;
+    fin {
+        fs.remove_all(?alloc, root);
+        session.dnit(?s);
+    }
+    val cold: res[project.Project, fail.Fail] = gate_rebuild(?s, root);
+    if (sel cold.err) { ret 3; }
+    var p: project.Project = cold.ok;
+    project.dnit_project(?p);
+    if (diagnostic.error_count(?s.diags) != 0) { ret 4; }
+
+    # the arm goes away: main's call no longer resolves
+    if (!write_source(?alloc, root, "cfg.mach", VIEW_CFG_OFF)) { ret 5; }
+    var off: project.Project;
+    if (gate_rebuild_rejected(?s, root, ?off) != 0) { ret 6; }
+    project.dnit_project(?off);
+    if (!diagnostic.error_says(?s.diags, "one")) { ret 7; }
+
+    # and back: the warm build resolves it again
+    if (!write_source(?alloc, root, "cfg.mach", VIEW_CFG_ON)) { ret 8; }
+    val on: res[project.Project, fail.Fail] = gate_rebuild(?s, root);
+    if (sel on.err) { ret 9; }
+    p = on.ok;
+    project.dnit_project(?p);
+    ret 0;
+}
+
+#[testing]
+fun manifest_notargets() str {
+    ret "[project]\nmach = \">=5\"\nid = \"uniontest\"\nversion = \"0.0.0\"\nsrc = \"src\"\nwork = \"out\"\n\n[artifact.uniontest]\nkind = \"bin\"\nentry = \"main.mach\"\nout = \"{project.work}/bin/uniontest\"\ntargets = [\"*\"]\nlink = []\nneed = []\n[profile.debug]\ndefault = true\noptimize = false\ndebug = true\nsimd = \"scalarize\"\n[profile.release]\noptimize = true\ndebug = false\nsimd = \"scalarize\"\n";
+}
+
+test manifest__empty_target_table_synthesizes_native {
+    var alloc:  A.Allocator;
+    val make_r: err[A.Error] = page.make(?alloc);
+    if (sel make_r.err) { ret 1; }
+    val sr: res[session.Session, fail.Fail] = toolchain.session_init(?alloc);
+    if (sel sr.err) { ret 1; }
+    var s: session.Session = sr.ok;
+
+    var names: [1]str;
+    names[0] = "main.mach";
+    var texts: [1]str;
+    texts[0] = "#[symbol(\"_start\")]\nfun start() i32 { ret 0; }\n";
+    val root_r: res[str, fail.Fail] = scaffold(?alloc, manifest_notargets(), ?names[0], ?texts[0], 1);
+    if (sel root_r.err) {
+        session.dnit(?s);
+        ret 1;
+    }
+    val root: str = root_r.ok;
+
+    var bad:    i32                             = 0;
+    var native: manifest.Selectors              = manifest.t_selectors("", "", "");
+    val pr:     res[project.Project, fail.Fail] = build_project(?s, root, ?native);
+    if (sel pr.ok) {
+        var p: project.Project = pr.ok;
+        project.dnit_project(?p);
+    }
+    if (sel pr.err) {
+        bad = 1;
+    }
+
+    fs.remove_all(?alloc, root);
+    session.dnit(?s);
+    ret bad;
+}
+
+# two declared targets that no supported host matches
+#[testing]
+fun manifest_foreign_only() str {
+    ret "[project]\nmach = \">=5\"\nid = \"foreign\"\nversion = \"0.0.0\"\nsrc = \"src\"\nwork = \"out/{target.name}/{profile.name}\"\n\n[target.bare]\nisa = \"aarch64\"\nos = \"freestanding\"\nabi = \"aapcs64\"\nof = \"elf\"\n\n[target.spare]\nisa = \"riscv64\"\nos = \"freestanding\"\nabi = \"lp64d\"\nof = \"elf\"\n\n[artifact.foreign]\nkind = \"bin\"\nentry = \"main.mach\"\nout = \"{project.work}/bin/foreign\"\ntargets = [\"*\"]\nlink = []\nneed = []\n[profile.debug]\ndefault = true\noptimize = false\ndebug = true\nsimd = \"scalarize\"\n";
+}
+
+# `native` with no declared host target is refused before any step runs, and `-t` still selects it
+test native__without_a_host_target_is_refused_naming_the_way_out {
+    var alloc:  A.Allocator;
+    val make_r: err[A.Error] = page.make(?alloc);
+    if (sel make_r.err) { ret 1; }
+    val sr: res[session.Session, fail.Fail] = toolchain.session_init(?alloc);
+    if (sel sr.err) { ret 1; }
+    var s: session.Session = sr.ok;
+
+    var names: [1]str;
+    names[0] = "main.mach";
+    var texts: [1]str;
+    texts[0] = "#[symbol(\"_start\")]\nfun start() i32 { ret 0; }\n";
+    val root_r: res[str, fail.Fail] = scaffold(?alloc, manifest_foreign_only(), ?names[0], ?texts[0], 1);
+    if (sel root_r.err) {
+        session.dnit(?s);
+        ret 1;
+    }
+    val root: str = root_r.ok;
+
+    var bad:    i32                             = 0;
+    var native: manifest.Selectors              = manifest.t_selectors("", "", "");
+    val nr:     res[project.Project, fail.Fail] = build_project(?s, root, ?native);
+    if (sel nr.ok) {
+        var p: project.Project = nr.ok;
+        project.dnit_project(?p);
+        bad = 2;
+    }
+    if (sel nr.err) {
+        val text: str = fail.describe(nr.err);
+        if (!str_contains(text, "matches no declared target") || !str_contains(text, "bare (freestanding-aarch64)")
+            || !str_contains(text, "with -t")) { bad = 3; }
+    }
+
+    var named: manifest.Selectors              = manifest.t_selectors("", "bare", "");
+    val er:    res[project.Project, fail.Fail] = build_project(?s, root, ?named);
+    if (sel er.err) { bad = 4; }
+    if (sel er.ok) {
+        var p: project.Project = er.ok;
+        project.dnit_project(?p);
+    }
+
+    fs.remove_all(?alloc, root);
+    session.dnit(?s);
+    ret bad;
+}
+
+# `$project.name` and `$project.description` are refused at their use site as
+# unknown paths, the same as any other wrong path
+test project_path__name_and_description_are_refused_as_unknown {
+    if (vec_diag("val n: *u8 = $project.name;\nfun main() i32 { ret 0; }\n", "unknown `$project.*` path") != 0)        { ret 1; }
+    if (vec_diag("val d: *u8 = $project.description;\nfun main() i32 { ret 0; }\n", "unknown `$project.*` path") != 0) { ret 2; }
+    if (vec_diag("val d: *u8 = $project.bogus;\nfun main() i32 { ret 0; }\n", "unknown `$project.*` path") != 0)       { ret 3; }
+    if (!sema_clean("val i: *u8 = $project.id;\nval v: *u8 = $project.version;\nfun main() i32 { ret 0; }\n"))         { ret 4; }
+    ret 0;
+}
+
+#[testing]
+fun manifest_overlay_src() str {
+    ret "[project]\nmach = \">=5\"\nid = \"ctxcase\"\nversion = \"1.2.3\"\nsrc = \"src\"\nwork = \"out/{target.name}/{profile.name}\"\n\n[target.windows]\nisa = \"x86_64\"\nos = \"windows\"\nabi = \"win64\"\n\n[profile.release]\noptimize = true\ndebug = false\nsimd = \"scalarize\"\n\n[artifact.beta]\nkind = \"bin\"\nentry = \"beta.mach\"\nout = \"{project.work}/bin/beta\"\ntargets = [\"*\"]\nlink = []\nneed = []\n";
+}
+
+test overlay__is_found_through_the_manifest_src {
+    var alloc:  A.Allocator;
+    val make_r: err[A.Error] = page.make(?alloc);
+    if (sel make_r.err) { ret 1; }
+    val sr: res[session.Session, fail.Fail] = toolchain.session_init(?alloc);
+    if (sel sr.err) { ret 1; }
+    var s: session.Session = sr.ok;
+
+    var names: [1]str;
+    names[0] = "beta.mach";
+    var texts: [1]str;
+    texts[0] = "fun main() i32 { ret no_such_symbol(); }\n";
+    val root_r: res[str, fail.Fail] = scaffold(?alloc, manifest_overlay_src(), ?names[0], ?texts[0], 1);
+    if (sel root_r.err) {
+        session.dnit(?s);
+        ret 2;
+    }
+    val root: str = root_r.ok;
+
+    val ov_path: res[str, A.Error] = types_path.join(?alloc, root, "src/beta.mach");
+    if (sel ov_path.err) {
+        fs.remove_all(?alloc, root);
+        session.dnit(?s);
+        ret 3;
+    }
+    val osr: err[fail.Fail] = session.set_overlay(?s, ov_path.ok, "fun main() i32 { ret 0; }\n");
+    if (sel osr.err) {
+        fs.remove_all(?alloc, root);
+        session.dnit(?s);
+        ret 3;
+    }
+
+    var bad: i32                               = 0;
+    val mr:  res[manifest.Manifest, fail.Fail] = load_manifest(?s, root);
+    if (sel mr.err) { bad = 4; }
+    if (sel mr.ok) {
+        var mf:  manifest.Manifest    = mr.ok;
+        var req: request.BuildRequest = request.defaults();
+        req.project_root = root;
+        req.target       = "windows";
+        req.profile      = "release";
+        req.artifact     = "beta";
+        req.goal         = request.GOAL_OBJECTS;
+        req.opt          = pipeline.OPT_RELEASE;
+
+        val pr: res[project.Project, fail.Fail] = analyze_project_tolerant(?s, ?mf, ?req, project.ROOT_ARTIFACT, nil, 0, FRONTEND_SEMA);
+        if (sel pr.err) { bad = 5; }
+        if (sel pr.ok) {
+            var p: project.Project = pr.ok;
+            if (diagnostic.error_count(?p.s.diags) != 0) { bad = 6; }
+            project.dnit_project(?p);
+        }
+        manifest.dnit(?mf, ?alloc);
+    }
+
+    session.dnit(?s);
+    fs.remove_all(?alloc, root);
+    ret bad;
+}
+
+#[testing]
+fun manifest_stack_elf() str {
+    ret "[project]\nmach = \">=5\"\nid = \"stk\"\nversion = \"0.1.0\"\nsrc = \"src\"\nwork = \"out/{target.name}/{profile.name}\"\n\n[target.win]\nisa = \"x86_64\"\nos = \"windows\"\nabi = \"win64\"\nstack_reserve = 8388608\n\n[target.lin]\nisa = \"x86_64\"\nos = \"linux\"\nabi = \"sysv64\"\nstack_reserve = 8388608\n\n[profile.debug]\noptimize = false\ndebug = false\nsimd = \"scalarize\"\n\n[artifact.stk]\nkind = \"bin\"\nentry = \"main.mach\"\nout = \"{project.work}/bin/stk\"\ntargets = [\"*\"]\nlink = []\nneed = []\n";
+}
+
+# the pe case, which accepts the keys, is stack_reserve__reaches_the_linked_pe
+test stack_reserve__refused_at_load_on_a_format_without_one {
+    var alloc:  A.Allocator;
+    val make_r: err[A.Error] = page.make(?alloc);
+    if (sel make_r.err) { ret 1; }
+    val sr: res[session.Session, fail.Fail] = toolchain.session_init(?alloc);
+    if (sel sr.err) { ret 1; }
+    var s: session.Session = sr.ok;
+
+    var names: [1]str;
+    names[0] = "main.mach";
+    var texts: [1]str;
+    texts[0] = "fun main() i32 { ret 0; }\n";
+
+    var bad: i32 = 0;
+
+    val bad_root_r: res[str, fail.Fail] = scaffold(?alloc, manifest_stack_elf(), ?names[0], ?texts[0], 1);
+    if (sel bad_root_r.err) {
+        session.dnit(?s);
+        ret 2;
+    }
+    val bad_root: str = bad_root_r.ok;
+
+    val br: res[manifest.Manifest, fail.Fail] = load_manifest(?s, bad_root);
+    if (sel br.ok) {
+        var m: manifest.Manifest = br.ok;
+        manifest.dnit(?m, ?alloc);
+        bad = 3;
+    }
+    if (sel br.err) {
+        val msg: str = fail.describe(br.err);
+        if (!str_contains(msg, "stack_reserve") && bad == 0) { bad = 4; }
+        if (!str_contains(msg, "lin") && bad == 0)           { bad = 5; }
+        if (!str_contains(msg, "elf") && bad == 0)           { bad = 6; }
+    }
+    fs.remove_all(?alloc, bad_root);
+    session.dnit(?s);
+    ret bad;
 }
