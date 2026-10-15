@@ -805,7 +805,9 @@ pub fun load_manifest(s: *session.Session, project_root: str) res[manifest.Manif
     val path: str = path_r.ok;
     fin { str_free(s.build_alloc, path); }
 
+    # the text read off disk is this call's; the session and the parse each keep their own copy
     var text:     str      = nil;
+    var read_off: bool     = false;
     val buffered: opt[str] = session.overlay_get(s, path);
     if (sel buffered.some) { text = buffered.some; }
     or {
@@ -815,7 +817,11 @@ pub fun load_manifest(s: *session.Session, project_root: str) res[manifest.Manif
             if (sel said.err) { ret res[manifest.Manifest, fail.Fail].err{said.err}; }
             ret res[manifest.Manifest, fail.Fail].err{fail.environment(diagnostic_kind.FS_READ, said.ok)};
         }
-        text = read.ok;
+        text     = read.ok;
+        read_off = true;
+    }
+    fin {
+        if (read_off) { str_free(s.build_alloc, text); }
     }
     val loaded: res[lang_source.FileId, fail.Fail] = session.load_source(s, path, text);
     if (sel loaded.err) { ret res[manifest.Manifest, fail.Fail].err{loaded.err}; }
