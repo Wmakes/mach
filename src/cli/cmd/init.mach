@@ -44,7 +44,6 @@ use mach.lang.driver.toolchain;
 use mach.lang.editor;
 use mach.lang.fail;
 use fe_format: mach.lang.fe.format;
-use mach.lang.host;
 use mach.lang.intern;
 use mach.lang.manifest;
 use mach.lang.output;
@@ -744,29 +743,18 @@ test build_manifest_text__states_the_compiler_range_and_leaves_dependencies_to_d
 
 #[testing]
 fun t_git_in(a: *A.Allocator, dir: str, c1: str, c2: str, c3: str) bool {
-    val gr: res[str, fail.Fail] = host.program_resolve(a, "git");
-    if (sel gr.err) { ret false; }
-    var av: [7]*u8;
-    av[0] = gr.ok::*u8;
-    av[1] = "-C"::*u8;
-    av[2] = dir::*u8;
-    var k: usize = 3;
-    if (!str_empty(c1)) {
-        av[k] = c1::*u8;
-        k     = k + 1;
+    var given: [3]str = [3]str{c1, c2, c3};
+    var args:  [3]str;
+    var k:     usize  = 0;
+    var i:     usize  = 0;
+    for (i < 3) {
+        if (!str_empty(given[i])) {
+            args[k] = given[i];
+            k       = k + 1;
+        }
+        i = i + 1;
     }
-    if (!str_empty(c2)) {
-        av[k] = c2::*u8;
-        k     = k + 1;
-    }
-    if (!str_empty(c3)) {
-        av[k] = c3::*u8;
-        k     = k + 1;
-    }
-    av[k] = nil;
-    val rr: res[exec.ExitStatus, exec.Error] = exec.run(gr.ok, ?av[0], exec.Environment.inherit{});
-    if (sel rr.err) { ret false; }
-    ret exec.exited(rr.ok) && exec.code(rr.ok) == 0;
+    ret git.scratch_git(a, dir, ?args[0], k);
 }
 
 # one tagged release of a fixture std whose manifest needs `mach_range`
@@ -909,7 +897,7 @@ test run__no_deps_resolves_the_range_without_a_checkout {
 
 #[testing]
 fun t_release_of(a: *A.Allocator, root: str) res[str, fail.Fail] {
-    val sr: res[session.Session, fail.Fail] = toolchain.session_init(a);
+    val sr: res[session.Session, fail.Fail] = git.scratch_session(a);
     if (sel sr.err) { ret res[str, fail.Fail].err{fail.message("session")}; }
     var s: session.Session = sr.ok;
     fin { session.dnit(?s); }
@@ -1443,7 +1431,7 @@ fun t_init_git_boundary(no_git: bool, existing: bool) i32 {
     var head_before:   str = "";
     var config_before: str = "";
     if (existing) {
-        val created: res[session.Session, fail.Fail] = toolchain.session_init(?a);
+        val created: res[session.Session, fail.Fail] = git.scratch_session(?a);
         if (sel created.err) { ret 5; }
         var s: session.Session = created.ok;
         fin { session.dnit(?s); }

@@ -48,6 +48,8 @@ use driver_closure: mach.lang.driver.closure;
 use mach.lang.driver.request;
 use mach.lang.driver.toolchain;
 use mach.lang.manifest;
+#[testing]
+use mach.lang.package.git;
 use mach.lang.readout;
 use mach.lang.session;
 use lang_target: mach.lang.target;
@@ -1285,32 +1287,6 @@ val T_NOGIT_LIB_MANIFEST: str = "[project]\nmach = \">=5\"\nid = \"nogitlib\"\nv
 #[testing]
 val T_NOGIT_MAIN: str = "use nogitlib.lib;\n\n#[symbol(\"_start\")]\nfun start() {\n    val c: u64 = lib.code();\n    asm x86_64 {\n        mov rax, 60\n        mov rdi, {c}\n        syscall\n    }\n}\n";
 
-# run git in `dir` with a fixed identity, so a commit needs no user configuration
-#[testing]
-fun t_git_ok(a: *A.Allocator, dir: str, args: *str, count: usize) bool {
-    val program: res[str, fail.Fail] = host.program_resolve(a, "git");
-    if (sel program.err) { ret false; }
-    var argv: [12]*u8;
-    if (count > 4) { ret false; }
-    argv[0] = program.ok::*u8;
-    argv[1] = "-C"::*u8;
-    argv[2] = dir::*u8;
-    argv[3] = "-c"::*u8;
-    argv[4] = "user.name=mach-test"::*u8;
-    argv[5] = "-c"::*u8;
-    argv[6] = "user.email=mach-test@example.invalid"::*u8;
-    var i: usize = 0;
-    for (i < count) {
-        argv[7 + i] = args[i]::*u8;
-        i           = i + 1;
-    }
-    argv[7 + count] = nil;
-    val ran: res[exec.ExitStatus, exec.Error] = exec.run(program.ok, ?argv[0], exec.Environment.inherit{});
-    if (sel ran.err) { ret false; }
-    val status: exec.ExitStatus = ran.ok;
-    ret exec.exited(status) && exec.code(status) == 0;
-}
-
 # `mach build` of a project whose dependency is a git checkout runs no git process: the
 # build only locates each dependency and reads its manifest. PATH is pointed at
 # a stand-in git that records every run, so any git the build spawns is caught
@@ -1334,7 +1310,7 @@ test build__a_checked_out_dependency_runs_no_git {
     var init:   [2]str = [2]str{"init", "-q"};
     var add:    [2]str = [2]str{"add", "-A"};
     var commit: [4]str = [4]str{"commit", "-q", "-m", "checked out"};
-    if (!t_git_ok(?a, dep, ?init[0], 2) || !t_git_ok(?a, dep, ?add[0], 2) || !t_git_ok(?a, dep, ?commit[0], 4)) { ret 4; }
+    if (!git.scratch_git(?a, dep, ?init[0], 2) || !git.scratch_git(?a, dep, ?add[0], 2) || !git.scratch_git(?a, dep, ?commit[0], 4)) { ret 4; }
 
     val fake_dir: str                              = fixture.join(?a, root, "fakebin");
     val marker:   str                              = fixture.join(?a, root, "git-ran");
