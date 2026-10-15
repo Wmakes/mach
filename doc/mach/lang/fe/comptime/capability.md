@@ -144,6 +144,18 @@ pub fun capabilities_empty[T](kind: PhaseCapabilityKind) PhaseCapabilities[T];
 pub fun parsed_expression[T](ctx: *T, a: *ast.Ast, eid: ast_id.ExprId) res[ast_expr.Expr, comptime_failure.EvalFail];
 ```
 
+## fun parsed_head
+
+```mach
+pub fun parsed_head[T](ctx: *T, a: *ast.Ast, tid: ast_id.TypeId) res[ast_type.Type, comptime_failure.EvalFail];
+```
+
+## fun read_head
+
+```mach
+pub fun read_head[T](ctx: *T, caps: PhaseCapabilities[T], a: *ast.Ast, tid: ast_id.TypeId) res[ast_type.Type, comptime_failure.EvalFail];
+```
+
 ## fun read_expression
 
 ```mach
@@ -162,14 +174,16 @@ no phase capability: an expression reads literals and the constants its context 
 
 ```mach
 pub fun loading_capabilities[T](member: fun(*T, ast_id.ExprId) res[opt[comptime_value.CTValue], comptime_failure.EvalFail],
-cast: fun(*T, ast_id.ExprId, comptime_value.CTValue) res[comptime_value.CTValue, comptime_failure.EvalFail]) res[PhaseCapabilities[T], fail.Fail];
+cast: fun(*T, ast_id.ExprId, comptime_value.CTValue) res[comptime_value.CTValue, comptime_failure.EvalFail],
+head: fun(*T, *ast.Ast, ast_id.TypeId) res[ast_type.Type, comptime_failure.EvalFail]) res[PhaseCapabilities[T], fail.Fail];
 ```
 
 ## fun resolution_capabilities
 
 ```mach
 pub fun resolution_capabilities[T](ident: fun(*T, ast_id.ExprId) bool,
-expression: fun(*T, *ast.Ast, ast_id.ExprId) res[ast_expr.Expr, comptime_failure.EvalFail]) res[PhaseCapabilities[T], fail.Fail];
+expression: fun(*T, *ast.Ast, ast_id.ExprId) res[ast_expr.Expr, comptime_failure.EvalFail],
+head: fun(*T, *ast.Ast, ast_id.TypeId) res[ast_type.Type, comptime_failure.EvalFail]) res[PhaseCapabilities[T], fail.Fail];
 ```
 
 ## fun semantic_name_capabilities
@@ -180,7 +194,8 @@ member: fun(*T, ast_id.ExprId) res[opt[comptime_value.CTValue], comptime_failure
 constant: fun(*T, ast_id.ExprId) res[opt[comptime_value.CTValue], comptime_failure.EvalFail],
 store: fun(*T, u32) res[*comptime_deep.Store, comptime_failure.EvalFail],
 ident: fun(*T, ast_id.ExprId) bool,
-expression: fun(*T, *ast.Ast, ast_id.ExprId) res[ast_expr.Expr, comptime_failure.EvalFail]) res[PhaseCapabilities[T], fail.Fail];
+expression: fun(*T, *ast.Ast, ast_id.ExprId) res[ast_expr.Expr, comptime_failure.EvalFail],
+head: fun(*T, *ast.Ast, ast_id.TypeId) res[ast_type.Type, comptime_failure.EvalFail]) res[PhaseCapabilities[T], fail.Fail];
 ```
 
 ## fun semantic_type_capabilities
@@ -199,7 +214,8 @@ layout: fun(*T, u32) res[opt[comptime_value.CTValue], comptime_failure.EvalFail]
 cast: fun(*T, ast_id.ExprId, comptime_value.CTValue) res[comptime_value.CTValue, comptime_failure.EvalFail],
 scalar: fun(*T, ast_id.ExprId, comptime_value.CTValue) res[comptime_value.CTValue, comptime_failure.EvalFail],
 ident: fun(*T, ast_id.ExprId) bool,
-expression: fun(*T, *ast.Ast, ast_id.ExprId) res[ast_expr.Expr, comptime_failure.EvalFail]) res[PhaseCapabilities[T], fail.Fail];
+expression: fun(*T, *ast.Ast, ast_id.ExprId) res[ast_expr.Expr, comptime_failure.EvalFail],
+head: fun(*T, *ast.Ast, ast_id.TypeId) res[ast_type.Type, comptime_failure.EvalFail]) res[PhaseCapabilities[T], fail.Fail];
 ```
 
 ## fun lowering_capabilities
@@ -217,7 +233,8 @@ layout: fun(*T, u32) res[opt[comptime_value.CTValue], comptime_failure.EvalFail]
 cast: fun(*T, ast_id.ExprId, comptime_value.CTValue) res[comptime_value.CTValue, comptime_failure.EvalFail],
 scalar: fun(*T, ast_id.ExprId, comptime_value.CTValue) res[comptime_value.CTValue, comptime_failure.EvalFail],
 ident: fun(*T, ast_id.ExprId) bool,
-expression: fun(*T, *ast.Ast, ast_id.ExprId) res[ast_expr.Expr, comptime_failure.EvalFail]) res[PhaseCapabilities[T], fail.Fail];
+expression: fun(*T, *ast.Ast, ast_id.ExprId) res[ast_expr.Expr, comptime_failure.EvalFail],
+head: fun(*T, *ast.Ast, ast_id.TypeId) res[ast_type.Type, comptime_failure.EvalFail]) res[PhaseCapabilities[T], fail.Fail];
 ```
 
 ## fun capabilities_have_member

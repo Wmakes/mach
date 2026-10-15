@@ -323,6 +323,8 @@ rec ResolveContext {
 
     expr_choices:       *interpretation.Choice;
     expr_choices_count: usize;
+    # how each literal head's path reads, one per type node; the parsed tree is never rewritten
+    type_heads: *interpretation.Head;
 }
 
 pub rec ResolveResult {
@@ -348,6 +350,9 @@ pub rec ResolveResult {
 
     expr_choices:       *interpretation.Choice;
     expr_choices_count: usize;
+    # how each literal head's path reads, `type_count` of them: as written, or as a type and the
+    # tag case its last segment selects
+    type_heads: *interpretation.Head;
 
     # the local each `{name}` of an asm block binds
     asm_binds: collections_vector.Vector[AsmBind];
@@ -570,6 +575,9 @@ pub fun result_dnit(r: *ResolveResult) {
     if (r.expr_choices != nil && r.expr_choices_count != 0) {
         A.deallocate[interpretation.Choice](r.alloc, r.expr_choices, r.expr_choices_count);
     }
+    if (r.type_heads != nil && r.type_count != 0) {
+        A.deallocate[interpretation.Head](r.alloc, r.type_heads, r.type_count::usize);
+    }
     map.dnit[u64, SymbolId](?r.param_index);
     collections_vector.dnit[AsmBind](?r.asm_binds);
     comptime.bindings_dnit(?r.constants);
@@ -586,6 +594,7 @@ pub fun result_dnit(r: *ResolveResult) {
     r.public_constant_count = 0;
     r.expr_choices          = nil;
     r.expr_choices_count    = 0;
+    r.type_heads            = nil;
 }
 
 # an owned copy of `r` from `alloc`, every entry at the id it has in `r`
@@ -616,6 +625,9 @@ pub fun result_copy(r: *ResolveResult, alloc: *A.Allocator) res[ResolveResult, f
     val choices: res[*interpretation.Choice, A.Error] = array_copy[interpretation.Choice](alloc, r.expr_choices, r.expr_choices_count);
     if (sel choices.err) { ret res[ResolveResult, fail.Fail].err{fail.refused(choices.err)}; }
     out.expr_choices = choices.ok;
+    val heads: res[*interpretation.Head, A.Error] = array_copy[interpretation.Head](alloc, r.type_heads, r.type_count::usize);
+    if (sel heads.err) { ret res[ResolveResult, fail.Fail].err{fail.refused(heads.err)}; }
+    out.type_heads = heads.ok;
     map.dnit[u64, SymbolId](?out.param_index);
     val params: res[map.Map[u64, SymbolId], A.Error] = map.clone[u64, SymbolId](?r.param_index, alloc);
     if (sel params.err) {
@@ -734,17 +746,9 @@ fun register_constant_tags(rc: *ResolveContext, start: u32, len: u32) err[fail.F
 fun split_literal_head(rc: *ResolveContext, eid: ast_id.ExprId) {
     val e_opt: opt[*ast_expr.Expr] = ast.get_expr(rc.a, eid);
     if (!sel e_opt.some) { ret; }
-    val e:   *ast_expr.Expr = e_opt.some;
-    var tid: ast_id.TypeId  = ast_id.TYPE_NIL;
-    if (e.kind == ast_expr.EXPR_KIND_STRUCT_LIT) { tid = e.data.struct_lit.ty; }
-    if (e.kind == ast_expr.EXPR_KIND_VECTOR_LIT) { tid = e.data.vector_lit.ty; }
-    if (ast_id.type_is_nil(tid))                 { ret; }
-    val t_opt: opt[*ast_type.Type] = ast.get_type(rc.a, tid);
-    if (!sel t_opt.some) { ret; }
-    val t: *ast_type.Type = t_opt.some;
-    if (t.kind == ast_type.TYPE_KIND_NAMED && ast_id.expr_is_nil(t.data.named.case_desc) && t.data.named.case_name.len == 0) {
-        split_case_head(rc, ?t.data.named);
-    }
+    val tid: ast_id.TypeId = comptime.literal_head_type(e_opt.some);
+    if (ast_id.type_is_nil(tid)) { ret; }
+    split_case_head(rc, tid);
 }
 
 fun init_context(
@@ -763,7 +767,7 @@ fun init_context(
     rc.deps   = deps;
     rc.ctx    = ctx;
     val caps_r: res[comptime.PhaseCapabilities[ResolveContext], fail.Fail] =
-        comptime.resolution_capabilities[ResolveContext](comptime_ident_is_runtime, comptime_expression);
+        comptime.resolution_capabilities[ResolveContext](comptime_ident_is_runtime, comptime_expression, comptime_head);
     if (sel caps_r.err) {
         ret err[fail.Fail].err{caps_r.err};
     }
@@ -809,6 +813,7 @@ fun init_context(
 
     rc.expr_choices       = nil;
     rc.expr_choices_count = 0;
+    rc.type_heads         = nil;
 
     var handed: bool = false;
     fin {
@@ -856,6 +861,13 @@ fun init_context(
         }
         rc.type_resolved = r.ok;
         memory.fill[SymbolId](rc.type_resolved, SYMBOL_NIL, a.types.len);
+        val heads: res[*interpretation.Head, A.Error] = A.allocate[interpretation.Head](s.alloc, a.types.len);
+        if (sel heads.err) {
+            fail.internal(?rc.status, lang_alloc.text(heads.err));
+            ret err[fail.Fail].err{fail.refused(heads.err)};
+        }
+        rc.type_heads = heads.ok;
+        memory.fill[interpretation.Head](rc.type_heads, interpretation.HEAD_PARSED, a.types.len);
     }
     if (a.decls.len > 0) {
         val r: res[*SymbolId, A.Error] = A.allocate[SymbolId](s.alloc, a.decls.len);
@@ -897,6 +909,9 @@ fun dnit_context(rc: *ResolveContext) {
     }
     if (rc.expr_choices != nil && rc.expr_choices_count != 0) {
         A.deallocate[interpretation.Choice](rc.s.alloc, rc.expr_choices, rc.expr_choices_count);
+    }
+    if (rc.type_heads != nil) {
+        A.deallocate[interpretation.Head](rc.s.alloc, rc.type_heads, rc.a.types.len);
     }
     map.dnit_by[ImportedKey, SymbolId](?rc.imported_cache);
     map.dnit[intern.StrId, SymbolId](?rc.vec_cache);
@@ -1405,7 +1420,7 @@ fun try_register_comptime_const(rc: *ResolveContext, name_span: lang_source.Span
 # literal, bound once the literal's head has been split into type and case, and rebound with its
 # declared type by type checking. it points into this syntax tree and is never exported
 fun register_constant_tag(rc: *ResolveContext, name_span: lang_source.Span, init_expr: ast_id.ExprId) err[fail.Fail] {
-    if (name_span.len == 0 || !comptime.is_case_literal(rc.a, init_expr)) { ret err[fail.Fail].ok{}; }
+    if (name_span.len == 0 || !is_case_literal(rc, init_expr)) { ret err[fail.Fail].ok{}; }
     val r_id: res[intern.StrId, A.Error] = intern.range_add(?rc.s.interner, rc.source, name_span.offset, name_span.len);
     if (sel r_id.err) {
         fail.internal(?rc.status, lang_alloc.text(r_id.err));
@@ -2823,19 +2838,13 @@ fun bind_expr(rc: *ResolveContext, eid: ast_id.ExprId) err[fail.Fail] {
         val rt: err[fail.Fail] = bind_literal_head(rc, e.data.vector_lit.ty);
         if (sel rt.err) { ret rt; }
         # a head that names a case is a tag construction, not a lane list
-        if (literal_head_names_case(rc, e.data.vector_lit.ty)) {
-            val vl: ast_expr.ExprVectorLit = e.data.vector_lit;
-            e.kind            = ast_expr.EXPR_KIND_STRUCT_LIT;
-            e.data.struct_lit = ast_expr.ExprStructLit{elems_start: vl.elems_start, elems_len: vl.elems_len,
-                ty: vl.ty, fields_start: 0, fields_len: 0};
-            ret bind_expr_list(rc, e.data.struct_lit.elems_start, e.data.struct_lit.elems_len);
-        }
+        if (literal_head_names_case(rc, e.data.vector_lit.ty)) { rc.expr_choices[ast_id.expr_index(eid)] = interpretation.CASE_LITERAL; }
         ret bind_expr_list(rc, e.data.vector_lit.elems_start, e.data.vector_lit.elems_len);
     }
     if (e.kind == ast_expr.EXPR_KIND_STRUCT_LIT) {
         val rt: err[fail.Fail] = bind_literal_head(rc, e.data.struct_lit.ty);
         if (sel rt.err) { ret rt; }
-        # positional payloads, which a case construction rewritten from a vector literal keeps
+        # positional elements, which a record literal repeats from its named fields
         val re: err[fail.Fail] = bind_expr_list(rc, e.data.struct_lit.elems_start, e.data.struct_lit.elems_len);
         if (sel re.err) { ret re; }
         var fi: u32 = 0;
@@ -2899,6 +2908,35 @@ fun comptime_expression(rc: *ResolveContext, a: *ast.Ast, eid: ast_id.ExprId) re
 pub fun expression(rr: *ResolveResult, a: *ast.Ast, eid: ast_id.ExprId) res[ast_expr.Expr, fail.Fail] {
     if (rr == nil) { ret res[ast_expr.Expr, fail.Fail].err{fail.message("resolved expression requires a resolver result")}; }
     ret interpretation.get(a, rr.expr_choices, rr.expr_choices_count, eid);
+}
+
+# the type node `tid` of `a`, whose text is `source`, as name resolution read it: a literal head
+# it split names the type by its path's prefix and the case by the last segment
+pub fun type_node(rr: *ResolveResult, a: *ast.Ast, source: str, tid: ast_id.TypeId) res[ast_type.Type, fail.Fail] {
+    if (rr == nil) { ret res[ast_type.Type, fail.Fail].err{fail.message("resolved type requires a resolver result")}; }
+    ret interpretation.type_node(a, source, rr.type_heads, rr.type_count::usize, tid);
+}
+
+# the type node `tid` as this resolution reads it so far
+fun head_node(rc: *ResolveContext, tid: ast_id.TypeId) res[ast_type.Type, fail.Fail] {
+    ret interpretation.type_node(rc.a, rc.source, rc.type_heads, rc.a.types.len, tid);
+}
+
+fun comptime_head(rc: *ResolveContext, a: *ast.Ast, tid: ast_id.TypeId) res[ast_type.Type, comptime.EvalFail] {
+    if (rc == nil || rc.a != a) { ret res[ast_type.Type, comptime.EvalFail].err{comptime.eval_error(comptime.EVAL_FAIL_INTERNAL, diagnostic_kind.COMPILER_INTERNAL, "resolution type belongs to a different parsed owner")}; }
+    val result: res[ast_type.Type, fail.Fail] = head_node(rc, tid);
+    if (sel result.err) {
+        fail.internal(?rc.status, fail.describe(result.err));
+        ret res[ast_type.Type, comptime.EvalFail].err{comptime.eval_error(comptime.EVAL_FAIL_INTERNAL, diagnostic_kind.COMPILER_INTERNAL, fail.describe(result.err))};
+    }
+    ret res[ast_type.Type, comptime.EvalFail].ok{result.ok};
+}
+
+# whether the literal `eid` constructs a tag case, its head read as this resolution reads it
+fun is_case_literal(rc: *ResolveContext, eid: ast_id.ExprId) bool {
+    val e_opt: opt[*ast_expr.Expr] = ast.get_expr(rc.a, eid);
+    if (!sel e_opt.some) { ret false; }
+    ret literal_head_names_case(rc, comptime.literal_head_type(e_opt.some));
 }
 
 fun resolve_bracket_call(rc: *ResolveContext, eid: ast_id.ExprId) err[fail.Fail] {
@@ -3335,8 +3373,8 @@ fun bind_literal_head(rc: *ResolveContext, tid: ast_id.TypeId) err[fail.Fail] {
             val rd: err[fail.Fail] = bind_expr(rc, t.data.named.case_desc);
             if (sel rd.err) { ret rd; }
         }
-        or (t.kind == ast_type.TYPE_KIND_NAMED && t.data.named.case_name.len == 0) {
-            split_case_head(rc, ?t.data.named);
+        or (t.kind == ast_type.TYPE_KIND_NAMED) {
+            split_case_head(rc, tid);
         }
     }
     ret bind_type(rc, tid);
@@ -3344,15 +3382,23 @@ fun bind_literal_head(rc: *ResolveContext, tid: ast_id.TypeId) err[fail.Fail] {
 
 fun literal_head_names_case(rc: *ResolveContext, tid: ast_id.TypeId) bool {
     if (ast_id.type_is_nil(tid)) { ret false; }
-    val t_opt: opt[*ast_type.Type] = ast.get_type(rc.a, tid);
-    if (!sel t_opt.some) { ret false; }
-    val t: *ast_type.Type = t_opt.some;
-    if (t.kind != ast_type.TYPE_KIND_NAMED) { ret false; }
-    ret t.data.named.case_name.len != 0 || !ast_id.expr_is_nil(t.data.named.case_desc);
+    val t_r: res[ast_type.Type, fail.Fail] = head_node(rc, tid);
+    if (sel t_r.err) {
+        fail.internal(?rc.status, fail.describe(t_r.err));
+        ret false;
+    }
+    ret comptime.names_case(t_r.ok);
 }
 
-fun split_case_head(rc: *ResolveContext, named: *ast_type.TypeNamed) {
-    val path: lang_source.Span = named.name;
+# records that the bare named head `tid` reads as a type and a case when its path's prefix names
+# something other than a module; a head already split, or one the parser gave a case, stays
+fun split_case_head(rc: *ResolveContext, tid: ast_id.TypeId) {
+    val t_opt: opt[*ast_type.Type] = ast.get_type(rc.a, tid);
+    if (!sel t_opt.some) { ret; }
+    val t: *ast_type.Type = t_opt.some;
+    if (t.kind != ast_type.TYPE_KIND_NAMED || !ast_id.expr_is_nil(t.data.named.case_desc) || t.data.named.case_name.len != 0) { ret; }
+    if (rc.type_heads[ast_id.type_index(tid)] != interpretation.HEAD_PARSED)                                                  { ret; }
+    val path: lang_source.Span = t.data.named.name;
     val pre:  lang_source.Span = fe_path.prefix(rc.source, path);
     if (pre.len == 0 || pre.len >= path.len) { ret; }
     val leaf: lang_source.Span = fe_path.leaf(rc.source, path);
@@ -3362,8 +3408,7 @@ fun split_case_head(rc: *ResolveContext, named: *ast_type.TypeNamed) {
     if (symbol_is_nil(sid))                            { ret; }
     if (rc.symbols[symbol_index(sid)].kind == SYM_USE) { ret; }
 
-    named.name      = pre;
-    named.case_name = leaf;
+    rc.type_heads[ast_id.type_index(tid)] = interpretation.HEAD_CASE;
 }
 
 # the tail symbol of a dotted path, without reporting: SYMBOL_NIL when any segment is unknown
@@ -3405,7 +3450,14 @@ fun bind_type(rc: *ResolveContext, tid: ast_id.TypeId) err[fail.Fail] {
     if (stack.exhausted()) { ret refuse_nesting(rc, t.span); }
 
     if (t.kind == ast_type.TYPE_KIND_NAMED) {
-        val sid: SymbolId = resolve_type_path(rc, ?t.data.named, t.span);
+        # the path as this resolution reads it: a literal head it split names the type by its prefix
+        val head_r: res[ast_type.Type, fail.Fail] = head_node(rc, tid);
+        if (sel head_r.err) {
+            fail.internal(?rc.status, fail.describe(head_r.err));
+            ret err[fail.Fail].err{head_r.err};
+        }
+        var head: ast_type.Type = head_r.ok;
+        val sid:  SymbolId      = resolve_type_path(rc, ?head.data.named, t.span);
         if (rc.type_resolved != nil) { rc.type_resolved[ast_id.type_index(tid)] = sid; }
         var ai: u32 = 0;
         for (ai < t.data.named.args_len) {
@@ -3682,6 +3734,7 @@ fun build_result(rc: *ResolveContext) res[ResolveResult, fail.Fail] {
 
     out.expr_choices       = rc.expr_choices;
     out.expr_choices_count = rc.expr_choices_count;
+    out.type_heads         = rc.type_heads;
     out.asm_binds          = rc.asm_binds;
     rc.asm_binds           = collections_vector.init[AsmBind](rc.s.alloc);
     out.constants          = comptime.publish(rc.ctx);
@@ -3691,6 +3744,7 @@ fun build_result(rc: *ResolveContext) res[ResolveResult, fail.Fail] {
     rc.decl_symbol        = nil;
     rc.expr_choices       = nil;
     rc.expr_choices_count = 0;
+    rc.type_heads         = nil;
 
     handed = true;
     ret res[ResolveResult, fail.Fail].ok{out};

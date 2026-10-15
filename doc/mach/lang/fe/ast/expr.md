@@ -420,6 +420,9 @@ pub rec ExprStructLit;
 pub rec ExprVectorLit;
 ```
 
+a typed literal with only positional elements, `T{a, b}`: a vector's lanes as written, or a tag
+case's payload when name resolution finds the head names a case (interpretation.CASE_LITERAL)
+
 ## rec ExprTypeRef
 
 ```mach

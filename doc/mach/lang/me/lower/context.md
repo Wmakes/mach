@@ -228,6 +228,15 @@ its own kind at the node the lowering stands on; any other failure is the loweri
 pub fun record_eval_result(lc: *LowerContext, r: res[comptime.CTValue, comptime.EvalFail]);
 ```
 
+## fun type_node
+
+```mach
+pub fun type_node(lc: *LowerContext, tid: ast_id.TypeId) res[ast_type.Type, fail.Fail];
+```
+
+the type node `tid` as name resolution read it, a literal head it split naming the type by its
+path's prefix and the case by the last segment
+
 ## fun expression
 
 ```mach

@@ -421,7 +421,7 @@ pub fun init_context(lc: *LowerContext, req: *LowerRequest, m: *me_ir.Module) er
         resolve_type_query,
         resolve_layout_intrinsic,
         resolve_scalar_cast, resolve_scalar_value,
-        comptime_ident_is_runtime, comptime_expression);
+        comptime_ident_is_runtime, comptime_expression, comptime_head);
     if (sel caps_r.err) {
         ret err[fail.Fail].err{caps_r.err};
     }
@@ -672,6 +672,23 @@ pub fun record_eval_result(lc: *LowerContext, r: res[comptime.CTValue, comptime.
     if (sel r.ok) { ret; }
     val f: comptime.EvalFail = r.err;
     if (f.kind == comptime.EVAL_FAIL_INTERNAL) { fail.internal(?lc.status, f.message); }
+}
+
+# the type node `tid` as name resolution read it, a literal head it split naming the type by its
+# path's prefix and the case by the last segment
+pub fun type_node(lc: *LowerContext, tid: ast_id.TypeId) res[ast_type.Type, fail.Fail] {
+    val result: res[ast_type.Type, fail.Fail] = resolve.type_node(lc.scope.rr, lc.scope.a, lc.scope.source, tid);
+    if (sel result.err) { fail.internal(?lc.status, fail.describe(result.err)); }
+    ret result;
+}
+
+fun comptime_head(lc: *LowerContext, a: *ast.Ast, tid: ast_id.TypeId) res[ast_type.Type, comptime.EvalFail] {
+    if (lc == nil || lc.scope.a != a) { ret res[ast_type.Type, comptime.EvalFail].err{comptime.eval_error(comptime.EVAL_FAIL_INTERNAL, diagnostic_kind.COMPILER_INTERNAL, "lowering type belongs to a different parsed owner")}; }
+    val result: res[ast_type.Type, fail.Fail] = resolve.type_node(lc.scope.rr, a, lc.scope.source, tid);
+    if (sel result.err) {
+        ret res[ast_type.Type, comptime.EvalFail].err{comptime.eval_error(comptime.EVAL_FAIL_INTERNAL, diagnostic_kind.COMPILER_INTERNAL, fail.describe(result.err))};
+    }
+    ret res[ast_type.Type, comptime.EvalFail].ok{result.ok};
 }
 
 pub fun expression(lc: *LowerContext, eid: ast_id.ExprId) res[ast_expr.Expr, fail.Fail] {

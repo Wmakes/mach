@@ -2595,19 +2595,17 @@ fun literal_head_case(sc: *sema_context.SemaContext, tid: ast_id.TypeId) lang_so
     var absent: lang_source.Span;
     absent.offset = 0;
     absent.len    = 0;
-    val t_opt: opt[*ast_type.Type] = ast.get_type(sc.view.a, tid);
-    if (!sel t_opt.some) { ret absent; }
-    val t: *ast_type.Type = t_opt.some;
-    if (t.kind != ast_type.TYPE_KIND_NAMED) { ret absent; }
-    ret t.data.named.case_name;
+    val t_opt: opt[ast_type.Type] = sema_context.type_node(sc, tid);
+    if (!sel t_opt.some)                             { ret absent; }
+    if (t_opt.some.kind != ast_type.TYPE_KIND_NAMED) { ret absent; }
+    ret t_opt.some.data.named.case_name;
 }
 
 fun literal_head_case_desc(sc: *sema_context.SemaContext, tid: ast_id.TypeId) ast_id.ExprId {
-    val t_opt: opt[*ast_type.Type] = ast.get_type(sc.view.a, tid);
-    if (!sel t_opt.some) { ret ast_id.EXPR_NIL; }
-    val t: *ast_type.Type = t_opt.some;
-    if (t.kind != ast_type.TYPE_KIND_NAMED) { ret ast_id.EXPR_NIL; }
-    ret t.data.named.case_desc;
+    val t_opt: opt[ast_type.Type] = sema_context.type_node(sc, tid);
+    if (!sel t_opt.some)                             { ret ast_id.EXPR_NIL; }
+    if (t_opt.some.kind != ast_type.TYPE_KIND_NAMED) { ret ast_id.EXPR_NIL; }
+    ret t_opt.some.data.named.case_desc;
 }
 
 fun infer_struct_lit(sc: *sema_context.SemaContext, sl: *ast_expr.ExprStructLit, span: lang_source.Span) type.TypeId {

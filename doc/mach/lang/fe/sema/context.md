@@ -266,6 +266,29 @@ pub fun expression(sc: *SemaContext, eid: ast_id.ExprId) res[ast_expr.Expr, fail
 pub fun comptime_expression(sc: *SemaContext, a: *ast.Ast, eid: ast_id.ExprId) res[ast_expr.Expr, comptime.EvalFail];
 ```
 
+## fun type_node
+
+```mach
+pub fun type_node(sc: *SemaContext, tid: ast_id.TypeId) opt[ast_type.Type];
+```
+
+the type node `tid` as name resolution read it, a literal head it split naming the type by its
+path's prefix and the case by the last segment; none, with the walk failed, when it cannot be read
+
+## fun comptime_head
+
+```mach
+pub fun comptime_head(sc: *SemaContext, a: *ast.Ast, tid: ast_id.TypeId) res[ast_type.Type, comptime.EvalFail];
+```
+
+## fun is_case_literal
+
+```mach
+pub fun is_case_literal(sc: *SemaContext, eid: ast_id.ExprId) bool;
+```
+
+whether the literal `eid` constructs a tag case, its head read as name resolution read it
+
 ## fun apply_subst
 
 ```mach

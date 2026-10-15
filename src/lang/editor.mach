@@ -6,6 +6,7 @@ use std.collections.vector.Vector;
 use fs:         std.filesystem;
 use std_format: std.format;
 use io_error:   std.io.error;
+use std.memory;
 use std.print;
 use system_os: std.system.os;
 use std.types.bool.bool;
@@ -46,6 +47,7 @@ use mach.lang.fe.ast;
 use ast_decl: mach.lang.fe.ast.decl;
 use ast_expr: mach.lang.fe.ast.expr;
 use ast_id:   mach.lang.fe.ast.id;
+use mach.lang.fe.ast.interpretation;
 use ast_type: mach.lang.fe.ast.type;
 use mach.lang.fe.comptime;
 use comptime_path: mach.lang.fe.comptime.path;
@@ -2111,6 +2113,15 @@ fun t_resolve_snapshot(alloc: *A.Allocator, ids: *resolve.SymbolId, n: u32) *res
 }
 
 #[testing]
+fun t_snapshot[T](alloc: *A.Allocator, items: *T, n: usize) *T {
+    if (n == 0) { ret nil; }
+    val r: res[*T, A.Error] = A.allocate[T](alloc, n);
+    if (sel r.err) { ret nil; }
+    memory.copy[T](r.ok, items, n);
+    ret r.ok;
+}
+
+#[testing]
 fun t_resolve_same(before: *resolve.SymbolId, after: *resolve.SymbolId, n: u32) bool {
     var i: u32 = 0;
     for (i < n) {
@@ -2150,23 +2161,55 @@ test resolve__a_second_resolve_binds_what_the_first_did {
     deps.entries = ?lib_exports;
     deps.count   = 1;
 
+    # resolve never writes the parsed tree, so both resolves read exactly what was written
+    val parsed_r: res[*ast.Ast, fail.Fail] = parse_buffer(?es, res_fid.ok);
+    if (sel parsed_r.err) { ret 2; }
+    val parsed:       *ast.Ast       = parsed_r.ok;
+    val parsed_exprs: *ast_expr.Expr = t_snapshot[ast_expr.Expr](?alloc, parsed.exprs.data, parsed.exprs.len);
+    val parsed_types: *ast_type.Type = t_snapshot[ast_type.Type](?alloc, parsed.types.data, parsed.types.len);
+    val expr_len:     usize          = parsed.exprs.len;
+    val type_len:     usize          = parsed.types.len;
+    fin {
+        if (parsed_exprs != nil) { A.deallocate[ast_expr.Expr](?alloc, parsed_exprs, expr_len); }
+        if (parsed_types != nil) { A.deallocate[ast_type.Type](?alloc, parsed_types, type_len); }
+    }
+    if (parsed_exprs == nil || parsed_types == nil) { ret 2; }
+
     val first_r: res[*resolve.ResolveResult, fail.Fail] = t_resolve_deps(?es, res_fid.ok, ?deps);
     if (sel first_r.err) { ret 3; }
     val first: *resolve.ResolveResult = first_r.ok;
     if (!sel first.status.kind.accepted) { ret 4; }
-    val exprs: u32               = first.expr_count;
-    val types: u32               = first.type_count;
-    val decls: u32               = first.decl_count;
-    val syms:  u32               = first.symbol_count;
-    val e0:    *resolve.SymbolId = t_resolve_snapshot(?alloc, first.expr_resolved, exprs);
-    val t0:    *resolve.SymbolId = t_resolve_snapshot(?alloc, first.type_resolved, types);
-    val d0:    *resolve.SymbolId = t_resolve_snapshot(?alloc, first.decl_symbol, decls);
+    val exprs: u32                    = first.expr_count;
+    val types: u32                    = first.type_count;
+    val decls: u32                    = first.decl_count;
+    val syms:  u32                    = first.symbol_count;
+    val e0:    *resolve.SymbolId      = t_resolve_snapshot(?alloc, first.expr_resolved, exprs);
+    val t0:    *resolve.SymbolId      = t_resolve_snapshot(?alloc, first.type_resolved, types);
+    val d0:    *resolve.SymbolId      = t_resolve_snapshot(?alloc, first.decl_symbol, decls);
+    val c0:    *interpretation.Choice = t_snapshot[interpretation.Choice](?alloc, first.expr_choices, exprs::usize);
+    val h0:    *interpretation.Head   = t_snapshot[interpretation.Head](?alloc, first.type_heads, types::usize);
     fin {
         if (e0 != nil) { A.deallocate[resolve.SymbolId](?alloc, e0, exprs::usize); }
         if (t0 != nil) { A.deallocate[resolve.SymbolId](?alloc, t0, types::usize); }
         if (d0 != nil) { A.deallocate[resolve.SymbolId](?alloc, d0, decls::usize); }
+        if (c0 != nil) { A.deallocate[interpretation.Choice](?alloc, c0, exprs::usize); }
+        if (h0 != nil) { A.deallocate[interpretation.Head](?alloc, h0, types::usize); }
     }
-    if (e0 == nil || t0 == nil || d0 == nil) { ret 5; }
+    if (e0 == nil || t0 == nil || d0 == nil || c0 == nil || h0 == nil) { ret 5; }
+    # the literal `Cause.refused{3}` is read as a case construction, and its head as type and case
+    var cases: u32 = 0;
+    var heads: u32 = 0;
+    var k:     u32 = 0;
+    for (k < exprs) {
+        if (c0[k] == interpretation.CASE_LITERAL) { cases = cases + 1; }
+        k = k + 1;
+    }
+    k = 0;
+    for (k < types) {
+        if (h0[k] == interpretation.HEAD_CASE) { heads = heads + 1; }
+        k = k + 1;
+    }
+    if (cases != 4 || heads != 3) { ret 13; }
 
     val second_r: res[*resolve.ResolveResult, fail.Fail] = t_resolve_deps(?es, res_fid.ok, ?deps);
     if (sel second_r.err) { ret 6; }
@@ -2174,9 +2217,16 @@ test resolve__a_second_resolve_binds_what_the_first_did {
     if (!sel second.status.kind.accepted) { ret 7; }
     if (second.expr_count != exprs || second.type_count != types || second.decl_count != decls
         || second.symbol_count != syms) { ret 8; }
-    if (!t_resolve_same(e0, second.expr_resolved, exprs)) { ret 9; }
-    if (!t_resolve_same(t0, second.type_resolved, types)) { ret 10; }
-    if (!t_resolve_same(d0, second.decl_symbol, decls))   { ret 11; }
+    if (!t_resolve_same(e0, second.expr_resolved, exprs))                            { ret 9; }
+    if (!t_resolve_same(t0, second.type_resolved, types))                            { ret 10; }
+    if (!t_resolve_same(d0, second.decl_symbol, decls))                              { ret 11; }
+    if (!memory.equal[interpretation.Choice](c0, second.expr_choices, exprs::usize)) { ret 14; }
+    if (!memory.equal[interpretation.Head](h0, second.type_heads, types::usize))     { ret 15; }
+    val reparsed: *ast.Ast = slot_live(?es, res_fid.ok).a;
+    if (reparsed != parsed)                                                      { ret 16; }
+    if (parsed.exprs.len != expr_len || parsed.types.len != type_len)            { ret 19; }
+    if (!memory.equal[ast_expr.Expr](parsed_exprs, parsed.exprs.data, expr_len)) { ret 17; }
+    if (!memory.equal[ast_type.Type](parsed_types, parsed.types.data, type_len)) { ret 18; }
     var deferred: u32 = 0;
     var j:        u32 = 0;
     for (j < exprs) {
@@ -4833,8 +4883,13 @@ test tag__go_to_definition_maps_a_case_use_to_its_declaring_case_span {
     val head_off: usize         = t_offset_of(src, "Reply.value{");
     val tid:      ast_id.TypeId = ast.offset_to_type(a, head_off);
     if (ast_id.type_is_nil(tid) || ast_id.type_index(tid) >= rr.type_count) { ret 2; }
-    val head: *ast_type.Type = ?a.types.data[ast_id.type_index(tid)];
-    if (head.kind != ast_type.TYPE_KIND_NAMED || head.data.named.case_name.offset != head_off + 6) { ret 3; }
+    # the parsed head is the path as written, and resolution reads it as type and case
+    val parsed: *ast_type.Type = ?a.types.data[ast_id.type_index(tid)];
+    if (parsed.kind != ast_type.TYPE_KIND_NAMED || parsed.data.named.case_name.len != 0 || parsed.data.named.name.len != 11) { ret 3; }
+    val head_r: res[ast_type.Type, fail.Fail] = resolve.type_node(rr, a, src, tid);
+    if (sel head_r.err) { ret 99; }
+    val head: ast_type.Type = head_r.ok;
+    if (head.kind != ast_type.TYPE_KIND_NAMED || head.data.named.case_name.offset != head_off + 6 || head.data.named.name.len != 5) { ret 3; }
     val resolved_type_of_r: res[type.TypeId, fail.Fail] = resolved_type_of(?result, tid);
     if (sel resolved_type_of_r.err) { ret 99; }
     val tag_ty: type.TypeId = resolved_type_of_r.ok;

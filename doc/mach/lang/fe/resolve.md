@@ -394,6 +394,15 @@ whose value no comptime evaluation sees; false for a name that resolved to none
 pub fun expression(rr: *ResolveResult, a: *ast.Ast, eid: ast_id.ExprId) res[ast_expr.Expr, fail.Fail];
 ```
 
+## fun type_node
+
+```mach
+pub fun type_node(rr: *ResolveResult, a: *ast.Ast, source: str, tid: ast_id.TypeId) res[ast_type.Type, fail.Fail];
+```
+
+the type node `tid` of `a`, whose text is `source`, as name resolution read it: a literal head
+it split names the type by its path's prefix and the case by the last segment
+
 ## fun unknown_catalog
 
 ```mach

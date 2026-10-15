@@ -1053,15 +1053,24 @@ eid: ast_id.ExprId,
 interner: *intern.Interner) res[str, comptime_failure.EvalFail];
 ```
 
-## fun is_case_literal
+## fun names_case
 
 ```mach
-pub fun is_case_literal(a: *ast.Ast, eid: ast_id.ExprId) bool;
+pub fun names_case(head: ast_type.Type) bool;
 ```
 
-a literal is a case literal when its head names a tag case, `T.c{...}` or `T.[c]{...}`; the
-parser records the case only for a head with generic arguments, name resolution splits the
+a literal head names a tag case, `T.c{...}` or `T.[c]{...}`, read as its phase reads it: the
+parser records the case only for a head with generic arguments, and name resolution splits the
 others, so the answer is complete once the literal's head has been bound
+
+## fun literal_head_type
+
+```mach
+pub fun literal_head_type(e: *ast_expr.Expr) ast_id.TypeId;
+```
+
+the head type of a literal in either parsed spelling: the parser emits a positional `T.c{x}` as a
+lane list, which name resolution reads as a case construction once it learns the head names a case
 
 ## fun literal_case
 
