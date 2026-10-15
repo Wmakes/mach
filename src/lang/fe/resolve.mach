@@ -4120,7 +4120,7 @@ pub fun sources(name: str, text: str) Sources {
 # select `isa` for `s` with the extensions or levels `names` adds; false when there are more
 # than a fixture holds
 #[testing]
-fun sources_target(s: *Sources, isa: str, os: str, abi: str, names: *str, count: u32) bool {
+pub fun sources_target(s: *Sources, isa: str, os: str, abi: str, names: *str, count: u32) bool {
     if (count > FIXTURE_MODULES) { ret false; }
     s.isa = isa;
     s.os  = os;
@@ -4159,6 +4159,8 @@ pub rec Resolved {
     count:   u32;
     # the standing of the load and resolution of every module
     status: fail.PhaseStatus;
+    # the standing of the load alone
+    loaded: fail.PhaseStatus;
     opened: bool;
     hosted: bool;
 }
@@ -4207,6 +4209,7 @@ pub fun resolved_check(r: *Resolved, src: *Sources) err[fail.Fail] {
     r.hosted = false;
     r.count  = 0;
     r.status = fail.accepted();
+    r.loaded = fail.accepted();
     page.make(?r.alloc);
     val made: res[session.Session, fail.Fail] = session.init(?r.alloc);
     if (sel made.err) { ret err[fail.Fail].err{made.err}; }
@@ -4245,6 +4248,7 @@ pub fun resolved_check(r: *Resolved, src: *Sources) err[fail.Fail] {
     if (sel loaded.err) {
         if (!fail.is_reported(loaded.err)) { ret err[fail.Fail].err{loaded.err}; }
         fail.reject(?r.status);
+        fail.reject(?r.loaded);
         ret err[fail.Fail].ok{};
     }
     i = 0;
@@ -4255,11 +4259,12 @@ pub fun resolved_check(r: *Resolved, src: *Sources) err[fail.Fail] {
         if (sel registered.err) { ret registered; }
         val recorded: err[fail.Fail] = fe_load.decorators_record(?r.loader, module.id(i));
         if (sel recorded.err) { ret recorded; }
-        fail.merge(?r.status, r.host.parsed[i]);
-        fail.merge(?r.status, row.load.status);
+        fail.merge(?r.loaded, r.host.parsed[i]);
+        fail.merge(?r.loaded, row.load.status);
         i = i + 1;
     }
 
+    fail.merge(?r.status, r.loaded);
     var from: Exporters = Exporters{ctx: r::ptr, count: r.host.count, exports: fixture_exports, path: fixture_path};
     i = 0;
     for (i < r.host.closed) {
