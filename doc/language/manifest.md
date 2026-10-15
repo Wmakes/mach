@@ -174,8 +174,11 @@ Test objects sit in `obj/` beside the module objects, as
 under the work directory when it is written from `{project.work}`.
 
 `mach clean` removes `obj/`, `ir/`, `asm/`, `.cache/`, `.stage/`, `test/` and
-`dep/` along with every artifact output, for every declared target and profile,
-so the build after it is a cold one that reuses nothing. A step output may not
+`dep/` along with every artifact output, for every cell `mach build --all` plans,
+dependency requirement cells included, so the build after it is a cold one that
+reuses nothing. It plans exactly as that build does, so a manifest or a
+dependency closure the build refuses, such as one not yet pulled, is refused by
+`mach clean` too. A step output may not
 name a path inside `obj/<project.id>/`, `.cache/` or `.stage/` (see
 [build steps](#stepname--build-steps)).
 

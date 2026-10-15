@@ -63,7 +63,7 @@ rec CleanEntry {
 }
 
 # `mach clean`
-pub val COMMAND: args.CommandSpec = args.CommandSpec{name: "clean", aliases: nil, alias_n: 0, grammar: " <path>", summary: "remove project build output", effect: "remove the output, object, IR, assembly, test, cache, and staging trees declared by the manifest", exits: nil, exit_n: 0, terminator: "", tables: nil, table_n: 0, refused: nil, refused_n: 0, refusal: "", relations: nil, relation_n: 0, constraints: nil, constraint_n: 0, operand_min: 0, operand_max: args.OPERANDS_ANY, truncate_at_sep: false, actions: nil, action_n: 0, examples: nil, example_n: 0, run: run};
+pub val COMMAND: args.CommandSpec = args.CommandSpec{name: "clean", aliases: nil, alias_n: 0, grammar: " <path>", summary: "remove project build output", effect: "remove every artifact and every object, IR, assembly, test, cache, staging and dependency tree a build of every cell writes, as the build plans it", exits: nil, exit_n: 0, terminator: "", tables: nil, table_n: 0, refused: nil, refused_n: 0, refusal: "", relations: nil, relation_n: 0, constraints: nil, constraint_n: 0, operand_min: 0, operand_max: args.OPERANDS_ANY, truncate_at_sep: false, actions: nil, action_n: 0, examples: nil, example_n: 0, run: run};
 
 # `mach clean`: remove every path a build of every cell writes, as the build
 # plans it: each artifact's output and the object, IR, assembly, test, cache,
