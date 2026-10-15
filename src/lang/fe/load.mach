@@ -180,7 +180,7 @@ pub rec Module {
 # chains:  the pool position of every `$if` chain in the module, ascending; a chain before the
 #          binder may bind the name first in the arm it selects
 # indexed: the two above describe the current syntax
-pub rec DemandIndex {
+rec DemandIndex {
     names:   map.Map[u64, u32];
     chains:  collections_vector.Vector[u32];
     indexed: bool;
