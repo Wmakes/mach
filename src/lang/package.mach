@@ -131,15 +131,7 @@ pub fun refuse_nested_realization(s: *session.Session, alias: str, dep_dir: str)
 
 #[testing]
 pub fun declared_dep_id(s: *session.Session, dep_full: str) res[str, fail.Fail] {
-    val toml_path_r: res[str, fail.Fail] = driver_load.join_path(s.build_alloc, dep_full, manifest.MANIFEST_FILE);
-    if (sel toml_path_r.err) { ret res[str, fail.Fail].err{toml_path_r.err}; }
-    val toml_path: str                          = toml_path_r.ok;
-    val tr:        res[manifest.Doc, fail.Fail] = manifest.doc_read(s.build_alloc, toml_path);
-    str_free(s.build_alloc, toml_path);
-    if (sel tr.err) { ret res[str, fail.Fail].err{tr.err}; }
-    var doc: manifest.Doc                      = tr.ok;
-    val mr:  res[manifest.Manifest, fail.Fail] = manifest.parse(s.build_alloc, ?s.interner, ?doc);
-    manifest.doc_dnit(s.build_alloc, ?doc);
+    val mr: res[manifest.Manifest, fail.Fail] = manifest.read_at(s.build_alloc, ?s.interner, dep_full);
     if (sel mr.err) { ret res[str, fail.Fail].err{mr.err}; }
     var parsed: manifest.Manifest = mr.ok;
     fin { manifest.dnit(?parsed, s.build_alloc); }
@@ -153,15 +145,7 @@ pub fun declared_dep_id(s: *session.Session, dep_full: str) res[str, fail.Fail] 
 }
 
 pub fun verify_dep_manifest_id(s: *session.Session, dep_full: str, id: str) err[fail.Fail] {
-    val toml_path_r: res[str, fail.Fail] = driver_load.join_path(s.build_alloc, dep_full, manifest.MANIFEST_FILE);
-    if (sel toml_path_r.err) { ret err[fail.Fail].err{toml_path_r.err}; }
-    val toml_path: str                          = toml_path_r.ok;
-    val tr:        res[manifest.Doc, fail.Fail] = manifest.doc_read(s.build_alloc, toml_path);
-    str_free(s.build_alloc, toml_path);
-    if (sel tr.err) { ret err[fail.Fail].err{tr.err}; }
-    var doc: manifest.Doc                      = tr.ok;
-    val mr:  res[manifest.Manifest, fail.Fail] = manifest.parse(s.build_alloc, ?s.interner, ?doc);
-    manifest.doc_dnit(s.build_alloc, ?doc);
+    val mr: res[manifest.Manifest, fail.Fail] = manifest.read_at(s.build_alloc, ?s.interner, dep_full);
     if (sel mr.err) { ret err[fail.Fail].err{mr.err}; }
     var parsed: manifest.Manifest = mr.ok;
     fin { manifest.dnit(?parsed, s.build_alloc); }

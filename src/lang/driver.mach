@@ -4,6 +4,7 @@ use std.types.bool.bool;
 use std.types.bool.false;
 use std.types.bool.true;
 use std.types.error.err;
+use std.types.option.opt;
 use std.types.result.res;
 use std.types.size.usize;
 use std.types.string.str;
@@ -12,9 +13,7 @@ use std.types.string.str_empty;
 use std.types.string.str_len;
 
 use A:          std.allocator;
-#[testing]
 use fs:         std.filesystem;
-#[testing]
 use types_path: std.types.path;
 
 use collections_vector: std.collections.vector;
@@ -791,62 +790,53 @@ fun close_resolve_row(p: *project.Project) {
     readout.phase_end(p.progress, readout.RESOLVE, cache.frontend_count(p), "module", "modules");
 }
 
+# the root manifest of the project at `project_root`, read once: its text, an
+# open buffer's when the session holds one, becomes the session's input for the
+# file, so a warm session sees an edit to it as an input change, and the manifest
+# records the input and the revision it was read at
+# ---
+# s:            the session; its build allocator owns the manifest
+# project_root: the project root
+# ret:          the manifest, released with `manifest.dnit`; err when it cannot be
+#               read, does not parse or fails a check
 pub fun load_manifest(s: *session.Session, project_root: str) res[manifest.Manifest, fail.Fail] {
-    val mp_r: res[str, fail.Fail] = driver_load.join_path(s.build_alloc, project_root, manifest.MANIFEST_FILE);
-    if (sel mp_r.err) { ret res[manifest.Manifest, fail.Fail].err{mp_r.err}; }
-    val manifest_path: str = mp_r.ok;
+    val path_r: res[str, A.Error] = types_path.join(s.build_alloc, project_root, manifest.MANIFEST_FILE);
+    if (sel path_r.err) { ret res[manifest.Manifest, fail.Fail].err{fail.refused(path_r.err)}; }
+    val path: str = path_r.ok;
+    fin { str_free(s.build_alloc, path); }
 
-    val doc_r: res[manifest.Doc, fail.Fail] = manifest.doc_read(s.build_alloc, manifest_path);
-    str_free(s.build_alloc, manifest_path);
-    if (sel doc_r.err) { ret res[manifest.Manifest, fail.Fail].err{doc_r.err}; }
-    var doc: manifest.Doc = doc_r.ok;
+    var text:     str      = nil;
+    val buffered: opt[str] = session.overlay_get(s, path);
+    if (sel buffered.some) { text = buffered.some; }
+    or {
+        val read: res[str, fs.FsError] = fs.read_string(s.build_alloc, path);
+        if (sel read.err) {
+            val said: res[str, fail.Fail] = fail.format(s.build_alloc, "cannot read '{}': {}", path, fail.fs_text(read.err));
+            if (sel said.err) { ret res[manifest.Manifest, fail.Fail].err{said.err}; }
+            ret res[manifest.Manifest, fail.Fail].err{fail.environment(diagnostic_kind.FS_READ, said.ok)};
+        }
+        text = read.ok;
+    }
+    val loaded: res[lang_source.FileId, fail.Fail] = session.load_source(s, path, text);
+    if (sel loaded.err) { ret res[manifest.Manifest, fail.Fail].err{loaded.err}; }
 
-    val mr: res[manifest.Manifest, fail.Fail] = manifest.parse(s.build_alloc, ?s.interner, ?doc);
-    manifest.doc_dnit(s.build_alloc, ?doc);
-    if (sel mr.err) { ret mr; }
-    var m: manifest.Manifest = mr.ok;
+    val parsed: res[manifest.Manifest, fail.Fail] = manifest.parse_text(s.build_alloc, ?s.interner, path, text);
+    if (sel parsed.err) { ret parsed; }
+    var m: manifest.Manifest = parsed.ok;
+    m.source          = loaded.ok;
+    m.source_revision = query.peek_revision(?s.queries, ?session.FILE_TEXT, lang_source.file_index(loaded.ok)::u64);
 
-    val sk: err[fail.Fail] = check_stack_keys(s, ?m);
+    val reg: res[*lang_target.TargetRegistry, fail.Fail] = toolchain.registry();
+    if (sel reg.err) {
+        manifest.dnit(?m, s.build_alloc);
+        ret res[manifest.Manifest, fail.Fail].err{reg.err};
+    }
+    val sk: err[fail.Fail] = manifest.check_stack_keys(s.build_alloc, ?s.interner, reg.ok, ?m);
     if (sel sk.err) {
         manifest.dnit(?m, s.build_alloc);
         ret res[manifest.Manifest, fail.Fail].err{sk.err};
     }
     ret res[manifest.Manifest, fail.Fail].ok{m};
-}
-
-fun check_stack_keys(s: *session.Session, m: *manifest.Manifest) err[fail.Fail] {
-    var i: u32 = 0;
-    for (i < m.target_count) {
-        val td: *manifest.TargetDef = ?m.targets[i];
-        if (td.stack_reserve == 0 && td.stack_commit == 0) {
-            i = i + 1;
-            cnt;
-        }
-
-        val reg_r: res[*lang_target.TargetRegistry, fail.Fail] = toolchain.registry();
-        if (sel reg_r.err) { ret err[fail.Fail].err{reg_r.err}; }
-
-        var of_name: str = "";
-        if (!intern.str_is_nil(td.of)) { of_name = intern.text(?s.interner, td.of); }
-        val tr: res[lang_target.Binding, fail.Fail] = lang_target.select_of(reg_r.ok,
-            intern.text(?s.interner, td.isa), intern.text(?s.interner, td.os),
-            intern.text(?s.interner, td.abi), of_name);
-        if (sel tr.err) {
-            i = i + 1;
-            cnt;
-        }
-        val t: lang_target.Binding = tr.ok;
-
-        if (!t.of.carries_stack_size) {
-            var key: str = "stack_reserve";
-            if (td.stack_reserve == 0) { key = "stack_commit"; }
-            ret err[fail.Fail].err{fail.formatted_user(s.build_alloc, diagnostic_kind.TARGET_STACK_SIZE,
-                "mach.toml: [target.{}].{} is not expressible on the `{}` object format, which carries no stack size in its image headers",
-                intern.text(?s.interner, td.name), key, t.of.name)};
-        }
-        i = i + 1;
-    }
-    ret err[fail.Fail].ok{};
 }
 
 # a project under a fresh temporary root: the manifest `text`, and the `n`

@@ -85,17 +85,8 @@ pub fun run(cx: *args.Call) res[i64, fail.Fail] {
 }
 
 fun clean_project(r: *cli_diagnostic.Report, a: *A.Allocator, root: *u8) i64 {
-    val mp_r: res[str, A.Error] = types_path.join(a, root, util.PROJECT_CONFIG_NAME);
-    if (sel mp_r.err) { ret cli_diagnostic.report_fail(r, fail.refused(mp_r.err), diagnostic.ORIGIN_NONE); }
-    val manifest_path: str = mp_r.ok;
-
-    val doc_r: res[manifest.Doc, fail.Fail] = manifest.doc_read(a, manifest_path);
-    if (sel doc_r.err) { ret cli_diagnostic.report_fail(r, doc_r.err, diagnostic.ORIGIN_NONE); }
-    var doc: manifest.Doc = doc_r.ok;
-
     var itn:   intern.Interner                   = intern.init(a);
-    val man_r: res[manifest.Manifest, fail.Fail] = manifest.parse(a, ?itn, ?doc);
-    manifest.doc_dnit(a, ?doc);
+    val man_r: res[manifest.Manifest, fail.Fail] = manifest.read_at(a, ?itn, root::str);
     if (sel man_r.err) { ret cli_diagnostic.report_fail(r, man_r.err, diagnostic.ORIGIN_NONE); }
     var m: manifest.Manifest = man_r.ok;
     fin { manifest.dnit(?m, a); }
@@ -331,9 +322,7 @@ fun plan_dependency_cells_for(a: *A.Allocator, itn: *intern.Interner, reg: *lang
     for (i < names.len) {
         val slot_r: res[str, A.Error] = types_path.join(a, dep_dir, names.data[i]);
         if (sel slot_r.err) { ret err[fail.Fail].err{fail.refused(slot_r.err)}; }
-        val manifest_r: res[str, A.Error] = types_path.join(a, slot_r.ok, manifest.MANIFEST_FILE);
-        if (sel manifest_r.err) { ret err[fail.Fail].err{fail.refused(manifest_r.err)}; }
-        val dm_r: res[manifest.Manifest, fail.Fail] = read_dependency_manifest(a, itn, manifest_r.ok);
+        val dm_r: res[manifest.Manifest, fail.Fail] = manifest.read_at(a, itn, slot_r.ok);
         if (sel dm_r.ok) {
             var dm:    manifest.Manifest = dm_r.ok;
             var scope: manifest.Scope    = manifest.dependency_scope(m, ?dm);
@@ -379,15 +368,6 @@ fun push_dependency_cell(a: *A.Allocator, itn: *intern.Interner, raw: *Vector[Cl
     val state: err[fail.Fail] = push_state_entries(itn, raw, bu);
     if (sel state.err) { ret state; }
     ret push_dependency_home(a, itn, raw, bu.obj_root);
-}
-
-fun read_dependency_manifest(a: *A.Allocator, itn: *intern.Interner, manifest_path: str) res[manifest.Manifest, fail.Fail] {
-    val doc_r: res[manifest.Doc, fail.Fail] = manifest.doc_read(a, manifest_path);
-    if (sel doc_r.err) { ret res[manifest.Manifest, fail.Fail].err{doc_r.err}; }
-    var doc:    manifest.Doc                      = doc_r.ok;
-    val parsed: res[manifest.Manifest, fail.Fail] = manifest.parse(a, itn, ?doc);
-    manifest.doc_dnit(a, ?doc);
-    ret parsed;
 }
 
 fun cmp_entry(x: *CleanEntry, y: *CleanEntry) i64 {

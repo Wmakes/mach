@@ -47,17 +47,8 @@ use mach.lang.output;
 
 #[testing]
 pub fun resolve_artifact_path(alloc: *A.Allocator, reg: *lang_target.TargetRegistry, project_root: str, selectors: *manifest.Selectors) res[str, fail.Fail] {
-    val mp_r: res[str, fail.Fail] = driver_load.join_path(alloc, project_root, manifest.MANIFEST_FILE);
-    if (sel mp_r.err) { ret res[str, fail.Fail].err{mp_r.err}; }
-    val manifest_path: str = mp_r.ok;
-
-    val doc_r: res[manifest.Doc, fail.Fail] = manifest.doc_read(alloc, manifest_path);
-    if (sel doc_r.err) { ret res[str, fail.Fail].err{doc_r.err}; }
-    var doc: manifest.Doc = doc_r.ok;
-
     var itn: intern.Interner                   = intern.init(alloc);
-    val mr:  res[manifest.Manifest, fail.Fail] = manifest.parse(alloc, ?itn, ?doc);
-    manifest.doc_dnit(alloc, ?doc);
+    val mr:  res[manifest.Manifest, fail.Fail] = manifest.read_at(alloc, ?itn, project_root);
     if (sel mr.err) { ret res[str, fail.Fail].err{mr.err}; }
     var m: manifest.Manifest = mr.ok;
     fin { manifest.dnit(?m, alloc); }
@@ -97,17 +88,8 @@ pub rec RunArtifact {
 #                  names several cells or a library, or for an unusable `-o`
 pub fun resolve_run_artifact(alloc: *A.Allocator, reg: *lang_target.TargetRegistry, project_root: str, selectors: *manifest.Selectors,
     output_override: str) res[RunArtifact, fail.Fail] {
-    val mp_r: res[str, fail.Fail] = driver_load.join_path(alloc, project_root, manifest.MANIFEST_FILE);
-    if (sel mp_r.err) { ret res[RunArtifact, fail.Fail].err{mp_r.err}; }
-    val manifest_path: str = mp_r.ok;
-
-    val doc_r: res[manifest.Doc, fail.Fail] = manifest.doc_read(alloc, manifest_path);
-    if (sel doc_r.err) { ret res[RunArtifact, fail.Fail].err{doc_r.err}; }
-    var doc: manifest.Doc = doc_r.ok;
-
     var itn: intern.Interner                   = intern.init(alloc);
-    val mr:  res[manifest.Manifest, fail.Fail] = manifest.parse(alloc, ?itn, ?doc);
-    manifest.doc_dnit(alloc, ?doc);
+    val mr:  res[manifest.Manifest, fail.Fail] = manifest.read_at(alloc, ?itn, project_root);
     if (sel mr.err) { ret res[RunArtifact, fail.Fail].err{mr.err}; }
     var m: manifest.Manifest = mr.ok;
     fin { manifest.dnit(?m, alloc); }

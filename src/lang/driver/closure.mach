@@ -695,26 +695,11 @@ fun locate_dependency(s: *session.Session, alias: str, project_root: str,
         ret res[project.DepEntry, fail.Fail].err{fail.user(diagnostic_kind.DEP_NOT_DIRECTORY, "dependency realization must be a physical directory, not a symlink or other entry")};
     }
 
-    val toml_path_r: res[str, fail.Fail] = driver_load.join_path(s.build_alloc, dep_dir, manifest.MANIFEST_FILE);
-    if (sel toml_path_r.err) { ret res[project.DepEntry, fail.Fail].err{toml_path_r.err}; }
-    val toml_path: str = toml_path_r.ok;
-
-    val tr: res[manifest.Doc, fail.Fail] = manifest.doc_read(s.build_alloc, toml_path);
-    str_free(s.build_alloc, toml_path);
-    if (sel tr.err) {
-        val msg: res[str, fail.Fail] = diag_dep_manifest_error(s, alias, fail.describe(tr.err));
-        if (sel msg.err) { ret res[project.DepEntry, fail.Fail].err{msg.err}; }
-        ret res[project.DepEntry, fail.Fail].err{fail.with_text(tr.err, msg.ok)};
-    }
-    var doc: manifest.Doc = tr.ok;
-
-    val mr: res[manifest.Manifest, fail.Fail] = manifest.parse(s.build_alloc, ?s.interner, ?doc);
-    manifest.doc_dnit(s.build_alloc, ?doc);
+    val mr: res[manifest.Manifest, fail.Fail] = manifest.read_at(s.build_alloc, ?s.interner, dep_dir);
     if (sel mr.err) {
-        val msg_r: res[str, std_format.FormatError] = std_format.sprint(s.build_alloc, "dependency '{}': {}", alias,
-            fail.describe(mr.err));
-        if (sel msg_r.err) { ret res[project.DepEntry, fail.Fail].err{mr.err}; }
-        ret res[project.DepEntry, fail.Fail].err{fail.with_text(mr.err, msg_r.ok)};
+        val msg: res[str, fail.Fail] = diag_dep_manifest_error(s, alias, fail.describe(mr.err));
+        if (sel msg.err) { ret res[project.DepEntry, fail.Fail].err{msg.err}; }
+        ret res[project.DepEntry, fail.Fail].err{fail.with_text(mr.err, msg.ok)};
     }
     var entry: project.DepEntry;
     entry.manifest = mr.ok;
