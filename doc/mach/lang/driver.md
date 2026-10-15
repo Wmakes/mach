@@ -196,7 +196,8 @@ pub fun build_project(s: *session.Session, project_root: str, selectors: *manife
 ## fun closure_locate
 
 ```mach
-pub fun closure_locate(s: *session.Session, m: *manifest.Manifest, project_root: str) res[project.Closure, fail.Fail];
+pub fun closure_locate(s: *session.Session, m: *manifest.Manifest, project_root: str,
+unrealized: driver_closure.Unrealized) res[project.Closure, fail.Fail];
 ```
 
 locate a root manifest's dependency closure with no build cell configured, as a
@@ -206,6 +207,7 @@ edges, and nothing is checked against git or the pins
 s: the session; its build allocator owns the closure
 m: the root manifest
 project_root: the root project's directory
+unrealized: what a dependency nothing is realized for is
 ret: the closure, released with `project.closure_dnit`
 
 ## fun closure_checked

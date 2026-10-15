@@ -99,7 +99,8 @@ names:    the interner the plan's names live in; a session runs the plan only
 manifest: the root manifest the plan was made from, borrowed; it outlives the plan
 closure:  the manifest's dependency closure, located once by
           `plan_dependency_requirements`; every cell borrows it
-located:  whether `closure` was located, which running the plan requires
+located:  whether `closure` was located as a build needs it, every dependency
+          realized, which running the plan requires
 
 ## fun plan
 
@@ -172,7 +173,7 @@ ret: ok; the configuration failure of the first cell that has one
 ## fun plan_dependency_requirements
 
 ```mach
-pub fun plan_dependency_requirements(s: *session.Session, bp: *BuildPlan) err[fail.Fail];
+pub fun plan_dependency_requirements(s: *session.Session, bp: *BuildPlan, unrealized: driver_closure.Unrealized) err[fail.Fail];
 ```
 
 locate the root's dependency closure, once, into the plan, and add the cells a
@@ -186,8 +187,10 @@ are refused
 
 s: the session the plan was made in
 bp: the plan, mutated in place
+unrealized: what a dependency nothing is realized for is; a plan that leaves
+            one out lists what was built and never runs
 ret: ok; err from locating the closure, a dependency cell's planning, or an
-     output collision
+            output collision
 
 ## fun check_plan_outputs
 

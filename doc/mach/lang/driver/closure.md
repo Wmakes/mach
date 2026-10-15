@@ -45,11 +45,37 @@ pub fun check_dep_root(project_root: str) res[bool, fail.Fail];
 
 whether the dependency root exists; err when it is anything but a physical directory
 
+## def Unrealized
+
+```mach
+pub def Unrealized: u8
+```
+
+what locating makes of a dependency nothing is realized for under dep/
+
+## val UNREALIZED_REFUSED
+
+```mach
+pub val UNREALIZED_REFUSED: Unrealized = 0
+```
+
+a build needs every dependency, so it is refused, naming `mach dep pull`
+
+## val UNREALIZED_UNBUILT
+
+```mach
+pub val UNREALIZED_UNBUILT: Unrealized = 1
+```
+
+a dependency never realized was never built: it is left out with what it
+would reach, and an edge to it names no project. only a caller asking what
+was built, as clean does, locates this way; such a closure never configures a build
+
 ## fun locate
 
 ```mach
 pub fun locate(s: *session.Session, alloc: *A.Allocator, m: *manifest.Manifest, project_root: str,
-check: *Check) res[project.Closure, fail.Fail];
+check: *Check, unrealized: Unrealized) res[project.Closure, fail.Fail];
 ```
 
 locate a root manifest's dependency closure as a build reads it: every
@@ -63,6 +89,7 @@ alloc: owns the closure
 m: the root manifest
 project_root: the root project's directory
 check: what each located edge is also held to, or nil for a build, which locates only
+unrealized: what a dependency nothing is realized for is
 ret: the closure; err naming a missing dependency, an unreadable manifest, a
               cycle or an unaccepted compiler range, or the first edge that does not hold
               to `check`

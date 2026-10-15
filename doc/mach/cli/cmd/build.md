@@ -58,7 +58,8 @@ ret: the plans, or a Fail: internal for session or registry setup, user for mani
 
 ```mach
 pub fun plan_selection(a: *A.Allocator, ps: *session.Session, m: *manifest.Manifest, root: str, cli: *args.CliArgs,
-goal: request.BuildGoal, mode: manifest.ArtifactDefault, configure_deps: bool) res[Planned, fail.Fail];
+goal: request.BuildGoal, mode: manifest.ArtifactDefault, configure_deps: bool,
+unrealized: driver_closure.Unrealized) res[Planned, fail.Fail];
 ```
 
 resolve the selectors against a loaded manifest and plan every resolved cell,
@@ -68,6 +69,7 @@ each other: a caller that runs them all checks they write disjoint outputs
 a: allocator for the requests
 ps: the session the manifest was loaded in; owns the plans
 m: the root manifest
+unrealized: what a dependency nothing is realized for is
 ret: the plans; err from selection, a request, planning or dependency configuration
 
 ## fun announce_profile
