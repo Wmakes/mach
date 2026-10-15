@@ -4251,3 +4251,22 @@ test comptime_sel__refuses_a_foreign_place {
     if (sema_checked.sema_diag2("use t.lib; fun f() i64 { $if (sel lib.C.value) { ret 1; } ret 0; }", "tag Reply: u8 { empty; value: i64; } pub var C: Reply = Reply.value{42};", "does not name a module-level constant") != 0) { ret 1; }
     ret 0;
 }
+
+# a test body's literal `ret` is refused at the ret when it is outside 0..255, with
+# the value in the message; an ordinary function returning the same value is not
+test test_result__literal_outside_the_status_range_is_refused_at_the_ret {
+    val src: str = "fun main() i32 { ret 0; }\nfun wide() i32 { ret 256; }\ntest a { ret 256; }\ntest b { ret 300; }\ntest c { ret -1; }\n";
+    if (!sema_checked.sema_rejects_at(src, "test result 256 is outside the status range 0..255", 63, 8)) { ret 1; }
+    if (!sema_checked.sema_rejects_at(src, "test result 300 is outside the status range 0..255", 83, 8)) { ret 2; }
+    if (!sema_checked.sema_rejects_at(src, "test result -1 is outside the status range 0..255", 103, 7)) { ret 3; }
+    var c:    sema_checked.Checked;
+    val made: err[fail.Fail] = sema_checked.checked_init(?c, src);
+    fin { sema_checked.checked_dnit(?c); }
+    if (sel made.err) { ret 4; }
+    # exactly the three test rets, not `wide`
+    if (diagnostic.errors_saying(?c.r.s.diags, "outside the status range 0..255") != 3) { ret 5; }
+    if (!diagnostic.note_says(?c.r.s.diags, "eight bits on every host"))                 { ret 6; }
+    # the range itself, and a run-time value, are the dispatcher's business
+    if (!sema_checked.sema_clean("fun main() i32 { ret 0; }\nfun wide() i32 { ret 256; }\ntest d { ret 255; }\ntest e { ret 0; }\ntest f { ret wide(); }\ntest g { ret 200 + 55; }\n")) { ret 7; }
+    ret 0;
+}

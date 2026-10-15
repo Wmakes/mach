@@ -27,7 +27,7 @@ use std.types.string.str_copy_slice;
 use std.types.string.str_empty;
 use std.types.string.str_len;
 
-pub fun wildcard_match(pat: str, name: str) bool {
+fun wildcard_match(pat: str, name: str) bool {
     val pn:   usize = str_len(pat);
     val nn:   usize = str_len(name);
     var pi:   usize = 0;
@@ -378,4 +378,30 @@ fun t_matches_free(alloc: *A.Allocator, v: *collections_vector.Vector[str]) {
         i = i + 1;
     }
     collections_vector.dnit[str](v);
+}
+
+test wildcard_match__star_prefix_infix_and_exact {
+    var bad: i32 = 0;
+    if (!wildcard_match("*.c", "mad.c"))           { bad = 1; }
+    if (!wildcard_match("*.c", ".c"))              { bad = 2; }
+    if (!wildcard_match("mini*.h", "miniaudio.h")) { bad = 3; }
+    if (!wildcard_match("a*b*c", "axxbyyc"))       { bad = 4; }
+    if (!wildcard_match("*", "anything"))          { bad = 5; }
+    if (!wildcard_match("exact.c", "exact.c"))     { bad = 6; }
+    if (wildcard_match("*.c", "mad.h"))            { bad = 7; }
+    if (wildcard_match("*.c", "mad.cpp"))          { bad = 8; }
+    if (wildcard_match("mini*.h", "audio.h"))      { bad = 9; }
+    if (wildcard_match("exact.c", "exact.cc"))     { bad = 10; }
+    ret bad;
+}
+
+test shape_ok__one_recursive_segment_at_most {
+    var bad: i32 = 0;
+    if (!shape_ok("dir/*.c"))    { bad = 1; }
+    if (!shape_ok("dir/**/*.c")) { bad = 2; }
+    if (!shape_ok("*.c"))        { bad = 3; }
+    if (!shape_ok("a/b/c.c"))    { bad = 4; }
+    if (shape_ok("a/*/b.c"))     { bad = 5; }
+    if (shape_ok("a/**/**/*.c")) { bad = 6; }
+    ret bad;
 }

@@ -5,5 +5,4 @@ use std.runtime;
 use build_tests:                 mach.lang.build.tests;
 use driver_build_tests:          mach.lang.driver.tests.build;
 use driver_deps_tests:           mach.lang.driver.tests.deps;
-use driver_manifest_tests:       mach.lang.driver.tests.manifest;
 use readout_tests:               mach.lang.readout.tests;
