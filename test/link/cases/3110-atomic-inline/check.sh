@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 . "$(dirname "$0")/../../check/common.sh"
 
-# atomic_inline_scan <mnemonic-regex> — read a linked-image disassembly and report
+# atomic_inline_scan <mnemonic-regex> <raw> — read a linked-image disassembly and report
 # the two facts above. the wrapper list is spelled out so a wrapper with no call
 # reads as 0 rather than being absent, and any other `std.sync.atomic.*` symbol a
 # case function calls is appended after the eight.
 atomic_inline_scan() {
-    awk -v atomic="$1" '
+    awk -v atomic="$1" -v raw="$2" '
     BEGIN {
         n = split("load store cas fetch_add fetch_sub exchange fence spin_hint", names, " ")
         for (i = 1; i <= n; i++) { calls[names[i]] = 0; known[names[i]] = 1 }
@@ -23,6 +23,13 @@ atomic_inline_scan() {
         if (!incase) { next }
         text = $0
         sub(/^[[:space:]]*[0-9a-f]+:[[:space:]]*/, "", text)
+        if (raw == 1) {
+            word = text; sub(/[[:space:]].*$/, "", word)
+            sub(/^[0-9a-f]+[[:space:]]*/, "", text)
+            # the riscv64 spin hint is `fence w, 0` (0x0100000f); llvm-objdump 23 names
+            # it `pause`, so it is read by encoding and given one spelling
+            if (word == "0100000f") { text = "fence w, 0" }
+        }
         sub(/[[:space:]]*#.*$/, "", text)
         gsub(/[[:space:]]+/, " ", text)
         sub(/ $/, "", text)
@@ -101,7 +108,11 @@ produce_atomic_inline() {
         riscv64-*) atomic='^(fence|lr[.]|sc[.]|amo|pause)' ;;
         *) echo "link: atomic-inline: no atomic vocabulary for '$target'" >&2; return 2 ;;
     esac
-    "$tool" -d --no-show-raw-insn "$bin" | atomic_inline_scan "$atomic"
+    # riscv64 keeps the raw column, whose encoding is stable where the mnemonic is not
+    case "$target" in
+        riscv64-*) "$tool" -d "$bin" | atomic_inline_scan "$atomic" 1 ;;
+        *)         "$tool" -d --no-show-raw-insn "$bin" | atomic_inline_scan "$atomic" 0 ;;
+    esac
 }
 
 produce_atomic_inline "$@"
