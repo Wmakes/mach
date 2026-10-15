@@ -46,7 +46,6 @@ use mach.lang.package.report;
 use mach.lang.readout;
 use mach.lang.session;
 use lang_source: mach.lang.source;
-use mach.lang.step;
 use lang_target: mach.lang.target;
 use target_of:   mach.lang.target.of;
 
@@ -2406,13 +2405,13 @@ test readout__the_tally_counts_a_simd_require_rejection {
     var s: session.Session = session_r.ok;
     fin { session.dnit(?s); }
 
-    var pick: manifest.Selectors = manifest.t_selectors("", "linux", "");
     # the driver's default request stands in for the composed one, so the
     # profile's lever is set on the request the way the cli composes it
     var req: request.BuildRequest = request.defaults();
     req.project_root = root;
+    req.target       = "linux";
     req.simd         = manifest.SIMD_REQUIRE;
-    val project_r: res[project.Project, fail.Fail] = step.project_build_req(?s, root, ?pick, ?req);
+    val project_r: res[project.Project, fail.Fail] = driver.begin_loaded(?s, ?req);
     if (sel project_r.err) { ret 5; }
     var p: project.Project = project_r.ok;
     fin { project.dnit_project(?p); }
@@ -2484,11 +2483,11 @@ fun t_allowed_warnings(target_keys: str, profile_keys: str, main_text: str, lib_
     val pf_r: res[manifest.ResolvedProfile, fail.Fail] = manifest.resolve_profile(?a, ?s.interner, ?m, "");
     if (sel pf_r.err) { ret -1; }
 
-    var pick: manifest.Selectors   = manifest.t_selectors("", "t", "");
-    var req:  request.BuildRequest = request.defaults();
+    var req: request.BuildRequest = request.defaults();
     req.project_root = root;
+    req.target       = "t";
     req.allow        = pf_r.ok.allow;
-    val project_r: res[project.Project, fail.Fail] = step.project_build_req(?s, root, ?pick, ?req);
+    val project_r: res[project.Project, fail.Fail] = driver.begin_loaded(?s, ?req);
     if (sel project_r.err) { ret -1; }
     var p: project.Project = project_r.ok;
     fin { project.dnit_project(?p); }
@@ -2668,11 +2667,11 @@ test simd_require__a_declared_extension_lowers_the_cell_packed {
     var s: session.Session = session_r.ok;
     fin { session.dnit(?s); }
 
-    var pick: manifest.Selectors   = manifest.t_selectors("", "linux", "");
-    var req:  request.BuildRequest = request.defaults();
+    var req: request.BuildRequest = request.defaults();
     req.project_root = root;
+    req.target       = "linux";
     req.simd         = manifest.SIMD_REQUIRE;
-    val project_r: res[project.Project, fail.Fail] = step.project_build_req(?s, root, ?pick, ?req);
+    val project_r: res[project.Project, fail.Fail] = driver.begin_loaded(?s, ?req);
     if (sel project_r.err) { ret 5; }
     var p: project.Project = project_r.ok;
     fin { project.dnit_project(?p); }

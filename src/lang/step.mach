@@ -2406,26 +2406,3 @@ test step_outputs__native_snapshot_and_declarations_share_canonical_paths {
     if (!named) { ret 7; }
     ret 0;
 }
-
-# a project built for the selected cell as a build does through its load: the
-# dependencies' steps and the project's own run before the load phase
-#[testing]
-pub fun project_build(s: *session.Session, project_root: str, selectors: *manifest.Selectors) res[project.Project, fail.Fail] {
-    ret project_build_req(s, project_root, selectors, nil);
-}
-
-# as `project_build`, with the caller's request standing in for the composed one
-#[testing]
-pub fun project_build_req(s: *session.Session, project_root: str, selectors: *manifest.Selectors, req: *request.BuildRequest) res[project.Project, fail.Fail] {
-    val begun: res[project.Project, fail.Fail] = driver.project_begin(s, project_root, selectors, req);
-    if (sel begun.err) { ret begun; }
-    var p:       project.Project      = begun.ok;
-    val te:      *project.TargetEntry = p.target_entry;
-    val dep_ran: err[fail.Fail]       = driver.phase_finish(?p, dependency_run(?p, te.isa_name, te.os_name, te.abi_name));
-    if (sel dep_ran.err) { ret driver.project_failure(?p, dep_ran.err); }
-    val ran: err[fail.Fail] = driver.phase_finish(?p, run(p.alloc, ?p));
-    if (sel ran.err) { ret driver.project_failure(?p, ran.err); }
-    val loaded: err[fail.Fail] = driver.run_load_phase(?p);
-    if (sel loaded.err) { ret driver.project_failure(?p, loaded.err); }
-    ret res[project.Project, fail.Fail].ok{p};
-}

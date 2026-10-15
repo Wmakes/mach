@@ -55,7 +55,6 @@ use mach.lang.package.resolver;
 use package_source: mach.lang.package.source;
 use package_verify: mach.lang.package.verify;
 use mach.lang.session;
-use mach.lang.step;
 
 val MANIFEST: str = manifest.MANIFEST_FILE;
 
@@ -1384,7 +1383,7 @@ fun t_session_and_mode(a: *A.Allocator, root: str, s: *session.Session, mode: *u
 #[testing]
 fun t_build_ok(s: *session.Session, root: str) bool {
     var pick: manifest.Selectors              = manifest.t_selectors("", "", "");
-    val pr:   res[project.Project, fail.Fail] = step.project_build(s, root, ?pick);
+    val pr:   res[project.Project, fail.Fail] = driver.build_project(s, root, ?pick);
     if (sel pr.err) {
         val f: fail.Fail = pr.err;
         if (fail.describe(f) != nil) {
@@ -1960,7 +1959,7 @@ test add__a_discovered_clash_retains_native_changes_and_releases_the_manifest_ed
 #[testing]
 fun t_build_refusal(s: *session.Session, root: str) str {
     var pick: manifest.Selectors              = manifest.t_selectors("", "", "");
-    val pr:   res[project.Project, fail.Fail] = step.project_build(s, root, ?pick);
+    val pr:   res[project.Project, fail.Fail] = driver.build_project(s, root, ?pick);
     if (sel pr.err) { ret fail.describe(pr.err); }
     var p: project.Project = pr.ok;
     project.dnit_project(?p);

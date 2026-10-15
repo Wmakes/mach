@@ -240,36 +240,20 @@ pub fun run_link_pass(p: *project.Project) res[bool, fail.Fail] {
     ret result;
 }
 
+# load the manifest at `project_root`, begin the one cell `selectors` names in it and
+# load its artifact's closure
 pub fun build_project(s: *session.Session, project_root: str, selectors: *manifest.Selectors) res[project.Project, fail.Fail] {
-    ret build_selected(s, project_root, selectors, nil, project.ROOT_ARTIFACT, true);
-}
-
-# load the manifest at `project_root` and begin the one cell `selectors` names in it;
-# `load` runs the load phase as a build does, or leaves the project before any phase
-fun build_selected(s: *session.Session, project_root: str, selectors: *manifest.Selectors, req: *request.BuildRequest,
-    roots: project.RootSet, load: bool) res[project.Project, fail.Fail] {
     val mr: res[manifest.Manifest, fail.Fail] = load_manifest(s, project_root);
     if (sel mr.err) {
         ret res[project.Project, fail.Fail].err{mr.err};
     }
     var m: manifest.Manifest = mr.ok;
     fin { manifest.dnit(?m, s.build_alloc); }
-    if (req != nil) {
-        val worked: err[fail.Fail] = request.request_work_apply(?s.interner, req, ?m);
-        if (sel worked.err) { ret res[project.Project, fail.Fail].err{worked.err}; }
-    }
     val cell: res[manifest.Cell, fail.Fail] = manifest.resolve_cell(s.build_alloc, ?s.interner, ?m, selectors,
         manifest.ARTIFACT_DEFAULT_ONE, "this command builds one artifact");
     if (sel cell.err) { ret res[project.Project, fail.Fail].err{cell.err}; }
-    var c: manifest.Cell = cell.ok;
-    var r: res[project.Project, fail.Fail];
-    if (load) { r = build_project_impl(s, project_root, ?c, ?m, req, roots); }
-    or        { r = begin_build_impl(s, project_root, ?c, ?m, nil, req, nil, roots); }
-    ret r;
-}
-
-fun build_project_impl(s: *session.Session, project_root: str, c: *manifest.Cell, m: *manifest.Manifest, req: *request.BuildRequest, roots: project.RootSet) res[project.Project, fail.Fail] {
-    val begin_r: res[project.Project, fail.Fail] = begin_build_impl(s, project_root, c, m, nil, req, nil, roots);
+    var c:       manifest.Cell                   = cell.ok;
+    val begin_r: res[project.Project, fail.Fail] = begin_build_impl(s, project_root, ?c, ?m, nil, nil, nil, project.ROOT_ARTIFACT);
     if (sel begin_r.err) { ret begin_r; }
     var p: project.Project = begin_r.ok;
 
@@ -354,19 +338,6 @@ pub val FRONTEND_PARSE:   FrontendPhase = 0;
 pub val FRONTEND_RESOLVE: FrontendPhase = 1;
 pub val FRONTEND_SEMA:    FrontendPhase = 2;
 
-# what a rejected frontend phase does to the project: the build-facing entry
-# points release it and answer the rejection, the tools-facing one keeps it
-def RejectionPolicy: u8;
-#[testing]
-val REJECTION_FAILS: RejectionPolicy = 0;
-val REJECTION_KEEPS: RejectionPolicy = 1;
-
-#[testing]
-pub fun analyze_project(s: *session.Session, m: *manifest.Manifest, req: *request.BuildRequest,
-    roots: project.RootSet, extra_roots: *intern.StrId, extra_root_count: u32) res[project.Project, fail.Fail] {
-    ret analyze_frontend(s, m, req, roots, extra_roots, extra_root_count, FRONTEND_SEMA, REJECTION_FAILS);
-}
-
 # frontend analysis for tools: the project comes back whenever the frontend
 # ran, whatever its phases decided, so a consumer can read the trees, resolve
 # results and sema results beside the diagnostics. every module that reached
@@ -389,12 +360,6 @@ pub fun analyze_project(s: *session.Session, m: *manifest.Manifest, req: *reques
 # ret:              the project, released by the caller with project.dnit_project
 pub fun analyze_project_tolerant(s: *session.Session, m: *manifest.Manifest, req: *request.BuildRequest,
     roots: project.RootSet, extra_roots: *intern.StrId, extra_root_count: u32, phase: FrontendPhase) res[project.Project, fail.Fail] {
-    ret analyze_frontend(s, m, req, roots, extra_roots, extra_root_count, phase, REJECTION_KEEPS);
-}
-
-fun analyze_frontend(s: *session.Session, m: *manifest.Manifest, req: *request.BuildRequest,
-    roots: project.RootSet, extra_roots: *intern.StrId, extra_root_count: u32, phase: FrontendPhase,
-    policy: RejectionPolicy) res[project.Project, fail.Fail] {
     if (phase > FRONTEND_SEMA) { ret res[project.Project, fail.Fail].err{fail.message("unknown frontend analysis phase")}; }
     if (roots != project.ROOT_ARTIFACT && roots != project.ROOT_UNION) {
         ret res[project.Project, fail.Fail].err{fail.unknown_catalog(s.alloc, "RootSet", roots::u32)};
@@ -413,29 +378,29 @@ fun analyze_frontend(s: *session.Session, m: *manifest.Manifest, req: *request.B
 
     if (phase == FRONTEND_PARSE) {
         val parsed: err[fail.Fail] = parse_project_roots(?p, extra_roots, extra_root_count);
-        if (sel parsed.err) { ret phase_decided(?p, parsed.err, policy); }
+        if (sel parsed.err) { ret phase_decided(?p, parsed.err); }
         ret res[project.Project, fail.Fail].ok{p};
     }
 
     val load_r: err[fail.Fail] = run_load_phase_roots(?p, extra_roots, extra_root_count);
-    if (sel load_r.err) { ret phase_decided(?p, load_r.err, policy); }
+    if (sel load_r.err) { ret phase_decided(?p, load_r.err); }
 
     if (phase == FRONTEND_RESOLVE) {
         val current: err[fail.Fail] = resolve_query_phase(?p);
-        if (sel current.err) { ret phase_decided(?p, current.err, policy); }
+        if (sel current.err) { ret phase_decided(?p, current.err); }
         ret res[project.Project, fail.Fail].ok{p};
     }
 
     val sema_r: err[fail.Fail] = run_sema_pass(?p);
-    if (sel sema_r.err) { ret phase_decided(?p, sema_r.err, policy); }
+    if (sel sema_r.err) { ret phase_decided(?p, sema_r.err); }
 
     ret res[project.Project, fail.Fail].ok{p};
 }
 
-# a phase that did not finish: a rejection keeps the project under the
-# tolerant policy, everything else releases it
-fun phase_decided(p: *project.Project, failure: fail.Fail, policy: RejectionPolicy) res[project.Project, fail.Fail] {
-    if (policy == REJECTION_KEEPS && fail.is_reported(failure)) {
+# a phase that did not finish: a rejection keeps the project, everything else
+# releases it
+fun phase_decided(p: *project.Project, failure: fail.Fail) res[project.Project, fail.Fail] {
+    if (fail.is_reported(failure)) {
         ret res[project.Project, fail.Fail].ok{@p};
     }
     ret project_failure(p, failure);
@@ -867,26 +832,43 @@ pub fun scaffold(alloc: *A.Allocator, text: str, names: *str, texts: *str, n: u3
     ret res[str, fail.Fail].ok{root};
 }
 
-# a project begun for the selected cell, configured and published with no phase
-# run, for a caller that runs phases of its own before the load
+# a manifest for a test's project: the bin artifact `uniontest`, its entry `main.mach`, on a
+# target for each os and isa the compiler builds, with a debug and a release profile
 #[testing]
-pub fun project_begin(s: *session.Session, project_root: str, selectors: *manifest.Selectors, req: *request.BuildRequest) res[project.Project, fail.Fail] {
-    ret build_selected(s, project_root, selectors, req, project.ROOT_ARTIFACT, false);
+pub fun fixture_manifest() str {
+    ret "[project]\nmach = \">=5\"\nid = \"uniontest\"\nversion = \"0.0.0\"\nsrc = \"src\"\nwork = \"out/{target.name}/{profile.name}\"\n\n[target.linux]\nisa = \"x86_64\"\nos = \"linux\"\nabi = \"sysv64\"\n\n[target.windows]\nisa = \"x86_64\"\nos = \"windows\"\nabi = \"win64\"\n\n[target.linux-arm64]\nisa = \"aarch64\"\nos = \"linux\"\nabi = \"aapcs64\"\n\n[target.linux-riscv64]\nisa = \"riscv64\"\nos = \"linux\"\nabi = \"lp64d\"\n\n[target.darwin-x86_64]\nisa = \"x86_64\"\nos = \"darwin\"\nabi = \"sysv64\"\n\n[target.darwin-arm64]\nisa = \"aarch64\"\nos = \"darwin\"\nabi = \"aapcs64\"\n\n[target.bare-arm64]\nisa = \"aarch64\"\nos = \"freestanding\"\nabi = \"aapcs64\"\nof = \"elf\"\n\n[artifact.uniontest]\nkind = \"bin\"\nentry = \"main.mach\"\nout = \"{project.work}/bin/uniontest\"\ntargets = [\"*\"]\nlink = []\nneed = []\n[profile.debug]\ndefault = true\noptimize = false\ndebug = true\nsimd = \"scalarize\"\n[profile.release]\noptimize = true\ndebug = false\nsimd = \"scalarize\"\n";
 }
 
+# a project under a fresh temporary root, as `scaffold` writes it, loaded through
+# `build_project` for the cell `target` names, the default when empty, as the
+# documentation command loads one; the root is removed before this returns
 #[testing]
-pub fun build_project_union(s: *session.Session, project_root: str) res[project.Project, fail.Fail] {
-    ret build_project_union_for(s, project_root, "");
-}
-
-# the union with its primary cell selected by `target`, for a manifest declaring none for the host
-#[testing]
-pub fun build_project_union_for(s: *session.Session, project_root: str, target: str) res[project.Project, fail.Fail] {
+pub fun scaffold_build(s: *session.Session, alloc: *A.Allocator, text: str, names: *str, texts: *str, n: u32,
+    target: str) res[project.Project, fail.Fail] {
+    val root: res[str, fail.Fail] = scaffold(alloc, text, names, texts, n);
+    if (sel root.err) { ret res[project.Project, fail.Fail].err{root.err}; }
+    fin { fs.remove_all(alloc, root.ok); }
     val made: res[manifest.Selectors, fail.Fail] = manifest.selectors_of(s.build_alloc, "", target, "");
     if (sel made.err) { ret res[project.Project, fail.Fail].err{made.err}; }
-    var union_sel: manifest.Selectors = made.ok;
-    fin { manifest.selectors_dnit(?union_sel); }
-    ret build_selected(s, project_root, ?union_sel, nil, project.ROOT_UNION, true);
+    var selectors: manifest.Selectors = made.ok;
+    fin { manifest.selectors_dnit(?selectors); }
+    ret build_project(s, root.ok, ?selectors);
+}
+
+# the cell `req` names begun through `begin_build` over the manifest at its project root,
+# as a build begins it, and loaded; no step runs
+#[testing]
+pub fun begin_loaded(s: *session.Session, req: *request.BuildRequest) res[project.Project, fail.Fail] {
+    val read: res[manifest.Manifest, fail.Fail] = load_manifest(s, req.project_root);
+    if (sel read.err) { ret res[project.Project, fail.Fail].err{read.err}; }
+    var m: manifest.Manifest = read.ok;
+    fin { manifest.dnit(?m, s.build_alloc); }
+    val begun: res[project.Project, fail.Fail] = begin_build(s, ?m, nil, req, nil);
+    if (sel begun.err) { ret begun; }
+    var p:      project.Project = begun.ok;
+    val loaded: err[fail.Fail]  = run_load_phase(?p);
+    if (sel loaded.err) { ret project_failure(?p, loaded.err); }
+    ret res[project.Project, fail.Fail].ok{p};
 }
 
 # a load that failed: the frontend's recorded status wins over the loader's
