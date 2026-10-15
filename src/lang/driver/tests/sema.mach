@@ -42,6 +42,7 @@ use mach.lang.type;
 
 use mach.lang.build.engine;
 use build_plan: mach.lang.build.plan;
+use mach.lang.build.publication;
 use mach.lang.driver;
 use mach.lang.driver.passes;
 use mach.lang.driver.project;
@@ -101,8 +102,10 @@ test grouped_expr__values_survive_to_run_time {
     rq.goal         = request.GOAL_TESTS;
     val pr: res[build_plan.BuildPlan, fail.Fail] = build_plan.plan(?alloc, ?s.interner, toolchain.t_registry(), ?m, rq);
     if (sel pr.err) { ret 4; }
-    var bp: build_plan.BuildPlan                 = pr.ok;
-    val r:  res[outcome.BuildOutcome, fail.Fail] = engine.execute_warm(?bp, 0, ?s, ?alloc, nil);
+    var bp:        build_plan.BuildPlan     = pr.ok;
+    var published: publication.Publications = publication.init(?alloc);
+    fin { publication.dnit(?published); }
+    val r: res[outcome.BuildOutcome, fail.Fail] = engine.execute_warm(?bp, 0, ?s, ?published, ?alloc, nil);
     if (sel r.err) {
         print.eprintln(fail.describe(r.err));
         ret 4;

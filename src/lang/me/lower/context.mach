@@ -33,6 +33,7 @@ use sema_declared: mach.lang.fe.sema.declared;
 use mach.lang.fe.sema.recipe;
 use mach.lang.float;
 use mach.lang.intern;
+use mach.lang.linkage;
 use me_ir: mach.lang.me.ir;
 use mach.lang.me.ir.builder;
 use ir_debug: mach.lang.me.ir.debug;
@@ -118,6 +119,8 @@ pub rec ScopeMark {
 }
 
 pub rec LowerRequest {
+    # the declarations' export names, the project's
+    linkage:    *linkage.Linkage;
     interfaces: fe_sema.interface.Reader;
     instances:  *fe_sema.instance.Set;
     diags:      *diagnostic.DiagnosticStore;
@@ -150,6 +153,7 @@ pub rec LowerContext {
     diags:            *diagnostic.DiagnosticStore;
     status:           fail.PhaseStatus;
     s:                *session.Session;
+    linkage:          *linkage.Linkage;
     tgt:              *resolved.Target;
     scope:            ModuleScope;
     scopes:           *ModuleScope;
@@ -317,6 +321,7 @@ fun foreign_ctx(lc: *LowerContext, origin: session.ModuleId, t: *fe_sema.templat
 
 pub fun request(
     s: *session.Session,
+    l: *linkage.Linkage,
     tgt: *resolved.Target,
     malloc: *A.Allocator,
     a: *ast.Ast,
@@ -331,6 +336,7 @@ pub fun request(
     checks: bool,
     diags: *diagnostic.DiagnosticStore,
     interfaces: fe_sema.interface.Reader) res[LowerRequest, fail.Fail] {
+    if (l == nil)      { ret res[LowerRequest, fail.Fail].err{fail.message("lower: a lowering request requires the project's linkage")}; }
     if (tgt == nil)    { ret res[LowerRequest, fail.Fail].err{fail.message("lower: a lowering request requires a resolved target")}; }
     if (malloc == nil) { ret res[LowerRequest, fail.Fail].err{fail.message("lower: a lowering request requires an allocator")}; }
 
@@ -340,6 +346,7 @@ pub fun request(
 
     var req: LowerRequest;
     req.s               = s;
+    req.linkage         = l;
     req.interfaces      = interfaces;
     req.instances       = ?sema_result.instances;
     req.diags           = diags;
@@ -396,6 +403,7 @@ pub fun init_context(lc: *LowerContext, req: *LowerRequest, m: *me_ir.Module) er
     lc.status            = fail.accepted();
     lc.logical_type_path = nil;
     lc.s                 = s;
+    lc.linkage           = req.linkage;
     lc.interfaces        = req.interfaces;
     lc.foreign           = collections_vector.init[ForeignScope](s.alloc);
     lc.diags             = req.diags;
@@ -2008,25 +2016,27 @@ test request__refuses_a_module_product_that_does_not_correspond {
     fin { session.dnit(?s); }
     var f: ScopeFixture;
     if (!scope_fixture(?s, ?f)) { ret 1; }
-    var tgt:    resolved.Target          = resolved.Target{};
+    var tgt: resolved.Target = resolved.Target{};
+    var l:   linkage.Linkage = linkage.init(?alloc);
+    fin { linkage.dnit(?l); }
     val reader: fe_sema.interface.Reader = fe_sema.interface.Reader{ctx: nil, read: fixture_interface};
     val unread: fe_sema.interface.Reader = fe_sema.interface.Reader{ctx: nil, read: nil};
 
     var code: i32 = 0;
 
-    val good: res[LowerRequest, fail.Fail] = request(?s, ?tgt, ?alloc, ?f.a1, f.fqn, f.mid, ?f.sm1, ?f.rr1, ?f.cc1, nil, false, false, true, nil, reader);
+    val good: res[LowerRequest, fail.Fail] = request(?s, ?l, ?tgt, ?alloc, ?f.a1, f.fqn, f.mid, ?f.sm1, ?f.rr1, ?f.cc1, nil, false, false, true, nil, reader);
     if (sel good.err) { ret 1; }
     val req: LowerRequest = good.ok;
     if (req.module.a != ?f.a1 || !module.same(req.module.own_module, f.mid)) { code = 1; }
     if (req.instances != ?f.sm1.instances)                                   { code = 1; }
 
-    val r_2066: res[LowerRequest, fail.Fail] = request(?s, nil, ?alloc, ?f.a1, f.fqn, f.mid, ?f.sm1, ?f.rr1, ?f.cc1, nil, false, false, true, nil, reader);
+    val r_2066: res[LowerRequest, fail.Fail] = request(?s, ?l, nil, ?alloc, ?f.a1, f.fqn, f.mid, ?f.sm1, ?f.rr1, ?f.cc1, nil, false, false, true, nil, reader);
     if (sel r_2066.ok) { code = 1; }
-    val r_2067: res[LowerRequest, fail.Fail] = request(?s, ?tgt, nil, ?f.a1, f.fqn, f.mid, ?f.sm1, ?f.rr1, ?f.cc1, nil, false, false, true, nil, reader);
+    val r_2067: res[LowerRequest, fail.Fail] = request(?s, ?l, ?tgt, nil, ?f.a1, f.fqn, f.mid, ?f.sm1, ?f.rr1, ?f.cc1, nil, false, false, true, nil, reader);
     if (sel r_2067.ok) { code = 1; }
-    val r_2068: res[LowerRequest, fail.Fail] = request(?s, ?tgt, ?alloc, ?f.a2, f.fqn, f.mid, ?f.sm1, ?f.rr1, ?f.cc1, nil, false, false, true, nil, reader);
+    val r_2068: res[LowerRequest, fail.Fail] = request(?s, ?l, ?tgt, ?alloc, ?f.a2, f.fqn, f.mid, ?f.sm1, ?f.rr1, ?f.cc1, nil, false, false, true, nil, reader);
     if (sel r_2068.ok) { code = 1; }
-    val r_2069: res[LowerRequest, fail.Fail] = request(?s, ?tgt, ?alloc, ?f.a1, f.fqn, f.mid, ?f.sm1, ?f.rr1, ?f.cc1, nil, false, false, true, nil, unread);
+    val r_2069: res[LowerRequest, fail.Fail] = request(?s, ?l, ?tgt, ?alloc, ?f.a1, f.fqn, f.mid, ?f.sm1, ?f.rr1, ?f.cc1, nil, false, false, true, nil, unread);
     if (sel r_2069.ok) { code = 1; }
 
     ret code;

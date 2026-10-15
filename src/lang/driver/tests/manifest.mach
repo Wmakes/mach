@@ -331,7 +331,7 @@ fun ut_pe_stack_of(p: *project.Project, outcome_r: *u64, com: *u64) bool {
 
     var linked: bool = false;
     if (!missing) {
-        val lr: err[fail.Fail] = ut_planned_link_images(p.s, ?p.target, images,
+        val lr: err[fail.Fail] = ut_planned_link_images(p.s, ?p.linkage, ?p.target, images,
             p.emit_len, nil::*target_of.DynLib, 0, output_testing.path(?tf)::*u8, "stkprobe"::*u8,
             catalog_artifact.EXECUTABLE, false, target_of.image_options_default(catalog_subsystem.CONSOLE));
         linked = sel lr.ok;

@@ -36,6 +36,7 @@ use mach.lang.build.outcome;
 use mach.lang.driver.request;
 use mach.lang.fe.ast;
 use mach.lang.intern;
+use mach.lang.linkage;
 use mach.lang.manifest;
 use me_ir:          mach.lang.me.ir;
 use ir_instruction: mach.lang.me.ir.instruction;
@@ -54,6 +55,7 @@ use target_of:         mach.lang.target.of;
 
 use mach.lang.build.engine;
 use build_plan: mach.lang.build.plan;
+use mach.lang.build.publication;
 use mach.lang.driver;
 use mach.lang.driver.project;
 
@@ -1486,7 +1488,7 @@ fun ut_export_named(target_name: str, src: str, want: str) i32 {
     val a:  *ast.Ast = frontend.syntax(?p, project.module_at(?p, mid::u32));
     var di: usize    = 0;
     for (di < a.decls.len) {
-        val named: intern.StrId = session.export_name(?s, mid, di::u32);
+        val named: intern.StrId = linkage.export_name(?p.linkage, mid, di::u32);
         if (!intern.str_is_nil(named)) {
             val text: opt[str] = intern.get(?s.interner, named);
             if (sel text.some && str_equals(text.some, want)) { ret 0; }
@@ -3280,8 +3282,10 @@ fun ut_divide_trap_target(alloc: *A.Allocator, target_name: str, runner_name: st
         fs.remove_all(alloc, root);
         ret 1;
     }
-    var bp: build_plan.BuildPlan                 = pr.ok;
-    val br: res[outcome.BuildOutcome, fail.Fail] = engine.execute_warm(?bp, 0, ?s, alloc, nil);
+    var bp:        build_plan.BuildPlan     = pr.ok;
+    var published: publication.Publications = publication.init(alloc);
+    fin { publication.dnit(?published); }
+    val br: res[outcome.BuildOutcome, fail.Fail] = engine.execute_warm(?bp, 0, ?s, ?published, alloc, nil);
     if (sel br.err) { bad = 1; }
     if (sel br.ok) {
         val bo: outcome.BuildOutcome = br.ok;
@@ -3944,7 +3948,7 @@ fun ut_w64uw_link(p: *project.Project, out: *Vector[u8]) bool {
 
     var linked: bool = false;
     if (!missing) {
-        val lr: err[fail.Fail] = ut_planned_link_images(p.s, ?p.target, images,
+        val lr: err[fail.Fail] = ut_planned_link_images(p.s, ?p.linkage, ?p.target, images,
             p.emit_len, nil::*target_of.DynLib, 0, output_testing.path(?tf)::*u8, "w64uw"::*u8,
             catalog_artifact.EXECUTABLE, false, target_of.image_options_default(catalog_subsystem.CONSOLE));
         linked = sel lr.ok;
@@ -4274,8 +4278,10 @@ fun ut_float_zero_profile(alloc: *A.Allocator, root: str, profile_name: str) i32
     rq.profile      = profile_name;
     val pr: res[build_plan.BuildPlan, fail.Fail] = build_plan.plan(alloc, ?s.interner, toolchain.t_registry(), ?m, rq);
     if (sel pr.err) { ret 4; }
-    var bp: build_plan.BuildPlan                 = pr.ok;
-    val br: res[outcome.BuildOutcome, fail.Fail] = engine.execute_warm(?bp, 0, ?s, alloc, nil);
+    var bp:        build_plan.BuildPlan     = pr.ok;
+    var published: publication.Publications = publication.init(alloc);
+    fin { publication.dnit(?published); }
+    val br: res[outcome.BuildOutcome, fail.Fail] = engine.execute_warm(?bp, 0, ?s, ?published, alloc, nil);
     if (sel br.err) { ret 5; }
     val bo: outcome.BuildOutcome = br.ok;
     if (bo.severity != outcome.BUILD_OK || bo.artifacts.len != 1) { ret 6; }

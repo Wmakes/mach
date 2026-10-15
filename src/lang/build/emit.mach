@@ -35,6 +35,7 @@ use mach.lang.driver.toolchain;
 use mach.lang.fail;
 use mach.lang.growth;
 use mach.lang.intern;
+use mach.lang.linkage;
 use mach.lang.manifest;
 use me_ir:      mach.lang.me.ir;
 use ir_printer: mach.lang.me.ir.printer;
@@ -324,7 +325,7 @@ pub fun emit_shared_library(p: *project.Project, destination: str, inputs: *targ
     dynlibs: *target_of.DynLib, dynlib_len: u32, out_path: **u8) err[fail.Fail] {
     val solib: str = destination;
 
-    val res_link: err[fail.Fail] = linker.link(p.s, ?p.diags, ?p.target, inputs, len, dynlibs, dynlib_len, destination, artifact_product_name(p), catalog_artifact.SHARED, p.req.pie, target_of.image_options_default(p.req.subsystem));
+    val res_link: err[fail.Fail] = linker.link(p.s, ?p.linkage, ?p.diags, ?p.target, inputs, len, dynlibs, dynlib_len, destination, artifact_product_name(p), catalog_artifact.SHARED, p.req.pie, target_of.image_options_default(p.req.subsystem));
     if (sel res_link.err) {
         ret err[fail.Fail].err{res_link.err};
     }
@@ -339,7 +340,7 @@ pub fun link_shared_images(p: *project.Project, images: *target_of.ObjectImage,
     if (sel res_ord.err) { ret err[fail.Fail].err{fail.message("out of memory")}; }
     val ordered: *target_of.ObjectImage = res_ord.ok;
 
-    val res_link: err[fail.Fail] = linker.link_mixed(p.s, ?p.diags, ?p.target, ordered, p.emit_len, ext, ext_count,
+    val res_link: err[fail.Fail] = linker.link_mixed(p.s, ?p.linkage, ?p.diags, ?p.target, ordered, p.emit_len, ext, ext_count,
         dynlibs, dynlib_len, destination, artifact_product_name(p), catalog_artifact.SHARED, p.req.pie,
         target_of.image_options_default(p.req.subsystem));
     A.deallocate[target_of.ObjectImage](p.alloc, ordered, p.emit_len::usize);
@@ -353,7 +354,7 @@ pub fun link_shared_images(p: *project.Project, images: *target_of.ObjectImage,
 pub fun link_executable(p: *project.Project, inputs: *target_of.ObjectInput, len: u32,
     dynlibs: *target_of.DynLib, dynlib_len: u32, destination: str,
     image_options: target_of.ImageOptions) err[fail.Fail] {
-    val res_link: err[fail.Fail] = linker.link(p.s, ?p.diags, ?p.target, inputs, len, dynlibs, dynlib_len, destination, artifact_product_name(p), catalog_artifact.EXECUTABLE, p.req.pie, image_options);
+    val res_link: err[fail.Fail] = linker.link(p.s, ?p.linkage, ?p.diags, ?p.target, inputs, len, dynlibs, dynlib_len, destination, artifact_product_name(p), catalog_artifact.EXECUTABLE, p.req.pie, image_options);
     if (sel res_link.err) {
         ret err[fail.Fail].err{res_link.err};
     }
@@ -379,7 +380,7 @@ pub fun link_flat_images(p: *project.Project, images: *target_of.ObjectImage, de
     if (sel res_ord.err) { ret err[fail.Fail].err{fail.message("out of memory")}; }
     val ordered: *target_of.ObjectImage = res_ord.ok;
 
-    val res_link: err[fail.Fail] = linker.link_images(p.s, ?p.diags, ?p.target, ordered, p.emit_len, nil::*target_of.DynLib, 0, destination, artifact_product_name(p), catalog_artifact.EXECUTABLE, p.req.pie, image_options);
+    val res_link: err[fail.Fail] = linker.link_images(p.s, ?p.linkage, ?p.diags, ?p.target, ordered, p.emit_len, nil::*target_of.DynLib, 0, destination, artifact_product_name(p), catalog_artifact.EXECUTABLE, p.req.pie, image_options);
     A.deallocate[target_of.ObjectImage](p.alloc, ordered, p.emit_len::usize);
     if (sel res_link.err) {
         ret err[fail.Fail].err{res_link.err};
@@ -415,7 +416,7 @@ pub fun link_mixed_images(p: *project.Project, images: *target_of.ObjectImage,
     if (sel res_ord.err) { ret err[fail.Fail].err{fail.message("out of memory")}; }
     val ordered: *target_of.ObjectImage = res_ord.ok;
 
-    val res_link: err[fail.Fail] = linker.link_mixed(p.s, ?p.diags, ?p.target, ordered, p.emit_len, ext, ext_count,
+    val res_link: err[fail.Fail] = linker.link_mixed(p.s, ?p.linkage, ?p.diags, ?p.target, ordered, p.emit_len, ext, ext_count,
         dynlibs, dynlib_len, destination, artifact_product_name(p), catalog_artifact.EXECUTABLE, p.req.pie, image_options);
     A.deallocate[target_of.ObjectImage](p.alloc, ordered, p.emit_len::usize);
     if (sel res_link.err) {
@@ -440,7 +441,7 @@ pub fun append_external_inputs(p: *project.Project, unit: *build_plan.BuildUnit,
     dynlibs: **target_of.DynLib, dynlib_len: *u32) err[fail.Fail] {
     @dynlibs    = nil;
     @dynlib_len = 0;
-    session.reset_link_providers(p.s);
+    linkage.providers_clear(?p.linkage);
     val extra: u32 = count_external_tokens(p, unit);
     if (extra == 0) { ret err[fail.Fail].ok{}; }
 
@@ -661,8 +662,7 @@ fun register_link_provider(p: *project.Project, li: *input.Input) err[fail.Fail]
     if (sel nr.err) {
         ret err[fail.Fail].err{fail.message("out of memory")};
     }
-    val rr: err[fail.Fail] = session.register_link_provider(
-        p.s, nr.ok, li.kind == input.STATIC);
+    val rr: err[fail.Fail] = linkage.register_provider(?p.linkage, nr.ok, li.kind == input.STATIC);
     if (sel rr.err) {
         ret err[fail.Fail].err{fail.message("out of memory")};
     }
@@ -677,7 +677,7 @@ fun register_link_claims(p: *project.Project, req: *manifest.LinkRequirement) er
             ret err[fail.Fail].err{ln.err};
         }
         val sym:  intern.StrId = ln.ok;
-        val prev: intern.StrId = session.import_library(p.s, sym);
+        val prev: intern.StrId = linkage.import_library(?p.linkage, sym);
         if (!intern.str_is_nil(prev)) {
             val had: intern.StrId = prev;
             if (!intern.str_same(had, req.key)) {
@@ -687,7 +687,7 @@ fun register_link_claims(p: *project.Project, req: *manifest.LinkRequirement) er
             i = i + 1;
             cnt;
         }
-        val register_import_library_r: err[fail.Fail] = session.register_import_library(p.s, sym, req.key);
+        val register_import_library_r: err[fail.Fail] = linkage.register_import_library(?p.linkage, sym, req.key);
         if (sel register_import_library_r.err) {
             ret err[fail.Fail].err{fail.message("out of memory")};
         }
@@ -706,8 +706,10 @@ test register_link_claims__pins_and_rejects_conflicts {
     fin { session.dnit(?s); }
 
     var p: project.Project;
-    p.s     = ?s;
-    p.alloc = ?alloc;
+    p.s       = ?s;
+    p.alloc   = ?alloc;
+    p.linkage = linkage.init(?alloc);
+    fin { linkage.dnit(?p.linkage); }
 
     val sym_r: res[intern.StrId, A.Error] = intern.add(?s.interner, "Sleep");
     val pre_r: res[intern.StrId, A.Error] = intern.add(?s.interner, "_Sleep");
@@ -735,7 +737,7 @@ test register_link_claims__pins_and_rejects_conflicts {
 
     val register_link_claims_r: err[fail.Fail] = register_link_claims(?p, ?req);
     if (sel register_link_claims_r.err) { code = 1; }
-    val got: intern.StrId = session.import_library(?s, syms[0]);
+    val got: intern.StrId = linkage.import_library(?p.linkage, syms[0]);
     if (!(!intern.str_is_nil(got) && intern.str_same(got, req.key))) { code = 1; }
 
     val register_link_claims_r2: err[fail.Fail] = register_link_claims(?p, ?req);
@@ -746,16 +748,16 @@ test register_link_claims__pins_and_rejects_conflicts {
     val register_link_claims_r3: err[fail.Fail] = register_link_claims(?p, ?other);
     if (sel register_link_claims_r3.ok) { code = 1; }
 
-    session.reset_module_registry(?s);
+    linkage.clear(?p.linkage);
     val dr: res[lang_target.Binding, fail.Fail] = lang_target.t_select("x86_64", "darwin", "sysv64");
     if (sel dr.err) { ret 1; }
     p.target = dr.ok;
 
     val register_link_claims_r4: err[fail.Fail] = register_link_claims(?p, ?req);
     if (sel register_link_claims_r4.err) { code = 1; }
-    val dgot: intern.StrId = session.import_library(?s, pre_r.ok);
+    val dgot: intern.StrId = linkage.import_library(?p.linkage, pre_r.ok);
     if (!(!intern.str_is_nil(dgot) && intern.str_same(dgot, req.key))) { code = 1; }
-    val import_library_r: intern.StrId = session.import_library(?s, syms[0]);
+    val import_library_r: intern.StrId = linkage.import_library(?p.linkage, syms[0]);
     if (!intern.str_is_nil(import_library_r)) { code = 1; }
 
     val register_link_claims_r5: err[fail.Fail] = register_link_claims(?p, ?other);

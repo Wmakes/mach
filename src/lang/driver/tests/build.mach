@@ -24,10 +24,12 @@ use A: std.allocator;
 use mach.lang.be.linker;
 use mach.lang.build.outcome;
 use build_plan: mach.lang.build.plan;
+use mach.lang.build.publication;
 use mach.lang.diagnostic;
 use diagnostic_kind: mach.lang.diagnostic.kind;
 use mach.lang.driver.request;
 use mach.lang.intern;
+use mach.lang.linkage;
 use mach.lang.manifest;
 use mach.lang.query;
 use mach.lang.session;
@@ -244,8 +246,10 @@ test dispatcher__folds_a_wide_run_time_result_to_255 {
     rq.goal         = request.GOAL_TESTS;
     val pr: res[build_plan.BuildPlan, fail.Fail] = build_plan.plan(?alloc, ?s.interner, toolchain.t_registry(), ?m, rq);
     if (sel pr.err) { ret 1; }
-    var bp: build_plan.BuildPlan                 = pr.ok;
-    val r:  res[outcome.BuildOutcome, fail.Fail] = engine.execute_warm(?bp, 0, ?s, ?alloc, nil);
+    var bp:        build_plan.BuildPlan     = pr.ok;
+    var published: publication.Publications = publication.init(?alloc);
+    fin { publication.dnit(?published); }
+    val r: res[outcome.BuildOutcome, fail.Fail] = engine.execute_warm(?bp, 0, ?s, ?published, ?alloc, nil);
     if (sel r.err) {
         print.eprintln(fail.describe(r.err));
         ret 1;
@@ -669,7 +673,7 @@ fun ut_attr_probe_uncompiled(s: *session.Session, alloc: *A.Allocator, names: *s
     var out: str                        = "";
     val sid: res[intern.StrId, A.Error] = intern.add(?s.interner, sym);
     if (sel sid.ok) {
-        val got: intern.StrId = session.import_library(s, sid.ok);
+        val got: intern.StrId = linkage.import_library(?p.linkage, sid.ok);
         if (!intern.str_is_nil(got)) {
             val nm: opt[str] = intern.get(?s.interner, got);
             if (sel nm.some) { out = nm.some; }
@@ -857,7 +861,7 @@ fun ut_link_exe_image(p: *project.Project, root: str, out: *Vector[u8]) bool {
     var linked: bool = false;
     val path:   str  = ut_cc3(alloc, root, "/", "image.elf");
     if (!missing) {
-        val lr: err[fail.Fail] = ut_planned_link_images(p.s, ?p.target, images, p.emit_len,
+        val lr: err[fail.Fail] = ut_planned_link_images(p.s, ?p.linkage, ?p.target, images, p.emit_len,
             nil::*target_of.DynLib, 0, path::*u8, "fself"::*u8, catalog_artifact.EXECUTABLE, false,
             target_of.image_options_default(catalog_subsystem.CONSOLE));
         linked = sel lr.ok;
@@ -1012,8 +1016,10 @@ test q_link__records_the_normal_and_test_codegen_keys {
     }
     var bp: build_plan.BuildPlan = pr.ok;
 
-    var bad: i32                                  = 0;
-    val r1:  res[outcome.BuildOutcome, fail.Fail] = engine.execute_warm(?bp, 0, ?s, ?alloc, nil);
+    var bad:       i32                      = 0;
+    var published: publication.Publications = publication.init(?alloc);
+    fin { publication.dnit(?published); }
+    val r1: res[outcome.BuildOutcome, fail.Fail] = engine.execute_warm(?bp, 0, ?s, ?published, ?alloc, nil);
     if (sel r1.err) {
         fs.remove_all(?alloc, root);
         session.dnit(?s);
@@ -1139,8 +1145,10 @@ fun ut_artifact_test_statuses(alloc: *A.Allocator, s: *session.Session, root: st
         print.eprintln(fail.describe(pr.err));
         ret 2;
     }
-    var bp: build_plan.BuildPlan                 = pr.ok;
-    val r:  res[outcome.BuildOutcome, fail.Fail] = engine.execute_warm(?bp, 0, s, alloc, nil);
+    var bp:        build_plan.BuildPlan     = pr.ok;
+    var published: publication.Publications = publication.init(alloc);
+    fin { publication.dnit(?published); }
+    val r: res[outcome.BuildOutcome, fail.Fail] = engine.execute_warm(?bp, 0, s, ?published, alloc, nil);
     if (sel r.err) {
         print.eprintln(fail.describe(r.err));
         ret 3;
@@ -1262,8 +1270,10 @@ test test_goal__compile_error_collects_no_tests {
     }
     var bp: build_plan.BuildPlan = pr.ok;
 
-    var bad: i32                                  = 0;
-    val r:   res[outcome.BuildOutcome, fail.Fail] = engine.execute_warm(?bp, 0, ?s, ?alloc, nil);
+    var bad:       i32                      = 0;
+    var published: publication.Publications = publication.init(?alloc);
+    fin { publication.dnit(?published); }
+    val r: res[outcome.BuildOutcome, fail.Fail] = engine.execute_warm(?bp, 0, ?s, ?published, ?alloc, nil);
     if (sel r.err) { bad = 1; }
     if (sel r.ok) {
         var bo: outcome.BuildOutcome = r.ok;

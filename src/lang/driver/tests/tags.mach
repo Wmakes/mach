@@ -25,6 +25,7 @@ use mach.lang.session;
 
 use mach.lang.build.engine;
 use build_plan: mach.lang.build.plan;
+use mach.lang.build.publication;
 use mach.lang.driver;
 use mach.lang.driver.project;
 
@@ -388,8 +389,10 @@ fun ut_l8_trap_target(alloc: *A.Allocator, target_name: str, runner_name: str, r
         fs.remove_all(alloc, root);
         ret 1;
     }
-    var bp: build_plan.BuildPlan                 = pr.ok;
-    val br: res[outcome.BuildOutcome, fail.Fail] = engine.execute_warm(?bp, 0, ?s, alloc, nil);
+    var bp:        build_plan.BuildPlan     = pr.ok;
+    var published: publication.Publications = publication.init(alloc);
+    fin { publication.dnit(?published); }
+    val br: res[outcome.BuildOutcome, fail.Fail] = engine.execute_warm(?bp, 0, ?s, ?published, alloc, nil);
     if (sel br.err) { bad = 1; }
     if (sel br.ok) {
         val bo: outcome.BuildOutcome = br.ok;

@@ -18,6 +18,7 @@ use mach.lang.driver.request;
 use mach.lang.fail;
 use mach.lang.fe.ast;
 use mach.lang.intern;
+use mach.lang.linkage;
 use session_embed: mach.lang.session.embed;
 use lang_source:   mach.lang.source;
 use A:             std.allocator;
@@ -162,12 +163,12 @@ pub fun configuration(scratch: *A.Allocator, p: *project.Project, config: *u8, c
         }
         i = i + 1;
     }
-    cache_key.number(?b, p.s.link_provider_len::u64);
-    i = 0;
-    for (i < p.s.link_provider_len) {
-        cache_key.name(?b, ?p.s.interner, p.s.link_providers[i].name);
-        cache_key.number(?b, p.s.link_providers[i].is_static::u64);
-        i = i + 1;
+    cache_key.number(?b, p.linkage.providers.len::u64);
+    var k: usize = 0;
+    for (k < p.linkage.providers.len) {
+        cache_key.name(?b, ?p.s.interner, p.linkage.providers.data[k].name);
+        cache_key.number(?b, p.linkage.providers.data[k].is_static::u64);
+        k = k + 1;
     }
     ret cache_key.finish(?b, digest);
 }
@@ -1214,10 +1215,10 @@ test configuration__tracks_compiler_request_steps_dependencies_and_providers {
     compiler_id.len = 0;
     if (t_configured(?p, ?config, ?compiler_id, ?changed)) { ret 37; }
     compiler_id.len = 32;
-    val register_link_provider_r: err[fail.Fail] = session.register_link_provider(?s, ids[3], false);
+    val register_link_provider_r: err[fail.Fail] = linkage.register_provider(?p.linkage, ids[3], false);
     if (sel register_link_provider_r.err)                    { ret 38; }
     if (!t_configured(?p, ?config, ?compiler_id, ?baseline)) { ret 38; }
-    s.link_providers[0].is_static = true;
+    p.linkage.providers.data[0].is_static = true;
     if (!t_configured(?p, ?config, ?compiler_id, ?changed) || cache_key.equal(?baseline, ?changed)) { ret 39; }
     ret 0;
 }

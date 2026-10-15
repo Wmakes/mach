@@ -25,6 +25,7 @@ use target_of:   mach.lang.target.of;
 
 use mach.lang.build.engine;
 use build_plan: mach.lang.build.plan;
+use mach.lang.build.publication;
 use mach.lang.driver;
 use mach.lang.driver.project;
 
@@ -177,8 +178,10 @@ fun ut_testing_dep_build(alloc: *A.Allocator, root: str, goal: request.BuildGoal
     rq.object_cache = true;
     val pr: res[build_plan.BuildPlan, fail.Fail] = build_plan.plan(alloc, ?s.interner, toolchain.t_registry(), ?m, rq);
     if (sel pr.err) { ret 4; }
-    var bp: build_plan.BuildPlan                 = pr.ok;
-    val r:  res[outcome.BuildOutcome, fail.Fail] = engine.execute_warm(?bp, 0, ?s, alloc, nil);
+    var bp:        build_plan.BuildPlan     = pr.ok;
+    var published: publication.Publications = publication.init(alloc);
+    fin { publication.dnit(?published); }
+    val r: res[outcome.BuildOutcome, fail.Fail] = engine.execute_warm(?bp, 0, ?s, ?published, alloc, nil);
     if (sel r.err) { ret 5; }
     @tests   = r.ok;
     @refused = ut_diag_has(?s.diags, "is a `#[testing]` declaration");

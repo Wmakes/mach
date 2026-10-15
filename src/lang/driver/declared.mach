@@ -29,6 +29,7 @@ use mach.lang.fe.comptime;
 use mach.lang.fe.decorator;
 use fe_load: mach.lang.fe.load;
 use mach.lang.intern;
+use mach.lang.linkage;
 use mach.lang.session;
 use session_embed: mach.lang.session.embed;
 use lang_source:   mach.lang.source;
@@ -123,9 +124,9 @@ fun bind_import_libraries(p: *project.Project, mid: session.ModuleId, source: st
             if ((d.kind == ast_decl.DECL_KIND_FUN
                 || d.kind == ast_decl.DECL_KIND_VAL || d.kind == ast_decl.DECL_KIND_VAR)
                 && (d.flags & ast_decl.DECL_FLAG_EXT) != 0) {
-                val lib_opt: intern.StrId = session.export_library(p.s, mid, did::u32);
+                val lib_opt: intern.StrId = linkage.export_library(?p.linkage, mid, did::u32);
                 if (!intern.str_is_nil(lib_opt)) {
-                    val name_opt: intern.StrId = session.export_name(p.s, mid, did::u32);
+                    val name_opt: intern.StrId = linkage.export_name(?p.linkage, mid, did::u32);
                     if (intern.str_is_nil(name_opt)) {
                         ret err[fail.Fail].err{fail.message("internal: ext decl carries a #[library] attribution but no link name")};
                     }
@@ -173,7 +174,7 @@ fun bind_one_import_library(p: *project.Project, mid: session.ModuleId, source: 
 
     val ins: res[bool, A.Error] = map.insert[intern.StrId, ImportAttribution](attrs, name, here);
     if (sel ins.err) { ret err[fail.Fail].err{fail.refused(ins.err)}; }
-    ret session.register_import_library(p.s, name, lib);
+    ret linkage.register_import_library(?p.linkage, name, lib);
 }
 
 # the declaration's name, STR_NIL when no source names it
@@ -264,11 +265,11 @@ fun register_decl_decorators(p: *project.Project, mid: session.ModuleId, d: *ast
             val named: intern.StrId = decorator.string_id(?m.load.ctx, syn, dec, 0);
             if (!intern.str_is_nil(named)) {
                 if (is_library) {
-                    val rl: err[fail.Fail] = session.register_export_library(p.s, mid, did::u32, named);
+                    val rl: err[fail.Fail] = linkage.register_export_library(?p.linkage, mid, did::u32, named);
                     if (sel rl.err) { ret rl; }
                 }
                 or {
-                    val rn: err[fail.Fail] = session.register_export_name(p.s, mid, did::u32, named);
+                    val rn: err[fail.Fail] = linkage.register_export_name(?p.linkage, mid, did::u32, named);
                     if (sel rn.err) { ret rn; }
                 }
             }
@@ -285,19 +286,19 @@ fun ext_link_name(p: *project.Project, source: str, span: lang_source.Span) res[
 }
 
 fun register_ext_fun(p: *project.Project, mid: session.ModuleId, source: str, d: *ast_decl.Decl, did: ast_id.DeclId) err[fail.Fail] {
-    val export_name_r: intern.StrId = session.export_name(p.s, mid, did::u32);
+    val export_name_r: intern.StrId = linkage.export_name(?p.linkage, mid, did::u32);
     if (!intern.str_is_nil(export_name_r)) { ret err[fail.Fail].ok{}; }
     val name_r: res[intern.StrId, fail.Fail] = ext_link_name(p, source, d.data.fun_.name);
     if (sel name_r.err) { ret err[fail.Fail].err{name_r.err}; }
-    ret session.register_export_name(p.s, mid, did::u32, name_r.ok);
+    ret linkage.register_export_name(?p.linkage, mid, did::u32, name_r.ok);
 }
 
 fun register_ext_global(p: *project.Project, mid: session.ModuleId, source: str, d: *ast_decl.Decl, did: ast_id.DeclId) err[fail.Fail] {
-    val export_name_r: intern.StrId = session.export_name(p.s, mid, did::u32);
+    val export_name_r: intern.StrId = linkage.export_name(?p.linkage, mid, did::u32);
     if (!intern.str_is_nil(export_name_r)) { ret err[fail.Fail].ok{}; }
     val name_r: res[intern.StrId, fail.Fail] = ext_link_name(p, source, d.data.bind.name);
     if (sel name_r.err) { ret err[fail.Fail].err{name_r.err}; }
-    ret session.register_export_name(p.s, mid, did::u32, name_r.ok);
+    ret linkage.register_export_name(?p.linkage, mid, did::u32, name_r.ok);
 }
 
 # the string every decorator argument that takes one evaluates to, recorded for

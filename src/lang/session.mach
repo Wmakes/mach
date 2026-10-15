@@ -1,5 +1,7 @@
 use std.allocator.page;
 use std.collections.map;
+use collections_vector: std.collections.vector;
+use std.collections.vector.Vector;
 use std.process.exec;
 use std.text.string.str_dup;
 use std.text.string.str_free;
@@ -22,7 +24,6 @@ use types_path: std.types.path;
 use lang_alloc: mach.lang.alloc;
 use mach.lang.diagnostic;
 use mach.lang.fail;
-use mach.lang.growth;
 use mach.lang.intern;
 use mach.lang.module;
 use mach.lang.query;
@@ -41,20 +42,10 @@ fwd module.STABLE_MODULE_NIL;
 # editor hold it across builds, so no released module takes it
 pub val FILE_TEXT: query.Kind = query.Kind{name: "file text", role: query.INPUT, owner: query.KEY_UNOWNED};
 
+# an open buffer's text, standing in for the file at `path` (cleaned) on disk
 rec Overlay {
     path: str;
     text: str;
-}
-
-pub rec LinkProvider {
-    name:      intern.StrId;
-    is_static: bool;
-}
-
-rec LinkPublication {
-    path:     str;
-    revision: query.Revision;
-    digest:   [32]u8;
 }
 
 pub rec Session {
@@ -83,30 +74,20 @@ pub rec Session {
     module_count: u32;
 
     module_fqns: map.Map[module.ModuleId, intern.StrId];
-    # which loaded modules belong to the root project rather than a dependency;
-    # the loader declares it when it resolves a module path, and the export
-    # surface of a shared library is drawn from these modules alone
+    # which loaded modules belong to the root project rather than a dependency,
+    # part of a module's identity: the loader declares it when it gives the
+    # module its id, and the export surface of a shared library is drawn from
+    # these modules alone
     module_root_project: map.Map[module.ModuleId, bool];
-    export_names:        map.Map[u64, intern.StrId];
-    export_libraries:    map.Map[u64, intern.StrId];
-    import_libraries:    map.Map[intern.StrId, intern.StrId];
-
-    link_providers:    *LinkProvider;
-    link_provider_len: u32;
-    link_provider_cap: u32;
-
-    link_publications:    *LinkPublication;
-    link_publication_len: u32;
-    link_publication_cap: u32;
 
     stable_ids:     map.Map[intern.StrId, module.StableModuleId];
     stable_id_next: module.StableModuleId;
 
     stable_to_mid: map.Map[module.StableModuleId, module.ModuleId];
 
-    overlays:    *Overlay;
-    overlay_len: u32;
-    overlay_cap: u32;
+    # the open buffers, one per file however its path is spelled; scanned by
+    # path, as an editor holds a handful
+    overlays: Vector[Overlay];
 
     embeds: session_embed.EmbedCache;
 
@@ -132,22 +113,13 @@ pub fun init(alloc: *A.Allocator) res[Session, fail.Fail] {
     s.query_failure_message = nil;
     s.query_failure_places  = fail.reported();
 
-    s.interner             = intern.init(alloc);
-    s.module_count         = 0;
-    s.module_fqns          = map.init[module.ModuleId, intern.StrId](alloc);
-    s.module_root_project  = map.init[module.ModuleId, bool](alloc);
-    s.export_names         = map.init[u64, intern.StrId](alloc);
-    s.export_libraries     = map.init[u64, intern.StrId](alloc);
-    s.import_libraries     = map.init[intern.StrId, intern.StrId](alloc);
-    s.link_providers       = nil;
-    s.link_provider_len    = 0;
-    s.link_provider_cap    = 0;
-    s.link_publications    = nil;
-    s.link_publication_len = 0;
-    s.link_publication_cap = 0;
-    s.stable_ids           = map.init[intern.StrId, module.StableModuleId](alloc);
-    s.stable_id_next       = module.stable_id(0);
-    s.stable_to_mid        = map.init[module.StableModuleId, module.ModuleId](alloc);
+    s.interner            = intern.init(alloc);
+    s.module_count        = 0;
+    s.module_fqns         = map.init[module.ModuleId, intern.StrId](alloc);
+    s.module_root_project = map.init[module.ModuleId, bool](alloc);
+    s.stable_ids          = map.init[intern.StrId, module.StableModuleId](alloc);
+    s.stable_id_next      = module.stable_id(0);
+    s.stable_to_mid       = map.init[module.StableModuleId, module.ModuleId](alloc);
     # each part made so far is released when init does not complete
     var complete:    bool = false;
     var has_types:   bool = false;
@@ -162,11 +134,9 @@ pub fun init(alloc: *A.Allocator) res[Session, fail.Fail] {
         }
     }
 
-    s.overlays    = nil;
-    s.overlay_len = 0;
-    s.overlay_cap = 0;
-    s.embeds      = session_embed.init(alloc);
-    s.type_facts  = type_query.facts_init(alloc);
+    s.overlays   = collections_vector.init[Overlay](alloc);
+    s.embeds     = session_embed.init(alloc);
+    s.type_facts = type_query.facts_init(alloc);
 
     val opt_types: err[fail.Fail] = type.init(?s.types, alloc);
     if (sel opt_types.err) { ret res[Session, fail.Fail].err{opt_types.err}; }
@@ -255,28 +225,18 @@ pub fun hold_failure(s: *Session, failure: fail.Fail, lost: *bool) fail.Fail {
 pub fun dnit(s: *Session) {
     if (s == nil) { ret; }
 
-    if (s.overlays != nil && s.overlay_cap > 0) {
-        var oi: u32 = 0;
-        for (oi < s.overlay_len) {
-            str_free(s.alloc, s.overlays[oi].path);
-            str_free(s.alloc, s.overlays[oi].text);
-            oi = oi + 1;
-        }
-        A.deallocate[Overlay](s.alloc, s.overlays, s.overlay_cap::usize);
-        s.overlays    = nil;
-        s.overlay_len = 0;
-        s.overlay_cap = 0;
+    var oi: usize = 0;
+    for (oi < s.overlays.len) {
+        str_free(s.alloc, s.overlays.data[oi].path);
+        str_free(s.alloc, s.overlays.data[oi].text);
+        oi = oi + 1;
     }
+    collections_vector.dnit[Overlay](?s.overlays);
 
     s.module_count = 0;
 
     map.dnit[module.ModuleId, intern.StrId](?s.module_fqns);
     map.dnit[module.ModuleId, bool](?s.module_root_project);
-    map.dnit[u64, intern.StrId](?s.export_names);
-    map.dnit[u64, intern.StrId](?s.export_libraries);
-    map.dnit[intern.StrId, intern.StrId](?s.import_libraries);
-    reset_link_providers(s);
-    reset_link_publications(s);
     map.dnit[intern.StrId, module.StableModuleId](?s.stable_ids);
     map.dnit[module.StableModuleId, module.ModuleId](?s.stable_to_mid);
 
@@ -309,10 +269,6 @@ pub fun reset_module_registry(s: *Session) {
 
     map.clear[module.ModuleId, intern.StrId](?s.module_fqns);
     map.clear[module.ModuleId, bool](?s.module_root_project);
-    map.clear[u64, intern.StrId](?s.export_names);
-    map.clear[u64, intern.StrId](?s.export_libraries);
-    map.clear[intern.StrId, intern.StrId](?s.import_libraries);
-    reset_link_providers(s);
 
     map.clear[module.StableModuleId, module.ModuleId](?s.stable_to_mid);
 }
@@ -393,53 +349,6 @@ pub fun module_id_for_stable(s: *Session, stable: module.StableModuleId) module.
     ret module.MODULE_NIL;
 }
 
-pub fun register_export_name(s: *Session, mid: module.ModuleId, did: u32, name: intern.StrId) err[fail.Fail] {
-    val key:      u64                = (module.index(mid)::u64 << 32) | did::u64;
-    val insert_r: res[bool, A.Error] = map.insert[u64, intern.StrId](?s.export_names, key, name);
-    if (sel insert_r.err) { ret err[fail.Fail].err{fail.refused(insert_r.err)}; }
-    ret err[fail.Fail].ok{};
-}
-
-# drop every export name one module registered, before its syntax tree is replaced and
-# its declaration ids no longer name the same declarations
-# ---
-# s:          the session
-# mid:        the module whose names go
-# decl_count: the declaration count of the AST they were registered against
-pub fun forget_export_names(s: *Session, mid: module.ModuleId, decl_count: u32) {
-    var did: u32 = 0;
-    for (did < decl_count) {
-        var key: u64 = (module.index(mid)::u64 << 32) | did::u64;
-        map.remove[u64, intern.StrId](?s.export_names, ?key);
-        did = did + 1;
-    }
-}
-
-pub fun export_name(s: *Session, mid: module.ModuleId, did: u32) intern.StrId {
-    var key:     u64                = (module.index(mid)::u64 << 32) | did::u64;
-    val res_get: opt[*intern.StrId] = map.get[u64, intern.StrId](?s.export_names, ?key);
-    if (sel res_get.some) {
-        ret @res_get.some;
-    }
-    ret intern.STR_NIL;
-}
-
-pub fun register_export_library(s: *Session, mid: module.ModuleId, did: u32, lib: intern.StrId) err[fail.Fail] {
-    val key:      u64                = (module.index(mid)::u64 << 32) | did::u64;
-    val insert_r: res[bool, A.Error] = map.insert[u64, intern.StrId](?s.export_libraries, key, lib);
-    if (sel insert_r.err) { ret err[fail.Fail].err{fail.refused(insert_r.err)}; }
-    ret err[fail.Fail].ok{};
-}
-
-pub fun export_library(s: *Session, mid: module.ModuleId, did: u32) intern.StrId {
-    var key:     u64                = (module.index(mid)::u64 << 32) | did::u64;
-    val res_get: opt[*intern.StrId] = map.get[u64, intern.StrId](?s.export_libraries, ?key);
-    if (sel res_get.some) {
-        ret @res_get.some;
-    }
-    ret intern.STR_NIL;
-}
-
 pub fun reset_type_projection(s: *Session) err[fail.Fail] {
     if (s.queries.operation_active || s.queries.presentation_pending) {
         ret err[fail.Fail].err{fail.message("cannot replace type projections while query products are borrowed")};
@@ -447,124 +356,6 @@ pub fun reset_type_projection(s: *Session) err[fail.Fail] {
     expire_views(s);
     type.field_projection_reset(?s.types);
     ret err[fail.Fail].ok{};
-}
-
-pub fun register_import_library(s: *Session, name: intern.StrId, lib: intern.StrId) err[fail.Fail] {
-    val insert_r: res[bool, A.Error] = map.insert[intern.StrId, intern.StrId](?s.import_libraries, name, lib);
-    if (sel insert_r.err) { ret err[fail.Fail].err{fail.refused(insert_r.err)}; }
-    ret err[fail.Fail].ok{};
-}
-
-pub fun import_library(s: *Session, name: intern.StrId) intern.StrId {
-    val res_get: opt[*intern.StrId] = map.get[intern.StrId, intern.StrId](?s.import_libraries, ?name);
-    if (sel res_get.some) {
-        ret @res_get.some;
-    }
-    ret intern.STR_NIL;
-}
-
-pub fun register_link_provider(s: *Session, name: intern.StrId, is_static: bool) err[fail.Fail] {
-    if (intern.str_is_nil(name)) { ret err[fail.Fail].ok{}; }
-
-    var i: u32 = 0;
-    for (i < s.link_provider_len) {
-        if (intern.str_same(s.link_providers[i].name, name)) {
-            if (!is_static) { s.link_providers[i].is_static = false; }
-            ret err[fail.Fail].ok{};
-        }
-        i = i + 1;
-    }
-
-    val grown: err[A.Error] = growth.reserve[LinkProvider](s.alloc, ?s.link_providers, ?s.link_provider_cap, s.link_provider_len::usize + 1);
-    if (sel grown.err) { ret err[fail.Fail].err{fail.refused(grown.err)}; }
-
-    s.link_providers[s.link_provider_len].name      = name;
-    s.link_providers[s.link_provider_len].is_static = is_static;
-    s.link_provider_len                             = s.link_provider_len + 1;
-    ret err[fail.Fail].ok{};
-}
-
-pub fun link_provider(s: *Session, name: intern.StrId) opt[LinkProvider] {
-    var i: u32 = 0;
-    for (i < s.link_provider_len) {
-        if (intern.str_same(s.link_providers[i].name, name)) {
-            ret opt[LinkProvider].some{s.link_providers[i]};
-        }
-        i = i + 1;
-    }
-    ret opt[LinkProvider].none{};
-}
-
-pub fun link_providers(s: *Session) *LinkProvider {
-    ret s.link_providers;
-}
-
-pub fun link_provider_count(s: *Session) u32 {
-    ret s.link_provider_len;
-}
-
-pub fun reset_link_providers(s: *Session) {
-    if (s.link_providers != nil && s.link_provider_cap > 0) {
-        A.deallocate[LinkProvider](s.alloc, s.link_providers, s.link_provider_cap::usize);
-    }
-    s.link_providers    = nil;
-    s.link_provider_len = 0;
-    s.link_provider_cap = 0;
-}
-
-pub fun record_link_publication(s: *Session, path: str, revision: query.Revision, digest: *[32]u8) err[fail.Fail] {
-    var i: u32 = 0;
-    for (i < s.link_publication_len) {
-        if (str_equals(s.link_publications[i].path, path)) {
-            s.link_publications[i].revision = revision;
-            s.link_publications[i].digest   = @digest;
-            ret err[fail.Fail].ok{};
-        }
-        i = i + 1;
-    }
-
-    val dup_r: res[str, A.Error] = str_dup(s.alloc, path);
-    if (sel dup_r.err) { ret err[fail.Fail].err{fail.refused(dup_r.err)}; }
-    val dup: str = dup_r.ok;
-
-    val grown: err[A.Error] = growth.reserve[LinkPublication](s.alloc, ?s.link_publications, ?s.link_publication_cap, s.link_publication_len::usize + 1);
-    if (sel grown.err) {
-        str_free(s.alloc, dup);
-        ret err[fail.Fail].err{fail.refused(grown.err)};
-    }
-
-    s.link_publications[s.link_publication_len].path     = dup;
-    s.link_publications[s.link_publication_len].revision = revision;
-    s.link_publications[s.link_publication_len].digest   = @digest;
-    s.link_publication_len                               = s.link_publication_len + 1;
-    ret err[fail.Fail].ok{};
-}
-
-# the digest the link at `revision` published to `path`, none when it published none there
-pub fun link_publication_at(s: *Session, path: str, revision: query.Revision) opt[[32]u8] {
-    var i: u32 = 0;
-    for (i < s.link_publication_len) {
-        if (str_equals(s.link_publications[i].path, path)) {
-            if (s.link_publications[i].revision != revision) { ret opt[[32]u8].none{}; }
-            ret opt[[32]u8].some{s.link_publications[i].digest};
-        }
-        i = i + 1;
-    }
-    ret opt[[32]u8].none{};
-}
-
-fun reset_link_publications(s: *Session) {
-    if (s.link_publications != nil && s.link_publication_cap > 0) {
-        var i: u32 = 0;
-        for (i < s.link_publication_len) {
-            str_free(s.alloc, s.link_publications[i].path);
-            i = i + 1;
-        }
-        A.deallocate[LinkPublication](s.alloc, s.link_publications, s.link_publication_cap::usize);
-    }
-    s.link_publications    = nil;
-    s.link_publication_len = 0;
-    s.link_publication_cap = 0;
 }
 
 pub fun register_module_identity(s: *Session, mid: module.ModuleId, fqn: intern.StrId, stable: module.StableModuleId) err[fail.Fail] {
@@ -618,7 +409,7 @@ pub rec PreparedOverlay {
     owner:   *Session;
     key:     str;
     text:    str;
-    index:   u32;
+    index:   usize;
     remove:  bool;
     changed: bool;
 }
@@ -628,31 +419,30 @@ pub fun prepare_overlay(s: *Session, path: str, text: str, remove: bool) res[Pre
     val canonical: res[str, fail.Fail] = source_key(s, path);
     if (sel canonical.err) { ret res[PreparedOverlay, fail.Fail].err{canonical.err}; }
     var prepared: PreparedOverlay = PreparedOverlay{
-        owner: s, key: canonical.ok, index: s.overlay_len, remove: remove
+        owner: s, key: canonical.ok, index: s.overlays.len, remove: remove
     };
     var complete: bool = false;
     fin {
         if (!complete) { discard_overlay(?prepared); }
     }
-    var i: u32 = 0;
-    for (i < s.overlay_len) {
-        if (str_equals(s.overlays[i].path, prepared.key)) {
+    var i: usize = 0;
+    for (i < s.overlays.len) {
+        if (str_equals(s.overlays.data[i].path, prepared.key)) {
             prepared.index = i;
             brk;
         }
         i = i + 1;
     }
-    if (remove) { prepared.changed = prepared.index < s.overlay_len; }
+    if (remove) { prepared.changed = prepared.index < s.overlays.len; }
     or {
-        prepared.changed = prepared.index == s.overlay_len || !str_equals(s.overlays[prepared.index].text, text);
+        prepared.changed = prepared.index == s.overlays.len || !str_equals(s.overlays.data[prepared.index].text, text);
         if (prepared.changed) {
             val copied: res[str, A.Error] = str_dup(s.alloc, text);
             if (sel copied.err) { ret res[PreparedOverlay, fail.Fail].err{fail.refused(copied.err)}; }
             prepared.text = copied.ok;
-            if (prepared.index == s.overlay_len) {
-                if (s.overlay_len == ~(0::u32)) { ret res[PreparedOverlay, fail.Fail].err{fail.message("overlay capacity exhausted")}; }
-                val reserved: err[fail.Fail] = overlays_reserve(s, s.overlay_len + 1);
-                if (sel reserved.err) { ret res[PreparedOverlay, fail.Fail].err{reserved.err}; }
+            if (prepared.index == s.overlays.len) {
+                val reserved: res[usize, A.Error] = collections_vector.reserve[Overlay](?s.overlays, 1);
+                if (sel reserved.err) { ret res[PreparedOverlay, fail.Fail].err{fail.refused(reserved.err)}; }
             }
         }
     }
@@ -674,22 +464,27 @@ pub fun commit_overlay(prepared: *PreparedOverlay) bool {
     val changed: bool     = prepared.changed;
     if (changed) {
         expire_views(s);
-        val i: u32 = prepared.index;
+        val i: usize = prepared.index;
         if (prepared.remove) {
-            str_free(s.alloc, s.overlays[i].path);
-            str_free(s.alloc, s.overlays[i].text);
-            s.overlay_len = s.overlay_len - 1;
-            if (i != s.overlay_len) { s.overlays[i] = s.overlays[s.overlay_len]; }
+            str_free(s.alloc, s.overlays.data[i].path);
+            str_free(s.alloc, s.overlays.data[i].text);
+            val last: opt[Overlay] = collections_vector.pop[Overlay](?s.overlays);
+            # the last entry fills the removed one's place
+            if (sel last.some) {
+                if (i != s.overlays.len) { s.overlays.data[i] = last.some; }
+            }
         }
         or {
-            if (i == s.overlay_len) {
-                s.overlays[i].path = prepared.key;
-                prepared.key       = nil;
-                s.overlay_len      = s.overlay_len + 1;
+            # prepare reserved the new entry's room
+            if (i == s.overlays.len) {
+                collections_vector.push[Overlay](?s.overlays, Overlay{path: prepared.key, text: prepared.text});
+                prepared.key = nil;
             }
-            or { str_free(s.alloc, s.overlays[i].text); }
-            s.overlays[i].text = prepared.text;
-            prepared.text      = nil;
+            or {
+                str_free(s.alloc, s.overlays.data[i].text);
+                s.overlays.data[i].text = prepared.text;
+            }
+            prepared.text = nil;
         }
     }
     discard_overlay(prepared);
@@ -717,9 +512,9 @@ pub fun overlay_get(s: *Session, path: str) opt[str] {
     val key: str = key_r.ok;
     fin { str_free(s.alloc, key); }
 
-    var i: u32 = 0;
-    for (i < s.overlay_len) {
-        if (str_equals(s.overlays[i].path, key)) { ret opt[str].some{s.overlays[i].text}; }
+    var i: usize = 0;
+    for (i < s.overlays.len) {
+        if (str_equals(s.overlays.data[i].path, key)) { ret opt[str].some{s.overlays.data[i].text}; }
         i = i + 1;
     }
     ret opt[str].none{};
@@ -729,12 +524,6 @@ fun source_key(s: *Session, path: str) res[str, fail.Fail] {
     val cleaned: res[str, A.Error] = types_path.clean(s.alloc, path);
     if (sel cleaned.err) { ret res[str, fail.Fail].err{fail.refused(cleaned.err)}; }
     ret res[str, fail.Fail].ok{cleaned.ok};
-}
-
-fun overlays_reserve(s: *Session, need: u32) err[fail.Fail] {
-    val grown: err[A.Error] = growth.reserve[Overlay](s.alloc, ?s.overlays, ?s.overlay_cap, need::usize);
-    if (sel grown.err) { ret err[fail.Fail].err{fail.refused(grown.err)}; }
-    ret err[fail.Fail].ok{};
 }
 
 test overlay__set_get_replace_clear {
@@ -756,7 +545,7 @@ test overlay__set_get_replace_clear {
     if (sel set_overlay_r.err) { ret 1; }
     val set_overlay_r2: err[fail.Fail] = set_overlay(?s, "/x/b.mach", "BBB");
     if (sel set_overlay_r2.err) { ret 1; }
-    if (s.overlay_len != 2)     { bad = 1; }
+    if (s.overlays.len != 2)    { bad = 1; }
     val ga: opt[str] = overlay_get(?s, "/x/a.mach");
     val gb: opt[str] = overlay_get(?s, "/x/b.mach");
     if (!(sel ga.some && str_equals(ga.some, "AAA"))) { bad = 1; }
@@ -764,13 +553,13 @@ test overlay__set_get_replace_clear {
 
     val set_overlay_r3: err[fail.Fail] = set_overlay(?s, "/x/a.mach", "A2");
     if (sel set_overlay_r3.err) { ret 1; }
-    if (s.overlay_len != 2)     { bad = 1; }
+    if (s.overlays.len != 2)    { bad = 1; }
     val ga2: opt[str] = overlay_get(?s, "/x/a.mach");
     if (!(sel ga2.some && str_equals(ga2.some, "A2"))) { bad = 1; }
 
     val cleared: res[bool, fail.Fail] = clear_overlay(?s, "/x/a.mach");
     if (!(sel cleared.ok && !(!cleared.ok))) { bad = 1; }
-    if (s.overlay_len != 1)                  { bad = 1; }
+    if (s.overlays.len != 1)                 { bad = 1; }
     val overlay_get_r2: opt[str] = overlay_get(?s, "/x/a.mach");
     if (sel overlay_get_r2.some) { bad = 1; }
     val gb2: opt[str] = overlay_get(?s, "/x/b.mach");
@@ -799,7 +588,7 @@ test overlay__one_file_is_one_entry_however_it_is_spelled {
 
     val set_overlay_r2: err[fail.Fail] = set_overlay(?s, "/x/./src/a.mach", "NEWER");
     if (sel set_overlay_r2.err)                                   { ret 1; }
-    if (s.overlay_len != 1 && bad == 0)                           { bad = 5; }
+    if (s.overlays.len != 1 && bad == 0)                          { bad = 5; }
     if (!ut_overlay_is(?s, "/x/src/a.mach", "NEWER") && bad == 0) { bad = 6; }
 
     val overlay_get_r: opt[str] = overlay_get(?s, "/x/src/b.mach");
@@ -809,7 +598,7 @@ test overlay__one_file_is_one_entry_however_it_is_spelled {
 
     val cleared: res[bool, fail.Fail] = clear_overlay(?s, "/x//src/a.mach");
     if (!(sel cleared.ok && cleared.ok) && bad == 0) { bad = 9; }
-    if (s.overlay_len != 0 && bad == 0)              { bad = 10; }
+    if (s.overlays.len != 0 && bad == 0)             { bad = 10; }
 
     ret bad;
 }
@@ -819,88 +608,6 @@ fun ut_overlay_is(s: *Session, path: str, want: str) bool {
     val g: opt[str] = overlay_get(s, path);
     if (sel g.none) { ret false; }
     ret str_equals(g.some, want);
-}
-
-test link_provider__order_dedup_upgrade_reset {
-    var alloc: A.Allocator;
-    page.make(?alloc);
-    val sr: res[Session, fail.Fail] = init(?alloc);
-    if (sel sr.err) { ret 1; }
-    var s: Session = sr.ok;
-    fin { dnit(?s); }
-
-    var bad: i32 = 0;
-
-    val a_r: res[intern.StrId, A.Error] = intern.add(?s.interner, "alpha");
-    val b_r: res[intern.StrId, A.Error] = intern.add(?s.interner, "beta");
-    val c_r: res[intern.StrId, A.Error] = intern.add(?s.interner, "gamma");
-    if (sel a_r.err) { ret 1; }
-    if (sel b_r.err) { ret 1; }
-    if (sel c_r.err) { ret 1; }
-    val a: intern.StrId = a_r.ok;
-    val b: intern.StrId = b_r.ok;
-    val c: intern.StrId = c_r.ok;
-
-    if (link_provider_count(?s) != 0) { bad = 1; }
-    val link_provider_r: opt[LinkProvider] = link_provider(?s, a);
-    if (sel link_provider_r.some) { bad = 1; }
-
-    val register_link_provider_r: err[fail.Fail] = register_link_provider(?s, intern.STR_NIL, true);
-    if (sel register_link_provider_r.err) { ret 1; }
-    if (link_provider_count(?s) != 0)     { bad = 1; }
-
-    val register_link_provider_r2: err[fail.Fail] = register_link_provider(?s, a, true);
-    if (sel register_link_provider_r2.err) { ret 1; }
-    val register_link_provider_r3: err[fail.Fail] = register_link_provider(?s, b, false);
-    if (sel register_link_provider_r3.err)                                                   { ret 1; }
-    if (link_provider_count(?s) != 2)                                                        { bad = 1; }
-    if (!intern.str_same(link_providers(?s)[0].name, a) || !link_providers(?s)[0].is_static) { bad = 1; }
-    if (!intern.str_same(link_providers(?s)[1].name, b) || link_providers(?s)[1].is_static)  { bad = 1; }
-
-    val register_link_provider_r4: err[fail.Fail] = register_link_provider(?s, b, true);
-    if (sel register_link_provider_r4.err) { ret 1; }
-    if (link_provider_count(?s) != 2)      { bad = 1; }
-    if (link_providers(?s)[1].is_static)   { bad = 1; }
-
-    val register_link_provider_r5: err[fail.Fail] = register_link_provider(?s, a, false);
-    if (sel register_link_provider_r5.err) { ret 1; }
-    if (link_provider_count(?s) != 2)      { bad = 1; }
-    val pa: opt[LinkProvider] = link_provider(?s, a);
-    if (!(sel pa.some && !(pa.some.is_static))) { bad = 1; }
-
-    val link_provider_r2: opt[LinkProvider] = link_provider(?s, c);
-    if (sel link_provider_r2.some) { bad = 1; }
-
-    val register_link_provider_r6: err[fail.Fail] = register_link_provider(?s, c, true);
-    if (sel register_link_provider_r6.err) { ret 1; }
-    var fill: [3]u8;
-    fill[0] = 'd';
-    fill[2] = 0;
-    var i: u32 = 0;
-    for (i < 8) {
-        fill[1] = ('0'::u32 + i)::u8;
-        val nr: res[intern.StrId, A.Error] = intern.add(?s.interner, (?fill[0])::str);
-        if (sel nr.err) { ret 1; }
-        val register_link_provider_r7: err[fail.Fail] = register_link_provider(
-            ?s, nr.ok, true);
-        if (sel register_link_provider_r7.err) { ret 1; }
-        i = i + 1;
-    }
-    if (link_provider_count(?s) != 11)                   { bad = 1; }
-    if (!intern.str_same(link_providers(?s)[0].name, a)) { bad = 1; }
-    val pc: opt[LinkProvider] = link_provider(?s, c);
-    if (!(sel pc.some && !(!pc.some.is_static))) { bad = 1; }
-
-    reset_link_providers(?s);
-    if (link_provider_count(?s) != 0) { bad = 1; }
-    val link_provider_r3: opt[LinkProvider] = link_provider(?s, a);
-    if (sel link_provider_r3.some) { bad = 1; }
-
-    val register_link_provider_r8: err[fail.Fail] = register_link_provider(?s, c, false);
-    if (sel register_link_provider_r8.err) { ret 1; }
-    if (link_provider_count(?s) != 1)      { bad = 1; }
-
-    ret bad;
 }
 
 test load_source__source_and_overlay_keys_share_native_path_identity {

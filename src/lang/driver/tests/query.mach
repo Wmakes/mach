@@ -50,6 +50,7 @@ use mach.lang.type;
 use build_emit: mach.lang.build.emit;
 use mach.lang.build.engine;
 use build_plan: mach.lang.build.plan;
+use mach.lang.build.publication;
 use mach.lang.driver;
 use mach.lang.driver.passes;
 use mach.lang.driver.project;
@@ -2857,8 +2858,10 @@ test readout__a_phase_counts_what_it_processed {
     var rd: readout.Recording;
     readout.recording_init(?rd, ?alloc, readout.LEVEL_ITEMS);
 
-    var bad: i32                                  = 0;
-    val r:   res[outcome.BuildOutcome, fail.Fail] = engine.execute_warm(?bp, 0, ?s, ?alloc, ?rd.sink);
+    var bad:       i32                      = 0;
+    var published: publication.Publications = publication.init(?alloc);
+    fin { publication.dnit(?published); }
+    val r: res[outcome.BuildOutcome, fail.Fail] = engine.execute_warm(?bp, 0, ?s, ?published, ?alloc, ?rd.sink);
     if (sel r.err) { bad = 2; }
     if (sel r.ok) {
         var listed: outcome.BuildOutcome = r.ok;
@@ -2986,7 +2989,9 @@ fun ut_cached_build_in(s: *session.Session, alloc: *A.Allocator, root: str, targ
     var rd: readout.Recording;
     readout.recording_init(?rd, alloc, readout.LEVEL_ITEMS);
     fin { readout.recording_dnit(?rd); }
-    val r: res[outcome.BuildOutcome, fail.Fail] = engine.execute_warm(?bp, 0, s, alloc, ?rd.sink);
+    var published: publication.Publications = publication.init(alloc);
+    fin { publication.dnit(?published); }
+    val r: res[outcome.BuildOutcome, fail.Fail] = engine.execute_warm(?bp, 0, s, ?published, alloc, ?rd.sink);
     if (sel r.err) {
         print.eprintln(fail.describe(r.err));
         ret 3;
@@ -3123,8 +3128,10 @@ fun ut_artifact_path(s: *session.Session, alloc: *A.Allocator, root: str, target
     rq.debug        = false;
     val pr: res[build_plan.BuildPlan, fail.Fail] = build_plan.plan(alloc, ?s.interner, toolchain.t_registry(), ?m, rq);
     if (sel pr.err) { ret nil; }
-    var bp: build_plan.BuildPlan                 = pr.ok;
-    val r:  res[outcome.BuildOutcome, fail.Fail] = engine.execute_warm(?bp, 0, s, alloc, nil);
+    var bp:        build_plan.BuildPlan     = pr.ok;
+    var published: publication.Publications = publication.init(alloc);
+    fin { publication.dnit(?published); }
+    val r: res[outcome.BuildOutcome, fail.Fail] = engine.execute_warm(?bp, 0, s, ?published, alloc, nil);
     if (sel r.err) {
         print.eprintln(fail.describe(r.err));
         ret nil;
@@ -3244,7 +3251,7 @@ test static_library__keeps_what_its_modules_keep {
                 }
                 val options: target_of.ImageOptions = target_of.image_options_default(catalog_subsystem.CONSOLE);
                 if (bad == 0) {
-                    val dr: err[fail.Fail] = linker.link_observed(?s, ?p.diags, ?p.target, ?images[0], p.emit_len,
+                    val dr: err[fail.Fail] = linker.link_observed(?s, ?p.linkage, ?p.diags, ?p.target, ?images[0], p.emit_len,
                         nil::*target_of.ObjectInput, 0, ut_cc3(?alloc, root, "/", "direct"), "uniontest"::*u8, options, ?direct);
                     if (sel dr.err) {
                         print.eprintln(fail.describe(dr.err));
@@ -3254,7 +3261,7 @@ test static_library__keeps_what_its_modules_keep {
                 if (bad == 0) {
                     var paths: [1]target_of.ObjectInput;
                     paths[0] = target_of.ObjectInput{path: lib_path::*u8, origin: target_of.RELOC_INPUT};
-                    val lr: err[fail.Fail] = linker.link_observed(?s, ?p.diags, ?p.target, nil::*target_of.ObjectImage, 0,
+                    val lr: err[fail.Fail] = linker.link_observed(?s, ?p.linkage, ?p.diags, ?p.target, nil::*target_of.ObjectImage, 0,
                         ?paths[0], 1, ut_cc3(?alloc, root, "/", "relinked"), "uniontest"::*u8, options, ?linked);
                     if (sel lr.err) {
                         print.eprintln(fail.describe(lr.err));
@@ -3481,8 +3488,10 @@ test readout__a_gate_deferred_module_is_counted_once {
     var rd: readout.Recording;
     readout.recording_init(?rd, ?alloc, readout.LEVEL_ITEMS);
 
-    var bad: i32                                  = 0;
-    val r:   res[outcome.BuildOutcome, fail.Fail] = engine.execute_warm(?bp, 0, ?s, ?alloc, ?rd.sink);
+    var bad:       i32                      = 0;
+    var published: publication.Publications = publication.init(?alloc);
+    fin { publication.dnit(?published); }
+    val r: res[outcome.BuildOutcome, fail.Fail] = engine.execute_warm(?bp, 0, ?s, ?published, ?alloc, ?rd.sink);
     if (sel r.err) { bad = 1; }
     if (sel r.ok) {
         var listed: outcome.BuildOutcome = r.ok;

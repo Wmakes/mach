@@ -29,6 +29,7 @@ use mach.lang.fe.decorator;
 use mach.lang.fe.resolve;
 use fe_sema: mach.lang.fe.sema;
 use mach.lang.intern;
+use mach.lang.linkage;
 use me_ir: mach.lang.me.ir;
 use mach.lang.me.ir.builder;
 use ir_debug: mach.lang.me.ir.debug;
@@ -186,7 +187,7 @@ fun record_reexport_symbol(ctx: *lower_context.LowerContext, e: fe_sema.interfac
     if ((d.flags & fe_sema.interface.DECLARATION_EXT) != 0) { ret err[fail.Fail].ok{}; }
 
     val fqn:    intern.StrId                 = session.module_fqn(ctx.s, origin);
-    val export: intern.StrId                 = session.export_name(ctx.s, origin, d.decl::u32);
+    val export: intern.StrId                 = linkage.export_name(ctx.linkage, origin, d.decl::u32);
     val named:  res[intern.StrId, fail.Fail] = mangle.linkage_name(ctx.s, fqn, e.canon, export);
     if (sel named.err) { ret err[fail.Fail].err{named.err}; }
     ret me_ir.export_request_add(ctx.m, named.ok);
@@ -1415,13 +1416,13 @@ fun try_comptime(ctx: *lower_context.LowerContext, eid: ast_id.ExprId) res[compt
 }
 
 fun fun_export_of(ctx: *lower_context.LowerContext, did: ast_id.DeclId) intern.StrId {
-    val r_1166: intern.StrId = session.export_name(ctx.s, ctx.scope.own_module, did::u32);
+    val r_1166: intern.StrId = linkage.export_name(ctx.linkage, ctx.scope.own_module, did::u32);
     if (!intern.str_is_nil(r_1166)) { ret r_1166; }
     ret intern.STR_NIL;
 }
 
 fun global_export_of(ctx: *lower_context.LowerContext, did: ast_id.DeclId) intern.StrId {
-    val r_1170: intern.StrId = session.export_name(ctx.s, ctx.scope.own_module, did::u32);
+    val r_1170: intern.StrId = linkage.export_name(ctx.linkage, ctx.scope.own_module, did::u32);
     if (!intern.str_is_nil(r_1170)) { ret r_1170; }
     ret intern.STR_NIL;
 }

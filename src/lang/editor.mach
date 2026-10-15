@@ -4136,8 +4136,8 @@ test lifecycle__allocation_refusal_preserves_open_buffers_and_retry {
                 if (sel t_atomic_buffer_action_r.err) { ret 9; }
             }
             analysis_dnit(?result);
-            if (action != 3)        { t_dnit(?es); }
-            if (s.overlay_len != 0) { ret 10; }
+            if (action != 3)         { t_dnit(?es); }
+            if (s.overlays.len != 0) { ret 10; }
             session.dnit(?s);
             if (T.leaked(?t)) { ret 11; }
             refusal = refusal + 1;
@@ -4658,7 +4658,7 @@ test close__repeated_open_update_close_leaves_unrelated_products_and_identities_
     }
     val overlay_get_r: opt[str] = session.overlay_get(?s, "/mach-editor-unrelated/kept.mach");
     if (sel overlay_get_r.none) { ret 12; }
-    if (s.overlay_len != 1)     { ret 12; }
+    if (s.overlays.len != 1)    { ret 12; }
     ret 0;
 }
 

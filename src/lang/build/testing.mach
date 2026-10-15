@@ -33,6 +33,7 @@ use mach.lang.driver.toolchain;
 use mach.lang.fail;
 use lang_fingerprint: mach.lang.fingerprint;
 use mach.lang.intern;
+use mach.lang.linkage;
 use mach.lang.manifest;
 use me_ir: mach.lang.me.ir;
 use mach.lang.me.lower.testrunner;
@@ -289,7 +290,7 @@ fun build_dispatch_executable(p: *project.Project, dispatcher: str, artifact: st
     if (sel yielded.err) { ret yielded; }
 
     project.set_origin(p, diagnostic.ORIGIN_LINK);
-    val res_link: err[fail.Fail] = linker.link_mixed(p.s, ?p.diags, ?p.target, images, total, di.ext, di.ext_len,
+    val res_link: err[fail.Fail] = linker.link_mixed(p.s, ?p.linkage, ?p.diags, ?p.target, images, total, di.ext, di.ext_len,
         di.dynlibs, di.dynlib_len, artifact, build_emit.artifact_product_name(p), catalog_artifact.EXECUTABLE, p.req.pie,
         target_of.image_options_default(p.req.subsystem));
     if (sel res_link.err) {
@@ -358,7 +359,9 @@ fun testing_name(s: *session.Session, name: str) intern.StrId {
 # links `paths` into `out` and reads the image back
 #[testing]
 fun t_link_image(s: *session.Session, tgt: *lang_target.Binding, paths: *target_of.ObjectInput, count: u32, out: str, image: *Vector[u8]) bool {
-    val linked: err[fail.Fail] = linker.link(s, ?s.diags, tgt, paths, count, nil, 0, out, "coff-atom-test", catalog_artifact.EXECUTABLE, false,
+    var l: linkage.Linkage = linkage.init(s.alloc);
+    fin { linkage.dnit(?l); }
+    val linked: err[fail.Fail] = linker.link(s, ?l, ?s.diags, tgt, paths, count, nil, 0, out, "coff-atom-test", catalog_artifact.EXECUTABLE, false,
         target_of.image_options_default(catalog_subsystem.CONSOLE));
     if (sel linked.err) {
         print.eprintln(fail.describe(linked.err));

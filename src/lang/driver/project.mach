@@ -31,6 +31,7 @@ use mach.lang.fe.resolve;
 use fe_sema: mach.lang.fe.sema;
 use mach.lang.handle;
 use mach.lang.intern;
+use mach.lang.linkage;
 use mach.lang.manifest;
 use mach.lang.manifest.template;
 use me_ir: mach.lang.me.ir;
@@ -266,6 +267,9 @@ pub rec Project {
 
     roots: RootSet;
 
+    # what the load declares about linkage and the link phase offers the linker
+    linkage: linkage.Linkage;
+
     # the unit's phase rows, nil when nothing reads them
     progress: *readout.Progress;
 
@@ -377,6 +381,7 @@ pub fun dnit_project(p: *Project) {
     disk.dnit(?p.disk);
     diagnostic.store_dnit(?p.diags);
     deallocate_config(?p.config, p.alloc);
+    linkage.dnit(?p.linkage);
 
     session.reset_module_registry(p.s);
 }
@@ -405,6 +410,7 @@ pub fun init_project(p: *Project, s: *session.Session) {
     p.since                 = s.queries.operation_sequence + 1;
     p.context_frozen        = false;
     p.diags                 = diagnostic.store_init(p.alloc);
+    p.linkage               = linkage.init(p.alloc);
     p.target_entry          = nil;
     p.union_entries         = nil;
     p.union_entry_count     = 0;
