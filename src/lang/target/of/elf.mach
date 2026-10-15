@@ -370,7 +370,7 @@ fun section_table(buf: *u8, buf_size: usize, lay: *ElfLayout) res[SectionTable, 
     var t:     SectionTable = SectionTable{off: read_addr(buf, 24 + 2 * w, lay)::usize, entsize: bin.read_u16_le(buf, tail + 10)::usize, count: 0, shstrndx: 0};
     val shnum: u16          = bin.read_u16_le(buf, tail + 12);
     val names: u16          = bin.read_u16_le(buf, tail + 14);
-    if (t.off == 0) { ret res[SectionTable, fail.Fail].ok{t}; }
+    if (t.off == 0)                { ret res[SectionTable, fail.Fail].ok{t}; }
     if (t.entsize < lay.shdr_size) { ret res[SectionTable, fail.Fail].err{fail.user(diagnostic_kind.OBJECT_MALFORMED, "section header entry too small")}; }
     t.count    = shnum::u32;
     t.shstrndx = names::u32;
@@ -1317,10 +1317,10 @@ fun emit_object_image(tgt_isa: *target_of.ObjectTarget, img: *target_of.ObjectIm
         var sh_off: u64 = 0;
         if (sec_rows[s] != of_plan.NO_ROW) { sh_off = of_plan.offset(?fp, sec_rows[s])::u64; }
         # a merged string is one byte wide, any other merged entry the whole section
-        var entsize: u64 = 0;
+        var entsize:  u64 = 0;
         val sh_flags: u64 = section_flags_for_section(?img.sections[s]);
-        if ((sh_flags & SHF_STRINGS) != 0)    { entsize = 1; }
-        or ((sh_flags & SHF_MERGE) != 0)      { entsize = img.sections[s].len::u64; }
+        if ((sh_flags & SHF_STRINGS) != 0) { entsize = 1; }
+        or ((sh_flags & SHF_MERGE) != 0)   { entsize = img.sections[s].len::u64; }
         val declared_type: opt[u32] = section_type_for(img.sections[s].kind);
         if (sel declared_type.none) {
             ret err[fail.Fail].err{fail.message_of(target_of.section_kind_rejection(img.interner, img.alloc, img.sections[s].kind))};
@@ -5372,7 +5372,7 @@ test emit_object__extended_section_numbering_round_trips {
 
     var out: target_of.ObjectImage;
     val pr:  err[fail.Fail] = parse_object(?alloc, ?i, buf.data, buf.len, ?out);
-    if (sel pr.err)                  { ret 6; }
+    if (sel pr.err)                 { ret 6; }
     if (out.section_count != count) { ret 7; }
     var found: u32 = 0;
     var si:    u32 = 0;
@@ -5391,7 +5391,7 @@ test emit_object__extended_section_numbering_round_trips {
     if (found != 2) { ret 10; }
     val strings: *target_of.Section = ?out.sections[count - 1];
     if ((strings.native.flags & (SHF_MERGE | SHF_STRINGS)) != (SHF_MERGE | SHF_STRINGS) || strings.native.entry_size != 1) { ret 11; }
-    if (strings.len != 3 || strings.bytes[1] != 'b') { ret 12; }
+    if (strings.len != 3 || strings.bytes[1] != 'b')                                                                       { ret 12; }
     ret 0;
 }
 

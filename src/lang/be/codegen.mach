@@ -1,7 +1,7 @@
 use std.allocator.arena;
 use std.allocator.page;
+use T: std.allocator.testing;
 use std.collections.map;
-use T:         std.allocator.testing;
 use io_writer: std.io.writer;
 use std.memory;
 use std.print;
@@ -683,7 +683,7 @@ val STRING_SECTION: str = ".rodata.str";
 fun string_literal(g: *me_ir.Global, bytes: *u8, len: u32, kind: target_of.SectionKind) bool {
     if (!g.is_local || g.is_mut || g.is_embed || g.align != 0 || !intern.str_is_nil(g.section)) { ret false; }
     if (kind != target_of.SK_RODATA || g.init.kind != value.VAL_CONST_BYTES)                    { ret false; }
-    if (bytes == nil || len == 0 || bytes[len - 1] != 0)                                         { ret false; }
+    if (bytes == nil || len == 0 || bytes[len - 1] != 0)                                        { ret false; }
     var i: u32 = 0;
     for (i < len - 1) {
         if (bytes[i] == 0) { ret false; }
@@ -819,8 +819,8 @@ fun global_slot(s: *CodegenContext, tgt: *lang_target.Binding, image: *target_of
 # the shared section of the slot's name, kind and flags, made on first use;
 # the slot takes the next offset its alignment allows
 fun shared_join(alloc: *A.Allocator, shared: *SharedSections, slot: *GlobalSlot) err[fail.Fail] {
-    var head: u32         = NOT_SHARED;
-    val last: opt[*u32]   = map.get[intern.StrId, u32](?shared.byname, ?slot.name);
+    var head: u32       = NOT_SHARED;
+    val last: opt[*u32] = map.get[intern.StrId, u32](?shared.byname, ?slot.name);
     if (sel last.some) { head = @last.some; }
     var at: u32 = head;
     for (at != NOT_SHARED) {
@@ -831,8 +831,8 @@ fun shared_join(alloc: *A.Allocator, shared: *SharedSections, slot: *GlobalSlot)
     if (at == NOT_SHARED) {
         val grown: err[A.Error] = growth.reserve[SharedData](alloc, ?shared.items, ?shared.cap, shared.count::usize + 1);
         if (sel grown.err) { ret err[fail.Fail].err{fail.refused(grown.err)}; }
-        at                = shared.count;
-        shared.items[at]  = SharedData{name: slot.name, kind: slot.kind, flags: slot.flags, align: 1, len: 0, bytes: nil, index: 0,
+        at               = shared.count;
+        shared.items[at] = SharedData{name: slot.name, kind: slot.kind, flags: slot.flags, align: 1, len: 0, bytes: nil, index: 0,
             same_name: head};
         val indexed: res[bool, A.Error] = map.insert[intern.StrId, u32](?shared.byname, slot.name, at);
         if (sel indexed.err) { ret err[fail.Fail].err{fail.refused(indexed.err)}; }
@@ -912,7 +912,7 @@ fun pack_globals(s: *CodegenContext, tgt: *lang_target.Binding, image: *target_o
         val res_section: res[u32, fail.Fail] = target_of.section_install(image, ?sec);
         if (sel res_section.err) { ret err[fail.Fail].err{res_section.err}; }
         shared.items[d].index = res_section.ok;
-        d               = d + 1;
+        d                     = d + 1;
     }
 
     i = 0;
@@ -1849,11 +1849,11 @@ test pack_globals__globals_share_a_section_per_name_kind_and_flags {
     for (g < 8) {
         var init:    value.Value  = value.const_int(g::u64 + 1, u32_t);
         var section: intern.StrId = intern.STR_NIL;
-        if (g == 0)               { init = value.const_bytes(?ab[0], 3, ptr_t); }
-        or (g == 1)               { init = value.const_bytes(?cde[0], 4, ptr_t); }
-        or (g == 2)               { init = value.const_bytes(?nul[0], 3, ptr_t); }
-        or (g == 7)               { init = value.const_bytes(?ab[0], 3, u32_t); }
-        if (g == 5 || g == 6)     { section = rows_r.ok; }
+        if (g == 0)           { init = value.const_bytes(?ab[0], 3, ptr_t); }
+        or (g == 1)           { init = value.const_bytes(?cde[0], 4, ptr_t); }
+        or (g == 2)           { init = value.const_bytes(?nul[0], 3, ptr_t); }
+        or (g == 7)           { init = value.const_bytes(?ab[0], 3, u32_t); }
+        if (g == 5 || g == 6) { section = rows_r.ok; }
         module.globals[g] = me_ir.Global{name: names[g], ty: init.ty, init: init,
             is_mut:   false, is_pub: false, is_extern: false, is_import: false, is_local: g < 3,
             is_embed: g == 7, align: 0, section: section, iface: 0, iface_a: 0, iface_b: 0, iface_flags: 0,
@@ -1885,7 +1885,7 @@ test pack_globals__globals_share_a_section_per_name_kind_and_flags {
     for (pair < 3) {
         val first:  *target_of.Symbol = syms[firsts[pair]];
         val second: *target_of.Symbol = syms[seconds[pair]];
-        if (!target_of.section_same(first.section, second.section))  { ret (20 + pair)::i32; }
+        if (!target_of.section_same(first.section, second.section))    { ret (20 + pair)::i32; }
         if (first.offset != at[pair] || second.offset != at[pair] + 8) { ret (30 + pair)::i32; }
         pair = pair + 1;
     }
