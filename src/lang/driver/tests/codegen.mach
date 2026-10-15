@@ -3277,7 +3277,7 @@ fun ut_divide_trap_target(alloc: *A.Allocator, target_name: str, runner_name: st
     var rq: request.BuildRequest = request.defaults();
     rq.project_root = root;
     rq.target       = target_name;
-    val pr: res[build_plan.BuildPlan, fail.Fail] = build_plan.plan(alloc, ?s.interner, toolchain.t_registry(), ?m, rq);
+    val pr: res[build_plan.BuildPlan, fail.Fail] = build_plan.plan_to_run(alloc, ?s, toolchain.t_registry(), ?m, rq);
     if (sel pr.err) {
         fs.remove_all(alloc, root);
         ret 1;
@@ -4276,7 +4276,7 @@ fun ut_float_zero_profile(alloc: *A.Allocator, root: str, profile_name: str) i32
     rq.project_root = root;
     rq.target       = "";
     rq.profile      = profile_name;
-    val pr: res[build_plan.BuildPlan, fail.Fail] = build_plan.plan(alloc, ?s.interner, toolchain.t_registry(), ?m, rq);
+    val pr: res[build_plan.BuildPlan, fail.Fail] = build_plan.plan_to_run(alloc, ?s, toolchain.t_registry(), ?m, rq);
     if (sel pr.err) { ret 4; }
     var bp:        build_plan.BuildPlan     = pr.ok;
     var published: publication.Publications = publication.init(alloc);

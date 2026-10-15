@@ -196,9 +196,6 @@ pub fun link_dispatcher(p: *project.Project, sc: *TestScope, di: *DispatchInputs
     if (te == nil) {
         ret err[fail.Fail].err{fail.message("no target selected")};
     }
-    if (!p.target.of.links_from_image) {
-        ret err[fail.Fail].err{fail.user(diagnostic_kind.TARGET_OUTPUT_UNSUPPORTED, "this target's object format does not link from compiled images, so it cannot build tests")};
-    }
 
     var scratch_ar: arena.Arena;
     val init_r:     err[A.Error] = arena.init(?scratch_ar, p.s.backing, 0);

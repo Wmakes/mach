@@ -98,7 +98,7 @@ fun ut_readout_rows_case(jobs: u32) i32 {
     var rq: request.BuildRequest = request.defaults();
     rq.project_root = root;
     rq.jobs         = jobs;
-    val pr_r: res[build_plan.BuildPlan, fail.Fail] = build_plan.plan(?alloc, ?s.interner, toolchain.t_registry(), ?m, rq);
+    val pr_r: res[build_plan.BuildPlan, fail.Fail] = build_plan.plan_to_run(?alloc, ?s, toolchain.t_registry(), ?m, rq);
     if (sel pr_r.err) { ret 1; }
     var bp: build_plan.BuildPlan = pr_r.ok;
 

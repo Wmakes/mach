@@ -100,7 +100,7 @@ test grouped_expr__values_survive_to_run_time {
     rq.project_root = root;
     rq.target       = "linux";
     rq.goal         = request.GOAL_TESTS;
-    val pr: res[build_plan.BuildPlan, fail.Fail] = build_plan.plan(?alloc, ?s.interner, toolchain.t_registry(), ?m, rq);
+    val pr: res[build_plan.BuildPlan, fail.Fail] = build_plan.plan_to_run(?alloc, ?s, toolchain.t_registry(), ?m, rq);
     if (sel pr.err) { ret 4; }
     var bp:        build_plan.BuildPlan     = pr.ok;
     var published: publication.Publications = publication.init(?alloc);

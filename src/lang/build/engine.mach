@@ -50,6 +50,7 @@ use mach.lang.output;
 use mach.lang.query;
 use mach.lang.readout;
 use mach.lang.session;
+use lang_source: mach.lang.source;
 use mach.lang.step;
 use lang_target:       mach.lang.target;
 use catalog_artifact:  mach.lang.target.catalog.artifact;
@@ -126,7 +127,7 @@ fun record_blocked_unit(bo: *outcome.BuildOutcome, sink: *readout.Sink, oa: *A.A
 # plan, its severity the worst unit's; err is a failure of the engine itself, never of a
 # unit
 # ---
-# bp:      the plan, read only
+# bp:      the plan, its closure located; read only, and trusted as planned
 # backing: the allocator each unit's arena grows from; released per unit
 # oa:      owns the returned outcome and every path and text in it
 # sink:    where every unit, failure, diagnostic and phase row is sent as it happens; nil for none
@@ -195,8 +196,9 @@ fun execute_unit_cold(bp: *build_plan.BuildPlan, unit_index: usize, backing: *A.
     val make_r:  err[A.Error] = arena.make(?u_alloc, ?u_ar);
     if (sel make_r.err) { ret cold_fail(oa, sink, fail.message("failed to initialise allocator")); }
 
-    var r:           res[outcome.BuildOutcome, fail.Fail];
-    val res_session: res[session.Session, fail.Fail] = toolchain.session_init(?u_alloc);
+    var r: res[outcome.BuildOutcome, fail.Fail];
+    # the unit's session reads the plan's names, so its manifest and cells read as planned
+    val res_session: res[session.Session, fail.Fail] = toolchain.session_init_over(?u_alloc, bp.names);
     if (sel res_session.err) {
         val f: fail.Fail = fail.message_of(fail.join(?u_alloc, "failed to initialise compiler session: ", fail.describe(res_session.err)));
         r = cold_fail(oa, sink, f);
@@ -262,7 +264,7 @@ pub fun warm_project_plan(w: *WarmProject, rq: request.BuildRequest) err[fail.Fa
     w.m = loaded.ok;
     var at: request.BuildRequest = rq;
     at.project_root = w.root;
-    val planned: res[build_plan.BuildPlan, fail.Fail] = build_plan.plan(?w.alloc, ?w.s.interner, toolchain.t_registry(), ?w.m, at);
+    val planned: res[build_plan.BuildPlan, fail.Fail] = build_plan.plan_to_run(?w.alloc, ?w.s, toolchain.t_registry(), ?w.m, at);
     if (sel planned.err) { ret err[fail.Fail].err{planned.err}; }
     w.plan = planned.ok;
     ret err[fail.Fail].ok{};
@@ -299,8 +301,11 @@ test execute_unit_cold__session_init_failure_is_sent_before_arena_teardown {
 
     var rd: readout.Recording;
     readout.recording_init(?rd, ?oa, readout.LEVEL_RESULTS);
+    var names: intern.Interner = intern.init(?oa);
+    fin { intern.dnit(?names); }
     var bp: build_plan.BuildPlan;
-    val r:  res[outcome.BuildOutcome, fail.Fail] = execute_unit_cold(?bp, 0::usize, T.allocator_of(?t), ?oa, ?rd.sink);
+    bp.names = ?names;
+    val r: res[outcome.BuildOutcome, fail.Fail] = execute_unit_cold(?bp, 0::usize, T.allocator_of(?t), ?oa, ?rd.sink);
     if (sel r.err) { ret 3; }
 
     var bo:  outcome.BuildOutcome = r.ok;
@@ -319,7 +324,8 @@ test execute_unit_cold__session_init_failure_is_sent_before_arena_teardown {
 # restored on return, so every raw product a caller borrowed from the session before the
 # call is expired by it
 # ---
-# bp:         the plan, read only
+# bp:         the plan, its closure located; read only, and trusted as planned: neither the manifest
+#             nor the closure is read again, and a manifest the session reloaded since is refused
 # unit_index: the cell to run; out of range is an internal failure
 # s:          the warm session; its sources and queries carry over between calls
 # oa:         owns the returned outcome
@@ -353,23 +359,14 @@ pub fun execute_warm(bp: *build_plan.BuildPlan, unit_index: usize, s: *session.S
     s.build_alloc = ?call_alloc;
     fin { s.build_alloc = prior_build; }
 
-    val res_manifest: res[manifest.Manifest, fail.Fail] = driver.load_manifest(s, bp.request.project_root);
-    if (sel res_manifest.err) {
-        val r: res[outcome.BuildOutcome, fail.Fail] = warm_fail(?bo, sink, res_manifest.err);
-        ret r;
-    }
-    var m:      manifest.Manifest = res_manifest.ok;
-    val worked: err[fail.Fail]    = request.request_work_apply(?s.interner, ?bp.request, ?m);
-    if (sel worked.err) {
-        val r: res[outcome.BuildOutcome, fail.Fail] = warm_fail(?bo, sink, worked.err);
-        ret r;
-    }
+    val held: err[fail.Fail] = plan_held(bp, s);
+    if (sel held.err) { ret warm_fail(?bo, sink, held.err); }
 
     var req: request.BuildRequest =
         request.for_cell(?bp.request, planned.owner, planned.sel_target, planned.sel_artifact,
         planned.subsystem, planned.goal);
 
-    val begin_r: res[project.Project, fail.Fail] = driver.begin_build(s, ?m, ?req, pr);
+    val begin_r: res[project.Project, fail.Fail] = driver.begin_build(s, bp.manifest, ?bp.closure, ?req, pr);
     if (sel begin_r.err) {
         readout.diagnostics(sink, ?s.sources, ?s.diags);
         ret warm_fail(?bo, sink, begin_r.err);
@@ -377,18 +374,7 @@ pub fun execute_warm(bp: *build_plan.BuildPlan, unit_index: usize, s: *session.S
     var p: project.Project = begin_r.ok;
     fin { project.dnit_project(?p); }
 
-    # a dependency's cell replans in the scope its configuration realized
-    var scope: manifest.Scope = manifest.root_scope(?m);
-    if (p.config.dependency_owned) { scope = manifest.dependency_scope(?m, ?p.config.owner.manifest); }
-    val res_register: res[*lang_target.TargetRegistry, fail.Fail] = toolchain.registry();
-    if (sel res_register.err) { ret warm_fail(?bo, sink, res_register.err); }
-    val replan_r: res[build_plan.BuildUnit, fail.Fail] = build_plan.replan_unit(?call_alloc, ?s.interner, res_register.ok, ?scope, ?req, planned);
-    if (sel replan_r.err) {
-        val r: res[outcome.BuildOutcome, fail.Fail] = warm_fail(?bo, sink, replan_r.err);
-        ret r;
-    }
-    var cell: build_plan.BuildUnit  = replan_r.ok;
-    val unit: *build_plan.BuildUnit = ?cell;
+    val unit: *build_plan.BuildUnit = planned;
     # the cell's objects live in its obj directory, which is the object cache
     p.object_dir = unit.obj_dir;
     p.cache_dir  = unit.cache_dir;
@@ -454,6 +440,25 @@ pub fun execute_warm(bp: *build_plan.BuildPlan, unit_index: usize, s: *session.S
         outcome.fold_fail(?bo, ?f);
     }
     ret res[outcome.BuildOutcome, fail.Fail].ok{bo};
+}
+
+# a session runs a plan it reads as planned: the plan located its closure, and
+# the session holds the plan's names, as the session it was planned in or one
+# layered over that session's names. the session it was planned in also holds
+# the manifest's text, which must still be the text the plan was made from
+fun plan_held(bp: *build_plan.BuildPlan, s: *session.Session) err[fail.Fail] {
+    if (!bp.located) { ret err[fail.Fail].err{fail.message("internal: a plan runs only once its dependency closure is located")}; }
+    if (?s.interner != bp.names) {
+        if (!intern.descends(?s.interner, bp.names)) { ret err[fail.Fail].err{fail.message("internal: the session does not hold the plan's names")}; }
+        ret err[fail.Fail].ok{};
+    }
+    val m: *manifest.Manifest = bp.manifest;
+    if (lang_source.file_is_nil(m.source)) { ret err[fail.Fail].ok{}; }
+    val now: query.Revision = query.peek_revision(?s.queries, ?session.FILE_TEXT, lang_source.file_index(m.source)::u64);
+    if (now != m.source_revision) {
+        ret err[fail.Fail].err{fail.user(diagnostic_kind.MANIFEST_CHANGED, "the manifest changed after this build was planned; re-run the build")};
+    }
+    ret err[fail.Fail].ok{};
 }
 
 fun pcg_sweep_staged(p: *project.Project) {
@@ -834,19 +839,6 @@ fun emit_phase(p: *project.Project, unit: *build_plan.BuildUnit, st: *UnitState,
         }
     }
 
-    if (goal == request.GOAL_OBJECTS && flat) {
-        ret err[fail.Fail].err{fail.user(diagnostic_kind.TARGET_OUTPUT_UNSUPPORTED, "a flat-image object format produces only executables; library and '--emit obj' outputs are unsupported")};
-    }
-
-    if (goal == request.GOAL_TESTS && build_plan.finished_modules(?p.target)) {
-        ret err[fail.Fail].err{fail.user(diagnostic_kind.TARGET_OUTPUT_UNSUPPORTED, "a finished-module object format produces no executable; this target cannot build or run tests")};
-    }
-
-    if (build_plan.finished_modules(?p.target) && p.target_entry != nil
-        && catalog_artifact.is_library(p.target_entry.kind)) {
-        ret err[fail.Fail].err{fail.user(diagnostic_kind.TARGET_OUTPUT_UNSUPPORTED, "a finished-module object format has no archive or shared-library form; each module is its own artifact")};
-    }
-
     if (goal == request.GOAL_TESTS) {
         if (st.scope.sel_len == 0) {
             readout.phase_end(p.progress, readout.EMIT, 0, "object", "objects");
@@ -946,12 +938,7 @@ fun link_phase(p: *project.Project, unit: *build_plan.BuildUnit, st: *UnitState,
     val te: *project.TargetEntry = p.target_entry;
     if (te == nil) { ret err[fail.Fail].err{fail.message("no target selected")}; }
 
-    if (p.target.of != nil && p.target.of.produces_image) {
-        if (catalog_artifact.is_library(te.kind)) {
-            ret err[fail.Fail].err{fail.user(diagnostic_kind.TARGET_OUTPUT_UNSUPPORTED, "a flat-image object format produces only executables; library and '--emit obj' outputs are unsupported")};
-        }
-        ret link_flat(p, unit, st, t_link);
-    }
+    if (p.target.of != nil && p.target.of.produces_image) { ret link_flat(p, unit, st, t_link); }
     if (build_plan.finished_modules(?p.target)) {
         ret link_finished(p, unit, st, t_link);
     }

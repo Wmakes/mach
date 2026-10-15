@@ -264,12 +264,12 @@ fun build_selected(s: *session.Session, project_root: str, selectors: *manifest.
     var c: manifest.Cell = cell.ok;
     var r: res[project.Project, fail.Fail];
     if (load) { r = build_project_impl(s, project_root, ?c, ?m, req, roots); }
-    or        { r = begin_build_impl(s, project_root, ?c, ?m, req, nil, roots); }
+    or        { r = begin_build_impl(s, project_root, ?c, ?m, nil, req, nil, roots); }
     ret r;
 }
 
 fun build_project_impl(s: *session.Session, project_root: str, c: *manifest.Cell, m: *manifest.Manifest, req: *request.BuildRequest, roots: project.RootSet) res[project.Project, fail.Fail] {
-    val begin_r: res[project.Project, fail.Fail] = begin_build_impl(s, project_root, c, m, req, nil, roots);
+    val begin_r: res[project.Project, fail.Fail] = begin_build_impl(s, project_root, c, m, nil, req, nil, roots);
     if (sel begin_r.err) { ret begin_r; }
     var p: project.Project = begin_r.ok;
 
@@ -282,55 +282,32 @@ fun build_project_impl(s: *session.Session, project_root: str, c: *manifest.Cell
 }
 
 # locate a root manifest's dependency closure with no build cell configured, as a
-# build locates it: `p.config.deps` holds every dependency under dep/, its manifest
-# and its direct edges, and nothing is checked against git or the pins
+# build locates it: every dependency under dep/, its manifest and its direct
+# edges, and nothing is checked against git or the pins
 # ---
-# s:            the session
+# s:            the session; its build allocator owns the closure
 # m:            the root manifest
 # project_root: the root project's directory
-# ret:          the project holding the closure, released with `project.dnit_project`;
-#               err from locating the closure, its diagnostics published
-pub fun closure_locate(s: *session.Session, m: *manifest.Manifest, project_root: str) res[project.Project, fail.Fail] {
-    ret closure_project(s, m, project_root, nil);
+# ret:          the closure, released with `project.closure_dnit`
+pub fun closure_locate(s: *session.Session, m: *manifest.Manifest, project_root: str) res[project.Closure, fail.Fail] {
+    ret closure_of(s, m, project_root, nil);
 }
 
 # locate a root manifest's dependency closure as `closure_locate` does, holding every edge
 # to `check` as it is located, as `mach dep verify` does
 # ---
-# s:            the session
-# m:            the root manifest
-# project_root: the root project's directory
-# check:        what each located edge is held to
-# ret:          the project holding the closure, released with `project.dnit_project`;
-#               err naming the first edge that does not locate or does not hold
+# check: what each located edge is held to
+# ret:   the closure; err naming the first edge that does not locate or does not hold
 pub fun closure_checked(s: *session.Session, m: *manifest.Manifest, project_root: str,
-    check: *driver_closure.Check) res[project.Project, fail.Fail] {
-    ret closure_project(s, m, project_root, check);
+    check: *driver_closure.Check) res[project.Closure, fail.Fail] {
+    ret closure_of(s, m, project_root, check);
 }
 
-fun closure_project(s: *session.Session, m: *manifest.Manifest, project_root: str,
-    check: *driver_closure.Check) res[project.Project, fail.Fail] {
+fun closure_of(s: *session.Session, m: *manifest.Manifest, project_root: str,
+    check: *driver_closure.Check) res[project.Closure, fail.Fail] {
     val composed: err[fail.Fail] = registry_composed();
-    if (sel composed.err) { ret res[project.Project, fail.Fail].err{composed.err}; }
-    var p: project.Project;
-    project.init_project(?p, s);
-    var handed: bool = false;
-    fin {
-        if (!handed) { project.dnit_project(?p); }
-    }
-    p.req.project_root = project_root;
-    val dep_id_r: res[intern.StrId, A.Error] = intern.add(?s.interner, "dep");
-    if (sel dep_id_r.err) { ret res[project.Project, fail.Fail].err{fail.refused(dep_id_r.err)}; }
-    p.config.dir_dep = dep_id_r.ok;
-    val dr: err[fail.Fail] = driver_closure.locate(?p, m, project_root, check);
-    if (sel dr.err) {
-        handed = true;
-        ret project_failure(?p, dr.err);
-    }
-    val published: err[fail.Fail] = phase_finish(?p, err[fail.Fail].ok{});
-    if (sel published.err) { ret res[project.Project, fail.Fail].err{published.err}; }
-    handed = true;
-    ret res[project.Project, fail.Fail].ok{p};
+    if (sel composed.err) { ret res[project.Closure, fail.Fail].err{composed.err}; }
+    ret driver_closure.locate(s, s.build_alloc, m, project_root, check);
 }
 
 # the driver resolves targets only through the registry the toolchain composed
@@ -342,16 +319,20 @@ fun registry_composed() err[fail.Fail] {
 
 # begin the build the request names: every goal, a test goal included, loads the
 # selected artifact's closure
-pub fun begin_build(s: *session.Session, m: *manifest.Manifest, req: *request.BuildRequest, progress: *readout.Progress) res[project.Project, fail.Fail] {
-    ret begin_build_roots(s, m, req, progress, project.ROOT_ARTIFACT);
+# ---
+# m:       the root manifest the cell was planned from
+# closure: `m`'s closure as the plan located it, which the project borrows
+pub fun begin_build(s: *session.Session, m: *manifest.Manifest, closure: *project.Closure, req: *request.BuildRequest,
+    progress: *readout.Progress) res[project.Project, fail.Fail] {
+    ret begin_build_roots(s, m, closure, req, progress, project.ROOT_ARTIFACT);
 }
 
-fun begin_build_roots(s: *session.Session, m: *manifest.Manifest, req: *request.BuildRequest, progress: *readout.Progress,
-    roots: project.RootSet) res[project.Project, fail.Fail] {
+fun begin_build_roots(s: *session.Session, m: *manifest.Manifest, closure: *project.Closure, req: *request.BuildRequest,
+    progress: *readout.Progress, roots: project.RootSet) res[project.Project, fail.Fail] {
     val cell: res[manifest.Cell, fail.Fail] = request_cell(s, m, req);
     if (sel cell.err) { ret res[project.Project, fail.Fail].err{cell.err}; }
     var c: manifest.Cell = cell.ok;
-    ret begin_build_impl(s, req.project_root, ?c, m, req, progress, roots);
+    ret begin_build_impl(s, req.project_root, ?c, m, closure, req, progress, roots);
 }
 
 # the cell a request names: a dependency's cell exactly as its plan named it, and
@@ -424,7 +405,7 @@ fun analyze_frontend(s: *session.Session, m: *manifest.Manifest, req: *request.B
     diagnostic.store_dnit(?s.diags);
     s.diags = diagnostic.store_init(s.alloc);
 
-    val begin_r: res[project.Project, fail.Fail] = begin_build_roots(s, m, req, nil, roots);
+    val begin_r: res[project.Project, fail.Fail] = begin_build_roots(s, m, nil, req, nil, roots);
     if (sel begin_r.err) { ret begin_r; }
     var p: project.Project = begin_r.ok;
 
@@ -482,7 +463,8 @@ fun parse_project_roots(p: *project.Project, roots: *intern.StrId, count: u32) e
     ret retain_loaded(p, driver_load.collect_loaded_parses(p, err[fail.Fail].ok{}));
 }
 
-fun begin_build_impl(s: *session.Session, project_root: str, c: *manifest.Cell, m: *manifest.Manifest, req: *request.BuildRequest, progress: *readout.Progress, roots: project.RootSet) res[project.Project, fail.Fail] {
+fun begin_build_impl(s: *session.Session, project_root: str, c: *manifest.Cell, m: *manifest.Manifest, closure: *project.Closure,
+    req: *request.BuildRequest, progress: *readout.Progress, roots: project.RootSet) res[project.Project, fail.Fail] {
     val composed: err[fail.Fail] = registry_composed();
     if (sel composed.err) { ret res[project.Project, fail.Fail].err{composed.err}; }
     if (req != nil) {
@@ -501,7 +483,7 @@ fun begin_build_impl(s: *session.Session, project_root: str, c: *manifest.Cell, 
 
     var owner: str = "";
     if (req != nil) { owner = req.owner; }
-    val cfg_r: err[fail.Fail] = config.load_config_manifest(?p, project_root, m, c, owner, for_union);
+    val cfg_r: err[fail.Fail] = config.load_config_manifest(?p, project_root, m, closure, c, owner, for_union);
     if (sel cfg_r.err) {
         ret project_failure(?p, cfg_r.err);
     }

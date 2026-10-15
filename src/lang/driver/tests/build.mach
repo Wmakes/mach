@@ -244,7 +244,7 @@ test dispatcher__folds_a_wide_run_time_result_to_255 {
     rq.project_root = root;
     rq.target       = "linux";
     rq.goal         = request.GOAL_TESTS;
-    val pr: res[build_plan.BuildPlan, fail.Fail] = build_plan.plan(?alloc, ?s.interner, toolchain.t_registry(), ?m, rq);
+    val pr: res[build_plan.BuildPlan, fail.Fail] = build_plan.plan_to_run(?alloc, ?s, toolchain.t_registry(), ?m, rq);
     if (sel pr.err) { ret 1; }
     var bp:        build_plan.BuildPlan     = pr.ok;
     var published: publication.Publications = publication.init(?alloc);
@@ -1008,7 +1008,7 @@ test q_link__records_the_normal_and_test_codegen_keys {
     var rq: request.BuildRequest = request.defaults();
     rq.project_root = root;
     rq.goal         = request.GOAL_TESTS;
-    val pr: res[build_plan.BuildPlan, fail.Fail] = build_plan.plan(?alloc, ?s.interner, toolchain.t_registry(), ?m, rq);
+    val pr: res[build_plan.BuildPlan, fail.Fail] = build_plan.plan_to_run(?alloc, ?s, toolchain.t_registry(), ?m, rq);
     if (sel pr.err) {
         fs.remove_all(?alloc, root);
         session.dnit(?s);
@@ -1140,7 +1140,7 @@ fun ut_artifact_test_statuses(alloc: *A.Allocator, s: *session.Session, root: st
     rq.artifact     = artifact;
     rq.debug        = false;
     rq.goal         = request.GOAL_TESTS;
-    val pr: res[build_plan.BuildPlan, fail.Fail] = build_plan.plan(alloc, ?s.interner, toolchain.t_registry(), ?m, rq);
+    val pr: res[build_plan.BuildPlan, fail.Fail] = build_plan.plan_to_run(alloc, s, toolchain.t_registry(), ?m, rq);
     if (sel pr.err) {
         print.eprintln(fail.describe(pr.err));
         ret 2;
@@ -1262,7 +1262,7 @@ test test_goal__compile_error_collects_no_tests {
     var rq: request.BuildRequest = request.defaults();
     rq.project_root = root;
     rq.goal         = request.GOAL_TESTS;
-    val pr: res[build_plan.BuildPlan, fail.Fail] = build_plan.plan(?alloc, ?s.interner, toolchain.t_registry(), ?m, rq);
+    val pr: res[build_plan.BuildPlan, fail.Fail] = build_plan.plan_to_run(?alloc, ?s, toolchain.t_registry(), ?m, rq);
     if (sel pr.err) {
         fs.remove_all(?alloc, root);
         session.dnit(?s);

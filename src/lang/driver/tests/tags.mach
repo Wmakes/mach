@@ -384,7 +384,7 @@ fun ut_l8_trap_target(alloc: *A.Allocator, target_name: str, runner_name: str, r
         rq.profile = "release";
         rq.opt     = pipeline.OPT_RELEASE;
     }
-    val pr: res[build_plan.BuildPlan, fail.Fail] = build_plan.plan(alloc, ?s.interner, toolchain.t_registry(), ?m, rq);
+    val pr: res[build_plan.BuildPlan, fail.Fail] = build_plan.plan_to_run(alloc, ?s, toolchain.t_registry(), ?m, rq);
     if (sel pr.err) {
         fs.remove_all(alloc, root);
         ret 1;

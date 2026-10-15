@@ -127,11 +127,13 @@ pub val CHECK: args.CommandSpec = args.CommandSpec{name: "check", aliases: nil, 
 # a command's selection, planned: the cells the selectors resolved to, and one
 # plan per selected profile in the order the cells name them
 # ---
-# cells: the resolved (artifact, target, profile) cells
-# plans: one plan per profile; each plans that profile's cells
+# manifest: the root manifest the plans were made from, in the planning session
+# cells:    the resolved (artifact, target, profile) cells
+# plans:    one plan per profile; each plans that profile's cells
 pub rec Planned {
-    cells: Vector[manifest.Cell];
-    plans: Vector[build_plan.BuildPlan];
+    manifest: *manifest.Manifest;
+    cells:    Vector[manifest.Cell];
+    plans:    Vector[build_plan.BuildPlan];
 }
 
 # initialise a session, load the manifest, resolve the selectors and plan a
@@ -159,17 +161,21 @@ pub fun plan_invocation(a: *A.Allocator, root: str, cli: *args.CliArgs, goal: re
     }
     @ps = res_session.ok;
 
+    # the plans borrow the manifest, so it lives in the session they run in
     val res_manifest: res[manifest.Manifest, fail.Fail] = driver.load_manifest(ps, root);
     if (sel res_manifest.err) {
         ret plan_failure(a, ps, res_manifest.err);
     }
-    var m: manifest.Manifest = res_manifest.ok;
+    val held: res[*manifest.Manifest, A.Error] = A.allocate[manifest.Manifest](ps.alloc, 1);
+    if (sel held.err) { ret plan_failure(a, ps, fail.refused(held.err)); }
+    val m: *manifest.Manifest = held.ok;
+    @m = res_manifest.ok;
     if (cli.overrides.work != nil) {
-        val worked: err[fail.Fail] = request.work_apply(?ps.interner, cli.overrides.work::str, ?m);
+        val worked: err[fail.Fail] = request.work_apply(?ps.interner, cli.overrides.work::str, m);
         if (sel worked.err) { ret plan_failure(a, ps, worked.err); }
     }
 
-    val selected: res[Planned, fail.Fail] = plan_selection(a, ps, ?m, root, cli, goal, mode, configure_deps);
+    val selected: res[Planned, fail.Fail] = plan_selection(a, ps, m, root, cli, goal, mode, configure_deps);
     if (sel selected.err) {
         ret plan_failure(a, ps, selected.err);
     }
@@ -196,8 +202,9 @@ pub fun plan_selection(a: *A.Allocator, ps: *session.Session, m: *manifest.Manif
         ret res[Planned, fail.Fail].err{args.selection_hint(ps.alloc, ?cli.selectors, resolved.err)};
     }
     var planned: Planned;
-    planned.cells = resolved.ok;
-    planned.plans = collections_vector.init[build_plan.BuildPlan](ps.alloc);
+    planned.manifest = m;
+    planned.cells    = resolved.ok;
+    planned.plans    = collections_vector.init[build_plan.BuildPlan](ps.alloc);
     if (cli.overrides.output != nil && planned.cells.len != 1) {
         ret res[Planned, fail.Fail].err{manifest.single_selection_fail(ps.alloc, diagnostic_kind.OUTPUT_AMBIGUOUS, "-o names one output", ?planned.cells)};
     }
@@ -228,13 +235,13 @@ pub fun plan_selection(a: *A.Allocator, ps: *session.Session, m: *manifest.Manif
         }
         var bp: build_plan.BuildPlan = plan_r.ok;
 
-        val required: err[fail.Fail] = build_plan.plan_dependency_requirements(ps, m, ?bp);
+        val required: err[fail.Fail] = build_plan.plan_dependency_requirements(ps, ?bp);
         if (sel required.err) {
             ret res[Planned, fail.Fail].err{required.err};
         }
 
         if (configure_deps) {
-            val configured: err[fail.Fail] = build_plan.configure(ps, m, ?bp);
+            val configured: err[fail.Fail] = build_plan.configure(ps, ?bp);
             if (sel configured.err) {
                 ret res[Planned, fail.Fail].err{configured.err};
             }

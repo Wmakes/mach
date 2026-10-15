@@ -1827,7 +1827,7 @@ pub fun ut_engine_build_fails(src: str) i32 {
     var m:  manifest.Manifest    = mr.ok;
     var rq: request.BuildRequest = request.defaults();
     rq.project_root = root;
-    val pr: res[build_plan.BuildPlan, fail.Fail] = build_plan.plan(?alloc, ?s.interner, toolchain.t_registry(), ?m, rq);
+    val pr: res[build_plan.BuildPlan, fail.Fail] = build_plan.plan_to_run(?alloc, ?s, toolchain.t_registry(), ?m, rq);
     if (sel pr.err) { ret 1; }
     var bp: build_plan.BuildPlan = pr.ok;
 
@@ -2281,7 +2281,7 @@ pub fun ut_tag_native_case_files(alloc: *A.Allocator, manifest_text: str, root_n
         rq.profile = "release";
         rq.opt     = pipeline.OPT_RELEASE;
     }
-    val pr: res[build_plan.BuildPlan, fail.Fail] = build_plan.plan(alloc, ?s.interner, toolchain.t_registry(), ?m, rq);
+    val pr: res[build_plan.BuildPlan, fail.Fail] = build_plan.plan_to_run(alloc, ?s, toolchain.t_registry(), ?m, rq);
     if (sel pr.err) {
         fs.remove_all(alloc, root);
         ret 1;

@@ -2847,7 +2847,7 @@ test readout__a_phase_counts_what_it_processed {
     var rq: request.BuildRequest = request.defaults();
     rq.project_root = root;
     rq.goal         = request.GOAL_TEST_LIST;
-    val pr: res[build_plan.BuildPlan, fail.Fail] = build_plan.plan(?alloc, ?s.interner, toolchain.t_registry(), ?m, rq);
+    val pr: res[build_plan.BuildPlan, fail.Fail] = build_plan.plan_to_run(?alloc, ?s, toolchain.t_registry(), ?m, rq);
     if (sel pr.err) {
         fs.remove_all(?alloc, root);
         session.dnit(?s);
@@ -2983,7 +2983,7 @@ fun ut_cached_build_in(s: *session.Session, alloc: *A.Allocator, root: str, targ
     rq.goal         = request.GOAL_ARTIFACT;
     rq.object_cache = cached;
     rq.debug        = debug;
-    val pr: res[build_plan.BuildPlan, fail.Fail] = build_plan.plan(alloc, ?s.interner, toolchain.t_registry(), ?m, rq);
+    val pr: res[build_plan.BuildPlan, fail.Fail] = build_plan.plan_to_run(alloc, s, toolchain.t_registry(), ?m, rq);
     if (sel pr.err) { ret 2; }
     var bp: build_plan.BuildPlan = pr.ok;
     var rd: readout.Recording;
@@ -3126,7 +3126,7 @@ fun ut_artifact_path(s: *session.Session, alloc: *A.Allocator, root: str, target
     rq.goal         = request.GOAL_ARTIFACT;
     rq.object_cache = false;
     rq.debug        = false;
-    val pr: res[build_plan.BuildPlan, fail.Fail] = build_plan.plan(alloc, ?s.interner, toolchain.t_registry(), ?m, rq);
+    val pr: res[build_plan.BuildPlan, fail.Fail] = build_plan.plan_to_run(alloc, s, toolchain.t_registry(), ?m, rq);
     if (sel pr.err) { ret nil; }
     var bp:        build_plan.BuildPlan     = pr.ok;
     var published: publication.Publications = publication.init(alloc);
@@ -3477,7 +3477,7 @@ test readout__a_gate_deferred_module_is_counted_once {
     var rq: request.BuildRequest = request.defaults();
     rq.project_root = root;
     rq.goal         = request.GOAL_OBJECTS;
-    val pr: res[build_plan.BuildPlan, fail.Fail] = build_plan.plan(?alloc, ?s.interner, toolchain.t_registry(), ?m, rq);
+    val pr: res[build_plan.BuildPlan, fail.Fail] = build_plan.plan_to_run(?alloc, ?s, toolchain.t_registry(), ?m, rq);
     if (sel pr.err) {
         fs.remove_all(?alloc, root);
         session.dnit(?s);

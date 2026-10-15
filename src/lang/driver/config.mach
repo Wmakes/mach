@@ -227,11 +227,27 @@ fun clone_step(alloc: *A.Allocator, src: *manifest.StepDef, out: *manifest.StepD
     ret err[fail.Fail].ok{};
 }
 
+# the closure the project compiles against: `closure` borrowed, or with none
+# given one it locates and owns
+fun closure_taken(p: *project.Project, m: *manifest.Manifest, project_root: str, closure: *project.Closure) err[fail.Fail] {
+    var taken: *project.Closure = closure;
+    if (taken == nil) {
+        val located: res[project.Closure, fail.Fail] = driver_closure.locate(p.s, p.alloc, m, project_root, nil);
+        if (sel located.err) { ret err[fail.Fail].err{located.err}; }
+        project.closure_dnit(?p.config.closure);
+        p.config.closure = located.ok;
+        taken            = ?p.config.closure;
+    }
+    ret driver_closure.adopt(p, taken);
+}
+
 # configure a project for one build cell of `m`, or of one of its dependencies
 # ---
 # p:            the project being configured
 # project_root: the root project's directory
 # m:            the root manifest
+# closure:      `m`'s located closure, which the project borrows; nil to locate
+#               one the project owns
 # c:            the cell; with `owner`, a target and artifact of that dependency and
 #               a profile of `m`
 # owner:        "" for a cell of `m`, or the id of the closure dependency whose export
@@ -240,7 +256,7 @@ fun clone_step(alloc: *A.Allocator, src: *manifest.StepDef, out: *manifest.StepD
 #               entry loads, and `{artifact.<id>.out}` resolves over every artifact
 #               some artifact needs
 # ret:          ok; err from selection, template, step, link or dependency resolution
-pub fun load_config_manifest(p: *project.Project, project_root: str, m: *manifest.Manifest, c: *manifest.Cell,
+pub fun load_config_manifest(p: *project.Project, project_root: str, m: *manifest.Manifest, closure: *project.Closure, c: *manifest.Cell,
     owner: str, for_union: bool) err[fail.Fail] {
     val toolchain_r: res[*lang_target.TargetRegistry, fail.Fail] = toolchain.registry();
     if (sel toolchain_r.err) { ret err[fail.Fail].err{toolchain_r.err}; }
@@ -249,14 +265,11 @@ pub fun load_config_manifest(p: *project.Project, project_root: str, m: *manifes
     if (sel abs_root_r.err) { ret err[fail.Fail].err{fail.refused(abs_root_r.err)}; }
     p.config.project_root = abs_root_r.ok;
     p.config.home_root    = abs_root_r.ok;
-    val res_dep_id: res[intern.StrId, A.Error] = intern.add(?p.s.interner, "dep");
-    if (sel res_dep_id.err) { ret err[fail.Fail].err{fail.refused(res_dep_id.err)}; }
-    p.config.dir_dep = res_dep_id.ok;
 
     var scope: manifest.Scope = manifest.root_scope(m);
     if (!str_empty(owner)) {
-        val dr: err[fail.Fail] = driver_closure.locate(p, m, project_root, nil);
-        if (sel dr.err) { ret err[fail.Fail].err{dr.err}; }
+        val dr: err[fail.Fail] = closure_taken(p, m, project_root, closure);
+        if (sel dr.err) { ret dr; }
         val sr: err[fail.Fail] = driver_closure.scope_closure_to_dependency(p, owner);
         if (sel sr.err) { ret sr; }
         scope                 = manifest.dependency_scope(m, ?p.config.owner.manifest);
@@ -379,8 +392,8 @@ pub fun load_config_manifest(p: *project.Project, project_root: str, m: *manifes
     }
 
     if (!manifest.scope_is_dependency(?scope)) {
-        val dr: err[fail.Fail] = driver_closure.locate(p, m, project_root, nil);
-        if (sel dr.err) { ret err[fail.Fail].err{dr.err}; }
+        val dr: err[fail.Fail] = closure_taken(p, m, project_root, closure);
+        if (sel dr.err) { ret dr; }
     }
 
     val scoped: err[fail.Fail] = driver_closure.resolve_requirement_scopes(p, m, cell_profile);
