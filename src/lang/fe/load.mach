@@ -2,6 +2,7 @@ use std.allocator.page;
 use std.collections.map;
 use std.collections.sort;
 use collections_vector: std.collections.vector;
+use std_format:         std.format;
 use std.text.string.str_free;
 use std.types.bool.bool;
 use std.types.bool.false;
@@ -2754,6 +2755,8 @@ pub rec Fixture {
     count:  u32;
     done:   [8]session.ModuleId;
     closed: u32;
+    # how many times the load read a module's row
+    rows_read: u64;
 }
 
 #[testing]
@@ -2768,7 +2771,9 @@ fun fixture_add(ctx: ptr, fqn: intern.StrId, sid: session.StableModuleId) res[se
 
 #[testing]
 fun fixture_row(ctx: ptr, mid: session.ModuleId) Row {
-    ret (ctx::*Fixture).rows[module.index(mid)];
+    val f: *Fixture = ctx::*Fixture;
+    f.rows_read = f.rows_read + 1;
+    ret f.rows[module.index(mid)];
 }
 
 #[testing]
@@ -2845,6 +2850,7 @@ pub fun fixture_init(s: *session.Session, a: *A.Allocator, diags: *diagnostic.Di
     f.diags         = diags;
     f.count         = 0;
     f.closed        = 0;
+    f.rows_read     = 0;
     ret f;
 }
 
@@ -3008,5 +3014,70 @@ test gate__cast_resolves_local_and_imported_aliases {
     if (!sel main.status.kind.accepted)                         { ret 6; }
     if (module_count(?l) != 2)                                  { ret 7; }
     if (!module.stable_is_nil(stable_named(?l, "app.missing"))) { ret 8; }
+    ret 0;
+}
+
+# the rows a load of one module of `n` chained constants reads, V0 = V1 + 1 down to a constant
+# bound in a gate's arm, and whether V0 came out as n + 1; zero when the load failed
+#[testing]
+fun chained_constant_rows(n: u32) u64 {
+    var a: A.Allocator;
+    page.make(?a);
+    val made: res[session.Session, fail.Fail] = session.init(?a);
+    if (sel made.err) { ret 0; }
+    var s: session.Session = made.ok;
+    fin { session.dnit(?s); }
+    var diags: diagnostic.DiagnosticStore = diagnostic.store_init(?a);
+    fin { diagnostic.store_dnit(?diags); }
+    val app: res[intern.StrId, A.Error] = intern.add(?s.interner, "app");
+    if (sel app.err) { ret 0; }
+    var held: resident.Resident = resident.init(?a, ?s.interner, app.ok);
+    fin { resident.dnit(?held); }
+    var text: str = "$if (1 == 1) { val W: u32 = 1; }\n";
+    var i:    u32 = 0;
+    for (i < n) {
+        var next: str = "W";
+        if (i + 1 < n) {
+            val named: res[str, std_format.FormatError] = std_format.sprint(?a, "V{}", i + 1);
+            if (sel named.err) { ret 0; }
+            next = named.ok;
+        }
+        val line: res[str, std_format.FormatError] = std_format.sprint(?a, "{}pub val V{}: u32 = {} + 1;\n", text, i, next);
+        if (sel line.err) { ret 0; }
+        text = line.ok;
+        i    = i + 1;
+    }
+    if (!held_set(?held, "app.main", text)) { ret 0; }
+    var f: Fixture = fixture_init(?s, ?a, ?diags);
+    fin { fixture_dnit(?f); }
+    var l: Loader = init(?s, ?a);
+    fin { dnit(?l); }
+    bind(?l, fixture_host(?f), resident.provider_of(?held), ?diags);
+    val main_name: res[intern.StrId, A.Error] = intern.add(?s.interner, "app.main");
+    if (sel main_name.err) { ret 0; }
+    val loaded: res[session.ModuleId, fail.Fail] = module_load(?l, main_name.ok);
+    if (sel loaded.err)                { ret 0; }
+    if (diagnostic.has_errors(?diags)) { ret 0; }
+    val v0: res[intern.StrId, A.Error] = intern.add(?s.interner, "V0");
+    if (sel v0.err) { ret 0; }
+    val main:  *Module                  = module_at(?l, loaded.ok);
+    val bound: opt[comptime.NamedConst] = comptime.lookup(?main.ctx, v0.ok);
+    if (sel bound.none) { ret 0; }
+    val value: opt[u64] = comptime.ct_int_u64(bound.some.value);
+    if (sel value.none)           { ret 0; }
+    if (value.some != n::u64 + 1) { ret 0; }
+    ret f.rows_read;
+}
+
+# a demand finds each name by one lookup, so the rows a load reads stay a fixed number per
+# constant it binds; a pass over the module's declarations per demand reads one per declaration
+test load__demands_cost_linear_in_the_constants {
+    var n: u32 = 50;
+    for (n <= 200) {
+        val rows: u64 = chained_constant_rows(n);
+        if (rows == 0)          { ret 1; }
+        if (rows > 40 * n::u64) { ret 2; }
+        n = n * 4;
+    }
     ret 0;
 }
