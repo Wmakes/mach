@@ -1,5 +1,6 @@
 use std.types.bool.bool;
 use std.types.char.char;
+use std.types.option.opt;
 use std.types.result.res;
 use std.types.size.usize;
 use std.types.string.str;
@@ -26,6 +27,25 @@ pub rec StableModuleId {
 }
 
 pub val STABLE_MODULE_NIL: StableModuleId = StableModuleId{index: 0xFFFFFFFF};
+
+# a project numbers its modules from 0 below BUFFER_BASE, and a standalone
+# editor buffer's module is BUFFER_BASE past its file's index, so no project
+# module takes a buffer's id and a table keyed by module serves both
+pub val BUFFER_BASE: u32 = 0x80000000;
+
+# the module of the standalone buffer over the file with index `file`, none
+# past the last id the buffer range holds
+pub fun buffer_id(file: u32) opt[ModuleId] {
+    if (file >= MODULE_NIL.index - BUFFER_BASE) { ret opt[ModuleId].none{}; }
+    ret opt[ModuleId].some{id(BUFFER_BASE + file)};
+}
+
+# the index of the file whose standalone buffer is the module `m`, none when
+# `m` is a project's module or nil
+pub fun buffer_file(m: ModuleId) opt[u32] {
+    if (m.index < BUFFER_BASE || is_nil(m)) { ret opt[u32].none{}; }
+    ret opt[u32].some{m.index - BUFFER_BASE};
+}
 
 pub fun id(index: u32) ModuleId {
     var m: ModuleId;

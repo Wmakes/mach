@@ -70,7 +70,8 @@ pub rec Session {
     query_failure_places: fail.Fail;
     parse_sequence:       u64;
 
-    # one past the highest module id the session has an identity for
+    # one past the highest project module id the session has an identity for;
+    # below module.BUFFER_BASE, so it never wraps
     module_count: u32;
 
     module_fqns: map.Map[module.ModuleId, intern.StrId];
@@ -273,7 +274,7 @@ pub fun reset_module_registry(s: *Session) {
     map.clear[module.StableModuleId, module.ModuleId](?s.stable_to_mid);
 }
 
-# one past the highest module id the session has an identity for
+# one past the highest project module id the session has an identity for
 pub fun module_count(s: *Session) u32 {
     ret s.module_count;
 }
@@ -358,7 +359,10 @@ pub fun reset_type_projection(s: *Session) err[fail.Fail] {
     ret err[fail.Fail].ok{};
 }
 
+# give the module `mid` its name and stable identity; a project's module also
+# counts toward module_count, a standalone buffer's does not
 pub fun register_module_identity(s: *Session, mid: module.ModuleId, fqn: intern.StrId, stable: module.StableModuleId) err[fail.Fail] {
+    if (module.is_nil(mid)) { ret err[fail.Fail].err{fail.message("a module identity needs a module id")}; }
     var key: module.ModuleId = mid;
     expire_views(s);
     val rf: err[fail.Fail] = register_module_fqn(s, mid, fqn);
@@ -368,7 +372,8 @@ pub fun register_module_identity(s: *Session, mid: module.ModuleId, fqn: intern.
         map.remove[module.ModuleId, intern.StrId](?s.module_fqns, ?key);
         ret rm;
     }
-    if (mid::u32 + 1 > s.module_count) { s.module_count = mid::u32 + 1; }
+    val buffer: opt[u32] = module.buffer_file(mid);
+    if (sel buffer.none && module.index(mid) >= s.module_count) { s.module_count = module.index(mid) + 1; }
     ret err[fail.Fail].ok{};
 }
 

@@ -593,6 +593,7 @@ fun store_fail(e: handle.Error) fail.Fail {
 
 # make room for one more entry so the next module_append cannot fail
 pub fun module_reserve(p: *Project) err[fail.Fail] {
+    if (module_count(p) >= module.BUFFER_BASE) { ret err[fail.Fail].err{fail.message("a project numbers at most 2^31 modules")}; }
     val editor_r: res[handle.ChunkEditor[ModuleEntry], handle.Error] = handle.chunk_editor[ModuleEntry](?p.modules);
     if (sel editor_r.err) { ret err[fail.Fail].err{store_fail(editor_r.err)}; }
     var editor: handle.ChunkEditor[ModuleEntry] = editor_r.ok;
