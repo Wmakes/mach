@@ -105,7 +105,7 @@ pub fun overrides_init(a: *A.Allocator) Overrides {
 
 pub def SubsystemFlag: u8;
 
-pub val SUBSYSTEM_FLAG_NONE:    SubsystemFlag = 0;
+val     SUBSYSTEM_FLAG_NONE:    SubsystemFlag = 0;
 pub val SUBSYSTEM_FLAG_CONSOLE: SubsystemFlag = 1;
 val     SUBSYSTEM_FLAG_GUI:     SubsystemFlag = 2;
 

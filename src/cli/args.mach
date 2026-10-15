@@ -48,7 +48,7 @@ pub rec CliArgs {
 }
 
 # `--emit`'s help text
-pub val EMIT_HELP: str = "obj | exe (default exe; obj stops at the objects)";
+val EMIT_HELP: str = "obj | exe (default exe; obj stops at the objects)";
 
 # the refusal of an `--emit` value no goal is named by
 pub val EMIT_ERROR: str = "--emit expects 'obj' or 'exe'";
