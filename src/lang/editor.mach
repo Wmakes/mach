@@ -1118,6 +1118,7 @@ fun discover_project_root(alloc: *A.Allocator, file_path: str) res[opt[str], fai
             var file:     fs.File                          = opened.ok;
             val metadata: res[fs.Metadata, io_error.Error] = fs.stat_of(file);
             val closed:   err[io_error.Error]              = fs.close(?file);
+            # a manifest opened read-only loses nothing to a refused close, so the failure going out stands alone
             if (sel metadata.err) {
                 ret res[opt[str], fail.Fail].err{fail.message(system_os.message(metadata.err))};
             }
