@@ -1071,12 +1071,9 @@ fun buffer_resolved_type(es: *EditorSession, fid: lang_source.FileId, tid: ast_i
 
 val OOM_FAIL_MESSAGE: str = "out of memory";
 
-# a kind outside the FailKind catalog is an internal failure naming the
-# catalog; its message is of unknown provenance and is not carried
+# a copy of `f` owning its text and its places through the session's allocator,
+# released with fail_dnit; a refused copy is the borrowed out-of-memory message
 fun fail_owned(es: *EditorSession, f: fail.Fail) fail.Fail {
-    val carried: opt[str] = fail.text(f);
-    if (sel carried.none)                                  { ret f; }
-    if (carried.some == nil || str_len(carried.some) == 0) { ret f; }
     val kept: res[fail.Fail, A.Error] = fail.retain(es.alloc, f);
     if (sel kept.err) { ret fail.message(OOM_FAIL_MESSAGE); }
     ret kept.ok;
@@ -1085,15 +1082,9 @@ fun fail_owned(es: *EditorSession, f: fail.Fail) fail.Fail {
 # release an operational failure returned by analyze or build
 # ---
 # es: the editor session that returned the Fail
-# f:  the Fail; nil, a reported Fail and an empty message are no-ops, and borrowed text (the
-#     out-of-memory message) is left alone
+# f:  the Fail; nil is a no-op, and borrowed text (the out-of-memory message) is left alone
 pub fun fail_dnit(es: *EditorSession, f: *fail.Fail) {
     if (f == nil) { ret; }
-    val carried: opt[str] = fail.text(@f);
-    if (sel carried.none) { ret; }
-    val text: str = carried.some;
-    if (text == nil)        { ret; }
-    if (str_len(text) == 0) { ret; }
     fail.dnit(es.alloc, @f);
     @f = fail.without_places(fail.with_text(@f, nil));
 }
