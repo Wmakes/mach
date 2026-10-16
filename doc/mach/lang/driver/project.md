@@ -24,6 +24,15 @@ pub val ROOT_UNION: RootSet = 1
 pub rec TargetEntry;
 ```
 
+## fun target_entry_of
+
+```mach
+pub fun target_entry_of(bu: *manifest.BuildUnit) TargetEntry;
+```
+
+the target entry a selected build unit describes: the one place a TargetEntry is
+built, so every field is carried wherever an entry is made
+
 ## rec DepEntry
 
 ```mach

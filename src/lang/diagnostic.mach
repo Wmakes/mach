@@ -131,8 +131,22 @@ pub rec DiagnosticStore {
     # warnings of these kinds are dropped as they reach the store
     silenced: diagnostic_kind.KindSet;
     # the `#[expect]` acknowledgements a warning is matched against before it
-    # is silenced or kept
+    # is silenced or kept, in the order they were gathered
     expects: Vector[Expectation];
+    # each file's expectations: positions in `expects`, grouped by file in
+    # gathering order, and the run of them each file owns
+    expect_order:   Vector[usize];
+    expect_by_file: map.Map[u32, ExpectRun];
+    # how many expectations warnings have been matched against
+    expect_examined: u64;
+}
+
+# the expectations of one file: `len` positions from `start` in the store's
+# expect_order. `placed` counts those filled while the index is built
+rec ExpectRun {
+    start:  usize;
+    len:    usize;
+    placed: usize;
 }
 
 # one key of a declaration's `#[expect]`: a warning of a kind it selects,
@@ -176,15 +190,18 @@ pub rec DiagnosticBuilder {
 
 pub fun store_init(a: *A.Allocator) DiagnosticStore {
     var store: DiagnosticStore;
-    store.a           = a;
-    store.items       = collections_vector.init[Diagnostic](a);
-    store.reports     = map.init[u64, usize](a);
-    store.error_count = 0;
-    store.lost        = 0;
-    store.epoch       = 0;
-    store.origin      = ORIGIN_NONE;
-    store.silenced    = diagnostic_kind.set_empty();
-    store.expects     = collections_vector.init[Expectation](a);
+    store.a               = a;
+    store.items           = collections_vector.init[Diagnostic](a);
+    store.reports         = map.init[u64, usize](a);
+    store.error_count     = 0;
+    store.lost            = 0;
+    store.epoch           = 0;
+    store.origin          = ORIGIN_NONE;
+    store.silenced        = diagnostic_kind.set_empty();
+    store.expects         = collections_vector.init[Expectation](a);
+    store.expect_order    = collections_vector.init[usize](a);
+    store.expect_by_file  = map.init[u32, ExpectRun](a);
+    store.expect_examined = 0;
     ret store;
 }
 
@@ -209,22 +226,71 @@ fun is_silenced(store: *DiagnosticStore, k: diagnostic_kind.Kind) bool {
 }
 
 # acknowledge every warning an expectation in `list` covers as it reaches the
-# store; the store takes the list
-pub fun expect(store: *DiagnosticStore, list: Vector[Expectation]) {
+# store; the store takes the list, whatever the outcome, and indexes it by file
+pub fun expect(store: *DiagnosticStore, list: Vector[Expectation]) err[fail.Fail] {
     collections_vector.dnit[Expectation](?store.expects);
     store.expects = list;
+    collections_vector.clear[usize](?store.expect_order);
+    map.clear[u32, ExpectRun](?store.expect_by_file);
+    var i: usize = 0;
+    for (i < store.expects.len) {
+        var file: u32             = lang_source.file_index(store.expects.data[i].file_id);
+        val held: opt[*ExpectRun] = map.get[u32, ExpectRun](?store.expect_by_file, ?file);
+        if (sel held.some) { held.some.len = held.some.len + 1; }
+        or {
+            var run: ExpectRun;
+            run.start  = 0;
+            run.len    = 1;
+            run.placed = 0;
+            val noted: res[bool, A.Error] = map.insert[u32, ExpectRun](?store.expect_by_file, file, run);
+            if (sel noted.err) { ret unindexed(store, noted.err); }
+        }
+        i = i + 1;
+    }
+    val sized: res[usize, A.Error] = collections_vector.ensure[usize](?store.expect_order, store.expects.len);
+    if (sel sized.err) { ret unindexed(store, sized.err); }
+    # each file's run begins where the file is first met, so the runs keep gathering order
+    var next: usize = 0;
+    i = 0;
+    for (i < store.expects.len) {
+        var file: u32             = lang_source.file_index(store.expects.data[i].file_id);
+        val got:  opt[*ExpectRun] = map.get[u32, ExpectRun](?store.expect_by_file, ?file);
+        if (sel got.none) { ret err[fail.Fail].err{fail.message("diagnostic: an expectation's file is missing from its index")}; }
+        val run: *ExpectRun = got.some;
+        if (run.placed == 0) {
+            run.start = next;
+            next      = next + run.len;
+        }
+        store.expect_order.data[run.start + run.placed] = i;
+        run.placed                                      = run.placed + 1;
+        i                                               = i + 1;
+    }
+    store.expect_order.len = store.expects.len;
+    ret err[fail.Fail].ok{};
+}
+
+# an index that could not be built holds no expectation, so none is half indexed
+fun unindexed(store: *DiagnosticStore, e: A.Error) err[fail.Fail] {
+    collections_vector.clear[usize](?store.expect_order);
+    map.clear[u32, ExpectRun](?store.expect_by_file);
+    ret err[fail.Fail].err{fail.refused(e)};
 }
 
 # a warning at `loc` of kind `k` is acknowledged by every expectation around it
-# that selects `k`, and each of those is fulfilled
+# that selects `k`, and each of those is fulfilled. only the expectations of
+# the warning's own file are examined
 fun is_expected(store: *DiagnosticStore, k: diagnostic_kind.Kind, loc: lang_source.Location) bool {
     if (diagnostic_kind.is_error(k) || k == diagnostic_kind.EXPECT_UNFULFILLED) { ret false; }
-    var hit: bool  = false;
-    var i:   usize = 0;
-    for (i < store.expects.len) {
-        val e: *Expectation = ?store.expects.data[i];
-        if (lang_source.file_same(e.file_id, loc.file) && loc.span.offset >= e.start && loc.span.offset < e.end
-            && diagnostic_kind.set_has(?e.kinds, k)) {
+    var file: u32             = lang_source.file_index(loc.file);
+    val held: opt[*ExpectRun] = map.get[u32, ExpectRun](?store.expect_by_file, ?file);
+    if (sel held.none) { ret false; }
+    val run: *ExpectRun = held.some;
+    var hit: bool       = false;
+    var i:   usize      = 0;
+    for (i < run.len) {
+        val e: *Expectation = ?store.expects.data[store.expect_order.data[run.start + i]];
+        store.expect_examined = store.expect_examined + 1;
+        if (loc.span.offset >= e.start && loc.span.offset < e.end && diagnostic_kind.set_has(?e.kinds, k)) {
             e.fulfilled = true;
             hit         = true;
         }
@@ -382,6 +448,8 @@ pub fun store_dnit(store: *DiagnosticStore) {
     truncate(store, zero);
     collections_vector.dnit[Diagnostic](?store.items);
     collections_vector.dnit[Expectation](?store.expects);
+    collections_vector.dnit[usize](?store.expect_order);
+    map.dnit[u32, ExpectRun](?store.expect_by_file);
     map.dnit[u64, usize](?store.reports);
     store.error_count = 0;
     store.lost        = 0;
@@ -1801,6 +1869,53 @@ test commit__drops_a_report_the_store_already_holds {
         r = r + 1;
     }
     if (len(?store) != 6 || error_count(?store) != 6) { ret 9; }
+    ret 0;
+}
+
+# a warning is matched against its own file's expectations only, so judging it
+# costs the same however many expectations other files carry
+test commit__examines_only_the_warning_files_expectations {
+    var a: A.Allocator;
+    page.make(?a);
+    val kinds: diagnostic_kind.KindSet = diagnostic_kind.select("import.unused").warnings;
+    var n:     usize                   = 4;
+    for (n <= 64) {
+        var store: DiagnosticStore     = store_init(?a);
+        var list:  Vector[Expectation] = collections_vector.init[Expectation](?a);
+        var i:     usize               = 0;
+        # file 1's two expectations sit apart, between every other file's
+        for (i <= n) {
+            var e: Expectation;
+            e.file_id   = lang_source.file_id(2 + i::u32);
+            e.start     = 0;
+            e.end       = 100;
+            e.key       = lang_source.span(0, 1);
+            e.text      = "import.unused";
+            e.kinds     = kinds;
+            e.judged    = true;
+            e.fulfilled = false;
+            if (i == 0 || i == n) {
+                e.file_id = lang_source.file_id(1);
+                e.start   = i * 10;
+                e.end     = i * 10 + 10;
+            }
+            val pushed: res[usize, A.Error] = collections_vector.push[Expectation](?list, e);
+            if (sel pushed.err) {
+                store_dnit(?store);
+                ret 1;
+            }
+            i = i + 1;
+        }
+        var bad: i32 = 0;
+        if (!t_ok(expect(?store, list))) { bad = 2; }
+        val before: u64 = store.expect_examined;
+        if (bad == 0 && !t_ok(report(?store, diagnostic_kind.IMPORT_UNUSED, lang_source.file_id(1), lang_source.span(n * 10 + 2, 1), "unused"))) { bad = 3; }
+        if (bad == 0 && store.expect_examined - before != 2)                                                                                     { bad = 4; }
+        if (bad == 0 && (len(?store) != 0 || !store.expects.data[n].fulfilled || store.expects.data[0].fulfilled))                               { bad = 5; }
+        store_dnit(?store);
+        if (bad != 0) { ret bad; }
+        n = n * 4;
+    }
     ret 0;
 }
 

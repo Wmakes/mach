@@ -202,6 +202,13 @@ pub fun module_open(p: *project.Project, fqn: intern.StrId) res[session.ModuleId
     ret fe_load.module_open(l.ok, fqn);
 }
 
+# whether the load reached the module `fqn` names and never read its file
+pub fun module_unread(p: *project.Project, fqn: intern.StrId) bool {
+    val mid: opt[session.ModuleId] = fe_load.module_find(?p.loader, fqn);
+    if (sel mid.none) { ret false; }
+    ret lang_source.file_is_nil(project.module_at(p, mid.some::u32).file_id);
+}
+
 # reparse and re-walk one loaded module after its text changed, and say whether its load surface
 # survived, so the project's other modules stand as they are; every product the project holds of
 # the module is dropped, since each is keyed by the old syntax tree

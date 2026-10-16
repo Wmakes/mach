@@ -74,11 +74,39 @@ pub rec TargetEntry {
     extensions:      [extension.MAX_SELECTED]intern.StrId;
     extension_count: u32;
     entrypoint:      intern.StrId;
-    kind:            catalog_artifact.Kind;
+    # where the artifact's `entry` is written in the manifest
+    entry_at: fail.Place;
+    kind:     catalog_artifact.Kind;
     # the selected profile's `optimize`
     optimize:  bool;
     libs:      *manifest.LinkRequirement;
     lib_count: u32;
+}
+
+# the target entry a selected build unit describes: the one place a TargetEntry is
+# built, so every field is carried wherever an entry is made
+pub fun target_entry_of(bu: *manifest.BuildUnit) TargetEntry {
+    ret TargetEntry{
+        name:            bu.target_name,
+        os_name:         bu.target.os,
+        isa_name:        bu.target.isa,
+        baseline_name:   bu.target.baseline,
+        abi_name:        bu.target.abi,
+        of_name:         bu.target.of,
+        platform_name:   bu.target.platform,
+        env_name:        bu.target.env,
+        base:            bu.target.base,
+        stack_reserve:   bu.target.stack_reserve,
+        stack_commit:    bu.target.stack_commit,
+        extensions:      bu.target.extensions,
+        extension_count: bu.target.extension_count,
+        entrypoint:      bu.entry,
+        entry_at:        bu.artifact.entry_at,
+        kind:            bu.artifact.kind,
+        optimize:        bu.optimize,
+        libs:            bu.libs,
+        lib_count:       bu.lib_count,
+    };
 }
 
 pub rec DepEntry {
@@ -168,10 +196,12 @@ pub rec ProjectConfig {
     req_scope_count:   u32;
 }
 
-# an artifact entry the union walk loads: the entry module and the artifact it is of
+# an artifact entry the union walk loads: the entry module, the artifact it is of and
+# where the artifact's `entry` is written in the manifest
 pub rec ArtifactEntry {
     fqn:      intern.StrId;
     artifact: intern.StrId;
+    at:       fail.Place;
 }
 
 # a module the project loaded: its identity, what the load decided for it, and the codegen

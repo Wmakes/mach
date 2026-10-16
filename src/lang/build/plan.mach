@@ -764,20 +764,8 @@ fun plan_unit(a: *A.Allocator, itn: *intern.Interner, reg: *lang_target.TargetRe
     val ter: res[*project.TargetEntry, A.Error] = A.allocate[project.TargetEntry](a, 1::usize);
     if (sel ter.err) { ret res[BuildUnit, fail.Fail].err{fail.refused(ter.err)}; }
     val te: *project.TargetEntry = ter.ok;
-    te.name            = bu.target_name;
-    te.os_name         = bu.target.os;
-    te.isa_name        = bu.target.isa;
-    te.baseline_name   = bu.target.baseline;
-    te.abi_name        = bu.target.abi;
-    te.of_name         = bu.target.of;
-    te.extensions      = bu.target.extensions;
-    te.extension_count = bu.target.extension_count;
-    te.entrypoint      = bu.entry;
-    te.kind            = bu.artifact.kind;
-    te.optimize        = bu.optimize;
-    te.libs            = bu.libs;
-    te.lib_count       = bu.lib_count;
-    u.target_entry     = te;
+    @te            = project.target_entry_of(?bu);
+    u.target_entry = te;
 
     val root: str = req.project_root;
 
@@ -1830,6 +1818,30 @@ test plan__out_override_names_one_unit_inside_the_root {
     rq.out = "../custom";
     val pp: res[BuildPlan, fail.Fail] = plan(?alloc, ?itn, lang_target.t_registry(), ?m, rq);
     if (sel pp.ok) { ret 1; }
+    ret 0;
+}
+
+# the plan's entry carries every target key, not only the ones the tuple names
+test plan__the_unit_entry_carries_base_stack_platform_and_env {
+    var alloc: A.Allocator;
+    var itn:   intern.Interner;
+    var m:     manifest.Manifest;
+    if (!ut_scaffold_src(?alloc, ?itn, ?m, "[project]\nmach = \">=5\"\nid = \"p\"\nversion = \"0.1.0\"\nsrc = \"src\"\nwork = \"out\"\n[target.win]\nisa = \"x86_64\"\nos = \"windows\"\nabi = \"win64\"\nplatform = \"alpha\"\nenv = \"beta\"\nbase = 5368709120\nstack_reserve = 8388608\nstack_commit = 8192\n[profile.debug]\noptimize = false\ndebug = false\nsimd = \"scalarize\"\n[artifact.app]\nkind = \"bin\"\nentry = \"main.mach\"\nout = \"{project.work}/bin/app.exe\"\ntargets = [\"*\"]\nlink = []\nneed = []\n")) { ret 1; }
+
+    var rq: request.BuildRequest = request.defaults();
+    rq.project_root = "/r";
+    rq.target       = "win";
+
+    val pr: res[BuildPlan, fail.Fail] = plan(?alloc, ?itn, lang_target.t_registry(), ?m, rq);
+    if (sel pr.err) { ret 2; }
+    val bp: BuildPlan = pr.ok;
+    if (bp.units.len != 1) { ret 3; }
+    val te: *project.TargetEntry = bp.units.data[0].target_entry;
+    if (te.base != 5368709120)                                     { ret 4; }
+    if (te.stack_reserve != 8388608)                               { ret 5; }
+    if (te.stack_commit != 8192)                                   { ret 6; }
+    if (!str_equals(intern.text(?itn, te.platform_name), "alpha")) { ret 7; }
+    if (!str_equals(intern.text(?itn, te.env_name), "beta"))       { ret 8; }
     ret 0;
 }
 
