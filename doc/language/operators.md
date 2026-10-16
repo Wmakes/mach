@@ -373,8 +373,8 @@ the scalar `::` above, so `i32x4::f32x4` converts every lane numerically and
 `i8x4::i64x4` sign-extends every lane. Both sides need the same lane count
 (`i32x4::i64x2` is an error even though the two are the same size), and any
 pair of lane types is allowed, including equal-size integer and float lanes
-and a signedness change. A lane converts exactly as its scalar would on the
-same target, including NaN, the infinities and values outside the
+and a signedness change. A lane converts exactly as its scalar would,
+including NaN, the infinities and values outside the
 destination type. There is no cast between a vector and a scalar. The raw
 bits of a vector are `:~`, which, like every `:~`, needs only equal byte
 sizes (`i32x4:~f32x4`, `i32x4:~i64x2`).
@@ -413,6 +413,20 @@ fun main(argc: i64, argv: **u8) i64 {
 }
 ```
 
+### Float to integer
+
+`::` from a float to an integer truncates toward zero. When the truncated value
+lies outside the integer type's range, or the float is a NaN, the result
+depends on when the cast is evaluated:
+
+- **At compile time** the cast is refused (`comptime.cast_range`), the way a
+  division by zero is, and the error names the value and the type. This holds
+  for every integer width and both signednesses: `300.5::u8`, `-1.0::u32` and a
+  NaN cast to `i32` in a constant expression are errors.
+- **At run time** the cast saturates: a value below the type's minimum gives
+  the minimum, one above its maximum gives the maximum, and a NaN gives 0, the
+  same on every target.
+
 ### `f16` conversions
 
 `::` to and from `f16` follows the rule of the other float widths:
@@ -428,8 +442,8 @@ fun main(argc: i64, argv: **u8) i64 {
   magnitude 65520 or more overflows to infinity. Every integer width converts,
   `u8` to `u64` and `i8` to `i64`.
 - **`f16` to an integer** truncates toward zero. A value out of the integer's
-  range, an infinity or a NaN gives the target's result for the same conversion
-  from `f64`, the rule every float width follows.
+  range, an infinity or a NaN follows the rule of every float width
+  ([Float to integer](#float-to-integer)).
 - **`:~`** reads an `f16`'s bits as a `u16` or an `i16` and back, exactly, NaN
   payloads included.
 
