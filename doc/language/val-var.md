@@ -85,13 +85,14 @@ call or the address of a place behind a pointer, is rejected at that leaf with
 the reason it has none.
 
 A scalar read through such a constant is a compile-time constant too: a field, a
-nested member, or an element at a constant index of a record or array `val`, this
-module's or an imported one. It takes its value from the constant itself, so it
-may initialize a scalar `val` and size an array alike. A read past the end of an
-array, or of the payload of a case the constant does not hold, is rejected with
-that reason, and so is a read of a leaf that has no compile-time value, such as
-an address. A comptime read of one, in a `$if` gate or an array length, takes the
-same value.
+nested member, or an element of a record or array `val`, this module's or an
+imported one. It takes its value from the constant itself, so it may initialize a
+scalar `val` and size an array alike. A read past the end of an array, or of the
+payload of a case the constant does not hold, is rejected with that reason, and
+so is a read of a leaf that has no compile-time value, such as an address. A
+comptime read of one, in a `$if` gate or an array length, takes the same value.
+The index of an element, read or addressed as `?A[i]`, is any compile-time
+scalar: a literal, a named constant, or a read through another constant.
 
 ## `ext` — foreign data imports
 

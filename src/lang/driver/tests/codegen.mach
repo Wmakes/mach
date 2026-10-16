@@ -4607,6 +4607,45 @@ test constant__scalar_reads_take_the_published_value {
     ret 0;
 }
 
+# a named scalar constant indexes a constant like a literal, this module's, another's or a member
+# of a constant: an element read, an address in an aggregate and a scalar address. one past the
+# end is refused as out of bounds
+test constant__named_index_reads_like_a_literal {
+    var alloc:  A.Allocator;
+    val make_r: err[A.Error] = page.make(?alloc);
+    if (sel make_r.err) { ret 1; }
+    val sr: res[session.Session, fail.Fail] = toolchain.session_init(?alloc);
+    if (sel sr.err) { ret 1; }
+    var s: session.Session = sr.ok;
+    fin { session.dnit(?s); }
+    var names: [2]str = [2]str{"main.mach", "a.mach"};
+    var texts: [2]str = [2]str{
+        "use uniontest.a.K;\nuse uniontest.a.X;\nvar counter: [4]u32;\nval ROW: [4]u32 = [4]u32{5, 6, 7, 8};\nval I: u32 = 1;\nval E: u32 = ROW[I];\nval EK: u32 = ROW[K];\nval T: [3]*u32 = [3]*u32{?counter[I], ?counter[K], ?counter[X.index]};\nval P: *u32 = ?counter[K];\nfun main() i32 { ret 0; }\n",
+        "pub rec R { index: u32; }\npub val X: R = R{index: 2};\npub val K: u32 = 3;\n"
+    };
+    val pr: res[project.Project, fail.Fail] = ut_lowered(?s, ?alloc, ?names[0], ?texts[0], 2);
+    if (sel pr.err) { ret 2; }
+    var p: project.Project = pr.ok;
+    fin { project.dnit_project(?p); }
+
+    if (!ut_constant_is(?p, ?s, "uniontest.main", "E", 6))  { ret 3; }
+    if (!ut_constant_is(?p, ?s, "uniontest.main", "EK", 8)) { ret 4; }
+    val counter: intern.StrId        = ut_global_name(?p, ?s, "uniontest.main", "counter");
+    val found:   opt[value.ValueAgg] = ut_constant_data(?p, ?s, "uniontest.main", "T");
+    if (sel found.none)              { ret 5; }
+    if (found.some.reloc_count != 3) { ret 5; }
+    var i:       u32    = 0;
+    var addends: [3]i64 = [3]i64{4, 12, 8};
+    for (i < 3) {
+        val r: value.AggReloc = found.some.relocs[i];
+        if (!intern.str_same(r.symbol, counter) || r.addend != addends[i]) { ret 6; }
+        i = i + 1;
+    }
+
+    if (!ut_sema_rejects_with("var counter: [4]u32;\nval I: u32 = 4;\nval P: *u32 = ?counter[I];\nfun main() i32 { ret 0; }\n", "out of bounds")) { ret 7; }
+    ret 0;
+}
+
 # the name of the function module `fqn` defines as `bare`, nil when it defines none
 #[testing]
 fun ut_function_name(p: *project.Project, s: *session.Session, fqn: str, bare: str) intern.StrId {
