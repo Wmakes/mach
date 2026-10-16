@@ -1,6 +1,7 @@
 use std.allocator.page;
 use std.collections.map;
 use collections_vector: std.collections.vector;
+use std.system.panic.panic;
 use std.types.bool.bool;
 use std.types.bool.false;
 use std.types.bool.true;
@@ -809,7 +810,7 @@ rec ParallelLower {
 
 fun plw_worker_main(arg: *u8) {
     val pl: *ParallelLower = arg::*ParallelLower;
-    if (pl == nil) { ret; }
+    if (pl == nil) { panic("a lowering worker started with no section"); }
 
     for (true) {
         if (atomic.load(?pl.stop) != 0) { ret; }

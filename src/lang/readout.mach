@@ -318,7 +318,9 @@ rec Posted {
 
 # one unit's phase rows, timed as they run and sent to the sink as each closes.
 # a parallel section's workers post their items to a queue that whichever
-# thread holds the drain delivers, so a worker never waits on the sink
+# thread holds the drain delivers, so a worker never waits on the sink. a run
+# that shows no readout has no progress, and every phase, span and item given a
+# nil one is not shown
 pub rec Progress {
     sink:       *Sink;
     unit_start: Instant;

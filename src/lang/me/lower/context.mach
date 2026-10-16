@@ -341,6 +341,7 @@ pub fun request(
     if (malloc == nil) { ret res[LowerRequest, fail.Fail].err{fail.message("lower: a lowering request requires an allocator")}; }
 
     if (interfaces.read == nil) { ret res[LowerRequest, fail.Fail].err{fail.message("lower: a lowering request requires a reader of imported interfaces")}; }
+    if (diags == nil)           { ret res[LowerRequest, fail.Fail].err{fail.message("lower: a lowering request requires a diagnostic store")}; }
     val sr: res[ModuleScope, fail.Fail] = module_scope(s, own_module, a, fqn, sema_result, rr, ctx);
     if (sel sr.err) { ret res[LowerRequest, fail.Fail].err{sr.err}; }
 

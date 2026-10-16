@@ -531,7 +531,8 @@ fun sema_handle_decode(e: query.QueryView) *fe_sema.SemaResult {
     ret slot[0]::*fe_sema.SemaResult;
 }
 
-# a growing cycle's expansion, shown under the phase readout as it runs
+# a growing cycle's expansion, shown under the phase readout as it runs; a run with no readout
+# shows none
 fun growth_expanded(raw: ptr, module: intern.StrId, members: intern.StrId, instances: u32) {
     val p: *project.Project = raw::*project.Project;
     if (p.progress == nil) { ret; }
