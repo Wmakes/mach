@@ -3573,8 +3573,8 @@ test verify__drift_from_the_gitlink_or_the_selection_is_refused_naming_the_fix {
     ret 0;
 }
 
-# one package pinned at two commits, the second through a path dependency, is refused by verify
-# naming both gitlinks and both commits
+# one package pinned at two commits, the second through a path dependency, is refused by pull,
+# which still realizes the closure, and by verify, naming both gitlinks and both commits
 test verify__a_package_pinned_at_two_commits_across_a_path_dependency_is_refused {
     var a:      A.Allocator;
     val make_r: err[A.Error] = page.make(?a);
@@ -3592,7 +3592,8 @@ test verify__a_package_pinned_at_two_commits_across_a_path_dependency_is_refused
     if (str_empty(root)) { ret 6; }
     fin { fs.remove_all(?a, root); }
     if (!t_git_submodule_add(?a, root, fix_b, "dep/b") || !t_commit_all(?a, root)) { ret 7; }
-    if (t_pull(root, true, git.t_file_transport_environ()) != 0)                   { ret 8; }
+    if (t_pull(root, true, git.t_file_transport_environ()) == 0)                   { ret 8; }
+    if (!t_exists_under(?a, root, "dep/p/mach.toml"))                              { ret 8; }
     val refusal: str = t_closure_refusal(?a, root);
     if (!t_contains(refusal, "dependency 'b' is pinned at two commits")) { ret 9; }
     if (!t_contains(refusal, fixture.join(?a, root, "dep/b")))           { ret 10; }

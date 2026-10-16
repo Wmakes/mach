@@ -1,12 +1,11 @@
-# pull: `mach dep pull`, which realizes a project's dependency closure and notes every
-# package the closure pins at more than one commit
+# pull: `mach dep pull`, which realizes a project's dependency closure and refuses one that
+# pins a package at more than one commit
 use collections_vector: std.collections.vector;
 use std.collections.vector.Vector;
 use std.types.bool.bool;
 use std.types.bool.false;
 use std.types.error.err;
 use std.types.result.res;
-use std.types.size.usize;
 use std.types.string.str;
 
 use A: std.allocator;
@@ -20,8 +19,8 @@ use mach.lang.package.report;
 
 # realize the dependency closure of a project: acquire every declared dependency
 # transitively, check each realized manifest's project id against its declared name, and
-# report realized directories under dep/ that are no longer in the closure and packages
-# pinned at different commits within it
+# report realized directories under dep/ that are no longer in the closure, then refuse a
+# package pinned at different commits within it, the closure realized all the same
 # ---
 # s:     the session; a failure may borrow from it, so the caller shows it before ending it
 # a:     the storage the operation works in
@@ -42,10 +41,5 @@ pub fun project_closure(s: *session.Session, a: *A.Allocator, root: str, quiet: 
     fin { package_agreement.free_lines(a, ?split); }
     val checked: err[fail.Fail] = package_agreement.disagreements(?op, ?reqs, ?split);
     if (sel checked.err) { ret checked; }
-    var i: usize = 0;
-    for (i < split.len) {
-        report.notef(rep, a, "note: {}", split.data[i]);
-        i = i + 1;
-    }
-    ret err[fail.Fail].ok{};
+    ret package_agreement.refused(?op, ?split);
 }

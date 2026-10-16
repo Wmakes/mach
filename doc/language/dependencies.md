@@ -350,8 +350,9 @@ Then, when the checkout lacks the tag its selection is read by (the tag a
 fetches its tags (`fetched the tags of std`). `update` and `outdated` fetch
 them the same way to read a pin's release, unless `--offline`.
 
-`pull` also notes each identity pinned at two commits across the closure, as
-verify's item 7 refuses it, and still realizes.
+`pull` refuses an identity pinned at two commits across the closure, as
+verify's item 7 does, once it has realized the closure, so the checkouts are
+there to re-pin.
 
 A symlink, a file, a directory that is not a checkout of its own, and a dirty
 checkout that would be registered are refused and left as they are. `mach dep
