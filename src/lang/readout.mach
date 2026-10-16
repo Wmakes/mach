@@ -22,7 +22,7 @@ use A:               std.allocator;
 use chrono_duration: std.chrono.duration;
 use std.chrono.time;
 
-use mach.lang.build.outcome;
+use mach.lang.testrun;
 use mach.lang.diagnostic;
 use diagnostic_kind: mach.lang.diagnostic.kind;
 use mach.lang.fail;
@@ -151,9 +151,9 @@ rec Diagnostics {
 # one test's result, filled in place when the test finishes. log is the file its
 # captured output is kept in, nil when none could be named
 pub rec TestResult {
-    art:       *outcome.TestArtifact;
+    art:       *testrun.TestArtifact;
     done:      bool;
-    result:    outcome.GateResult;
+    result:    testrun.GateResult;
     code:      i32;
     elapsed:   chrono_duration.Duration;
     bound:     chrono_duration.Duration;
@@ -189,7 +189,7 @@ pub rec RunEnd {
     failed:    u32;
     timed_out: u32;
     wall:      chrono_duration.Duration;
-    tally:     *outcome.GateTally;
+    tally:     *testrun.GateTally;
 }
 
 # a growing cycle of instances being expanded: the module that declares its templates,

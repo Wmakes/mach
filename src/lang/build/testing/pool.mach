@@ -26,7 +26,7 @@ use std.process.events;
 use std.process.exec;
 use sync_cancel: std.sync.cancel;
 
-use mach.lang.build.outcome;
+use mach.lang.testrun;
 use build_testing: mach.lang.build.testing;
 use mach.lang.diagnostic;
 use diagnostic_kind: mach.lang.diagnostic.kind;
@@ -69,10 +69,10 @@ pub rec Counts {
 # n:      how many there are
 # config: how they run
 # ret:    the run's counts; err when the run could not start, before any test ran
-pub fun run(a: *A.Allocator, sink: *readout.Sink, arts: *outcome.TestArtifact, n: u32, config: *Config) res[Counts, fail.Fail] {
+pub fun run(a: *A.Allocator, sink: *readout.Sink, arts: *testrun.TestArtifact, n: u32, config: *Config) res[Counts, fail.Fail] {
     val runner: *u8 = config.runner;
     if (n == 0) {
-        var empty_tally: outcome.GateTally = outcome.gate_tally_init(a);
+        var empty_tally: testrun.GateTally = testrun.gate_tally_init(a);
         readout.run_start(sink, nil, 0, runner::str);
         readout.run_end(sink, readout.RunEnd{tests: nil, count: 0, passed: 0, failed: 0, timed_out: 0, wall: 0, tally: ?empty_tally});
         ret res[Counts, fail.Fail].ok{Counts{failed: 0, infrastructure: 0}};
@@ -94,7 +94,7 @@ pub fun run(a: *A.Allocator, sink: *readout.Sink, arts: *outcome.TestArtifact, n
 
     var i: u32 = 0;
     for (i < n) {
-        settle(?results[i], ?arts[i], outcome.gate_result(outcome.RESULT_PASS, outcome.CAUSE_PASS, nil));
+        settle(?results[i], ?arts[i], testrun.gate_result(testrun.RESULT_PASS, testrun.CAUSE_PASS, nil));
         results[i].done = false;
         results[i].log  = nil;
         val lp_r: res[str, fail.Fail] = log_path(a, log_dir, i);
@@ -108,7 +108,7 @@ pub fun run(a: *A.Allocator, sink: *readout.Sink, arts: *outcome.TestArtifact, n
     val wall: chrono_duration.Duration = readout.elapsed(run_start);
 
     val failed: u32               = count_failed(results, n);
-    var tally:  outcome.GateTally = outcome.gate_tally_init(a);
+    var tally:  testrun.GateTally = testrun.gate_tally_init(a);
     build_gate_tally(?tally, a, results, n);
     readout.run_end(sink, readout.RunEnd{tests: results, count: n, passed: n - failed, failed: failed,
         timed_out: count_timed_out(results, n), wall: wall, tally: ?tally});
@@ -120,17 +120,17 @@ fun count_timed_out(results: *readout.TestResult, len: u32) u32 {
     var t: u32 = 0;
     var i: u32 = 0;
     for (i < len) {
-        if (results[i].result.kind == outcome.RESULT_RESOURCE_EXHAUSTION
-            && results[i].result.cause == outcome.CAUSE_ORACLE_TIMEOUT) { t = t + 1; }
+        if (results[i].result.kind == testrun.RESULT_RESOURCE_EXHAUSTION
+            && results[i].result.cause == testrun.CAUSE_ORACLE_TIMEOUT) { t = t + 1; }
         i = i + 1;
     }
     ret t;
 }
 
-fun build_gate_tally(gt: *outcome.GateTally, a: *A.Allocator, results: *readout.TestResult, n: u32) {
+fun build_gate_tally(gt: *testrun.GateTally, a: *A.Allocator, results: *readout.TestResult, n: u32) {
     var i: u32 = 0;
     for (i < n) {
-        outcome.record_gate(gt, a, results[i].result);
+        testrun.record_gate(gt, a, results[i].result);
         i = i + 1;
     }
 }
@@ -142,7 +142,7 @@ rec Slot {
 }
 
 # a test that finished without running: result is why, and its log is kept
-fun settle(t: *readout.TestResult, art: *outcome.TestArtifact, result: outcome.GateResult) {
+fun settle(t: *readout.TestResult, art: *testrun.TestArtifact, result: testrun.GateResult) {
     t.art       = art;
     t.done      = true;
     t.result    = result;
@@ -218,7 +218,7 @@ fun execute(a: *A.Allocator, sink: *readout.Sink, results: *readout.TestResult, 
         for (inflight < window && spawned < n) {
             val idx: u32 = spawned;
             spawned = spawned + 1;
-            val spawn_fail: opt[outcome.GateResult] = spawn_one(a, processes, slots, window, ?results[idx], idx, runner,
+            val spawn_fail: opt[testrun.GateResult] = spawn_one(a, processes, slots, window, ?results[idx], idx, runner,
                 timeout);
             if (sel spawn_fail.none) {
                 inflight = inflight + 1;
@@ -290,11 +290,11 @@ fun execute(a: *A.Allocator, sink: *readout.Sink, results: *readout.TestResult, 
 # ret: none when it is running, otherwise the result it settles with
 fun spawn_one(a: *A.Allocator, processes: *subprocess.OwnedSubprocess, slots: *Slot,
     window: u32, t: *readout.TestResult, idx: u32, runner: *u8,
-    timeout: chrono_duration.Duration) opt[outcome.GateResult] {
+    timeout: chrono_duration.Duration) opt[testrun.GateResult] {
     var s: u32 = 0;
     for (s < window && slots[s].active) { s = s + 1; }
-    if (s == window || t.log == nil) { ret opt[outcome.GateResult].some{build_testing.classify_setup_failure()}; }
-    val art: *outcome.TestArtifact = t.art;
+    if (s == window || t.log == nil) { ret opt[testrun.GateResult].some{build_testing.classify_setup_failure()}; }
+    val art: *testrun.TestArtifact = t.art;
 
     var ibuf: [16]u8;
     write_index(?ibuf[0], 16, art.idx);
@@ -331,10 +331,10 @@ fun spawn_one(a: *A.Allocator, processes: *subprocess.OwnedSubprocess, slots: *S
         empty_cap.close_failed = false;
         empty_cap.closed       = false;
         empty_cap.owned        = false;
-        val result: outcome.GateResult = build_testing.classify_subprocess(?term, false, true, ?empty_cap);
+        val result: testrun.GateResult = build_testing.classify_subprocess(?term, false, true, ?empty_cap);
         subprocess.dnit(a, ?processes[idx]);
         fs.remove_file(t.log);
-        ret opt[outcome.GateResult].some{result};
+        ret opt[testrun.GateResult].some{result};
     }
 
     if (timeout > 0) { subprocess.bound(?processes[idx], timeout); }
@@ -342,7 +342,7 @@ fun spawn_one(a: *A.Allocator, processes: *subprocess.OwnedSubprocess, slots: *S
     slots[s].active = true;
     slots[s].idx    = idx;
     slots[s].start  = start;
-    ret opt[outcome.GateResult].none{};
+    ret opt[testrun.GateResult].none{};
 }
 
 # fill a reaped test's result from its process; a passing test's log is removed
@@ -382,17 +382,17 @@ fun finalize_slot(a: *A.Allocator, process: *subprocess.OwnedSubprocess, slot: *
     t.bound = 0;
     if (subprocess.expired(process)) { t.bound = process.timeout; }
     t.result = build_testing.classify_subprocess(?process.terminal, subprocess.expired(process), cap_ok, ?capture);
-    if (t.result.kind == outcome.RESULT_SEMANTIC_MISMATCH) { t.code = process.terminal.code; }
+    if (t.result.kind == testrun.RESULT_SEMANTIC_MISMATCH) { t.code = process.terminal.code; }
 
     subprocess.dnit(a, process);
-    if (t.result.kind == outcome.RESULT_PASS && t.log != nil) { fs.remove_file(t.log); }
+    if (t.result.kind == testrun.RESULT_PASS && t.log != nil) { fs.remove_file(t.log); }
 }
 
 fun count_failed(results: *readout.TestResult, len: u32) u32 {
     var f: u32 = 0;
     var i: u32 = 0;
     for (i < len) {
-        if (results[i].result.kind != outcome.RESULT_PASS) { f = f + 1; }
+        if (results[i].result.kind != testrun.RESULT_PASS) { f = f + 1; }
         i = i + 1;
     }
     ret f;
@@ -449,9 +449,9 @@ fun prepare_logs(a: *A.Allocator, log_dir: *u8, total: u32) err[fail.Fail] {
 }
 
 #[testing]
-fun t_outcome(kind: outcome.GateResultKind, cause: outcome.GateCause) readout.TestResult {
+fun t_outcome(kind: testrun.GateResultKind, cause: testrun.GateCause) readout.TestResult {
     var o: readout.TestResult;
-    settle(?o, nil, outcome.gate_result(kind, cause, nil));
+    settle(?o, nil, testrun.gate_result(kind, cause, nil));
     o.log = nil;
     ret o;
 }
@@ -461,22 +461,22 @@ test count_failed_and_build_gate_tally__only_pass_counts_as_passing {
     page.make(?a);
 
     var results: [3]readout.TestResult;
-    results[0] = t_outcome(outcome.RESULT_PASS, outcome.CAUSE_PASS);
-    results[1] = t_outcome(outcome.RESULT_SEMANTIC_MISMATCH, outcome.CAUSE_ORACLE_EXIT);
-    results[2] = t_outcome(outcome.RESULT_TOOL_UNAVAILABLE, outcome.CAUSE_TOOL_UNAVAILABLE);
+    results[0] = t_outcome(testrun.RESULT_PASS, testrun.CAUSE_PASS);
+    results[1] = t_outcome(testrun.RESULT_SEMANTIC_MISMATCH, testrun.CAUSE_ORACLE_EXIT);
+    results[2] = t_outcome(testrun.RESULT_TOOL_UNAVAILABLE, testrun.CAUSE_TOOL_UNAVAILABLE);
 
     if (count_failed(?results[0], 3) != 2) { ret 1; }
 
-    var gt: outcome.GateTally = outcome.gate_tally_init(?a);
+    var gt: testrun.GateTally = testrun.gate_tally_init(?a);
     build_gate_tally(?gt, ?a, ?results[0], 3);
 
     var bad: i32 = 0;
     if (gt.pass != 1)                       { bad = 1; }
     or (gt.semantic_mismatch != 1)          { bad = 1; }
     or (gt.tool_unavailable != 1)           { bad = 1; }
-    or (outcome.gate_tally_total(?gt) != 3) { bad = 1; }
+    or (testrun.gate_tally_total(?gt) != 3) { bad = 1; }
 
-    outcome.gate_tally_dnit(?gt);
+    testrun.gate_tally_dnit(?gt);
     ret bad;
 }
 
@@ -523,7 +523,7 @@ fun t_run_one_bounded(a: *A.Allocator, body: str, timeout: chrono_duration.Durat
     val create_dir_r: err[io_error.Error] = fs.create_dir(pr.log_dir, 0o700);
     if (sel create_dir_r.err) { ret 3; }
 
-    var art: outcome.TestArtifact;
+    var art: testrun.TestArtifact;
     art.module = "mach.timeout.probe";
     art.name   = "probe";
     art.file   = "probe.mach";
@@ -532,7 +532,7 @@ fun t_run_one_bounded(a: *A.Allocator, body: str, timeout: chrono_duration.Durat
     art.idx    = 0;
 
     var results: [1]readout.TestResult;
-    settle(?results[0], ?art, outcome.gate_result(outcome.RESULT_PASS, outcome.CAUSE_PASS, nil));
+    settle(?results[0], ?art, testrun.gate_result(testrun.RESULT_PASS, testrun.CAUSE_PASS, nil));
     results[0].done = false;
     val lp_r: res[str, fail.Fail] = log_path(a, pr.log_dir::*u8, 0);
     if (sel lp_r.err) { ret 3; }
@@ -543,7 +543,7 @@ fun t_run_one_bounded(a: *A.Allocator, body: str, timeout: chrono_duration.Durat
     var slot: Slot;
     slot.active = false;
 
-    val spawn_fail: opt[outcome.GateResult] = spawn_one(a, ?process, ?slot, 1, ?results[0], 0, "/bin/sh"::*u8, timeout);
+    val spawn_fail: opt[testrun.GateResult] = spawn_one(a, ?process, ?slot, 1, ?results[0], 0, "/bin/sh"::*u8, timeout);
     if (sel spawn_fail.some) { ret 4; }
 
     val wr: res[*subprocess.OwnedSubprocess, subprocess.Error] = subprocess.wait_any(a, ?process, 1, nil, nil);
@@ -571,8 +571,8 @@ $if ($mach.build.os != $mach.os.windows) {
         if (setup != 0) { bad = 10 + setup; }
         or {
             val o: *readout.TestResult = ?pr.outcome;
-            if (o.result.kind != outcome.RESULT_RESOURCE_EXHAUSTION) { bad = 4; }
-            or (o.result.cause != outcome.CAUSE_ORACLE_TIMEOUT)      { bad = 5; }
+            if (o.result.kind != testrun.RESULT_RESOURCE_EXHAUSTION) { bad = 4; }
+            or (o.result.cause != testrun.CAUSE_ORACLE_TIMEOUT)      { bad = 5; }
             or (o.bound != chrono_duration.SECOND)                   { bad = 6; }
             or {
                 var one: [1]readout.TestResult;
@@ -580,10 +580,10 @@ $if ($mach.build.os != $mach.os.windows) {
                 if (count_timed_out(?one[0], 1) != 1) { bad = 8; }
                 or (count_failed(?one[0], 1) != 1)    { bad = 9; }
                 or {
-                    var tally: outcome.GateTally = outcome.gate_tally_init(?a);
+                    var tally: testrun.GateTally = testrun.gate_tally_init(?a);
                     build_gate_tally(?tally, ?a, ?one[0], 1);
                     if (tally.infrastructure_failure != 0) { bad = 20; }
-                    outcome.gate_tally_dnit(?tally);
+                    testrun.gate_tally_dnit(?tally);
                 }
             }
         }
@@ -606,17 +606,17 @@ $if ($mach.build.os != $mach.os.windows) {
         if (setup != 0) { bad = 10 + setup; }
         or {
             val o: *readout.TestResult = ?pr.outcome;
-            if (o.result.kind != outcome.RESULT_PASS) { bad = 2; }
+            if (o.result.kind != testrun.RESULT_PASS) { bad = 2; }
             or (o.bound != 0)                         { bad = 3; }
             or {
                 var one: [1]readout.TestResult;
                 one[0] = @o;
                 if (count_timed_out(?one[0], 1) != 0) { bad = 4; }
                 or {
-                    var tally: outcome.GateTally = outcome.gate_tally_init(?a);
+                    var tally: testrun.GateTally = testrun.gate_tally_init(?a);
                     build_gate_tally(?tally, ?a, ?one[0], 1);
                     if (tally.infrastructure_failure != 0 || tally.pass != 1) { bad = 5; }
-                    outcome.gate_tally_dnit(?tally);
+                    testrun.gate_tally_dnit(?tally);
                 }
             }
         }
@@ -639,8 +639,8 @@ $if ($mach.build.os != $mach.os.windows) {
         if (setup != 0) { bad = 10 + setup; }
         or {
             val o: *readout.TestResult = ?pr.outcome;
-            if (o.result.kind != outcome.RESULT_SEMANTIC_MISMATCH) { bad = 2; }
-            or (o.result.cause != outcome.CAUSE_ORACLE_EXIT)       { bad = 3; }
+            if (o.result.kind != testrun.RESULT_SEMANTIC_MISMATCH) { bad = 2; }
+            or (o.result.cause != testrun.CAUSE_ORACLE_EXIT)       { bad = 3; }
             or (o.code != 4)                                       { bad = 4; }
             or (o.bound != 0)                                      { bad = 5; }
         }

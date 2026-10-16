@@ -24,6 +24,7 @@ use T: std.allocator.testing;
 use std.sync.atomic;
 use sync_thread: std.sync.thread;
 
+use mach.lang.testrun;
 use mach.lang.be.codegen;
 use mach.lang.be.linker;
 use build_emit: mach.lang.build.emit;
@@ -3453,7 +3454,7 @@ $if ($mach.build.os == $mach.os.linux && $mach.build.arch == $mach.arch.x86_64) 
         fin { outcome.outcome_dnit(?built); }
         if (built.severity != outcome.BUILD_OK) { ret 2; }
         if (built.tests.len != 1)               { ret 3; }
-        val art: *outcome.TestArtifact = ?built.tests.data[0];
+        val art: *testrun.TestArtifact = ?built.tests.data[0];
         val got: i32                   = dispatch_status(art.exe::str, art.idx);
         if (got != 0) {
             print.eprintlnf("grouped: exit {}", got::i64);
@@ -3485,7 +3486,7 @@ $if ($mach.build.os == $mach.os.linux && $mach.build.arch == $mach.arch.x86_64) 
         if (second != 0) { ret 20 + second; }
         fin { outcome.outcome_dnit(?tested); }
         if (tested.severity != outcome.BUILD_OK || tested.tests.len != 1) { ret 3; }
-        val art: *outcome.TestArtifact = ?tested.tests.data[0];
+        val art: *testrun.TestArtifact = ?tested.tests.data[0];
         if (dispatch_status(art.exe::str, art.idx) != 0) { ret 4; }
         ret 0;
     }
@@ -4783,7 +4784,7 @@ $if ($mach.build.os == $mach.os.linux && $mach.build.arch == $mach.arch.x86_64) 
             var found: bool  = false;
             var t:     usize = 0;
             for (t < bo.tests.len) {
-                val art: *outcome.TestArtifact = ?bo.tests.data[t];
+                val art: *testrun.TestArtifact = ?bo.tests.data[t];
                 if (str_equals(art.name::str, labels[i])) {
                     found = true;
                     val got: i32 = dispatch_status(art.exe::str, art.idx);
@@ -5138,7 +5139,7 @@ fun artifact_test_statuses(alloc: *A.Allocator, s: *session.Session, root: str, 
     }
     var t: usize = 0;
     for (t < bo.tests.len) {
-        val art:   *outcome.TestArtifact = ?bo.tests.data[t];
+        val art:   *testrun.TestArtifact = ?bo.tests.data[t];
         val label: res[str, A.Error]     = str_dup(alloc, art.name::str);
         if (sel label.err) { ret 5; }
         val pl: res[usize, A.Error] = collections_vector.push[str](labels, label.ok);
