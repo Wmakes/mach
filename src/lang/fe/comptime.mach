@@ -779,9 +779,10 @@ fun eval_field_member[T](ev: *Evaluation[T], object_eid: ast_id.ExprId, member_s
 }
 
 fun eval_const_elem_member[T](ev: *Evaluation[T], eid: ast_id.ExprId, object_eid: ast_id.ExprId, member_span: lang_source.Span, fw: float.FloatWidth) opt[res[comptime_value.CTValue, comptime_failure.EvalFail]] {
-    val obj_opt: opt[*ast_expr.Expr] = ast.get_expr(ev.a, object_eid);
-    if (sel obj_opt.none) { ret opt[res[comptime_value.CTValue, comptime_failure.EvalFail]].none{}; }
-    val obj: *ast_expr.Expr = obj_opt.some;
+    val obj_read: res[ast_expr.Expr, comptime_failure.EvalFail] = comptime_capability.read_expression[T](ev.cap_ctx, ev.caps, ev.a, object_eid);
+    if (sel obj_read.err) { ret opt[res[comptime_value.CTValue, comptime_failure.EvalFail]].some{res[comptime_value.CTValue, comptime_failure.EvalFail].err{obj_read.err}}; }
+    var obj_node: ast_expr.Expr  = obj_read.ok;
+    val obj:      *ast_expr.Expr = ?obj_node;
 
     val obj_r: res[opt[comptime_value.CTValue], comptime_failure.EvalFail] = eval_const_elem_object[T](ev, object_eid, fw);
     if (sel obj_r.err) {
@@ -847,11 +848,13 @@ fun field_zero[T](ev: *Evaluation[T], owner: u32, name: intern.StrId) opt[res[co
 # element of a published constant value, spelled as the binding itself or as a member path into
 # it; ok(none) when the expression evaluates to something else, err when evaluating it fails
 fun eval_const_elem_object[T](ev: *Evaluation[T], eid: ast_id.ExprId, fw: float.FloatWidth) res[opt[comptime_value.CTValue], comptime_failure.EvalFail] {
-    val none:  res[opt[comptime_value.CTValue], comptime_failure.EvalFail] = res[opt[comptime_value.CTValue], comptime_failure.EvalFail].ok{opt[comptime_value.CTValue].none{}};
-    val e_opt: opt[*ast_expr.Expr]                                         = ast.get_expr(ev.a, eid);
-    if (sel e_opt.none) { ret none; }
-    val e: *ast_expr.Expr = e_opt.some;
-    var r: res[comptime_value.CTValue, comptime_failure.EvalFail];
+    val none: res[opt[comptime_value.CTValue], comptime_failure.EvalFail] = res[opt[comptime_value.CTValue], comptime_failure.EvalFail].ok{opt[comptime_value.CTValue].none{}};
+    # the expression as name resolution read it, so `A[N]` with a named index is an element read
+    val read: res[ast_expr.Expr, comptime_failure.EvalFail] = comptime_capability.read_expression[T](ev.cap_ctx, ev.caps, ev.a, eid);
+    if (sel read.err) { ret res[opt[comptime_value.CTValue], comptime_failure.EvalFail].err{read.err}; }
+    var node: ast_expr.Expr  = read.ok;
+    val e:    *ast_expr.Expr = ?node;
+    var r:    res[comptime_value.CTValue, comptime_failure.EvalFail];
     if (e.kind == ast_expr.EXPR_KIND_IDENT) { r = eval_ident[T](ev, eid, e.data.ident.tok); }
     or (e.kind == ast_expr.EXPR_KIND_MEMBER) {
         val nested: opt[res[comptime_value.CTValue, comptime_failure.EvalFail]] =
@@ -884,20 +887,22 @@ fun is_constant_path(e: *ast_expr.Expr) bool {
 # out reads as its zero when that is a scalar and is refused otherwise
 fun eval_const_elem_index[T](ev: *Evaluation[T], eid: ast_id.ExprId, ix: *ast_expr.ExprIndex) opt[res[comptime_value.CTValue, comptime_failure.EvalFail]] {
     if (ast_expr.is_range(ix)) { ret opt[res[comptime_value.CTValue, comptime_failure.EvalFail]].none{}; }
-    val obj_opt: opt[*ast_expr.Expr] = ast.get_expr(ev.a, ix.object);
-    if (sel obj_opt.none) { ret opt[res[comptime_value.CTValue, comptime_failure.EvalFail]].none{}; }
+    val obj_read: res[ast_expr.Expr, comptime_failure.EvalFail] = comptime_capability.read_expression[T](ev.cap_ctx, ev.caps, ev.a, ix.object);
+    if (sel obj_read.err) { ret opt[res[comptime_value.CTValue, comptime_failure.EvalFail]].some{res[comptime_value.CTValue, comptime_failure.EvalFail].err{obj_read.err}}; }
+    var obj_node: ast_expr.Expr  = obj_read.ok;
+    val obj:      *ast_expr.Expr = ?obj_node;
 
     val obj_r: res[opt[comptime_value.CTValue], comptime_failure.EvalFail] = eval_const_elem_object[T](ev, ix.object, float.FLOAT_W_NONE);
     if (sel obj_r.err) {
         # an object this phase cannot read yet is the answer, so a later phase decides the read
         val kind: comptime_failure.EvalFailKind = obj_r.err.kind;
-        if (kind == comptime_failure.EVAL_FAIL_REJECTED && !is_constant_path(obj_opt.some)) { ret opt[res[comptime_value.CTValue, comptime_failure.EvalFail]].none{}; }
+        if (kind == comptime_failure.EVAL_FAIL_REJECTED && !is_constant_path(obj)) { ret opt[res[comptime_value.CTValue, comptime_failure.EvalFail]].none{}; }
         ret opt[res[comptime_value.CTValue, comptime_failure.EvalFail]].some{res[comptime_value.CTValue, comptime_failure.EvalFail].err{obj_r.err}};
     }
     val ov_opt: opt[comptime_value.CTValue] = obj_r.ok;
     if (sel ov_opt.none) {
         # an element of a window reads through the member capability, which reaches the window itself
-        if (obj_opt.some.kind != ast_expr.EXPR_KIND_INDEX || !comptime_capability.capabilities_have_member[T](ev.cap_ctx, ev.caps)) { ret opt[res[comptime_value.CTValue, comptime_failure.EvalFail]].none{}; }
+        if (obj.kind != ast_expr.EXPR_KIND_INDEX || !comptime_capability.capabilities_have_member[T](ev.cap_ctx, ev.caps)) { ret opt[res[comptime_value.CTValue, comptime_failure.EvalFail]].none{}; }
         val through: res[opt[comptime_value.CTValue], comptime_failure.EvalFail] = ev.caps.member(ev.cap_ctx, eid);
         if (sel through.err)     { ret opt[res[comptime_value.CTValue, comptime_failure.EvalFail]].some{res[comptime_value.CTValue, comptime_failure.EvalFail].err{through.err}}; }
         if (sel through.ok.none) { ret opt[res[comptime_value.CTValue, comptime_failure.EvalFail]].none{}; }
