@@ -64,6 +64,9 @@ pub fun classify_subprocess(term: *subprocess.SubprocessTerminal, expired: bool,
     if (term.kind == subprocess.STATE_EXITED && term.code == 0) {
         ret testrun.gate_result(testrun.RESULT_PASS, testrun.CAUSE_PASS, nil);
     }
+    if (term.kind == subprocess.STATE_EXITED && term.code == testrun.EXIT_SKIP) {
+        ret testrun.gate_result(testrun.RESULT_SKIP, testrun.CAUSE_SKIP, nil);
+    }
     if (term.kind == subprocess.STATE_EXITED) {
         ret testrun.gate_result(testrun.RESULT_SEMANTIC_MISMATCH, testrun.CAUSE_ORACLE_EXIT, nil);
     }
@@ -527,7 +530,15 @@ test classify_subprocess__maps_every_terminal_and_capture_shape {
     val exit_r: testrun.GateResult = classify_subprocess(?term, false, true, ?cap);
     if (exit_r.kind != testrun.RESULT_SEMANTIC_MISMATCH || exit_r.cause != testrun.CAUSE_ORACLE_EXIT) { bad = 1; }
 
+    term.code = 77;
+    val skip_r: testrun.GateResult = classify_subprocess(?term, false, true, ?cap);
+    if (skip_r.kind != testrun.RESULT_SKIP || skip_r.cause != testrun.CAUSE_SKIP) { bad = 1; }
+
     term.kind = subprocess.STATE_SIGNALED;
+    term.code = 77;
+    val sig_skip_r: testrun.GateResult = classify_subprocess(?term, false, true, ?cap);
+    if (sig_skip_r.kind != testrun.RESULT_SEMANTIC_MISMATCH || sig_skip_r.cause != testrun.CAUSE_ORACLE_SIGNAL) { bad = 1; }
+
     term.code = 9;
     val sig_r: testrun.GateResult = classify_subprocess(?term, false, true, ?cap);
     if (sig_r.kind != testrun.RESULT_SEMANTIC_MISMATCH || sig_r.cause != testrun.CAUSE_ORACLE_SIGNAL) { bad = 1; }

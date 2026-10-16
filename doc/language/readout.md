@@ -75,7 +75,8 @@ test holds back only its own module's line:
 
 ```
 app.parser                  12 ok     40ms
-app.main                     1 ok  1 FAIL      3ms
+app.crypto                   3 ok     1 skip      2ms
+app.main                     1 ok     1 FAIL      3ms
   FAIL  app.main#fails_on_purpose  src/main.mach:11  (exit 3)
     rerun: ./out/linux-x86_64/debug/test/app/app 4
 ```
@@ -84,19 +85,22 @@ Under `-v` each test is its own line, written when it finishes:
 
 ```
 ok    app.parser#rejects_trailing_comma   2ms
+skip  app.crypto#aes_round_trip           1ms
 FAIL  app.main#fails_on_purpose           1ms  (exit 3)  src/main.mach:11
     rerun: ./out/linux-x86_64/debug/test/app/app 4
 ```
 
 Lines and roll-ups therefore come out in the order the tests finish, which can
 differ from run to run. The closing summary does not: it re-lists every failure
-in collection order, the order `--list` prints, and ends with the counts.
+in collection order, the order `--list` prints, and ends with the counts. A
+skipped test is neither a pass nor a failure: it is never re-listed, and the
+skip count follows the total whenever a test skipped.
 
 ```
 failures:
   app.main#fails_on_purpose  src/main.mach:11  (exit 3)
 
-13 passed, 1 failed, 14 total  (61ms)
+16 passed, 1 failed, 18 total, 1 skipped  (61ms)
 ```
 
 Under `--diagnostics json` each test is also a `test` record on stderr as it

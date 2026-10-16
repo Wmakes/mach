@@ -2185,8 +2185,8 @@ test step_environment__inherits_overlays_and_owns_target_identity {
 # a build step runs while this process holds a variable with no UTF-8 spelling,
 # and the step's child receives it unit for unit. the test runs itself again
 # as the step, which the marker the step declares tells apart
-test execute_step_invocation__carries_an_unspellable_inherited_variable {
-    $if ($mach.build.os == $mach.os.windows) {
+$if ($mach.build.os == $mach.os.windows) {
+    test execute_step_invocation__carries_an_unspellable_inherited_variable {
         if (subprocess.t_is_set("M4719SC")) {
             if (!subprocess.t_holds_unspellable("M4719S")) { ret 20; }
             ret 0;
@@ -2231,9 +2231,6 @@ test execute_step_invocation__carries_an_unspellable_inherited_variable {
         fin { driver_environment.strings_free(?a, ?invocation.env); }
         val run: err[fail.Fail] = execute_step_invocation(?a, "", (?exe[0])::str, ?invocation, "unspellable", 0);
         if (sel run.err) { ret 6; }
-        ret 0;
-    }
-    $or {
         ret 0;
     }
 }

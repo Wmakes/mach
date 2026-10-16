@@ -95,13 +95,18 @@ body or another `#[testing]` declaration may reference it.
 
 The body is checked against an `i32` return type. A test reports its result
 through that return value, treated as a process-style status in the range
-`0..255`:
+`0..255`. There are three outcomes:
 
 - `ret 0` — pass.
-- any `ret N` with `N` in `1..255` — fail, reported as `(exit N)`.
-- falling off the end of the body returns `0` (the default terminator for
-  a non-void function is a zero return), so a body that never returns
-  explicitly is treated as a pass.
+- `ret 77` — skip: the test could not check anything on this host, so it
+  neither passes nor fails. It does not fail the run, and the runner counts it
+  apart from the passes.
+- any other `ret N` with `N` in `1..255` — fail, reported as `(exit N)`.
+
+Falling off the end of the body returns `0` (the default terminator for a
+non-void function is a zero return), so a body that never returns explicitly
+is treated as a pass. `77` is the skip status automake, meson and TAP use; std's
+panic and `os.abort` exit with `255`, so a crash never reads as a skip.
 
 The result is the test process's exit status, and a process exit status is
 eight bits wide on every host (`mach test` reads the same eight bits on
@@ -119,9 +124,8 @@ ends:
   always a failure. The low eight bits are never used on their own, so a
   result of `256` cannot read as a pass.
 
-Within the range the compiler attaches no special pass/fail meaning to
-particular non-zero codes, nor does it provide built-in assertion
-intrinsics. A test signals failure by returning non-zero — typically by
+Within the range the compiler attaches no meaning to any code but `0` and
+`77`, nor does it provide built-in assertion or skip intrinsics. A test signals failure by returning non-zero — typically by
 returning early from a failed check, as in the example above. A test that
 accumulates a bit mask must keep it within eight bits; past that, return
 the ordinal of the first failing check instead.
@@ -164,23 +168,25 @@ run are:
 --allow-unrunnable       exit 0 when nothing selected can run on this host, after building it
 ```
 
-A roll-up is `<module>  <ok> ok[  <fail> FAIL]  <duration>`, written once the
+A roll-up is `<module>  <ok> ok[  <skip> skip][  <fail> FAIL]  <duration>`, written once the
 module's last test finishes, so roll-ups come out in the order modules finish.
 Each expanded failure shows `file:line`, the exit code (`(exit N)`), signal
 (`(signal N)`) or `(timed out after <duration>)`, the child's captured output
-indented beneath, and the exact `rerun:` command; a passing test stays quiet.
-The run closes with a summary that re-lists every failure in collection order:
+indented beneath, and the exact `rerun:` command; a passing or skipped test
+stays quiet. The run closes with a summary that re-lists every failure in
+collection order, then the counts, with the skip count after the total
+whenever a test skipped:
 
 ```
 failures:
   app.main#fails_on_purpose  src/main.mach:11  (exit 3)
 
-1 passed, 1 failed, 2 total  (1ms)
+1 passed, 1 failed, 3 total, 1 skipped  (1ms)
 ```
 
 The exit code of `mach test`:
 
-- `0` — every test that ran passed.
+- `0` — every test that ran passed or skipped.
 - `1` — at least one test failed, was killed by a signal, or timed out; also a
   user error such as an unknown flag.
 - `2` — a build or internal error before the tests could run, or a test that
@@ -233,7 +239,8 @@ diagnostics: a `run_start`, one `test` per result as it finishes and a
 and not run, a `case` per test under `--list`, and the closing `summary`, as
 [diagnostics-json.md](diagnostics-json.md#test-records) describes. A `test` or
 `case` record names its test by qualified name in `name`, beside its `module`,
-`file`, `line` and dispatcher `index`. A timed-out test reports
+`file`, `line` and dispatcher `index`. A skipped test reports
+`"outcome":"skip"` and counts in the `run_end` record's `skipped`. A timed-out test reports
 `"outcome":"timeout"` with its bound in nanoseconds in `timeout_ns`. The human
 readout stays on stdout.
 
@@ -273,8 +280,10 @@ as is when the result is in `0..255`, and `255` otherwise (see
 `mach test` then keeps up to `--jobs` children in flight, each spawned as
 `<exe> <index>`, captures each child's stdout and stderr to a per-test file
 under `log/` beside the dispatcher, `test/<artifact>/log/` unless `-o` moves
-the dispatcher, named by the test's position in the run (a passing test's file is removed on the spot, a failing test's
-file stays), and reads its exit status. Results render
+the dispatcher, named by the test's position in the run (a passing or skipped
+test's file is removed on the spot, a failing test's file stays), and reads its
+exit status: `0` is a pass, `77` a skip, and any other status, a signal or a
+timeout a failure. Results render
 in collection order regardless of completion order.
 
 ## Which tests run
@@ -314,6 +323,20 @@ $if ($mach.build.os != $mach.os.windows) {
     }
 }
 ```
+
+A test whose gate is only known at run time, such as a CPU feature or a tool
+the host may lack, checks it first and returns `77` when it is closed, so the
+run reports a skip rather than a pass that checked nothing:
+
+```mach fragment
+test crypto__aes128_matches_fips_197 {
+    if (!cpu_has_aes()) { ret 77; }
+    ret 0;
+}
+```
+
+A test that checks several arms, each with its own gate, fails when any arm
+fails and otherwise returns `77` when any arm skipped.
 
 ## Test policy
 

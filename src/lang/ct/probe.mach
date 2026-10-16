@@ -192,7 +192,7 @@ test measure__the_address_harness_runs_and_reports {
     if (sel made.err) { ret 1; }
     if (!setup(?alloc)) {
         print.println("declined: this machine would not give up a table larger than its last-level cache");
-        ret 0;
+        ret 77;
     }
 
     var null_m: dudect.Measurement;

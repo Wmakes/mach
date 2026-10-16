@@ -74,7 +74,7 @@ pub fun run(a: *A.Allocator, sink: *readout.Sink, arts: *testrun.TestArtifact, n
     if (n == 0) {
         var empty_tally: testrun.GateTally = testrun.gate_tally_init(a);
         readout.run_start(sink, nil, 0, runner::str);
-        readout.run_end(sink, readout.RunEnd{tests: nil, count: 0, passed: 0, failed: 0, timed_out: 0, wall: 0, tally: ?empty_tally});
+        readout.run_end(sink, readout.RunEnd{tests: nil, count: 0, passed: 0, failed: 0, skipped: 0, timed_out: 0, wall: 0, tally: ?empty_tally});
         ret res[Counts, fail.Fail].ok{Counts{failed: 0, infrastructure: 0}};
     }
 
@@ -110,8 +110,8 @@ pub fun run(a: *A.Allocator, sink: *readout.Sink, arts: *testrun.TestArtifact, n
     val failed: u32               = count_failed(results, n);
     var tally:  testrun.GateTally = testrun.gate_tally_init(a);
     build_gate_tally(?tally, a, results, n);
-    readout.run_end(sink, readout.RunEnd{tests: results, count: n, passed: n - failed, failed: failed,
-        timed_out: count_timed_out(results, n), wall: wall, tally: ?tally});
+    readout.run_end(sink, readout.RunEnd{tests: results, count: n, passed: n - failed - tally.skip, failed: failed,
+        skipped: tally.skip, timed_out: count_timed_out(results, n), wall: wall, tally: ?tally});
     val counts: Counts = Counts{failed: failed, infrastructure: tally.infrastructure_failure};
     ret res[Counts, fail.Fail].ok{counts};
 }
@@ -356,8 +356,9 @@ fun finalize_slot(a: *A.Allocator, process: *subprocess.OwnedSubprocess, slot: *
     t.truncated = false;
     t.elapsed   = readout.elapsed(slot.start);
 
-    val provisional_pass: bool = process.terminal.kind == subprocess.STATE_EXITED && process.terminal.code == 0;
-    var retain:           bool = want_bytes;
+    val provisional_pass: bool = process.terminal.kind == subprocess.STATE_EXITED
+        && (process.terminal.code == 0 || process.terminal.code == testrun.EXIT_SKIP);
+    var retain: bool = want_bytes;
     if (provisional_pass && level < readout.LEVEL_ITEMS) { retain = false; }
 
     val capture_r: res[subprocess.CaptureIoResult, subprocess.Error] = subprocess.finish_capture(a, process, retain);
@@ -382,17 +383,22 @@ fun finalize_slot(a: *A.Allocator, process: *subprocess.OwnedSubprocess, slot: *
     t.bound = 0;
     if (subprocess.expired(process)) { t.bound = process.timeout; }
     t.result = build_testing.classify_subprocess(?process.terminal, subprocess.expired(process), cap_ok, ?capture);
-    if (t.result.kind == testrun.RESULT_SEMANTIC_MISMATCH) { t.code = process.terminal.code; }
+    if (t.result.kind == testrun.RESULT_SEMANTIC_MISMATCH || t.result.kind == testrun.RESULT_SKIP) { t.code = process.terminal.code; }
 
     subprocess.dnit(a, process);
-    if (t.result.kind == testrun.RESULT_PASS && t.log != nil) { fs.remove_file(t.log); }
+    if (!is_failure(?t.result) && t.log != nil) { fs.remove_file(t.log); }
+}
+
+# whether a result fails its run: anything but a pass or a skip
+fun is_failure(r: *testrun.GateResult) bool {
+    ret r.kind != testrun.RESULT_PASS && r.kind != testrun.RESULT_SKIP;
 }
 
 fun count_failed(results: *readout.TestResult, len: u32) u32 {
     var f: u32 = 0;
     var i: u32 = 0;
     for (i < len) {
-        if (results[i].result.kind != testrun.RESULT_PASS) { f = f + 1; }
+        if (is_failure(?results[i].result)) { f = f + 1; }
         i = i + 1;
     }
     ret f;
@@ -456,25 +462,27 @@ fun t_outcome(kind: testrun.GateResultKind, cause: testrun.GateCause) readout.Te
     ret o;
 }
 
-test count_failed_and_build_gate_tally__only_pass_counts_as_passing {
+test count_failed_and_build_gate_tally__pass_and_skip_are_not_failures {
     var a: A.Allocator;
     page.make(?a);
 
-    var results: [3]readout.TestResult;
+    var results: [4]readout.TestResult;
     results[0] = t_outcome(testrun.RESULT_PASS, testrun.CAUSE_PASS);
     results[1] = t_outcome(testrun.RESULT_SEMANTIC_MISMATCH, testrun.CAUSE_ORACLE_EXIT);
     results[2] = t_outcome(testrun.RESULT_TOOL_UNAVAILABLE, testrun.CAUSE_TOOL_UNAVAILABLE);
+    results[3] = t_outcome(testrun.RESULT_SKIP, testrun.CAUSE_SKIP);
 
-    if (count_failed(?results[0], 3) != 2) { ret 1; }
+    if (count_failed(?results[0], 4) != 2) { ret 1; }
 
     var gt: testrun.GateTally = testrun.gate_tally_init(?a);
-    build_gate_tally(?gt, ?a, ?results[0], 3);
+    build_gate_tally(?gt, ?a, ?results[0], 4);
 
     var bad: i32 = 0;
     if (gt.pass != 1)                       { bad = 1; }
     or (gt.semantic_mismatch != 1)          { bad = 1; }
     or (gt.tool_unavailable != 1)           { bad = 1; }
-    or (testrun.gate_tally_total(?gt) != 3) { bad = 1; }
+    or (gt.skip != 1)                       { bad = 1; }
+    or (testrun.gate_tally_total(?gt) != 4) { bad = 1; }
 
     testrun.gate_tally_dnit(?gt);
     ret bad;
