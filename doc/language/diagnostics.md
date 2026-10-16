@@ -84,7 +84,7 @@ modules or generic instances raise it.
 | `source` | characters the source may not contain |
 | `literal`, `float` | a literal that is malformed, unterminated or out of range for its type, and a float literal that is not exact at its type (`float.inexact`) |
 | `name`, `use`, `module`, `visibility`, `import`, `fwd` | names that do not resolve, collide, take a built-in type's name (`name.builtin_type`) or are not exported; `use` and `fwd` paths |
-| `decl`, `binding`, `global`, `const` | declaration forms: bindings, globals and constants |
+| `decl`, `def`, `binding`, `global`, `const` | declaration forms: bindings, globals, constants and type aliases |
 | `type`, `cast`, `operator`, `condition`, `assign`, `address`, `ptr` | type checking: mismatches, conversions, operators, conditions, assignment and addresses |
 | `call`, `variadic`, `pack`, `ret` | calls, C-variadic and pack parameters, and returned values |
 | `field`, `index`, `range`, `shift`, `array`, `uni`, `tag`, `sel`, `guard` | records, arrays, unions, tags, `sel` and guarded places |
