@@ -1,4 +1,5 @@
 use std.allocator.page;
+use std.collections.map;
 use std_format: std.format;
 use std.memory;
 use std.types.bool.bool;
@@ -371,8 +372,13 @@ pub val SEC_FLAG_ASSOCIATED: u32 = 0x40;
 # plus one, NATIVE_GROUP_RELOC set on a member that is a section's relocations
 pub val SEC_FLAG_GROUP: u32 = 0x80;
 
+# the section holds NUL-terminated strings with no other NUL in them, each
+# at an offset a symbol names, so a link may merge equal strings and a
+# format with a string-section spelling (elf SHF_MERGE|SHF_STRINGS) uses it
+pub val SEC_FLAG_STRINGS: u32 = 0x100;
+
 val SEC_FLAG_MASK: u32 = SEC_FLAG_MERGEABLE | SEC_FLAG_INIT_FUNCS | SEC_FLAG_COALESCE | SEC_FLAG_RETAIN
-    | SEC_FLAG_UNWIND_INDEX | SEC_FLAG_UNWIND_FRAMES | SEC_FLAG_ASSOCIATED | SEC_FLAG_GROUP;
+    | SEC_FLAG_UNWIND_INDEX | SEC_FLAG_UNWIND_FRAMES | SEC_FLAG_ASSOCIATED | SEC_FLAG_GROUP | SEC_FLAG_STRINGS;
 
 pub val NATIVE_GROUP_RELOC: u32 = 0x80000000;
 
@@ -942,6 +948,7 @@ pub fun validate_object_view(image: *ObjectImage) err[fail.Fail] {
         if ((sec.flags & (SEC_FLAG_MERGEABLE | SEC_FLAG_INIT_FUNCS)) == (SEC_FLAG_MERGEABLE | SEC_FLAG_INIT_FUNCS)
             || (sec.native.format != 0 && (sec.flags & SEC_FLAG_COALESCE) != 0)
             || ((sec.flags & SEC_FLAG_MERGEABLE) != 0 && sec.kind == SK_BSS)
+            || ((sec.flags & SEC_FLAG_STRINGS) != 0 && ((sec.flags & SEC_FLAG_MERGEABLE) != 0 || sec.kind != SK_RODATA))
             || ((sec.flags & SEC_FLAG_INIT_FUNCS) != 0
             && sec.kind != SK_DATA && sec.kind != SK_RODATA && sec.kind != SK_RELRO)) {
             ret err[fail.Fail].err{fail.user(diagnostic_kind.OBJECT_MALFORMED, "object image has incompatible section flags")};
@@ -3028,14 +3035,18 @@ fun t_header_span(shape: *HeaderShape, page_size: u64) u64 {
     ret page_size;
 }
 
-fun image_symbol_index(o: *ObjectImage, name: intern.StrId) u32 {
-    if (intern.str_is_nil(name)) { ret SYMBOL_NONE; }
+# the first symbol of `o` each name names, the one a deferred relocation binds to
+fun image_symbol_names(o: *ObjectImage, names: *map.Map[intern.StrId, u32]) err[A.Error] {
     var i: u32 = 0;
     for (i < o.symbol_count) {
-        if (intern.str_same(o.symbols[i].name, name)) { ret i; }
+        val name: intern.StrId = o.symbols[i].name;
+        if (!intern.str_is_nil(name) && !map.contains[intern.StrId, u32](names, ?name)) {
+            val added: res[bool, A.Error] = map.insert[intern.StrId, u32](names, name, i);
+            if (sel added.err) { ret err[A.Error].err{added.err}; }
+        }
         i = i + 1;
     }
-    ret SYMBOL_NONE;
+    ret err[A.Error].ok{};
 }
 
 pub rec DeferredReloc {
@@ -3110,8 +3121,12 @@ fun flush_deferred_consume(d: *DeferredRelocs, flushed: u32) {
 }
 
 pub fun flush_deferred(o: *ObjectImage, d: *DeferredRelocs) err[fail.Fail] {
-    val image_base: u32 = o.reloc_count;
-    var i:          u32 = 0;
+    val image_base: u32                        = o.reloc_count;
+    var names:      map.Map[intern.StrId, u32] = map.init[intern.StrId, u32](o.alloc);
+    fin { map.dnit[intern.StrId, u32](?names); }
+    val indexed: err[A.Error] = image_symbol_names(o, ?names);
+    if (sel indexed.err) { ret err[fail.Fail].err{fail.refused(indexed.err)}; }
+    var i: u32 = 0;
     for (i < d.count) {
         val pend: *DeferredReloc = ?d.items[i];
         if (intern.str_is_nil(pend.name)) {
@@ -3119,7 +3134,9 @@ pub fun flush_deferred(o: *ObjectImage, d: *DeferredRelocs) err[fail.Fail] {
             ret err[fail.Fail].err{fail.message("of: relocation has no target symbol")};
         }
 
-        var sym_ix: u32 = image_symbol_index(o, pend.name);
+        var sym_ix: u32       = SYMBOL_NONE;
+        val known:  opt[*u32] = map.get[intern.StrId, u32](?names, ?pend.name);
+        if (sel known.some) { sym_ix = @known.some; }
         if (sym_ix == SYMBOL_NONE) {
             var ext: Symbol;
             ext.name     = pend.name;
@@ -3135,6 +3152,11 @@ pub fun flush_deferred(o: *ObjectImage, d: *DeferredRelocs) err[fail.Fail] {
                 ret err[fail.Fail].err{sa.err};
             }
             sym_ix = sa.ok;
+            val added: res[bool, A.Error] = map.insert[intern.StrId, u32](?names, pend.name, sym_ix);
+            if (sel added.err) {
+                flush_deferred_consume(d, i);
+                ret err[fail.Fail].err{fail.refused(added.err)};
+            }
         }
 
         var rel: Relocation;
@@ -3619,7 +3641,9 @@ test flush_deferred__sym2_set_and_retry_consumes_flushed_prefix {
         ret 1;
     }
 
-    T.fail_at_ordinal(?t, T.attempt_count(?t) + 2);
+    # the flush allocates the three tables of its name index, then rec_a's relocation, then
+    # the growth of the symbols for sym_b's import, which fails
+    T.fail_at_ordinal(?t, T.attempt_count(?t) + 5);
     val r1: err[fail.Fail] = flush_deferred(?img, ?deferred);
     if (sel r1.ok) {
         deferred_dnit(?deferred);

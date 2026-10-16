@@ -82,6 +82,8 @@ reached: the union tuples a walk reached it under
 deps: the modules it imports
 consts: the public constants it exports to its importers' gates
 bindings: one record per import declaration the walk reached
+binders: where a demand finds each name a declaration list binds, built once per syntax
+              (see demand_index)
 
 ## rec Row
 

@@ -603,6 +603,16 @@ the section lists sections of its object that a link keeps or drops
 together: a flags word, then one word per member holding the member's index
 plus one, NATIVE_GROUP_RELOC set on a member that is a section's relocations
 
+## val SEC_FLAG_STRINGS
+
+```mach
+pub val SEC_FLAG_STRINGS: u32 = 0x100
+```
+
+the section holds NUL-terminated strings with no other NUL in them, each
+at an offset a symbol names, so a link may merge equal strings and a
+format with a string-section spelling (elf SHF_MERGE|SHF_STRINGS) uses it
+
 ## val NATIVE_GROUP_RELOC
 
 ```mach

@@ -994,19 +994,14 @@ pub fun own_nominal_declaration(sc: *SemaContext, nominal: *type.Type) res[ast_i
     if (!module.stable_same(nominal.data.nominal.owner.module, owner.module) || !lang_source.file_same(nominal.data.nominal.owner.file, owner.file)) {
         ret res[ast_id.DeclId, fail.Fail].err{fail.message("nominal definition belongs to another source owner")};
     }
+    var kind: resolve.SymKind = resolve.SYM_REC;
+    if (nominal.kind == type.TYPE_UNI) { kind = resolve.SYM_UNI; }
+    or (nominal.kind == type.TYPE_TAG) { kind = resolve.SYM_TAG; }
+    or (nominal.kind != type.TYPE_REC) { ret res[ast_id.DeclId, fail.Fail].err{fail.message("nominal definition is absent from the active resolved owner")}; }
+    val id: resolve.SymbolId = resolve.own_nominal(sc.view.rr, kind, nominal.data.nominal.name);
+    if (id.index == resolve.SYMBOL_AMBIGUOUS.index) { ret res[ast_id.DeclId, fail.Fail].err{fail.message("nominal definition is ambiguous in the active resolved owner")}; }
     var found: ast_id.DeclId = ast_id.DECL_NIL;
-    var i:     u32           = 0;
-    for (i < sc.view.rr.symbol_count) {
-        val symbol:  *resolve.Symbol = ?sc.view.rr.symbols[i];
-        var matches: bool            = symbol.kind == resolve.SYM_REC && nominal.kind == type.TYPE_REC;
-        if (symbol.kind == resolve.SYM_UNI && nominal.kind == type.TYPE_UNI) { matches = true; }
-        if (symbol.kind == resolve.SYM_TAG && nominal.kind == type.TYPE_TAG) { matches = true; }
-        if (matches && module.same(resolve.origin_of(sc.s, symbol), sc.view.own_module) && intern.str_same(symbol.canon, nominal.data.nominal.name)) {
-            if (!ast_id.decl_is_nil(found) && !ast_id.decl_same(found, symbol.decl)) { ret res[ast_id.DeclId, fail.Fail].err{fail.message("nominal definition is ambiguous in the active resolved owner")}; }
-            found = symbol.decl;
-        }
-        i = i + 1;
-    }
+    if (id.index < sc.view.rr.symbol_count)                                                { found = sc.view.rr.symbols[id.index].decl; }
     if (ast_id.decl_is_nil(found) || ast_id.decl_index(found) >= sc.view.a.decls.len::u32) { ret res[ast_id.DeclId, fail.Fail].err{fail.message("nominal definition is absent from the active resolved owner")}; }
     ret res[ast_id.DeclId, fail.Fail].ok{found};
 }

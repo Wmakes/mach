@@ -98,10 +98,11 @@ fun refuse_gated(sc: *sema_context.SemaContext, sym: *resolve.Symbol) res[opt[co
 # its literal leaves out: the same answer a typed read gets, since it needs only the types the
 # constant records on its nodes
 fun projected_value(sc: *sema_context.SemaContext, eid: ast_id.ExprId) res[opt[comptime.CTValue], comptime.EvalFail] {
-    val none:  res[opt[comptime.CTValue], comptime.EvalFail] = res[opt[comptime.CTValue], comptime.EvalFail].ok{opt[comptime.CTValue].none{}};
-    val e_opt: opt[*ast_expr.Expr]                           = ast.get_expr(sc.view.a, eid);
-    if (sel e_opt.none) { ret none; }
-    val e: *ast_expr.Expr = e_opt.some;
+    val none:     res[opt[comptime.CTValue], comptime.EvalFail] = res[opt[comptime.CTValue], comptime.EvalFail].ok{opt[comptime.CTValue].none{}};
+    val resolved: res[ast_expr.Expr, fail.Fail]                 = resolve.expression(sc.view.rr, sc.view.a, eid);
+    if (sel resolved.err) { ret res[opt[comptime.CTValue], comptime.EvalFail].err{comptime.eval_from_fail(resolved.err, diagnostic_kind.COMPTIME_NOT_CONSTANT, "")}; }
+    var node: ast_expr.Expr  = resolved.ok;
+    val e:    *ast_expr.Expr = ?node;
     if (e.kind != ast_expr.EXPR_KIND_MEMBER && !(e.kind == ast_expr.EXPR_KIND_INDEX && !ast_expr.is_range(?e.data.index))) { ret none; }
     val reached: res[Reach, fail.Fail] = reach(sc, eid, 0);
     if (sel reached.err)                  { ret res[opt[comptime.CTValue], comptime.EvalFail].err{comptime.eval_from_fail(reached.err, diagnostic_kind.COMPTIME_NOT_CONSTANT, "")}; }
@@ -595,9 +596,10 @@ fun reach_refused(why: comptime.EvalFail) res[Reach, fail.Fail] {
 fun reach(sc: *sema_context.SemaContext, eid: ast_id.ExprId, depth: u32) res[Reach, fail.Fail] {
     val none: res[Reach, fail.Fail] = res[Reach, fail.Fail].ok{Reach{kind: REACH_NONE}};
     if (depth >= REACH_DEPTH) { ret none; }
-    val e_opt: opt[*ast_expr.Expr] = ast.get_expr(sc.view.a, eid);
-    if (sel e_opt.none) { ret none; }
-    val e: ast_expr.Expr = @e_opt.some;
+    # the expression as name resolution read it, so `A[N]` with a named index is an element read
+    val read: res[ast_expr.Expr, fail.Fail] = resolve.expression(sc.view.rr, sc.view.a, eid);
+    if (sel read.err) { ret res[Reach, fail.Fail].err{read.err}; }
+    val e: ast_expr.Expr = read.ok;
     if (stack.exhausted()) { ret res[Reach, fail.Fail].err{refused_nesting(sc, e.span)}; }
     val named: opt[*resolve.Symbol] = sema_context.symbol_for_expr(sc, eid);
     if (sel named.some) {
@@ -853,9 +855,9 @@ fun address_root(sc: *sema_context.SemaContext, eid: ast_id.ExprId, steps: *coll
     if (depth >= REACH_DEPTH) { ret root_refused("this address steps too deep into its binding to be a constant"); }
     val named: opt[*resolve.Symbol] = sema_context.symbol_for_expr(sc, eid);
     if (sel named.some) { ret root_of(sc, named.some); }
-    val e_opt: opt[*ast_expr.Expr] = ast.get_expr(sc.view.a, eid);
-    if (sel e_opt.none) { ret res[Root, fail.Fail].err{fail.message("sema: an address names no expression")}; }
-    val e:      ast_expr.Expr = @e_opt.some;
+    val read: res[ast_expr.Expr, fail.Fail] = resolve.expression(sc.view.rr, sc.view.a, eid);
+    if (sel read.err) { ret res[Root, fail.Fail].err{read.err}; }
+    val e:      ast_expr.Expr = read.ok;
     var object: ast_id.ExprId = ast_id.EXPR_NIL;
     if (e.kind == ast_expr.EXPR_KIND_MEMBER)                                     { object = e.data.member.object; }
     or (e.kind == ast_expr.EXPR_KIND_INDEX && !ast_expr.is_range(?e.data.index)) { object = e.data.index.object; }

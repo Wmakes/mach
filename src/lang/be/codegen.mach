@@ -1,6 +1,7 @@
 use std.allocator.arena;
 use std.allocator.page;
-use T:         std.allocator.testing;
+use T: std.allocator.testing;
+use std.collections.map;
 use io_writer: std.io.writer;
 use std.memory;
 use std.print;
@@ -32,8 +33,10 @@ use mach.lang.be.codegen.regalloc;
 use mach.lang.be.codegen.structurize;
 use mach.lang.ct;
 use mach.lang.diagnostic;
+use diagnostic_kind: mach.lang.diagnostic.kind;
 use mach.lang.fail;
 use mach.lang.float;
+use mach.lang.growth;
 use mach.lang.intern;
 use mach.lang.layout;
 use me_ir:    mach.lang.me.ir;
@@ -561,7 +564,7 @@ fun section_bytes_copy(image: *target_of.ObjectImage, src: *u8, len: u32) res[*u
     ret res[*u8, fail.Fail].ok{buf};
 }
 
-fun add_global_symbol(image: *target_of.ObjectImage, irmod: *me_ir.Module, g: *me_ir.Global, sec_idx: u32, sec_len: u32) err[fail.Fail] {
+fun add_global_symbol(image: *target_of.ObjectImage, irmod: *me_ir.Module, g: *me_ir.Global, sec_idx: u32, offset: u32, sec_len: u32) err[fail.Fail] {
     var flags: u32 = target_of.SYM_OBJ_FLAG_OBJECT;
     if (!g.is_local)                                             { flags = flags | target_of.SYM_OBJ_FLAG_GLOBAL; }
     if (!g.is_local && !is_exported_definition(irmod, g.is_pub)) { flags = flags | target_of.SYM_OBJ_FLAG_HIDDEN; }
@@ -569,7 +572,7 @@ fun add_global_symbol(image: *target_of.ObjectImage, irmod: *me_ir.Module, g: *m
     var sym: target_of.Symbol;
     sym.name     = g.name;
     sym.section  = target_of.section_id(sec_idx);
-    sym.offset   = 0;
+    sym.offset   = offset;
     sym.size     = sec_len;
     sym.flags    = flags;
     sym.fallback = target_of.SYMBOL_NONE;
@@ -634,13 +637,288 @@ fun section_index_of(image: *target_of.ObjectImage, name: intern.StrId) i64 {
     ret -1;
 }
 
+# where one global's storage goes: a section its object's globals of the same
+# name, kind and flags share, or a section of its own
+rec GlobalSlot {
+    bytes:  *u8;
+    len:    u32;
+    kind:   target_of.SectionKind;
+    name:   intern.StrId;
+    align:  u32;
+    flags:  u32;
+    shared: u32;
+    offset: u32;
+}
+
+val NOT_SHARED: u32 = 0xFFFFFFFF;
+
+# one section many globals share, each at its own aligned offset under its own
+# sized symbol, which is what a link's collection keeps or drops
+rec SharedData {
+    name:  intern.StrId;
+    kind:  target_of.SectionKind;
+    flags: u32;
+    align: u32;
+    len:   u32;
+    bytes: *u8;
+    index: u32;
+    # the shared section made before this one under the same name
+    same_name: u32;
+}
+
+# an object's shared sections, indexed by name to the last one made under it
+rec SharedSections {
+    items:  *SharedData;
+    count:  u32;
+    cap:    u32;
+    byname: map.Map[intern.StrId, u32];
+}
+
+# the section name a string literal shares, whose flag lets a link merge it
+val STRING_SECTION: str = ".rodata.str";
+
+# a constant the compiler made for a string literal: local, plain, and its
+# bytes one NUL-terminated string with no NUL before the end; an explicitly
+# aligned constant is data a load reads whole, not a string
+fun string_literal(g: *me_ir.Global, bytes: *u8, len: u32, kind: target_of.SectionKind) bool {
+    if (!g.is_local || g.is_mut || g.is_embed || g.align != 0 || !intern.str_is_nil(g.section)) { ret false; }
+    if (kind != target_of.SK_RODATA || g.init.kind != value.VAL_CONST_BYTES)                    { ret false; }
+    if (bytes == nil || len == 0 || bytes[len - 1] != 0)                                        { ret false; }
+    var i: u32 = 0;
+    for (i < len - 1) {
+        if (bytes[i] == 0) { ret false; }
+        i = i + 1;
+    }
+    ret true;
+}
+
+fun global_slots_free(alloc: *A.Allocator, slots: *GlobalSlot, count: u32) {
+    if (slots == nil) { ret; }
+    var i: u32 = 0;
+    for (i < count) {
+        if (slots[i].bytes != nil && slots[i].len > 0) { A.deallocate[u8](alloc, slots[i].bytes, slots[i].len::usize); }
+        i = i + 1;
+    }
+    A.deallocate[GlobalSlot](alloc, slots, count::usize);
+}
+
+fun shared_sections_free(alloc: *A.Allocator, shared: *SharedSections) {
+    map.dnit[intern.StrId, u32](?shared.byname);
+    if (shared.items == nil) { ret; }
+    var i: u32 = 0;
+    for (i < shared.count) {
+        if (shared.items[i].bytes != nil) { A.deallocate[u8](alloc, shared.items[i].bytes, shared.items[i].len::usize); }
+        i = i + 1;
+    }
+    A.deallocate[SharedData](alloc, shared.items, shared.cap::usize);
+}
+
+# the bytes, size, kind, section name, alignment and flags of a defined global
+fun global_slot(s: *CodegenContext, tgt: *lang_target.Binding, image: *target_of.ObjectImage, irmod: *me_ir.Module,
+    g: *me_ir.Global, out: *GlobalSlot) err[fail.Fail] {
+    val machine: layout.Machine = resolved.layout_machine(?tgt.target);
+    out.bytes  = nil;
+    out.len    = 0;
+    out.shared = NOT_SHARED;
+    out.offset = 0;
+
+    var bytes: *u8 = nil;
+    var len:   u32 = 0;
+    if (g.init.kind == value.VAL_CONST_BYTES) {
+        val res_copy: res[*u8, fail.Fail] = section_bytes_copy(image, g.init.data.bytes.ptr, g.init.data.bytes.len);
+        if (sel res_copy.err) { ret err[fail.Fail].err{res_copy.err}; }
+        bytes = res_copy.ok;
+        len   = g.init.data.bytes.len;
+    }
+    or (g.init.kind == value.VAL_CONST_AGG) {
+        val res_copy: res[*u8, fail.Fail] = section_bytes_copy(image, g.init.data.agg.bytes, g.init.data.agg.len);
+        if (sel res_copy.err) { ret err[fail.Fail].err{res_copy.err}; }
+        bytes = res_copy.ok;
+        len   = g.init.data.agg.len;
+    }
+    or (g.init.kind == value.VAL_CONST_INT || g.init.kind == value.VAL_CONST_FLOAT) {
+        val gsz:  u32       = ir_type.byte_size_for_machine(?irmod.types, g.ty, machine);
+        var bits: wide.Wide = value.int_of(?g.init);
+        if (g.init.kind == value.VAL_CONST_FLOAT && is_f32_type(?irmod.types, g.ty)) {
+            bits = wide.from_u64(float.f64_to_f32_bits(bits.lo)::u64);
+        }
+        if (gsz > 0 && gsz < 16) { bits = wide.trunc(bits, gsz * 8); }
+        # a writable zero scalar holds no bytes, so it lands in .bss as a zero aggregate does; the
+        # bits are the test, so -0.0 keeps its bytes. read-only and #[section] globals keep theirs
+        val zero_fill: bool = wide.is_zero(bits) && g.is_mut && intern.str_is_nil(g.section);
+        if (gsz == 0 || gsz > 16) {
+            if (!wide.is_zero(bits)) {
+                ret err[fail.Fail].err{fail.message("be.codegen.pack_globals: non-zero scalar constant global initializer has unsupported size (expected 1..16 bytes)")};
+            }
+        }
+        or (!zero_fill) {
+            val res_bytes: res[*u8, A.Error] = A.allocate[u8](image.alloc, gsz::usize);
+            if (sel res_bytes.err) { ret err[fail.Fail].err{fail.refused(res_bytes.err)}; }
+            bytes = res_bytes.ok;
+            var ii: u32 = 0;
+            for (ii < gsz) {
+                bytes[ii] = wide.shr_u(bits, ii * 8).lo::u8;
+                ii        = ii + 1;
+            }
+            len = gsz;
+        }
+    }
+    # the slot owns the bytes from here, so a refusal below frees them with it
+    out.bytes = bytes;
+    out.len   = len;
+
+    var kind:  target_of.SectionKind = target_of.SK_BSS;
+    var sname: str                   = ".bss";
+    if (bytes != nil || g.is_embed) {
+        if (g.is_mut) {
+            kind  = target_of.SK_DATA;
+            sname = ".data";
+        }
+        or (g.init.kind == value.VAL_CONST_AGG && g.init.data.agg.reloc_count > 0) {
+            kind  = target_of.SK_RELRO;
+            sname = ".data.rel.ro";
+        }
+        or {
+            kind  = target_of.SK_RODATA;
+            sname = ".rodata";
+        }
+    }
+
+    var flags: u32 = 0;
+    if (g.is_embed)                   { flags = target_of.SEC_FLAG_MERGEABLE; }
+    if (intern.str_is_nil(g.section)) { flags = flags | target_of.SEC_FLAG_COALESCE; }
+    or                                { flags = flags | target_of.SEC_FLAG_RETAIN; }
+    if (string_literal(g, bytes, len, kind)) {
+        sname = STRING_SECTION;
+        flags = flags | target_of.SEC_FLAG_STRINGS;
+    }
+
+    var sec_name: intern.StrId = g.section;
+    if (intern.str_is_nil(sec_name)) {
+        val res_name: res[intern.StrId, A.Error] = intern.add(?s.session.interner, sname);
+        if (sel res_name.err) { ret err[fail.Fail].err{fail.refused(res_name.err)}; }
+        sec_name = res_name.ok;
+    }
+
+    var sec_len: u32 = len;
+    if (kind == target_of.SK_BSS) { sec_len = ir_type.byte_size_for_machine(?irmod.types, g.ty, machine); }
+
+    var sec_align: u32 = tgt.target.model.data_section_align;
+    val tya:       u32 = ir_type.byte_align_for_machine(?irmod.types, g.ty, machine);
+    if (tya > sec_align)     { sec_align = tya; }
+    if (g.align > sec_align) { sec_align = g.align; }
+
+    out.kind  = kind;
+    out.name  = sec_name;
+    out.align = sec_align;
+    out.flags = flags;
+    if (kind == target_of.SK_BSS) { out.len = sec_len; }
+    ret err[fail.Fail].ok{};
+}
+
+# the shared section of the slot's name, kind and flags, made on first use;
+# the slot takes the next offset its alignment allows
+fun shared_join(alloc: *A.Allocator, shared: *SharedSections, slot: *GlobalSlot) err[fail.Fail] {
+    var head: u32       = NOT_SHARED;
+    val last: opt[*u32] = map.get[intern.StrId, u32](?shared.byname, ?slot.name);
+    if (sel last.some) { head = @last.some; }
+    var at: u32 = head;
+    for (at != NOT_SHARED) {
+        val d: *SharedData = ?shared.items[at];
+        if (d.kind == slot.kind && d.flags == slot.flags) { brk; }
+        at = d.same_name;
+    }
+    if (at == NOT_SHARED) {
+        val grown: err[A.Error] = growth.reserve[SharedData](alloc, ?shared.items, ?shared.cap, shared.count::usize + 1);
+        if (sel grown.err) { ret err[fail.Fail].err{fail.refused(grown.err)}; }
+        at               = shared.count;
+        shared.items[at] = SharedData{name: slot.name, kind: slot.kind, flags: slot.flags, align: 1, len: 0, bytes: nil, index: 0,
+            same_name: head};
+        val indexed: res[bool, A.Error] = map.insert[intern.StrId, u32](?shared.byname, slot.name, at);
+        if (sel indexed.err) { ret err[fail.Fail].err{fail.refused(indexed.err)}; }
+        shared.count = shared.count + 1;
+    }
+    val d:      *SharedData = ?shared.items[at];
+    val a:      u64         = slot.align::u64;
+    val offset: u64         = (d.len::u64 + a - 1) / a * a;
+    if (offset + slot.len::u64 > 0xFFFFFFFF) {
+        ret err[fail.Fail].err{fail.user(diagnostic_kind.LINK_SIZE_LIMIT, "an object's data section exceeds the 4 GiB u32 limit")};
+    }
+    slot.shared = at;
+    slot.offset = offset::u32;
+    d.len       = (offset + slot.len::u64)::u32;
+    if (slot.align > d.align) { d.align = slot.align; }
+    ret err[fail.Fail].ok{};
+}
+
+# every defined global's storage, laid out in the section it shares with the
+# object's other globals of its name, kind and flags. an embedded file keeps a
+# section of its own, which a link merges whole with its equals, as does a
+# global with no storage
 fun pack_globals(s: *CodegenContext, tgt: *lang_target.Binding, image: *target_of.ObjectImage,
     deferred: *target_of.DeferredRelocs, irmod: *me_ir.Module) err[fail.Fail] {
-    val machine: layout.Machine = resolved.layout_machine(?tgt.target);
-    var i:       u32            = 0;
-    for (i < irmod.global_len) {
-        val g: *me_ir.Global = ?irmod.globals[i];
+    val alloc: *A.Allocator = image.alloc;
+    val n:     u32          = irmod.global_len;
+    if (n == 0) { ret err[fail.Fail].ok{}; }
+    val made: res[*GlobalSlot, A.Error] = A.zallocate[GlobalSlot](alloc, n::usize);
+    if (sel made.err) { ret err[fail.Fail].err{fail.refused(made.err)}; }
+    val slots: *GlobalSlot = made.ok;
+    fin { global_slots_free(alloc, slots, n); }
+    var shared: SharedSections = SharedSections{items: nil, count: 0, cap: 0, byname: map.init[intern.StrId, u32](alloc)};
+    fin { shared_sections_free(alloc, ?shared); }
 
+    var i: u32 = 0;
+    for (i < n) {
+        val g: *me_ir.Global = ?irmod.globals[i];
+        slots[i].shared = NOT_SHARED;
+        if (g.is_extern) {
+            i = i + 1;
+            cnt;
+        }
+        val filled: err[fail.Fail] = global_slot(s, tgt, image, irmod, g, ?slots[i]);
+        if (sel filled.err) { ret filled; }
+        if (!g.is_embed && slots[i].len > 0) {
+            val joined: err[fail.Fail] = shared_join(alloc, ?shared, ?slots[i]);
+            if (sel joined.err) { ret joined; }
+        }
+        i = i + 1;
+    }
+
+    var d: u32 = 0;
+    for (d < shared.count) {
+        if (shared.items[d].kind != target_of.SK_BSS) {
+            val got: res[*u8, A.Error] = A.zallocate[u8](alloc, shared.items[d].len::usize);
+            if (sel got.err) { ret err[fail.Fail].err{fail.refused(got.err)}; }
+            shared.items[d].bytes = got.ok;
+        }
+        d = d + 1;
+    }
+    i = 0;
+    for (i < n) {
+        val slot: *GlobalSlot = ?slots[i];
+        if (slot.shared != NOT_SHARED && slot.bytes != nil) {
+            val into: *u8 = shared.items[slot.shared].bytes;
+            memory.raw_copy((into::usize + slot.offset::usize)::ptr, slot.bytes::ptr, slot.len::usize);
+            A.deallocate[u8](alloc, slot.bytes, slot.len::usize);
+            slot.bytes = nil;
+        }
+        i = i + 1;
+    }
+    d = 0;
+    for (d < shared.count) {
+        var sec: target_of.Section = target_of.Section{name: shared.items[d].name, kind: shared.items[d].kind, bytes: shared.items[d].bytes,
+            len: shared.items[d].len, align: shared.items[d].align, flags: shared.items[d].flags};
+        shared.items[d].bytes = nil;
+        val res_section: res[u32, fail.Fail] = target_of.section_install(image, ?sec);
+        if (sel res_section.err) { ret err[fail.Fail].err{res_section.err}; }
+        shared.items[d].index = res_section.ok;
+        d                     = d + 1;
+    }
+
+    i = 0;
+    for (i < n) {
+        val g:    *me_ir.Global = ?irmod.globals[i];
+        val slot: *GlobalSlot   = ?slots[i];
         if (g.is_extern) {
             val flags:      u32            = target_of.SYM_OBJ_FLAG_OBJECT | target_of.SYM_OBJ_FLAG_EXTERN | target_of.SYM_OBJ_FLAG_GLOBAL;
             val res_extern: err[fail.Fail] = image_extern_symbol_add(image, g.name, flags);
@@ -649,119 +927,36 @@ fun pack_globals(s: *CodegenContext, tgt: *lang_target.Binding, image: *target_o
             cnt;
         }
 
-        var bytes: *u8 = nil;
-        var len:   u32 = 0;
-        if (g.init.kind == value.VAL_CONST_BYTES) {
-            val res_copy: res[*u8, fail.Fail] = section_bytes_copy(image, g.init.data.bytes.ptr, g.init.data.bytes.len);
-            if (sel res_copy.err) { ret err[fail.Fail].err{res_copy.err}; }
-            bytes = res_copy.ok;
-            len   = g.init.data.bytes.len;
+        var sec_idx: u32 = 0;
+        var offset:  u32 = 0;
+        if (slot.shared != NOT_SHARED) {
+            sec_idx = shared.items[slot.shared].index;
+            offset  = slot.offset;
         }
-        or (g.init.kind == value.VAL_CONST_AGG) {
-            val res_copy: res[*u8, fail.Fail] = section_bytes_copy(image, g.init.data.agg.bytes, g.init.data.agg.len);
-            if (sel res_copy.err) { ret err[fail.Fail].err{res_copy.err}; }
-            bytes = res_copy.ok;
-            len   = g.init.data.agg.len;
-        }
-        or (g.init.kind == value.VAL_CONST_INT || g.init.kind == value.VAL_CONST_FLOAT) {
-            val gsz:  u32       = ir_type.byte_size_for_machine(?irmod.types, g.ty, machine);
-            var bits: wide.Wide = value.int_of(?g.init);
-            if (g.init.kind == value.VAL_CONST_FLOAT && is_f32_type(?irmod.types, g.ty)) {
-                bits = wide.from_u64(float.f64_to_f32_bits(bits.lo)::u64);
-            }
-            if (gsz > 0 && gsz < 16) { bits = wide.trunc(bits, gsz * 8); }
-            # a writable zero scalar holds no bytes, so it lands in .bss as a zero aggregate does; the
-            # bits are the test, so -0.0 keeps its bytes. read-only and #[section] globals keep theirs
-            val zero_fill: bool = wide.is_zero(bits) && g.is_mut && intern.str_is_nil(g.section);
-            if (gsz == 0 || gsz > 16) {
-                if (!wide.is_zero(bits)) {
-                    ret err[fail.Fail].err{fail.message("be.codegen.pack_globals: non-zero scalar constant global initializer has unsupported size (expected 1..16 bytes)")};
+        or {
+            if (g.is_embed) {
+                val dup: i64 = embed_section_of(image, irmod, i, slot.bytes, slot.len, slot.name, slot.kind, slot.align);
+                if (dup >= 0) {
+                    val res_alias: err[fail.Fail] = add_global_symbol(image, irmod, g, dup::u32, 0, slot.len);
+                    if (sel res_alias.err) { ret res_alias; }
+                    i = i + 1;
+                    cnt;
                 }
             }
-            or (!zero_fill) {
-                val res_bytes: res[*u8, A.Error] = A.allocate[u8](image.alloc, gsz::usize);
-                if (sel res_bytes.err) { ret err[fail.Fail].err{fail.refused(res_bytes.err)}; }
-                bytes = res_bytes.ok;
-                var ii: u32 = 0;
-                for (ii < gsz) {
-                    bytes[ii] = wide.shr_u(bits, ii * 8).lo::u8;
-                    ii        = ii + 1;
-                }
-                len = gsz;
-            }
+            var sec: target_of.Section = target_of.Section{name: slot.name, kind: slot.kind, bytes: slot.bytes, len: slot.len,
+                align: slot.align, flags: slot.flags};
+            if (slot.kind == target_of.SK_BSS) { sec.bytes = nil; }
+            slot.bytes = nil;
+            val res_section: res[u32, fail.Fail] = target_of.section_install(image, ?sec);
+            if (sel res_section.err) { ret err[fail.Fail].err{res_section.err}; }
+            sec_idx = res_section.ok;
         }
 
-        var kind:  target_of.SectionKind = target_of.SK_BSS;
-        var sname: str                   = ".bss";
-        if (bytes != nil || g.is_embed) {
-            if (g.is_mut) {
-                kind  = target_of.SK_DATA;
-                sname = ".data";
-            }
-            or (g.init.kind == value.VAL_CONST_AGG && g.init.data.agg.reloc_count > 0) {
-                kind  = target_of.SK_RELRO;
-                sname = ".data.rel.ro";
-            }
-            or {
-                kind  = target_of.SK_RODATA;
-                sname = ".rodata";
-            }
-        }
-
-        var sec_name: intern.StrId = g.section;
-        if (intern.str_is_nil(sec_name)) {
-            val res_name: res[intern.StrId, A.Error] = intern.add(?s.session.interner, sname);
-            if (sel res_name.err) {
-                ret err[fail.Fail].err{fail.refused(res_name.err)};
-            }
-            sec_name = res_name.ok;
-        }
-
-        var sec_len: u32 = len;
-        if (kind == target_of.SK_BSS) {
-            sec_len = ir_type.byte_size_for_machine(?irmod.types, g.ty, machine);
-        }
-
-        var sec_align: u32 = tgt.target.model.data_section_align;
-        val tya:       u32 = ir_type.byte_align_for_machine(?irmod.types, g.ty, machine);
-        if (tya > sec_align)     { sec_align = tya; }
-        if (g.align > sec_align) { sec_align = g.align; }
-
-        if (g.is_embed) {
-            val dup: i64 = embed_section_of(image, irmod, i, bytes, sec_len, sec_name, kind, sec_align);
-            if (dup >= 0) {
-                if (bytes != nil && sec_len > 0) {
-                    A.deallocate[u8](image.alloc, bytes, sec_len::usize);
-                }
-                val res_alias: err[fail.Fail] = add_global_symbol(image, irmod, g, dup::u32, sec_len);
-                if (sel res_alias.err) { ret res_alias; }
-                i = i + 1;
-                cnt;
-            }
-        }
-
-        var sec: target_of.Section;
-        sec.name  = sec_name;
-        sec.kind  = kind;
-        sec.bytes = bytes;
-        sec.len   = sec_len;
-        sec.align = sec_align;
-        sec.flags = 0;
-        if (g.is_embed)                   { sec.flags = target_of.SEC_FLAG_MERGEABLE; }
-        if (intern.str_is_nil(g.section)) { sec.flags = sec.flags | target_of.SEC_FLAG_COALESCE; }
-        or                                { sec.flags = sec.flags | target_of.SEC_FLAG_RETAIN; }
-
-        val res_section: res[u32, fail.Fail] = target_of.section_install(image, ?sec);
-        if (sel res_section.err) {
-            ret err[fail.Fail].err{res_section.err};
-        }
-        val sec_idx: u32 = res_section.ok;
-
-        val res_sym: err[fail.Fail] = add_global_symbol(image, irmod, g, sec_idx, sec_len);
+        val res_sym: err[fail.Fail] = add_global_symbol(image, irmod, g, sec_idx, offset, slot.len);
         if (sel res_sym.err) { ret res_sym; }
 
         if (g.init.kind == value.VAL_CONST_AGG) {
-            val res_agg: err[fail.Fail] = pack_agg_relocs(tgt, deferred, ?g.init, sec_idx, tgt.isa.pointer_width);
+            val res_agg: err[fail.Fail] = pack_agg_relocs(tgt, deferred, ?g.init, sec_idx, offset, tgt.isa.pointer_width);
             if (sel res_agg.err) { ret res_agg; }
         }
         i = i + 1;
@@ -815,7 +1010,7 @@ fun pack_constpool(s: *CodegenContext, image: *target_of.ObjectImage, enc: *isa_
 }
 
 fun pack_agg_relocs(tgt: *lang_target.Binding, deferred: *target_of.DeferredRelocs, init: *value.Value, sec_idx: u32,
-    pointer_width: u32) err[fail.Fail] {
+    base: u32, pointer_width: u32) err[fail.Fail] {
     val kind_r: res[target_of.RelocKind, fail.Fail] = target_of.abs_kind_for_pointer_width(pointer_width);
     if (sel kind_r.err) { ret err[fail.Fail].err{kind_r.err}; }
     val kind: target_of.RelocKind = kind_r.ok;
@@ -829,7 +1024,7 @@ fun pack_agg_relocs(tgt: *lang_target.Binding, deferred: *target_of.DeferredRelo
 
         var rec: target_of.DeferredReloc;
         rec.section      = target_of.section_id(sec_idx);
-        rec.offset       = ar.offset;
+        rec.offset       = base + ar.offset;
         rec.kind         = kind;
         rec.name         = ar.symbol;
         rec.addend       = ar.addend;
@@ -1593,6 +1788,115 @@ test pack_globals__a_wide_scalar_packs_both_limbs {
         if (i != 8 && bytes2[i] != 0) { ret 13; }
         i = i + 1;
     }
+    ret 0;
+}
+
+# the symbol named `name`, nil when the image has none
+#[testing]
+fun t_symbol(image: *target_of.ObjectImage, name: intern.StrId) *target_of.Symbol {
+    var i: u32 = 0;
+    for (i < image.symbol_count) {
+        if (intern.str_same(image.symbols[i].name, name)) { ret ?image.symbols[i]; }
+        i = i + 1;
+    }
+    ret nil;
+}
+
+# globals of one section name, kind and flags share one section, each at its
+# own aligned offset: string literals in a string section, scalar vals in
+# .rodata, and vals naming one #[section]. a literal with a NUL inside is no
+# string, and an embedded file keeps a section of its own
+test pack_globals__globals_share_a_section_per_name_kind_and_flags {
+    var alloc:  A.Allocator;
+    val make_r: err[A.Error] = page.make(?alloc);
+    if (sel make_r.err) { ret 1; }
+    val sr: res[session.Session, fail.Fail] = session.init(?alloc);
+    if (sel sr.err) { ret 1; }
+    var s: session.Session = sr.ok;
+    fin { session.dnit(?s); }
+    val labels: [8]str = [8]str{"lit_a", "lit_b", "lit_nul", "val_a", "val_b", "row_a", "row_b", "asset"};
+    var names:  [8]intern.StrId;
+    var n:      u32    = 0;
+    for (n < 8) {
+        val named: res[intern.StrId, A.Error] = intern.add(?s.interner, labels[n]);
+        if (sel named.err) { ret 2; }
+        names[n] = named.ok;
+        n        = n + 1;
+    }
+    val rows_r: res[intern.StrId, A.Error] = intern.add(?s.interner, ".rodata.rows");
+    if (sel rows_r.err) { ret 2; }
+    val selected: res[lang_target.Binding, fail.Fail] = lang_target.t_select("x86_64", "linux", "sysv64");
+    if (sel selected.err) { ret 3; }
+    var tgt:         lang_target.Binding          = selected.ok;
+    val initialized: res[me_ir.Module, fail.Fail] = me_ir.init(?alloc, names[0]);
+    if (sel initialized.err) { ret 4; }
+    var module: me_ir.Module = initialized.ok;
+    module.root_project = true;
+    val ptr_r: res[ir_type.IrTypeId, fail.Fail] = ir_type.intern_ptr(?module.types);
+    val u32_r: res[ir_type.IrTypeId, fail.Fail] = ir_type.intern_int(?module.types, 32);
+    var ptr_t: ir_type.IrTypeId                 = ir_type.id(0);
+    var u32_t: ir_type.IrTypeId                 = ir_type.id(0);
+    if (sel ptr_r.ok) { ptr_t = ptr_r.ok; }
+    if (sel u32_r.ok) { u32_t = u32_r.ok; }
+    if (sel ptr_r.err || sel u32_r.err) {
+        me_ir.dnit(?module);
+        ret 4;
+    }
+    var ab:  [3]u8 = [3]u8{'a', 'b', 0};
+    var cde: [4]u8 = [4]u8{'c', 'd', 'e', 0};
+    var nul: [3]u8 = [3]u8{'x', 0, 0};
+    var g:   u32   = 0;
+    for (g < 8) {
+        var init:    value.Value  = value.const_int(g::u64 + 1, u32_t);
+        var section: intern.StrId = intern.STR_NIL;
+        if (g == 0)           { init = value.const_bytes(?ab[0], 3, ptr_t); }
+        or (g == 1)           { init = value.const_bytes(?cde[0], 4, ptr_t); }
+        or (g == 2)           { init = value.const_bytes(?nul[0], 3, ptr_t); }
+        or (g == 7)           { init = value.const_bytes(?ab[0], 3, u32_t); }
+        if (g == 5 || g == 6) { section = rows_r.ok; }
+        module.globals[g] = me_ir.Global{name: names[g], ty: init.ty, init: init,
+            is_mut:   false, is_pub: false, is_extern: false, is_import: false, is_local: g < 3,
+            is_embed: g == 7, align: 0, section: section, iface: 0, iface_a: 0, iface_b: 0, iface_flags: 0,
+            disp:     intern.STR_NIL, debug_type: ir_debug.TYPE_NIL};
+        g = g + 1;
+    }
+    module.global_len = 8;
+
+    val emitted: res[target_of.ObjectImage, fail.Fail] = codegen_unit(?s, ?tgt, ?module,
+        mir_unit.ir_set_empty(), nil, no_debug(), ?s.diags);
+    me_ir.dnit(?module);
+    if (sel emitted.err) { ret 5; }
+    var image: target_of.ObjectImage = emitted.ok;
+    fin { target_of.object_image_dnit(?image); }
+
+    var syms: [8]*target_of.Symbol;
+    g = 0;
+    for (g < 8) {
+        syms[g] = t_symbol(?image, names[g]);
+        if (syms[g] == nil) { ret (10 + g)::i32; }
+        g = g + 1;
+    }
+    # each pair shares a section, each entry at the end of the one before it
+    # rounded to the alignment; the literal with a NUL inside leads .rodata
+    val firsts:  [3]u32 = [3]u32{0, 3, 5};
+    val seconds: [3]u32 = [3]u32{1, 4, 6};
+    val at:      [3]u32 = [3]u32{0, 8, 0};
+    var pair:    u32    = 0;
+    for (pair < 3) {
+        val first:  *target_of.Symbol = syms[firsts[pair]];
+        val second: *target_of.Symbol = syms[seconds[pair]];
+        if (!target_of.section_same(first.section, second.section))    { ret (20 + pair)::i32; }
+        if (first.offset != at[pair] || second.offset != at[pair] + 8) { ret (30 + pair)::i32; }
+        pair = pair + 1;
+    }
+    val strings: *target_of.Section = ?image.sections[target_of.section_index(syms[0].section)];
+    if ((strings.flags & target_of.SEC_FLAG_STRINGS) == 0 || strings.bytes[8] != 'c') { ret 40; }
+    val inner: *target_of.Section = ?image.sections[target_of.section_index(syms[2].section)];
+    if ((inner.flags & target_of.SEC_FLAG_STRINGS) != 0 || !target_of.section_same(syms[2].section, syms[3].section)) { ret 41; }
+    val rows: *target_of.Section = ?image.sections[target_of.section_index(syms[5].section)];
+    if ((rows.flags & target_of.SEC_FLAG_RETAIN) == 0 || target_of.section_same(syms[5].section, syms[3].section)) { ret 42; }
+    val asset: *target_of.Section = ?image.sections[target_of.section_index(syms[7].section)];
+    if (asset.len != 3 || syms[7].offset != 0 || (asset.flags & target_of.SEC_FLAG_MERGEABLE) == 0) { ret 43; }
     ret 0;
 }
 
