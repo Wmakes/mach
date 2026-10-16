@@ -307,26 +307,7 @@ pub fun load_config_manifest(p: *project.Project, project_root: str, m: *manifes
     val ter: res[*project.TargetEntry, A.Error] = A.allocate[project.TargetEntry](p.alloc, 1::usize);
     if (sel ter.err) { ret err[fail.Fail].err{fail.refused(ter.err)}; }
     val targets: *project.TargetEntry = ter.ok;
-    var entry:   project.TargetEntry;
-    entry.name            = bu.target_name;
-    entry.os_name         = bu.target.os;
-    entry.isa_name        = bu.target.isa;
-    entry.abi_name        = bu.target.abi;
-    entry.of_name         = bu.target.of;
-    entry.platform_name   = bu.target.platform;
-    entry.env_name        = bu.target.env;
-    entry.base            = bu.target.base;
-    entry.stack_reserve   = bu.target.stack_reserve;
-    entry.stack_commit    = bu.target.stack_commit;
-    entry.extensions      = bu.target.extensions;
-    entry.extension_count = bu.target.extension_count;
-    entry.entrypoint      = bu.entry;
-    entry.entry_at        = bu.artifact.entry_at;
-    entry.kind            = bu.artifact.kind;
-    entry.optimize        = bu.optimize;
-    entry.libs            = bu.libs;
-    entry.lib_count       = bu.lib_count;
-    targets[0]            = entry;
+    targets[0] = project.target_entry_of(?bu);
 
     p.config.id           = om.id;
     p.config.version      = om.version;
