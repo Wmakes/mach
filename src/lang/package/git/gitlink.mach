@@ -36,9 +36,9 @@ pub fun tracked(s: *session.Session, dir: str) res[bool, fail.Fail] {
     var gi: git.Inspector  = git.inspector_pending(s.environ);
     val er: err[fail.Fail] = git.inspector_require(s.build_alloc, ?gi);
     if (sel er.err) { ret res[bool, fail.Fail].err{er.err}; }
-    val inside: bool = git.is_work_tree(s.build_alloc, ?gi, dir);
+    val inside: res[bool, fail.Fail] = git.is_work_tree(s.build_alloc, ?gi, dir);
     git.inspector_dnit(s.build_alloc, ?gi);
-    ret res[bool, fail.Fail].ok{inside};
+    ret inside;
 }
 
 pub fun begin(s: *session.Session, root: str) err[fail.Fail] {
@@ -46,7 +46,9 @@ pub fun begin(s: *session.Session, root: str) err[fail.Fail] {
     val required: err[fail.Fail] = git.inspector_require(s.build_alloc, ?gi);
     if (sel required.err) { ret err[fail.Fail].err{required.err}; }
     fin { git.inspector_dnit(s.build_alloc, ?gi); }
-    if (git.is_work_tree(s.build_alloc, ?gi, root)) { ret err[fail.Fail].ok{}; }
+    val inside: res[bool, fail.Fail] = git.is_work_tree(s.build_alloc, ?gi, root);
+    if (sel inside.err) { ret err[fail.Fail].err{inside.err}; }
+    if (inside.ok)      { ret err[fail.Fail].ok{}; }
     var args:        [1]str              = [1]str{"init"};
     val initialized: res[str, fail.Fail] = git.op(s.build_alloc, ?gi, root, ?args[0], 1, nil);
     if (sel initialized.err) { ret err[fail.Fail].err{initialized.err}; }

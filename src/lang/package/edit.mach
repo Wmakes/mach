@@ -129,7 +129,7 @@ pub fun update_apply(op: *package_closure.Operation, mode: u8, all: bool, name: 
     offline: bool, closure: *Vector[package_closure.Request]) err[fail.Fail] {
     val a:         *A.Allocator      = op.a;
     val mt_path_r: res[str, A.Error] = types_path.join(a, op.root, package_closure.MANIFEST);
-    if (sel mt_path_r.err) { ret err[fail.Fail].err{package_closure.oom()}; }
+    if (sel mt_path_r.err) { ret err[fail.Fail].err{fail.refused(mt_path_r.err)}; }
     val mt_r: res[manifest.Doc, fail.Fail] = package_closure.parse_file(a, mt_path_r.ok);
     if (sel mt_r.err) { ret err[fail.Fail].err{mt_r.err}; }
     var mt: manifest.Doc = mt_r.ok;
@@ -210,7 +210,7 @@ fun advance_fixed(op: *package_closure.Operation, mode: u8, targets: *Vector[pac
         if (package_closure.selects_release(r) || !r.is_git) { cnt; }
 
         val dep_full_r: res[str, fail.Fail] = package.dep_full_of(a, op.root, r.id);
-        if (sel dep_full_r.err) { ret err[fail.Fail].err{package_closure.oom()}; }
+        if (sel dep_full_r.err) { ret err[fail.Fail].err{dep_full_r.err}; }
         val dep_full: str = dep_full_r.ok;
 
         # a slot realized at the selector just now has nothing to advance
@@ -263,10 +263,10 @@ fun realize_picks(op: *package_closure.Operation, mode: u8, picks: *Vector[resol
         val pick: *resolver.Choice = ?picks.data[i];
         i = i + 1;
         val full_r: res[str, fail.Fail] = package.dep_full_of(a, op.root, pick.id);
-        if (sel full_r.err) { ret err[fail.Fail].err{package_closure.oom()}; }
+        if (sel full_r.err) { ret err[fail.Fail].err{full_r.err}; }
         val full:  str                              = full_r.ok;
         val ref_r: res[str, std_format.FormatError] = std_format.sprint(a, "tag/{}", pick.tag);
-        if (sel ref_r.err) { ret err[fail.Fail].err{package_closure.oom()}; }
+        if (sel ref_r.err) { ret err[fail.Fail].err{fail.format_refused(ref_r.err)}; }
         var request: package_closure.Request = package_closure.Request{id: pick.id, url: pick.url, src_path: "", ref: ref_r.ok, version: "", chain: "",
             root_decl: false, is_git: true, effect: ""};
         val present: res[bool, io_error.Error] = fs.exists(full);
@@ -353,7 +353,7 @@ fun realize_added(op: *package_closure.Operation, mode: u8, spec: *manifest.DepT
         var src: str = spec.value;
         if (!types_path.is_abs(src)) {
             val j: res[str, A.Error] = types_path.join(op.a, op.root, spec.value);
-            if (sel j.err) { ret err[fail.Fail].err{package_closure.oom()}; }
+            if (sel j.err) { ret err[fail.Fail].err{fail.refused(j.err)}; }
             src = j.ok;
         }
         val pr: res[bool, fail.Fail] = package_path.realize(op.s, op.root, name, src, op.rep);
@@ -386,7 +386,7 @@ pub fun apply(edit: *Edit, op: *package_closure.Operation, mode: u8, spec: *mani
     val a:         *A.Allocator         = op.a;
     var walk:      package_closure.Walk = package_closure.Walk{offline: offline, all: false, name: nil};
     val mt_path_r: res[str, A.Error]    = types_path.join(a, op.root, package_closure.MANIFEST);
-    if (sel mt_path_r.err) { ret err[fail.Fail].err{package_closure.oom()}; }
+    if (sel mt_path_r.err) { ret err[fail.Fail].err{fail.refused(mt_path_r.err)}; }
     val mt_path: str = mt_path_r.ok;
     fin { str_free(a, mt_path); }
 
@@ -411,7 +411,7 @@ pub fun apply(edit: *Edit, op: *package_closure.Operation, mode: u8, spec: *mani
         val at: i64 = package_resolve.pick_index(?chosen.ok.picks, name);
         if (at < 0) { ret err[fail.Fail].err{fail.user(diagnostic_kind.DEP_NO_RELEASE, "resolution chose no release for the new dependency")}; }
         val caret: res[str, std_format.FormatError] = std_format.sprint(a, "^{}", chosen.ok.picks.data[at::usize].version);
-        if (sel caret.err) { ret err[fail.Fail].err{package_closure.oom()}; }
+        if (sel caret.err) { ret err[fail.Fail].err{fail.format_refused(caret.err)}; }
         spec.version = caret.ok;
     }
 
@@ -447,7 +447,7 @@ pub fun apply(edit: *Edit, op: *package_closure.Operation, mode: u8, spec: *mani
     }
     if (adding && spec.source == manifest.DEP_SOURCE_PATH) {
         val destination_r: res[str, fail.Fail] = package.dep_full_of(a, op.root, name);
-        if (sel destination_r.err) { ret err[fail.Fail].err{package_closure.oom()}; }
+        if (sel destination_r.err) { ret err[fail.Fail].err{destination_r.err}; }
         val destination: str = destination_r.ok;
         fin { str_free(a, destination); }
         val exists_r:     res[bool, io_error.Error] = fs.exists(destination);

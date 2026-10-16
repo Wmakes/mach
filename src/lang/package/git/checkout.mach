@@ -89,7 +89,9 @@ fun realize_selector_ref(alloc: *A.Allocator, gi: *git.Inspector, dep_dir: str, 
 # declared source. `offline` fetches nothing, so the selector is read from what the store or checkout holds
 fun add_submodule(s: *session.Session, gi: *git.Inspector, root: str, id: str, rel: str, dep_full: str,
     url: str, ref: str, reuse_store: bool, refresh: bool, offline: bool, extra_env: **u8, rep: *report.Report) err[fail.Fail] {
-    if (!git.is_work_tree(s.build_alloc, gi, root)) {
+    val inside: res[bool, fail.Fail] = git.is_work_tree(s.build_alloc, gi, root);
+    if (sel inside.err) { ret err[fail.Fail].err{inside.err}; }
+    if (!inside.ok) {
         ret err[fail.Fail].err{fail.user(diagnostic_kind.DEP_NO_REPOSITORY, "dependency registration requires an existing Git repository; create it explicitly with mach init or git init")};
     }
     val metadata: err[fail.Fail] = git.require_matches_index(s, gi, id, root, ".gitmodules", "dependency metadata before registration");
@@ -568,7 +570,9 @@ fun slot_record_place(s: *session.Session, gi: *git.Inspector, root: str, rel: s
         @record = rec_r.ok;
         ret err[fail.Fail].ok{};
     }
-    if (!git.is_work_tree(s.build_alloc, gi, root)) { ret err[fail.Fail].ok{}; }
+    val inside: res[bool, fail.Fail] = git.is_work_tree(s.build_alloc, gi, root);
+    if (sel inside.err) { ret err[fail.Fail].err{inside.err}; }
+    if (!inside.ok)     { ret err[fail.Fail].ok{}; }
     var top_args: [2]str              = [2]str{"rev-parse", "--show-toplevel"};
     val top_r:    res[str, fail.Fail] = git.query(s.build_alloc, gi, root, ?top_args[0], 2);
     if (sel top_r.err) { ret err[fail.Fail].err{top_r.err}; }

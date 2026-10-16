@@ -36,7 +36,7 @@ use mach.lang.package.report;
 pub fun lines(op: *package_closure.Operation, out: *Vector[str]) err[fail.Fail] {
     val a:         *A.Allocator      = op.a;
     val mt_path_r: res[str, A.Error] = types_path.join(a, op.root, package_closure.MANIFEST);
-    if (sel mt_path_r.err) { ret err[fail.Fail].err{package_closure.oom()}; }
+    if (sel mt_path_r.err) { ret err[fail.Fail].err{fail.refused(mt_path_r.err)}; }
     val mt_r: res[manifest.Doc, fail.Fail] = package_closure.parse_file(a, mt_path_r.ok);
     if (sel mt_r.err) { ret err[fail.Fail].err{mt_r.err}; }
     var mt: manifest.Doc = mt_r.ok;
@@ -49,10 +49,7 @@ pub fun lines(op: *package_closure.Operation, out: *Vector[str]) err[fail.Fail] 
         deps_t = deps_t_o.some;
         n      = toml.table_len(deps_t);
     }
-    if (n == 0) {
-        collections_vector.push[str](out, "no dependencies");
-        ret err[fail.Fail].ok{};
-    }
+    if (n == 0) { ret put(out, fail.format(a, "no dependencies")); }
 
     # the closure as the realized checkouts and path sources declare it
     var closure: Vector[package_closure.Request] = collections_vector.init[package_closure.Request](a);
@@ -71,51 +68,82 @@ pub fun lines(op: *package_closure.Operation, out: *Vector[str]) err[fail.Fail] 
         val value: *toml.Value = value_o.some;
         i = i + 1;
         if (value.tag != toml.TYPE_TABLE) {
-            collections_vector.push[str](out, package_closure.concat3(a, "  ", key, "  (invalid)"));
+            val invalid: err[fail.Fail] = put(out, fail.format(a, "  {}  (invalid)", key));
+            if (sel invalid.err) { ret invalid; }
             cnt;
         }
-        val full_r: res[str, fail.Fail] = package.dep_full_of(a, op.root, key);
-        var state:  str                 = "missing";
-        if (sel full_r.ok) {
-            val is_dir_r: res[bool, io_error.Error] = fs.is_dir(full_r.ok);
-            if ((sel is_dir_r.ok && is_dir_r.ok)) { state = "realized"; }
-        }
-        var line:    str = package_closure.concat3(a, "  ", key, "");
-        val git_src: str = package_closure.key_text(?value.data.table, "git");
-        if (!str_empty(git_src)) {
-            line = package_closure.concat3(a, line, "  git=", git_src);
-            val ref: str = package_closure.key_text(?value.data.table, "ref");
-            if (!str_empty(ref)) { line = package_closure.concat3(a, line, "  ref=", ref); }
-            val version: str = package_closure.key_text(?value.data.table, "version");
-            if (!str_empty(version)) { line = package_closure.concat3(a, line, "  version=", version); }
-            val pinned_r: res[opt[str], fail.Fail] = op.pins.read(op.pins.ctx, op.root, key);
-            if (sel pinned_r.ok) {
-                val pinned_o: opt[str] = pinned_r.ok;
-                if (sel pinned_o.some) { line = package_closure.concat3(a, line, "  pin=", pinned_o.some); }
-            }
-            if (sel full_r.ok) {
-                if (!str_empty(version) && str_equals(state, "realized")) {
-                    val ranged: res[str, fail.Fail] = range_state(op, key, full_r.ok, version);
-                    if (sel ranged.err) { ret err[fail.Fail].err{ranged.err}; }
-                    state = ranged.ok;
-                }
-            }
-        }
-        or { line = package_closure.concat3(a, line, "  path=", package_closure.key_text(?value.data.table, "path")); }
-        collections_vector.push[str](out, package_closure.concat3(a, line, "  ", state));
+        val line: res[str, fail.Fail] = entry_line(op, key, ?value.data.table);
+        val kept: err[fail.Fail]      = put(out, line);
+        if (sel kept.err) { ret kept; }
         val at: i64 = package_closure.index(?closure, key);
         if (at < 0 || !closure.data[at::usize].root_decl) { cnt; }
         val winner: *package_closure.Request = ?closure.data[at::usize];
         var k:      usize                    = 0;
         for (k < winner.overrode.len) {
-            val o:    *package_closure.Overridden      = ?winner.overrode.data[k];
-            val over: res[str, std_format.FormatError] = std_format.sprint(a, "    overrides {}, which requires {}", o.chain, o.asked);
-            if (sel over.err) { ret err[fail.Fail].err{package_closure.oom()}; }
-            collections_vector.push[str](out, over.ok);
+            val o:    *package_closure.Overridden = ?winner.overrode.data[k];
+            val over: err[fail.Fail]              = put(out, fail.format(a, "    overrides {}, which requires {}", o.chain, o.asked));
+            if (sel over.err) { ret over; }
             k = k + 1;
         }
     }
     ret err[fail.Fail].ok{};
+}
+
+# appends `line` to `out`, or the failure that refused to make or keep it
+fun put(out: *Vector[str], line: res[str, fail.Fail]) err[fail.Fail] {
+    if (sel line.err) { ret err[fail.Fail].err{line.err}; }
+    val pushed: res[usize, A.Error] = collections_vector.push[str](out, line.ok);
+    if (sel pushed.err) { ret err[fail.Fail].err{fail.refused(pushed.err)}; }
+    ret err[fail.Fail].ok{};
+}
+
+# the line of the root declaration `key`, whose table is `t`: its source, ref, version and pin,
+# then its state. a directory or a pin that cannot be read is listed with why, so `list` still
+# lists the rest
+fun entry_line(op: *package_closure.Operation, key: str, t: *toml.Table) res[str, fail.Fail] {
+    val a:      *A.Allocator        = op.a;
+    val full_r: res[str, fail.Fail] = package.dep_full_of(a, op.root, key);
+    var state:  res[str, fail.Fail] = res[str, fail.Fail].ok{"missing"};
+    if (sel full_r.ok) {
+        val is_dir_r: res[bool, io_error.Error] = fs.is_dir(full_r.ok);
+        if (sel is_dir_r.err) { state = fail.format(a, "unreadable ({})", fail.io_text(is_dir_r.err)); }
+        or {
+            if (is_dir_r.ok) { state = res[str, fail.Fail].ok{"realized"}; }
+        }
+    }
+    var line:    res[str, fail.Fail] = fail.format(a, "  {}", key);
+    val git_src: str                 = package_closure.key_text(t, "git");
+    if (str_empty(git_src)) { line = joined(a, line, "  path=", package_closure.key_text(t, "path")); }
+    or {
+        line = joined(a, line, "  git=", git_src);
+        val ref: str = package_closure.key_text(t, "ref");
+        if (!str_empty(ref)) { line = joined(a, line, "  ref=", ref); }
+        val version: str = package_closure.key_text(t, "version");
+        if (!str_empty(version)) { line = joined(a, line, "  version=", version); }
+        val pinned_r: res[opt[str], fail.Fail] = op.pins.read(op.pins.ctx, op.root, key);
+        if (sel pinned_r.err) {
+            val why: res[str, fail.Fail] = fail.format(a, "unreadable ({})", fail.describe(pinned_r.err));
+            if (sel why.err) { ret why; }
+            line = joined(a, line, "  pin=", why.ok);
+        }
+        or {
+            val pinned_o: opt[str] = pinned_r.ok;
+            if (sel pinned_o.some) { line = joined(a, line, "  pin=", pinned_o.some); }
+        }
+        var realized: bool = false;
+        if (sel state.ok) { realized = str_equals(state.ok, "realized"); }
+        if (sel full_r.ok) {
+            if (realized && !str_empty(version)) { state = range_state(op, key, full_r.ok, version); }
+        }
+    }
+    if (sel state.err) { ret state; }
+    ret joined(a, line, "  ", state.ok);
+}
+
+# `made` with `label` and `value` appended, or the failure that refused either
+fun joined(a: *A.Allocator, made: res[str, fail.Fail], label: str, value: str) res[str, fail.Fail] {
+    if (sel made.err) { ret made; }
+    ret fail.format(a, "{}{}{}", made.ok, label, value);
 }
 
 # a realized version-selected dependency's state in `mach dep list`: "realized" while its range
