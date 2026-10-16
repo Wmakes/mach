@@ -67,7 +67,7 @@ pub fun add(a: Wide, b: Wide) Wide {
     ret add_carry(a, b, ?c);
 }
 
-pub fun add_carry(a: Wide, b: Wide, carry_out: *bool) Wide {
+fun add_carry(a: Wide, b: Wide, carry_out: *bool) Wide {
     val lo:    u64 = a.lo + b.lo;
     var carry: u64 = 0;
     if (lo < a.lo) { carry = 1; }
@@ -82,7 +82,7 @@ pub fun sub(a: Wide, b: Wide) Wide {
     ret sub_borrow(a, b, ?c);
 }
 
-pub fun sub_borrow(a: Wide, b: Wide, borrow_out: *bool) Wide {
+fun sub_borrow(a: Wide, b: Wide, borrow_out: *bool) Wide {
     val lo:     u64 = a.lo - b.lo;
     var borrow: u64 = 0;
     if (a.lo < b.lo) { borrow = 1; }
@@ -90,22 +90,6 @@ pub fun sub_borrow(a: Wide, b: Wide, borrow_out: *bool) Wide {
     val hi:  u64 = hi1 - borrow;
     @borrow_out = a.hi < b.hi || hi1 < borrow;
     ret Wide{lo: lo, hi: hi};
-}
-
-# the two's complement sum, flagging a signed overflow: both operands share a
-# sign the sum does not
-pub fun add_signed(a: Wide, b: Wide, overflow_out: *bool) Wide {
-    val s: Wide = add(a, b);
-    @overflow_out = is_negative(a) == is_negative(b) && is_negative(s) != is_negative(a);
-    ret s;
-}
-
-# the two's complement difference, flagging a signed overflow: the operands
-# differ in sign and the difference does not share the minuend's
-pub fun sub_signed(a: Wide, b: Wide, overflow_out: *bool) Wide {
-    val d: Wide = sub(a, b);
-    @overflow_out = is_negative(a) != is_negative(b) && is_negative(d) != is_negative(a);
-    ret d;
 }
 
 pub fun neg(a: Wide) Wide {
@@ -166,7 +150,7 @@ pub fun mul(a: Wide, b: Wide) Wide {
     ret Wide{lo: low.lo, hi: hi};
 }
 
-pub fun mul_overflows_u(a: Wide, b: Wide) bool {
+fun mul_overflows_u(a: Wide, b: Wide) bool {
     if (a.hi != 0 && b.hi != 0) { ret true; }
     # at most one cross product is live, so their low halves add without carry
     val c1: Wide = mul_u64(a.lo, b.hi);
@@ -175,19 +159,6 @@ pub fun mul_overflows_u(a: Wide, b: Wide) bool {
     val low: Wide = mul_u64(a.lo, b.lo);
     val hi:  u64  = low.hi + c1.lo + c2.lo;
     ret hi < low.hi;
-}
-
-pub fun mul_overflows_s(a: Wide, b: Wide) bool {
-    if (is_zero(a) || is_zero(b)) { ret false; }
-    var ma: Wide = a;
-    var mb: Wide = b;
-    if (is_negative(a))          { ma = neg(a); }
-    if (is_negative(b))          { mb = neg(b); }
-    if (mul_overflows_u(ma, mb)) { ret true; }
-    val p:   Wide = mul(ma, mb);
-    val min: Wide = Wide{lo: 0, hi: TOP_BIT};
-    if (is_negative(a) != is_negative(b)) { ret lt_u(min, p); }
-    ret is_negative(p);
 }
 
 #[testing]
@@ -602,26 +573,6 @@ test sub__lane_borrow_and_flags {
     ret 0;
 }
 
-test add_signed__overflow_edges {
-    var o: bool;
-    if (!eq(add_signed(t_max_s(), from_u64(1), ?o), t_min()) || !o)                     { ret 1; }
-    if (!eq(add_signed(t_min(), from_i64(-1), ?o), t_max_s()) || !o)                    { ret 2; }
-    if (!eq(add_signed(t_max_s(), from_i64(-1), ?o), sub(t_max_s(), from_u64(1))) || o) { ret 3; }
-    if (!eq(add_signed(from_i64(-3), from_i64(-4), ?o), from_i64(-7)) || o)             { ret 4; }
-    if (!eq(add_signed(t_min(), t_max_s(), ?o), from_i64(-1)) || o)                     { ret 5; }
-    ret 0;
-}
-
-test sub_signed__overflow_edges {
-    var o: bool;
-    if (!eq(sub_signed(t_min(), from_u64(1), ?o), t_max_s()) || !o)        { ret 1; }
-    if (!eq(sub_signed(t_max_s(), from_i64(-1), ?o), t_min()) || !o)       { ret 2; }
-    if (!eq(sub_signed(from_i64(-3), from_i64(-4), ?o), from_u64(1)) || o) { ret 3; }
-    if (!eq(sub_signed(zero(), t_min(), ?o), t_min()) || !o)               { ret 4; }
-    if (!eq(sub_signed(from_i64(-1), t_max_s(), ?o), t_min()) || o)        { ret 5; }
-    ret 0;
-}
-
 test lt__signed_and_unsigned_orders {
     if (!lt_u(from_u64(1), t_wide(0, 1)))  { ret 1; }
     if (lt_u(t_max_u(), zero()))           { ret 2; }
@@ -708,20 +659,6 @@ test mul__wrapping_and_overflow_flags {
     val b: Wide = from_u64(0xFFFFFFFFFFFFFFFF);
     if (!eq(mul(a, b), t_wide(0x1, 0xFFFFFFFFFFFFFFFD))) { ret 12; }
     if (!mul_overflows_u(a, b))                          { ret 13; }
-    ret 0;
-}
-
-test mul_overflows_s__edges {
-    if (mul_overflows_s(t_min(), from_u64(1)))                        { ret 1; }
-    if (!mul_overflows_s(t_min(), from_i64(-1)))                      { ret 2; }
-    if (mul_overflows_s(t_max_s(), from_i64(-1)))                     { ret 3; }
-    if (!mul_overflows_s(t_max_s(), from_u64(2)))                     { ret 4; }
-    if (mul_overflows_s(t_wide(0, 0x4000000000000000), from_i64(-2))) { ret 5; }
-    if (!mul_overflows_s(t_wide(0, 0x4000000000000000), from_u64(2))) { ret 6; }
-    if (mul_overflows_s(t_min(), zero()))                             { ret 7; }
-    if (mul_overflows_s(from_i64(-3), from_i64(-7)))                  { ret 8; }
-    if (!mul_overflows_s(t_min(), t_min()))                           { ret 9; }
-    if (!mul_overflows_s(from_i64(-1), t_min()))                      { ret 10; }
     ret 0;
 }
 
