@@ -646,6 +646,17 @@ pub fun join(a: *A.Allocator, va: ...) res[str, Fail] {
     ret res[str, Fail].ok{r.ok};
 }
 
+# `cause` with `context` in front of its text, joined into `a`, which owns the
+# new text; the class, the kind and the places are kept. a reported cause has
+# no text to extend, and a refused join leaves the cause as it was, so the
+# context never takes the cause's place
+pub fun prefixed(a: *A.Allocator, context: str, cause: Fail) Fail {
+    if (is_reported(cause)) { ret cause; }
+    val joined: res[str, Fail] = join(a, context, describe(cause));
+    if (sel joined.err) { ret cause; }
+    ret with_text(cause, joined.ok);
+}
+
 # an internal failure whose text is `fmt` formatted with `va` into `a`, which
 # owns the text; a refusal to format is the failure instead
 pub fun formatted(a: *A.Allocator, fmt: str, va: ...) Fail {
@@ -1186,5 +1197,27 @@ test formatted_user__a_refused_text_stays_the_refusal {
     if (!str_equals(r.message, "out of memory")) { ret 5; }
     T.clear_failure(?t);
     if (T.leaked(?t) || T.double_free_count(?t) != 0) { ret 6; }
+    ret 0;
+}
+
+test prefixed__the_context_goes_in_front_and_never_in_place {
+    var t:    T.Testing;
+    val made: err[A.Error] = T.make(?t);
+    if (sel made.err) { ret 1; }
+    fin { T.dnit(?t); }
+    val a:   *A.Allocator = T.allocator_of(?t);
+    val msg: Fail         = prefixed(a, "ctx: ", message("broken"));
+    if (!t_message_with(msg, "ctx: broken")) { ret 2; }
+    dnit(a, msg);
+    val keyed: Fail = prefixed(a, "ctx: ", environment(diagnostic_kind.FS_READ, "cannot read"));
+    if (!sel keyed.environment || kind_of(keyed) != diagnostic_kind.FS_READ) { ret 3; }
+    if (!str_equals(describe(keyed), "ctx: cannot read"))                    { ret 4; }
+    dnit(a, keyed);
+    if (!is_reported(prefixed(a, "ctx: ", reported()))) { ret 5; }
+    T.fail_at_ordinal(?t, T.attempt_count(?t) + 1);
+    val refused_join: Fail = prefixed(a, "ctx: ", user(diagnostic_kind.TOML_MALFORMED, "bad object"));
+    T.clear_failure(?t);
+    if (!t_user_with(refused_join, "bad object") || kind_of(refused_join) != diagnostic_kind.TOML_MALFORMED) { ret 6; }
+    if (T.leaked(?t) || T.double_free_count(?t) != 0)                                                        { ret 7; }
     ret 0;
 }

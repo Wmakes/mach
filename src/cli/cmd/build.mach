@@ -175,14 +175,7 @@ pub rec Planned {
 pub fun plan_invocation(a: *A.Allocator, root: str, cli: *args.CliArgs, goal: request.BuildGoal,
     mode: manifest.ArtifactDefault, configure_deps: bool, ps: *session.Session) res[Planned, fail.Fail] {
     val res_session: res[session.Session, fail.Fail] = toolchain.session_init(a);
-    if (sel res_session.err) {
-        # the context goes in front of the cause, which keeps its kind
-        val cause: fail.Fail = res_session.err;
-        if (fail.is_reported(cause)) { ret res[Planned, fail.Fail].err{cause}; }
-        val joined: res[str, fail.Fail] = fail.join(a, "failed to initialise compiler session: ", fail.describe(cause));
-        if (sel joined.err) { ret res[Planned, fail.Fail].err{cause}; }
-        ret res[Planned, fail.Fail].err{fail.with_text(cause, joined.ok)};
-    }
+    if (sel res_session.err) { ret res[Planned, fail.Fail].err{fail.prefixed(a, "failed to initialise compiler session: ", res_session.err)}; }
     @ps = res_session.ok;
 
     # the plans borrow the manifest, so it lives in the session they run in
