@@ -454,7 +454,6 @@ fun t_req_exit_code(a: *A.Allocator, exe: str) i32 {
 
 $if ($mach.build.arch == $mach.arch.x86_64 && $mach.build.os == $mach.os.linux) {
     test run__a_glob_requirement_builds_first_and_the_bin_embeds_its_output {
-
         var a:      A.Allocator;
         val make_r: err[A.Error] = page.make(?a);
         if (sel make_r.err) { ret 1; }

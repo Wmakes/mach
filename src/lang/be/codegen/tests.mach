@@ -29,7 +29,6 @@ use std.types.string.str_replace;
 
 use mach.lang.be.codegen;
 use mach.lang.be.codegen.dwarf;
-use mach.lang.be.linker;
 use mir_lower: mach.lang.be.codegen.mir.lower;
 use mach.lang.be.codegen.testing.CODEGEN_CASE_NONE;
 use mach.lang.be.codegen.testing.CODEGEN_CASE_PUBLIC_MUL;
@@ -95,6 +94,7 @@ use mach.lang.be.codegen.testing.tag_native_case;
 use mach.lang.be.codegen.testing.vec_codegen_defined;
 use mach.lang.be.codegen.testing.vec_diag;
 use mach.lang.be.codegen.testing.vec_lower;
+use mach.lang.be.linker;
 use mach.lang.build.engine;
 use mach.lang.build.outcome;
 use build_plan: mach.lang.build.plan;
@@ -124,14 +124,14 @@ use mach.lang.module;
 use output_testing: mach.lang.output.testing;
 use mach.lang.query;
 use mach.lang.session;
+#[testing]
+use mach.lang.stack;
 use mach.lang.step;
 use catalog_artifact:  mach.lang.target.catalog.artifact;
 use catalog_subsystem: mach.lang.target.catalog.subsystem;
 use extension_x64:     mach.lang.target.extension.x64;
 use target_of:         mach.lang.target.of;
 use mach.lang.target.of.bin;
-#[testing]
-use mach.lang.stack;
 #[testing]
 use target_os_linux: mach.lang.target.os.linux;
 
@@ -5103,8 +5103,8 @@ test linkage_name__test_declaration {
     var s: session.Session = sr.ok;
     fin { session.dnit(?s); }
 
-    var names: [1]str = [1]str{"main.mach"};
-    var texts: [1]str = [1]str{"fun probe() i32 { ret 0; }\ntest probe { ret probe(); }\nfun main() i32 { ret probe(); }\n"};
+    var names: [1]str                          = [1]str{"main.mach"};
+    var texts: [1]str                          = [1]str{"fun probe() i32 { ret 0; }\ntest probe { ret probe(); }\nfun main() i32 { ret probe(); }\n"};
     val pr:    res[project.Project, fail.Fail] = driver.scaffold_build(?s, ?alloc, driver.fixture_manifest(), ?names[0], ?texts[0], 1, "");
     if (sel pr.err) { ret 1; }
     var p: project.Project = pr.ok;
@@ -5126,22 +5126,22 @@ test linkage_name__test_declaration {
     if (module.is_nil(mid)) { ret 5; }
     val normal: *me_ir.Module = project.module_at(?p, mid::u32).ir_module;
     val tests:  *me_ir.Module = project.module_at(?p, mid::u32).test.ir_module;
-    if (tests == nil)                                                { ret 5; }
-    if (defined_fn_exact(?s, tests, "uniontest.main#probe") != 1)     { ret 6; }
-    if (defined_fn_exact(?s, tests, "uniontest.main.probe") != 0)     { ret 7; }
-    if (defined_fn_exact(?s, normal, "uniontest.main.probe") != 1)   { ret 8; }
-    if (defined_fn_exact(?s, normal, "uniontest.main#probe") != 0)   { ret 9; }
+    if (tests == nil)                                              { ret 5; }
+    if (defined_fn_exact(?s, tests, "uniontest.main#probe") != 1)  { ret 6; }
+    if (defined_fn_exact(?s, tests, "uniontest.main.probe") != 0)  { ret 7; }
+    if (defined_fn_exact(?s, normal, "uniontest.main.probe") != 1) { ret 8; }
+    if (defined_fn_exact(?s, normal, "uniontest.main#probe") != 0) { ret 9; }
     ret 0;
 }
 
 #[testing]
 val TESTING_HELPER: u32 = 1;
 #[testing]
-val TESTING_SLOT: u32 = 2;
+val TESTING_SLOT:   u32 = 2;
 #[testing]
 val TESTING_CALLED: u32 = 4;
 #[testing]
-val TESTING_PLAIN: u32 = 8;
+val TESTING_PLAIN:  u32 = 8;
 # the normal object carried a `#[testing]` declaration, which only a test object may
 #[testing]
 val TESTING_LEAKED: u32 = 16;
@@ -5215,7 +5215,7 @@ fun testing_objects(test_mode: bool, seen: *u32) i32 {
     val main: *project.ModuleEntry = project.module_at(?p, main_mid::u32);
     val api:  *project.ModuleEntry = project.module_at(?p, api_mid::u32);
     if (main.object_image == nil || api.object_image == nil) { ret 11; }
-    if (image_names(api.object_image, ?s.interner, "plain"))  { @seen = @seen | TESTING_PLAIN; }
+    if (image_names(api.object_image, ?s.interner, "plain")) { @seen = @seen | TESTING_PLAIN; }
     if (image_names(api.object_image, ?s.interner, "fixture_")
         || image_calls(main.object_image, ?s.interner, "fixture_")) { @seen = @seen | TESTING_LEAKED; }
     if (!test_mode) { ret 0; }
@@ -5240,7 +5240,7 @@ test testing_mark__emitted_only_for_tests {
     if (ordinary != 0)         { ret ordinary; }
     if (seen != TESTING_PLAIN) { ret 20; }
     val tested: i32 = testing_objects(true, ?seen);
-    if (tested != 0)                                                                              { ret tested; }
+    if (tested != 0)                                                                               { ret tested; }
     if (seen != (TESTING_PLAIN | TESTING_HELPER | TESTING_SLOT | TESTING_CALLED | TESTING_SHARED)) { ret 30; }
     ret 0;
 }
@@ -5390,7 +5390,7 @@ fun fs_elf_unmapped_header(alloc: *A.Allocator, target_name: str) bool {
     var i:            u32  = 0;
     for (i < n) {
         if (segs[i].off == 0)                                                 { ok = false; }
-        if (segs[i].vaddr >= FS_VADDR_CEIL)                                { ok = false; }
+        if (segs[i].vaddr >= FS_VADDR_CEIL)                                   { ok = false; }
         if (segs[i].off + segs[i].filesz > img.len::u64)                      { ok = false; }
         if (entry >= segs[i].vaddr && entry < segs[i].vaddr + segs[i].filesz) { covers_entry = true; }
         i = i + 1;

@@ -22,11 +22,11 @@ use A:               std.allocator;
 use chrono_duration: std.chrono.duration;
 use std.chrono.time;
 
-use mach.lang.testrun;
 use mach.lang.diagnostic;
 use diagnostic_kind: mach.lang.diagnostic.kind;
 use mach.lang.fail;
 use lang_source: mach.lang.source;
+use mach.lang.testrun;
 
 # the event stream of every command that reports progress. the build engine and
 # the test runner report what happens as it happens, in order, to a sink the

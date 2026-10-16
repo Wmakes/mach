@@ -24,7 +24,6 @@ use T: std.allocator.testing;
 use std.sync.atomic;
 use sync_thread: std.sync.thread;
 
-use mach.lang.testrun;
 use mach.lang.be.codegen;
 use mach.lang.be.linker;
 use build_emit: mach.lang.build.emit;
@@ -37,16 +36,26 @@ use diagnostic_kind: mach.lang.diagnostic.kind;
 use mach.lang.driver;
 use mach.lang.driver.cache;
 use mach.lang.driver.codec;
+#[testing]
+use mach.lang.driver.frontend;
 use mach.lang.driver.passes;
 use mach.lang.driver.project;
 use mach.lang.driver.request;
 use mach.lang.driver.toolchain;
 use mach.lang.fail;
+#[testing]
+use fe_sema:          mach.lang.fe.sema;
+#[testing]
+use sema_checked:     mach.lang.fe.sema.checked;
 use lang_fingerprint: mach.lang.fingerprint;
 use mach.lang.intern;
 use mach.lang.manifest;
+#[testing]
+use mach.lang.manifest.target.on_host;
 use me_ir: mach.lang.me.ir;
 use mach.lang.me.lower.testrunner;
+#[testing]
+use mach.lang.me.pipeline;
 #[testing]
 use mach.lang.module;
 use mach.lang.output;
@@ -54,38 +63,29 @@ use mach.lang.query;
 use mach.lang.readout;
 use mach.lang.session;
 use lang_source: mach.lang.source;
+#[testing]
+use mach.lang.stack;
 use mach.lang.step;
 use lang_target:       mach.lang.target;
 use catalog_artifact:  mach.lang.target.catalog.artifact;
 use catalog_subsystem: mach.lang.target.catalog.subsystem;
-use target_of:         mach.lang.target.of;
+#[testing]
+use mach.lang.target.isa;
+use target_of: mach.lang.target.of;
+use mach.lang.testrun;
 use mach.lang.wire;
-#[testing]
-use std.print;
-#[testing]
-use std.types.string.str_len;
-#[testing]
-use std.process.exec;
 #[testing]
 use std_format: std.format;
 #[testing]
+use std.print;
+#[testing]
+use std.process.exec;
+#[testing]
 use std.system.panic.panic;
-#[testing]
-use fe_sema: mach.lang.fe.sema;
-#[testing]
-use mach.lang.me.pipeline;
-#[testing]
-use mach.lang.driver.frontend;
-#[testing]
-use sema_checked: mach.lang.fe.sema.checked;
-#[testing]
-use mach.lang.manifest.target.on_host;
 #[testing]
 use std.text.string.str_dup;
 #[testing]
-use mach.lang.stack;
-#[testing]
-use mach.lang.target.isa;
+use std.types.string.str_len;
 
 rec UnitState {
     inputs:     *target_of.ObjectInput;
@@ -3228,8 +3228,8 @@ fun built_outcome(alloc: *A.Allocator, root: str, goal: request.BuildGoal, artif
 fun renamed_reexport_links(main_text: str) i32 {
     var alloc: A.Allocator;
     page.make(?alloc);
-    var names: [3]str = [3]str{"main.mach", "mid.mach", "leaf.mach"};
-    var texts: [3]str = [3]str{main_text, "fwd renamed_alias: uniontest.leaf.original_name;\nfwd uniontest.leaf.original_name;\n", "pub fun original_name() i32 { ret 42; }\n"};
+    var names: [3]str              = [3]str{"main.mach", "mid.mach", "leaf.mach"};
+    var texts: [3]str              = [3]str{main_text, "fwd renamed_alias: uniontest.leaf.original_name;\nfwd uniontest.leaf.original_name;\n", "pub fun original_name() i32 { ret 42; }\n"};
     val made:  res[str, fail.Fail] = driver.scaffold(?alloc, driver.fixture_manifest(), ?names[0], ?texts[0], 3);
     if (sel made.err) { ret 1; }
     fin { fs.remove_all(?alloc, made.ok); }
@@ -3267,8 +3267,8 @@ fun testing_dep_scaffold(alloc: *A.Allocator, main_text: str) res[str, fail.Fail
     if (sel dep_src.err) { ret res[str, fail.Fail].err{fail.refused(dep_src.err)}; }
     val dir: err[fs.FsError] = fs.create_dir_all(alloc, dep_src.ok, 493);
     if (sel dir.err) { ret res[str, fail.Fail].err{fail.fs_refused(dir.err)}; }
-    var paths: [3]str;
-    var bytes: [3]str;
+    var paths:        [3]str;
+    var bytes:        [3]str;
     val dep_manifest: res[str, A.Error] = types_path.join(alloc, root, "dep/leaf");
     if (sel dep_manifest.err) { ret res[str, fail.Fail].err{fail.refused(dep_manifest.err)}; }
     var files: [3]str = [3]str{manifest.MANIFEST_FILE, "lib.mach", "shape.mach"};
@@ -3283,7 +3283,7 @@ fun testing_dep_scaffold(alloc: *A.Allocator, main_text: str) res[str, fail.Fail
     bytes[0] = lib_manifest(alloc, "leaf");
     bytes[1] = "use leaf.shape;\nval BASE: u64 = 4 * $size_of(shape.Pair);\n#[testing]\nval END: u64 = BASE - 22;\n#[testing]\npub fun helper() i32 { ret END::i32; }\npub fun plain() i32 { ret (BASE - 64)::i32; }\n";
     bytes[2] = "pub rec Pair {\n    a: u64;\n    b: u64;\n}\n";
-    i = 0;
+    i        = 0;
     for (i < 3) {
         val wrote: err[fs.FsError] = fs.write_bytes(paths[i], bytes[i], str_len(bytes[i]), 420);
         if (sel wrote.err) { ret res[str, fail.Fail].err{fail.fs_refused(wrote.err)}; }
@@ -3338,7 +3338,7 @@ fun tag_verdicts(rows: *fe_sema.TagFixture, count: usize) i32 {
             if (sel planned.err) { ret -3; }
             val built: res[outcome.BuildOutcome, fail.Fail] = execute_warm(?w.plan, 0, ?w.s, ?w.published, ?w.alloc, nil);
             if (sel built.err) { ret -4; }
-            var bo:       outcome.BuildOutcome = built.ok;
+            var bo:       outcome.BuildOutcome  = built.ok;
             val severity: outcome.BuildSeverity = bo.severity;
             outcome.outcome_dnit(?bo);
             if (severity > outcome.BUILD_USER || (severity == outcome.BUILD_OK) != rows[i].accept) {
@@ -3354,29 +3354,29 @@ fun tag_verdicts(rows: *fe_sema.TagFixture, count: usize) i32 {
 
 # each tag fixture's verdict holds through lowering and codegen under both profiles
 test tag_corpus__verdict_matches_across_profiles {
-    if (tag_verdicts(?fe_sema.TAG_CASE_RECIPES[0], $length_of(fe_sema.TAG_CASE_RECIPES)) != 0)               { ret 1; }
-    if (tag_verdicts(?fe_sema.TAG_CONSTRUCTION_NAMES[0], $length_of(fe_sema.TAG_CONSTRUCTION_NAMES)) != 0)   { ret 2; }
+    if (tag_verdicts(?fe_sema.TAG_CASE_RECIPES[0], $length_of(fe_sema.TAG_CASE_RECIPES)) != 0)                 { ret 1; }
+    if (tag_verdicts(?fe_sema.TAG_CONSTRUCTION_NAMES[0], $length_of(fe_sema.TAG_CONSTRUCTION_NAMES)) != 0)     { ret 2; }
     if (tag_verdicts(?fe_sema.TAG_RECORD_LITERAL_FORMS[0], $length_of(fe_sema.TAG_RECORD_LITERAL_FORMS)) != 0) { ret 3; }
-    if (tag_verdicts(?fe_sema.TAG_FORGED_CASTS[0], $length_of(fe_sema.TAG_FORGED_CASTS)) != 0)               { ret 4; }
-    if (tag_verdicts(?fe_sema.TAG_IS_TAG_QUERIES[0], $length_of(fe_sema.TAG_IS_TAG_QUERIES)) != 0)           { ret 5; }
-    if (tag_verdicts(?fe_sema.CANONICAL_CONSTRUCTION[0], $length_of(fe_sema.CANONICAL_CONSTRUCTION)) != 0)   { ret 6; }
-    if (tag_verdicts(?fe_sema.CANONICAL_ARITY[0], $length_of(fe_sema.CANONICAL_ARITY)) != 0)                 { ret 7; }
-    if (tag_verdicts(?fe_sema.CANONICAL_PAYLOADS[0], $length_of(fe_sema.CANONICAL_PAYLOADS)) != 0)           { ret 8; }
-    if (tag_verdicts(?fe_sema.CANONICAL_DISTINCTNESS[0], $length_of(fe_sema.CANONICAL_DISTINCTNESS)) != 0)   { ret 9; }
-    if (tag_verdicts(?fe_sema.CANONICAL_CASTS[0], $length_of(fe_sema.CANONICAL_CASTS)) != 0)                 { ret 10; }
-    if (tag_verdicts(?fe_sema.SEL_PAYLOAD_GUARDS[0], $length_of(fe_sema.SEL_PAYLOAD_GUARDS)) != 0)           { ret 11; }
-    if (tag_verdicts(?fe_sema.SEL_SELECTOR_USAGE[0], $length_of(fe_sema.SEL_SELECTOR_USAGE)) != 0)           { ret 12; }
-    if (tag_verdicts(?fe_sema.SEL_ONE_CASE[0], $length_of(fe_sema.SEL_ONE_CASE)) != 0)                       { ret 13; }
-    if (tag_verdicts(?fe_sema.SEL_NON_PLACES[0], $length_of(fe_sema.SEL_NON_PLACES)) != 0)                   { ret 14; }
-    if (tag_verdicts(?fe_sema.SEL_ESCAPES[0], $length_of(fe_sema.SEL_ESCAPES)) != 0)                         { ret 15; }
-    if (tag_verdicts(?fe_sema.SEL_ARMS[0], $length_of(fe_sema.SEL_ARMS)) != 0)                               { ret 16; }
-    if (tag_verdicts(?fe_sema.SEL_OUTSIDE_GUARDS[0], $length_of(fe_sema.SEL_OUTSIDE_GUARDS)) != 0)           { ret 17; }
-    if (tag_verdicts(?fe_sema.SEL_AND_GUARDS[0], $length_of(fe_sema.SEL_AND_GUARDS)) != 0)                   { ret 18; }
-    if (tag_verdicts(?fe_sema.SEL_EXITING_CHAINS[0], $length_of(fe_sema.SEL_EXITING_CHAINS)) != 0)           { ret 19; }
-    if (tag_verdicts(?fe_sema.SEL_WHOLE_ASSIGNMENT[0], $length_of(fe_sema.SEL_WHOLE_ASSIGNMENT)) != 0)       { ret 20; }
-    if (tag_verdicts(?fe_sema.SEL_FIN_RETURNS[0], $length_of(fe_sema.SEL_FIN_RETURNS)) != 0)                 { ret 21; }
-    if (tag_verdicts(?fe_sema.SEL_AUTO_DEREF[0], $length_of(fe_sema.SEL_AUTO_DEREF)) != 0)                   { ret 22; }
-    if (tag_verdicts(?fe_sema.SEL_COMPTIME[0], $length_of(fe_sema.SEL_COMPTIME)) != 0)                       { ret 23; }
+    if (tag_verdicts(?fe_sema.TAG_FORGED_CASTS[0], $length_of(fe_sema.TAG_FORGED_CASTS)) != 0)                 { ret 4; }
+    if (tag_verdicts(?fe_sema.TAG_IS_TAG_QUERIES[0], $length_of(fe_sema.TAG_IS_TAG_QUERIES)) != 0)             { ret 5; }
+    if (tag_verdicts(?fe_sema.CANONICAL_CONSTRUCTION[0], $length_of(fe_sema.CANONICAL_CONSTRUCTION)) != 0)     { ret 6; }
+    if (tag_verdicts(?fe_sema.CANONICAL_ARITY[0], $length_of(fe_sema.CANONICAL_ARITY)) != 0)                   { ret 7; }
+    if (tag_verdicts(?fe_sema.CANONICAL_PAYLOADS[0], $length_of(fe_sema.CANONICAL_PAYLOADS)) != 0)             { ret 8; }
+    if (tag_verdicts(?fe_sema.CANONICAL_DISTINCTNESS[0], $length_of(fe_sema.CANONICAL_DISTINCTNESS)) != 0)     { ret 9; }
+    if (tag_verdicts(?fe_sema.CANONICAL_CASTS[0], $length_of(fe_sema.CANONICAL_CASTS)) != 0)                   { ret 10; }
+    if (tag_verdicts(?fe_sema.SEL_PAYLOAD_GUARDS[0], $length_of(fe_sema.SEL_PAYLOAD_GUARDS)) != 0)             { ret 11; }
+    if (tag_verdicts(?fe_sema.SEL_SELECTOR_USAGE[0], $length_of(fe_sema.SEL_SELECTOR_USAGE)) != 0)             { ret 12; }
+    if (tag_verdicts(?fe_sema.SEL_ONE_CASE[0], $length_of(fe_sema.SEL_ONE_CASE)) != 0)                         { ret 13; }
+    if (tag_verdicts(?fe_sema.SEL_NON_PLACES[0], $length_of(fe_sema.SEL_NON_PLACES)) != 0)                     { ret 14; }
+    if (tag_verdicts(?fe_sema.SEL_ESCAPES[0], $length_of(fe_sema.SEL_ESCAPES)) != 0)                           { ret 15; }
+    if (tag_verdicts(?fe_sema.SEL_ARMS[0], $length_of(fe_sema.SEL_ARMS)) != 0)                                 { ret 16; }
+    if (tag_verdicts(?fe_sema.SEL_OUTSIDE_GUARDS[0], $length_of(fe_sema.SEL_OUTSIDE_GUARDS)) != 0)             { ret 17; }
+    if (tag_verdicts(?fe_sema.SEL_AND_GUARDS[0], $length_of(fe_sema.SEL_AND_GUARDS)) != 0)                     { ret 18; }
+    if (tag_verdicts(?fe_sema.SEL_EXITING_CHAINS[0], $length_of(fe_sema.SEL_EXITING_CHAINS)) != 0)             { ret 19; }
+    if (tag_verdicts(?fe_sema.SEL_WHOLE_ASSIGNMENT[0], $length_of(fe_sema.SEL_WHOLE_ASSIGNMENT)) != 0)         { ret 20; }
+    if (tag_verdicts(?fe_sema.SEL_FIN_RETURNS[0], $length_of(fe_sema.SEL_FIN_RETURNS)) != 0)                   { ret 21; }
+    if (tag_verdicts(?fe_sema.SEL_AUTO_DEREF[0], $length_of(fe_sema.SEL_AUTO_DEREF)) != 0)                     { ret 22; }
+    if (tag_verdicts(?fe_sema.SEL_COMPTIME[0], $length_of(fe_sema.SEL_COMPTIME)) != 0)                         { ret 23; }
     ret 0;
 }
 
@@ -3399,8 +3399,8 @@ fun trap_target(alloc: *A.Allocator, target_name: str, runner_name: str, release
     val made: err[fail.Fail] = warm_project_init(?w);
     if (sel made.err) { ret 1; }
     fin { warm_project_dnit(?w); }
-    var names: [1]str = [1]str{"main.mach"};
-    var texts: [1]str = [1]str{driver.joined(alloc, tag_trap_program(), native_stub())};
+    var names:      [1]str         = [1]str{"main.mach"};
+    var texts:      [1]str         = [1]str{driver.joined(alloc, tag_trap_program(), native_stub())};
     val scaffolded: err[fail.Fail] = warm_project_scaffold(?w, native_manifest(), ?names[0], ?texts[0], 1);
     if (sel scaffolded.err) { ret 2; }
     var rq: request.BuildRequest = request.defaults();
@@ -3442,8 +3442,8 @@ $if ($mach.build.os == $mach.os.linux && $mach.build.arch == $mach.arch.x86_64) 
     test grouped_expr__values_survive_to_run_time {
         var alloc: A.Allocator;
         page.make(?alloc);
-        var names: [1]str = [1]str{"main.mach"};
-        var texts: [1]str = [1]str{driver.joined(?alloc, "val N: i32 = (4);\ntest grouped {\n    var x: i32 = (N);\n    (x) = ('a')::i32 + (1);\n    val s: *u8 = (\"hi\");\n    val p: *u8 = (nil);\n    val f: f64 = (2.5);\n    if (p != nil) { ret 11; }\n    if (f != 2.5) { ret 12; }\n    if (s[0] != 104 || s[1] != 105 || s[2] != 0) { ret 13; }\n    ret (x) - 98;\n}\n", dispatcher_stub())};
+        var names: [1]str              = [1]str{"main.mach"};
+        var texts: [1]str              = [1]str{driver.joined(?alloc, "val N: i32 = (4);\ntest grouped {\n    var x: i32 = (N);\n    (x) = ('a')::i32 + (1);\n    val s: *u8 = (\"hi\");\n    val p: *u8 = (nil);\n    val f: f64 = (2.5);\n    if (p != nil) { ret 11; }\n    if (f != 2.5) { ret 12; }\n    if (s[0] != 104 || s[1] != 105 || s[2] != 0) { ret 13; }\n    ret (x) - 98;\n}\n", dispatcher_stub())};
         val made:  res[str, fail.Fail] = driver.scaffold(?alloc, driver.fixture_manifest(), ?names[0], ?texts[0], 1);
         if (sel made.err) { ret 1; }
         fin { fs.remove_all(?alloc, made.ok); }
@@ -3766,8 +3766,8 @@ test execute_warm__a_shared_library_fwd_of_a_generic_warns_at_the_fwd {
     fin { session.dnit(?s); }
 
     val count: i32 = shared_fwd_arm(?alloc, "shared", ?s);
-    if (count < 0)                                                                                             { ret 10 - count; }
-    if (count != 3)                                                                                            { ret 2; }
+    if (count < 0)                                                                                          { ret 10 - count; }
+    if (count != 3)                                                                                         { ret 2; }
     if (!diag_has_warning(?s.diags, "`fwd` of the generic declaration `ident` exports nothing"))            { ret 3; }
     if (!diag_has_warning(?s.diags, "`fwd` of the comptime-parameter declaration `sized` exports nothing")) { ret 4; }
     if (!diag_has_warning(?s.diags, "`fwd` of the pack declaration `total` exports nothing"))               { ret 5; }
@@ -3902,10 +3902,10 @@ test execute_warm__unchanged_rebuild_reuses_and_stays_bounded {
     if (query.peek_revision(?w.s.queries, ?passes.LINK, 0) != lk_1)                                      { bad = 1; }
     if (intern.count(?w.s.interner) != interned_1)                                                       { bad = 1; }
     if (lang_source.count(?w.s.sources) != sources_1)                                                    { bad = 1; }
-    if (shard_len(?w.s, ?frontend.PARSE) != n_parse_1)                                                { bad = 1; }
-    if (shard_len(?w.s, ?frontend.SEMA) != n_sema_1)                                                  { bad = 1; }
-    if (shard_len(?w.s, ?passes.LOWER) != n_low_1)                                                    { bad = 1; }
-    if (shard_len(?w.s, ?passes.CODEGEN) != n_cg_1)                                                   { bad = 1; }
+    if (shard_len(?w.s, ?frontend.PARSE) != n_parse_1)                                                   { bad = 1; }
+    if (shard_len(?w.s, ?frontend.SEMA) != n_sema_1)                                                     { bad = 1; }
+    if (shard_len(?w.s, ?passes.LOWER) != n_low_1)                                                       { bad = 1; }
+    if (shard_len(?w.s, ?passes.CODEGEN) != n_cg_1)                                                      { bad = 1; }
 
     val src_dir:       str             = driver.joined(?w.alloc, w.root, "/", "src");
     val a_path:        str             = driver.joined(?w.alloc, src_dir, "/", "a.mach");
@@ -3920,10 +3920,10 @@ test execute_warm__unchanged_rebuild_reuses_and_stays_bounded {
     if (query.peek_revision(?w.s.queries, ?passes.CODEGEN, module.stable_index(st_b)::u64) != cg_b_1) { bad = 1; }
     if (query.peek_revision(?w.s.queries, ?passes.LINK, 0) == lk_1)                                   { bad = 1; }
     if (lang_source.count(?w.s.sources) != sources_1)                                                 { bad = 1; }
-    if (shard_len(?w.s, ?frontend.PARSE) != n_parse_1)                                             { bad = 1; }
-    if (shard_len(?w.s, ?frontend.SEMA) != n_sema_1)                                               { bad = 1; }
-    if (shard_len(?w.s, ?passes.LOWER) != n_low_1)                                                 { bad = 1; }
-    if (shard_len(?w.s, ?passes.CODEGEN) != n_cg_1)                                                { bad = 1; }
+    if (shard_len(?w.s, ?frontend.PARSE) != n_parse_1)                                                { bad = 1; }
+    if (shard_len(?w.s, ?frontend.SEMA) != n_sema_1)                                                  { bad = 1; }
+    if (shard_len(?w.s, ?passes.LOWER) != n_low_1)                                                    { bad = 1; }
+    if (shard_len(?w.s, ?passes.CODEGEN) != n_cg_1)                                                   { bad = 1; }
 
     ret bad;
 }
@@ -4149,7 +4149,7 @@ test execute_warm__parallel_pool_rebuilds_only_stale_modules {
     if (query.peek_revision(?w.s.queries, ?passes.CODEGEN, module.stable_index(st_main)::u64) != cg_m_1) { bad = 1; }
     if (query.peek_revision(?w.s.queries, ?passes.CODEGEN, module.stable_index(st_b)::u64) != cg_b_1)    { bad = 1; }
     if (query.peek_revision(?w.s.queries, ?passes.LINK, 0) == lk_1)                                      { bad = 1; }
-    if (shard_len(?w.s, ?passes.CODEGEN) != n_cg_1)                                                   { bad = 1; }
+    if (shard_len(?w.s, ?passes.CODEGEN) != n_cg_1)                                                      { bad = 1; }
 
     ret bad;
 }
@@ -4385,8 +4385,8 @@ test execute_warm__bin_name_keys_the_artifact_cache {
     # second: only obj/ could hand the second the object the first just wrote
     var c0: Vector[u8];
     var c1: Vector[u8];
-    if (fresh_unit(?w.alloc, w.root, 0, ?c0) != 0)         { ret 2; }
-    if (fresh_unit(?w.alloc, w.root, 1, ?c1) != 0)         { ret 2; }
+    if (fresh_unit(?w.alloc, w.root, 0, ?c0) != 0)                  { ret 2; }
+    if (fresh_unit(?w.alloc, w.root, 1, ?c1) != 0)                  { ret 2; }
     if (!same_image_bytes(?c0, ?v0) || !same_image_bytes(?c1, ?v1)) { bad = 3; }
 
     ret bad;
@@ -4496,8 +4496,8 @@ test execute_warm__pool_error_message_survives_teardown {
     if (sel r.err) { bad = 1; }
     if (sel r.ok) {
         var bo: outcome.BuildOutcome = r.ok;
-        if (bo.severity == outcome.BUILD_OK)             { bad = 1; }
-        if (rd.failures.len != 1)                        { bad = 1; }
+        if (bo.severity == outcome.BUILD_OK)          { bad = 1; }
+        if (rd.failures.len != 1)                     { bad = 1; }
         if (!recording_contains(?rd, "'frobnicate'")) { bad = 1; }
         if (!recording_contains(?rd, "c.mach"))       { bad = 1; }
         outcome.outcome_dnit(?bo);
@@ -4586,7 +4586,7 @@ test execute_warm__refuses_a_manifest_that_changed_after_planning {
     if (sel r.err) { bad = 1; }
     if (sel r.ok) {
         var bo: outcome.BuildOutcome = r.ok;
-        if (bo.severity != outcome.BUILD_USER)                                   { bad = 1; }
+        if (bo.severity != outcome.BUILD_USER)                                { bad = 1; }
         or (!recording_contains(?rd, "changed after this build was planned")) { bad = 1; }
         outcome.outcome_dnit(?bo);
     }
@@ -4863,8 +4863,8 @@ test step_out__refused_inside_compiler_owned_trees {
     var i: usize = 0;
     for (i < 4) {
         val c:       StepOut = STEP_OUTS[i];
-        var needles: [3]str    = [3]str{"[step.vendor]", c.out, c.tree};
-        var n:       usize     = 3;
+        var needles: [3]str  = [3]str{"[step.vendor]", c.out, c.tree};
+        var n:       usize   = 3;
         if (str_equals(c.tree, "")) { n = 0; }
         val code: i32 = vendor_build(?alloc, manifest_vendor(?alloc, c.argv, c.out), "", ?needles[0], n);
         if (code != 0) { ret (i::i32 + 1) * 10 + code; }
@@ -4945,11 +4945,11 @@ test build__gate_on_a_variable_fails_the_build {
         "fun sink(va: ...) u32 { var acc: u32 = 0; $each a in va { acc = acc + a; } ret acc; }\n#[symbol(\"",
         entry_symbol(), "\")]\nfun start() i32 { sink(7::u32, 8::u32); ret 0; }\n");
 
-    if (sema_checked.sema_clean(pk))              { bad = 1; }
+    if (sema_checked.sema_clean(pk)) { bad = 1; }
     if (engine_build_fails(pk) != 0) { bad = 1; }
 
-    if (engine_build_fails(ok) == 0) { bad = 1; }
-    if (!sema_checked.sema_clean(ok))             { bad = 1; }
+    if (engine_build_fails(ok) == 0)  { bad = 1; }
+    if (!sema_checked.sema_clean(ok)) { bad = 1; }
 
     ret bad;
 }
@@ -5188,8 +5188,8 @@ $if ($mach.build.os == $mach.os.linux && $mach.build.arch == $mach.arch.x86_64) 
 
         # the default artifact
         val dr: i32 = artifact_test_statuses(?alloc, ?s, root, "", ?labels, ?statuses);
-        if (dr != 0)                                                                     { ret 10 + dr; }
-        if (labels.len != 2)                                                             { ret 20; }
+        if (dr != 0)                                                                  { ret 10 + dr; }
+        if (labels.len != 2)                                                          { ret 20; }
         if (status_of(?labels, ?statuses, "lessons.hello#own") != 0)                  { ret 21; }
         if (status_of(?labels, ?statuses, "lessons.common#names_its_artifact") != 11) { ret 22; }
 
@@ -5197,8 +5197,8 @@ $if ($mach.build.os == $mach.os.linux && $mach.build.arch == $mach.arch.x86_64) 
         labels.len   = 0;
         statuses.len = 0;
         val sr2: i32 = artifact_test_statuses(?alloc, ?s, root, "shaded", ?labels, ?statuses);
-        if (sr2 != 0)                                                                    { ret 30 + sr2; }
-        if (labels.len != 2)                                                             { ret 40; }
+        if (sr2 != 0)                                                                 { ret 30 + sr2; }
+        if (labels.len != 2)                                                          { ret 40; }
         if (status_of(?labels, ?statuses, "lessons.shaded#own") != 0)                 { ret 41; }
         if (status_of(?labels, ?statuses, "lessons.common#names_its_artifact") != 12) { ret 42; }
         ret 0;
@@ -5261,7 +5261,6 @@ test test_goal__compile_error_collects_no_tests {
     session.dnit(?s);
     ret bad;
 }
-
 
 # the failure compiling the linux `app` artifact of the project at `root` to objects reports,
 # the steps it needs run first, or none when it compiled clean; `no_cache` reruns every step
@@ -5334,7 +5333,7 @@ fun engine_build_fails(src: str) i32 {
     var published: publication.Publications = publication.init(?alloc);
     fin { publication.dnit(?published); }
     val r: res[outcome.BuildOutcome, fail.Fail] = execute_warm(?bp, 0, ?s, ?published, ?alloc, nil);
-    if (sel r.err) { ret 1; }
+    if (sel r.err)                         { ret 1; }
     if (r.ok.severity == outcome.BUILD_OK) { ret 1; }
     if (r.ok.artifacts.len != 0)           { ret 1; }
     ret 0;

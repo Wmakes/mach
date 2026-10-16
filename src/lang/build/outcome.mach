@@ -117,9 +117,9 @@ pub fun record_artifact(bo: *BuildOutcome, kind: catalog_artifact.Kind, path: st
 
 # t's text is borrowed; the outcome keeps its own copy. a nil text stays nil
 pub fun record_test(bo: *BuildOutcome, t: testrun.TestArtifact) err[A.Error] {
-    val a:     *A.Allocator = bo.tests.a;
+    val a:     *A.Allocator         = bo.tests.a;
     var owned: testrun.TestArtifact = testrun.TestArtifact{line: t.line, idx: t.idx};
-    var moved: bool         = false;
+    var moved: bool                 = false;
     fin {
         if (!moved) { free_test_artifact(a, ?owned); }
     }
@@ -315,7 +315,7 @@ test merge__transfers_artifacts_and_tests_and_empties_the_source {
     if (t_refused(record_artifact(?agg, catalog_artifact.EXECUTABLE, "agg-existing"))) { ret 1; }
 
     var unit: BuildOutcome = outcome_init(?a);
-    if (t_refused(record_artifact(?unit, catalog_artifact.OBJECTS, "unit-object")))              { ret 2; }
+    if (t_refused(record_artifact(?unit, catalog_artifact.OBJECTS, "unit-object")))                      { ret 2; }
     if (t_refused(record_test(?unit, testrun.TestArtifact{module: "m", name: "l", file: "f", line: 1}))) { ret 3; }
 
     if (t_refused(merge(?agg, ?unit))) { ret 4; }

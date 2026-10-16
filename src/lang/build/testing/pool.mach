@@ -26,7 +26,6 @@ use std.process.events;
 use std.process.exec;
 use sync_cancel: std.sync.cancel;
 
-use mach.lang.testrun;
 use build_testing: mach.lang.build.testing;
 use mach.lang.diagnostic;
 use diagnostic_kind: mach.lang.diagnostic.kind;
@@ -34,6 +33,7 @@ use mach.lang.fail;
 use mach.lang.output;
 use mach.lang.readout;
 use mach.lang.subprocess;
+use mach.lang.testrun;
 
 # the most bytes of a test's output its capture keeps
 val CAPTURE_LIMIT: usize = 65536;

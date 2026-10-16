@@ -1002,7 +1002,7 @@ fun register_attempt(ordinal: usize, finished: *bool) i32 {
     val sr: res[Session, fail.Fail] = init(T.allocator_of(?failing));
     if (sel sr.err) { ret 2; }
     var s:   Session = sr.ok;
-    var bad: i32             = 0;
+    var bad: i32     = 0;
     T.fail_at_ordinal(?failing, T.attempt_count(?failing) + ordinal);
     val r: err[fail.Fail] = register_module_identity(?s, module.id(3), intern.str_id(9), module.stable_id(5));
     if (sel r.err) {

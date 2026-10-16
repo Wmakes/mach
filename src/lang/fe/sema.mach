@@ -4265,7 +4265,7 @@ test test_result__literal_outside_the_status_range_is_refused_at_the_ret {
     if (sel made.err) { ret 4; }
     # exactly the three test rets, not `wide`
     if (diagnostic.errors_saying(?c.r.s.diags, "outside the status range 0..255") != 3) { ret 5; }
-    if (!diagnostic.note_says(?c.r.s.diags, "eight bits on every host"))                 { ret 6; }
+    if (!diagnostic.note_says(?c.r.s.diags, "eight bits on every host"))                { ret 6; }
     # the range itself, and a run-time value, are the dispatcher's business
     if (!sema_checked.sema_clean("fun main() i32 { ret 0; }\nfun wide() i32 { ret 256; }\ntest d { ret 255; }\ntest e { ret 0; }\ntest f { ret wide(); }\ntest g { ret 200 + 55; }\n")) { ret 7; }
     ret 0;

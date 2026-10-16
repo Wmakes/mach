@@ -28,7 +28,6 @@ use cli_diagnostic: mach.cli.diagnostic;
 use mach.cli.exit;
 use mach.cli.fixture;
 use mach.cli.util;
-use mach.lang.testrun;
 use mach.lang.build.engine;
 use mach.lang.build.outcome;
 use build_plan:   mach.lang.build.plan;
@@ -41,6 +40,7 @@ use mach.lang.fail;
 use mach.lang.host;
 use mach.lang.manifest;
 use mach.lang.session;
+use mach.lang.testrun;
 
 # `--filter <substr>`
 val FILTER: args.FlagSpec = args.FlagSpec{name: "--filter", value: "substr", arity: args.ARITY_VALUE, doc: "run only tests whose qualified name contains the substring", default: "", repeatable: false, alias_of: nil};

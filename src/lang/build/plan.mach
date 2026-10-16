@@ -1630,8 +1630,8 @@ test test_goal__plans_the_artifact_of_the_selected_target {
     rq.goal         = request.GOAL_TESTS;
 
     val pr: res[BuildPlan, fail.Fail] = plan(?alloc, ?itn, lang_target.t_registry(), ?m, rq);
-    if (sel pr.err)                                           { ret 2; }
-    if (pr.ok.units.len != 1)                                 { ret 3; }
+    if (sel pr.err)                                            { ret 2; }
+    if (pr.ok.units.len != 1)                                  { ret 3; }
     if (!str_equals(pr.ok.units.data[0].sel_artifact, "tool")) { ret 4; }
     ret 0;
 }

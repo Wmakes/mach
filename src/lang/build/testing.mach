@@ -18,7 +18,6 @@ use std.types.string.str_empty;
 
 use A: std.allocator;
 
-use mach.lang.testrun;
 use mach.lang.be.codegen;
 use mach.lang.be.linker;
 use mach.lang.be.obj;
@@ -49,6 +48,7 @@ use catalog_artifact:  mach.lang.target.catalog.artifact;
 use catalog_subsystem: mach.lang.target.catalog.subsystem;
 use target_of:         mach.lang.target.of;
 use target_testing:    mach.lang.target.testing;
+use mach.lang.testrun;
 use mach.lang.wire;
 
 pub fun classify_subprocess(term: *subprocess.SubprocessTerminal, expired: bool, cap_ok: bool, cap: *subprocess.CaptureIoResult) testrun.GateResult {

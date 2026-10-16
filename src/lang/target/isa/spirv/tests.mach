@@ -48,7 +48,6 @@ use mach.lang.driver.passes;
 use mach.lang.driver.project;
 use mach.lang.driver.request;
 use mach.lang.driver.toolchain;
-use mach.lang.package.git;
 use mach.lang.fail;
 use mach.lang.host;
 use mach.lang.intern;
@@ -56,6 +55,7 @@ use mach.lang.manifest;
 use mach.lang.me.pipeline;
 use lang_mir: mach.lang.mir;
 use mach.lang.module;
+use mach.lang.package.git;
 use mach.lang.session;
 use lang_source: mach.lang.source;
 use mach.lang.step;
@@ -4307,7 +4307,7 @@ test inert_handle__crosses_a_module_boundary {
     dep_texts[0] = "#[handle(\"spirv\", \"image\", 0, 1, 0, 0, 0, 1, 0)]\npub def Texture2D;\n\n#[handle(\"spirv\", \"sampled_image\", Texture2D)]\npub def Sampler2D;\n\n#[op(\"spirv\", \"core\", \"OpImageSampleImplicitLod\")]\npub fun sample(s: Sampler2D, uv: f32x2) f32x4;\n";
     val dep_root: str            = driver.joined(?alloc, root, "/", "dep/tex");
     val wr:       err[fail.Fail] = write_node_multi(?alloc, dep_root, dep_manifest, ?dep_names[0], ?dep_texts[0], 1);
-    if (sel wr.err)                                                 { ret 2; }
+    if (sel wr.err)                                                         { ret 2; }
     if (!git.scratch_repo(?alloc, root, "https://example.invalid/app.git")) { ret 2; }
 
     var pick: manifest.Selectors              = manifest.t_selectors("", "linux", "");

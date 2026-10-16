@@ -56,9 +56,13 @@ use mach.lang.module;
 #[testing]
 use ast_decl:   mach.lang.fe.ast.decl;
 #[testing]
+use ast_expr:   mach.lang.fe.ast.expr;
+#[testing]
 use ast_id:     mach.lang.fe.ast.id;
 #[testing]
 use ast_module: mach.lang.fe.ast.module;
+#[testing]
+use ast_stmt:   mach.lang.fe.ast.stmt;
 #[testing]
 use mach.lang.fe.comptime;
 #[testing]
@@ -66,9 +70,31 @@ use comptime_path: mach.lang.fe.comptime.path;
 #[testing]
 use fe_load:       mach.lang.fe.load;
 #[testing]
+use mach.lang.fe.resolve;
+#[testing]
+use fe_sema: mach.lang.fe.sema;
+#[testing]
 use mach.lang.growth;
 #[testing]
+use mach.lang.manifest.target.on_host;
+#[testing]
+use me_ir:          mach.lang.me.ir;
+#[testing]
+use ir_instruction: mach.lang.me.ir.instruction;
+#[testing]
+use mach.lang.me.ir.value;
+#[testing]
+use mach.lang.package.git;
+#[testing]
+use mach.lang.retention;
+#[testing]
+use session_embed: mach.lang.session.embed;
+#[testing]
+use mach.lang.stack;
+#[testing]
 use catalog_os: mach.lang.target.catalog.os;
+#[testing]
+use mach.lang.type;
 #[testing]
 use std.allocator.page;
 #[testing]
@@ -76,7 +102,15 @@ use T: std.allocator.testing;
 #[testing]
 use std.collections.map;
 #[testing]
+use io_error: std.io.error;
+#[testing]
+use std.memory;
+#[testing]
 use std.print;
+#[testing]
+use std.system.capability;
+#[testing]
+use std.system.panic.panic;
 #[testing]
 use types_string: std.types.string;
 #[testing]
@@ -87,40 +121,6 @@ use std.types.string.str_equals;
 use std.types.string.str_region_equals;
 #[testing]
 use std.types.string.str_replace;
-#[testing]
-use std.system.panic.panic;
-#[testing]
-use std.system.capability;
-#[testing]
-use mach.lang.stack;
-#[testing]
-use mach.lang.manifest.target.on_host;
-#[testing]
-use mach.lang.package.git;
-#[testing]
-use io_error: std.io.error;
-#[testing]
-use ast_expr: mach.lang.fe.ast.expr;
-#[testing]
-use ast_stmt: mach.lang.fe.ast.stmt;
-#[testing]
-use session_embed: mach.lang.session.embed;
-#[testing]
-use mach.lang.fe.resolve;
-#[testing]
-use fe_sema:        mach.lang.fe.sema;
-#[testing]
-use me_ir:          mach.lang.me.ir;
-#[testing]
-use ir_instruction: mach.lang.me.ir.instruction;
-#[testing]
-use mach.lang.me.ir.value;
-#[testing]
-use mach.lang.retention;
-#[testing]
-use mach.lang.type;
-#[testing]
-use std.memory;
 
 fwd frontend.begin_query_phase;
 fwd frontend.finish_query_phase;
@@ -4495,7 +4495,6 @@ test stack_reserve__refused_at_load_on_a_format_without_one {
     ret bad;
 }
 
-
 # a rebuild of the project at `root` on a live session, its default cell loaded as a build loads it
 #[testing]
 pub fun rebuild(s: *session.Session, root: str) res[project.Project, fail.Fail] {
@@ -7870,7 +7869,7 @@ test test_goal__leaves_out_another_targets_modules {
     var s: session.Session = sr.ok;
     fin { session.dnit(?s); }
 
-    val mtext: str = "[project]\nmach = \">=5\"\nid = \"split\"\nversion = \"0.0.0\"\nsrc = \"src\"\nwork = \"out/{target.name}/{profile.name}\"\n\n[target.host]\nisa = \"x86_64\"\nos = \"linux\"\nabi = \"sysv64\"\n\n[target.gpu]\nisa = \"spirv\"\nos = \"freestanding\"\nabi = \"spirv\"\n\n[profile.debug]\ndefault = true\noptimize = false\ndebug = false\nsimd = \"scalarize\"\n\n[artifact.app]\nkind = \"static\"\nentry = \"main.mach\"\nout = \"{project.work}/lib/app\"\ntargets = [\"host\"]\nlink = []\nneed = []\n\n[artifact.shader]\nkind = \"bin\"\nentry = \"frag.mach\"\nout = \"{project.work}/spv/frag.spv\"\ntargets = [\"gpu\"]\nlink = []\nneed = []\n";
+    val mtext: str    = "[project]\nmach = \">=5\"\nid = \"split\"\nversion = \"0.0.0\"\nsrc = \"src\"\nwork = \"out/{target.name}/{profile.name}\"\n\n[target.host]\nisa = \"x86_64\"\nos = \"linux\"\nabi = \"sysv64\"\n\n[target.gpu]\nisa = \"spirv\"\nos = \"freestanding\"\nabi = \"spirv\"\n\n[profile.debug]\ndefault = true\noptimize = false\ndebug = false\nsimd = \"scalarize\"\n\n[artifact.app]\nkind = \"static\"\nentry = \"main.mach\"\nout = \"{project.work}/lib/app\"\ntargets = [\"host\"]\nlink = []\nneed = []\n\n[artifact.shader]\nkind = \"bin\"\nentry = \"frag.mach\"\nout = \"{project.work}/spv/frag.spv\"\ntargets = [\"gpu\"]\nlink = []\nneed = []\n";
     var names: [4]str = [4]str{"main.mach", "frag.mach", "shaderlib.mach", "shared.mach"};
     var texts: [4]str = [4]str{
         "use split.shared;\n\ntest host { ret 0; }\n",
@@ -7900,7 +7899,7 @@ test test_goal__leaves_out_another_targets_modules {
     if (!project.in_topo(?p, "split.shared")) { ret 7; }
     if (!project.in_topo(?p, "split.main"))   { ret 8; }
     val se: err[fail.Fail] = run_sema_pass(?p);
-    if (sel se.err)                                { ret 9; }
+    if (sel se.err)                              { ret 9; }
     if (diagnostic.error_count(?p.s.diags) != 0) { ret 10; }
     ret 0;
 }
@@ -7914,7 +7913,7 @@ test validate_local_links__skips_a_link_filtered_to_another_target {
     var s: session.Session = sr.ok;
     fin { session.dnit(?s); }
 
-    val mtext: str = "[project]\nmach = \">=5\"\nid = \"winlocal\"\nversion = \"0.0.0\"\nsrc = \"src\"\nwork = \"out/{target.name}/{profile.name}\"\n\n[target.linux]\nisa = \"x86_64\"\nos = \"linux\"\nabi = \"sysv64\"\n\n[target.windows]\nisa = \"x86_64\"\nos = \"windows\"\nabi = \"win64\"\n\n[link.winobj]\nsource = \"local\"\npath = \"{project.work}/win.o\"\nos = [\"windows\"]\nisa = [\"*\"]\nabi = [\"*\"]\nexport = false\n\n[artifact.app]\nkind = \"bin\"\nentry = \"main.mach\"\nout = \"{project.work}/bin/app\"\ntargets = [\"*\"]\nlink = []\nneed = []\n[profile.debug]\ndefault = true\noptimize = false\ndebug = true\nsimd = \"scalarize\"\n[profile.release]\noptimize = true\ndebug = false\nsimd = \"scalarize\"\n";
+    val mtext:  str                 = "[project]\nmach = \">=5\"\nid = \"winlocal\"\nversion = \"0.0.0\"\nsrc = \"src\"\nwork = \"out/{target.name}/{profile.name}\"\n\n[target.linux]\nisa = \"x86_64\"\nos = \"linux\"\nabi = \"sysv64\"\n\n[target.windows]\nisa = \"x86_64\"\nos = \"windows\"\nabi = \"win64\"\n\n[link.winobj]\nsource = \"local\"\npath = \"{project.work}/win.o\"\nos = [\"windows\"]\nisa = [\"*\"]\nabi = [\"*\"]\nexport = false\n\n[artifact.app]\nkind = \"bin\"\nentry = \"main.mach\"\nout = \"{project.work}/bin/app\"\ntargets = [\"*\"]\nlink = []\nneed = []\n[profile.debug]\ndefault = true\noptimize = false\ndebug = true\nsimd = \"scalarize\"\n[profile.release]\noptimize = true\ndebug = false\nsimd = \"scalarize\"\n";
     var names:  [1]str              = [1]str{"main.mach"};
     var texts:  [1]str              = [1]str{"fun main() i32 { ret 0; }\n"};
     val root_r: res[str, fail.Fail] = scaffold(?alloc, mtext, ?names[0], ?texts[0], 1);
@@ -7960,7 +7959,7 @@ test resolve_artifact_path__default_unknown_and_per_target {
 
     var pick: manifest.Selectors  = manifest.t_selectors("", "linux", "");
     val pr:   res[str, fail.Fail] = config.resolve_artifact_path(?alloc, reg, root, ?pick);
-    if (sel pr.err)                                                   { ret 4; }
+    if (sel pr.err)                                                     { ret 4; }
     if (!path_is(?alloc, pr.ok, root, "out/linux/debug/bin/uniontest")) { ret 5; }
 
     var unknown: manifest.Selectors  = manifest.t_selectors("nope", "linux", "");
@@ -7968,14 +7967,14 @@ test resolve_artifact_path__default_unknown_and_per_target {
     if (sel refused.ok) { ret 6; }
 
     # the artifact a target builds names its own output
-    val split: str = "[project]\nmach = \">=5\"\nid = \"uniontest\"\nversion = \"0.0.0\"\nsrc = \"src\"\nwork = \"out/{target.name}/{profile.name}\"\n\n[target.linux]\nisa = \"x86_64\"\nos = \"linux\"\nabi = \"sysv64\"\n\n[target.windows]\nisa = \"x86_64\"\nos = \"windows\"\nabi = \"win64\"\n\n[artifact.uniontest]\nkind = \"bin\"\nentry = \"main.mach\"\nout = \"{project.work}/bin/uniontest\"\ntargets = [\"linux\"]\nlink = []\nneed = []\n\n[artifact.uniontest-windows]\nkind = \"bin\"\nentry = \"main.mach\"\nout = \"{project.work}/bin/uniontest.exe\"\ntargets = [\"windows\"]\nlink = []\nneed = []\n[profile.debug]\ndefault = true\noptimize = false\ndebug = true\nsimd = \"scalarize\"\n[profile.release]\noptimize = true\ndebug = false\nsimd = \"scalarize\"\n";
+    val split:   str                 = "[project]\nmach = \">=5\"\nid = \"uniontest\"\nversion = \"0.0.0\"\nsrc = \"src\"\nwork = \"out/{target.name}/{profile.name}\"\n\n[target.linux]\nisa = \"x86_64\"\nos = \"linux\"\nabi = \"sysv64\"\n\n[target.windows]\nisa = \"x86_64\"\nos = \"windows\"\nabi = \"win64\"\n\n[artifact.uniontest]\nkind = \"bin\"\nentry = \"main.mach\"\nout = \"{project.work}/bin/uniontest\"\ntargets = [\"linux\"]\nlink = []\nneed = []\n\n[artifact.uniontest-windows]\nkind = \"bin\"\nentry = \"main.mach\"\nout = \"{project.work}/bin/uniontest.exe\"\ntargets = [\"windows\"]\nlink = []\nneed = []\n[profile.debug]\ndefault = true\noptimize = false\ndebug = true\nsimd = \"scalarize\"\n[profile.release]\noptimize = true\ndebug = false\nsimd = \"scalarize\"\n";
     val split_r: res[str, fail.Fail] = scaffold(?alloc, split, ?names[0], ?texts[0], 1);
     if (sel split_r.err) { ret 7; }
     val split_root: str = split_r.ok;
     fin { fs.remove_all(?alloc, split_root); }
-    var windows: manifest.Selectors  = manifest.t_selectors("", "windows", "");
+    var windows:  manifest.Selectors  = manifest.t_selectors("", "windows", "");
     val split_pr: res[str, fail.Fail] = config.resolve_artifact_path(?alloc, reg, split_root, ?windows);
-    if (sel split_pr.err)                                                                     { ret 8; }
+    if (sel split_pr.err)                                                                 { ret 8; }
     if (!path_is(?alloc, split_pr.ok, split_root, "out/windows/debug/bin/uniontest.exe")) { ret 9; }
     ret 0;
 }
@@ -7989,7 +7988,7 @@ test build_project__selected_artifact_sets_the_root_module {
     var s: session.Session = sr.ok;
     fin { session.dnit(?s); }
 
-    val mtext: str = "[project]\nmach = \">=5\"\nid = \"uniontest\"\nversion = \"0.0.0\"\nsrc = \"src\"\nwork = \"out/{target.name}/{profile.name}\"\n\n[target.linux]\nisa = \"x86_64\"\nos = \"linux\"\nabi = \"sysv64\"\n\n[artifact.alpha]\nkind = \"bin\"\nentry = \"alpha.mach\"\nout = \"{project.work}/bin/alpha\"\ntargets = [\"*\"]\nlink = []\nneed = []\n\n[artifact.beta]\nkind = \"bin\"\nentry = \"beta.mach\"\nout = \"{project.work}/bin/beta\"\ntargets = [\"*\"]\nlink = []\nneed = []\ndefault = true\n[profile.debug]\ndefault = true\noptimize = false\ndebug = true\nsimd = \"scalarize\"\n";
+    val mtext:  str                 = "[project]\nmach = \">=5\"\nid = \"uniontest\"\nversion = \"0.0.0\"\nsrc = \"src\"\nwork = \"out/{target.name}/{profile.name}\"\n\n[target.linux]\nisa = \"x86_64\"\nos = \"linux\"\nabi = \"sysv64\"\n\n[artifact.alpha]\nkind = \"bin\"\nentry = \"alpha.mach\"\nout = \"{project.work}/bin/alpha\"\ntargets = [\"*\"]\nlink = []\nneed = []\n\n[artifact.beta]\nkind = \"bin\"\nentry = \"beta.mach\"\nout = \"{project.work}/bin/beta\"\ntargets = [\"*\"]\nlink = []\nneed = []\ndefault = true\n[profile.debug]\ndefault = true\noptimize = false\ndebug = true\nsimd = \"scalarize\"\n";
     var names:  [2]str              = [2]str{"alpha.mach", "beta.mach"};
     var texts:  [2]str              = [2]str{"fun main() i32 { ret 0; }\n", "fun main() i32 { ret 0; }\n"};
     val root_r: res[str, fail.Fail] = scaffold(?alloc, mtext, ?names[0], ?texts[0], 2);
@@ -8034,7 +8033,7 @@ test build_project__refuses_an_unregistered_isa {
         project.dnit_project(?p);
         ret 4;
     }
-    if (!fail.is_user(pr.err))                                                                                 { ret 5; }
+    if (!fail.is_user(pr.err))                                                                                { ret 5; }
     if (!str_contains(fail.describe(pr.err), "no isa implementation registered for 'mos6502' (registered: ")) { ret 6; }
     ret 0;
 }
@@ -8091,7 +8090,7 @@ fun import_library_beside(s: *session.Session, alloc: *A.Allocator, names: *str,
     var p: project.Project = pr.ok;
     fin { project.dnit_project(?p); }
     val status: fail.PhaseStatus = frontend.frontend_status(?p);
-    if (!sel status.kind.accepted) { ret res[str, fail.Fail].err{fail.phase_failure(status)}; }
+    if (!sel status.kind.accepted)              { ret res[str, fail.Fail].err{fail.phase_failure(status)}; }
     if (p.emit_len >= project.module_count(?p)) { ret res[str, fail.Fail].err{fail.message("the fixture loaded no uncompiled module")}; }
     ret import_library_of(?p, sym);
 }
@@ -8242,8 +8241,8 @@ fun nesting_build(arg: *u8) {
     val sr: res[session.Session, fail.Fail] = toolchain.session_init(?r.alloc);
     if (sel sr.err) { ret; }
     r.s = sr.ok;
-    var names: [1]str                           = [1]str{"main.mach"};
-    var texts: [1]str                           = [1]str{r.src};
+    var names: [1]str                          = [1]str{"main.mach"};
+    var texts: [1]str                          = [1]str{r.src};
     val pr:    res[project.Project, fail.Fail] = scaffold_build(?r.s, ?r.alloc, fixture_manifest(), ?names[0], ?texts[0], 1, "");
     if (sel pr.err) {
         session.dnit(?r.s);
@@ -8385,9 +8384,9 @@ test manifest__the_root_and_each_dependency_are_held_to_one_rule_per_key {
     var s: session.Session = sr.ok;
     fin { session.dnit(?s); }
 
-    val origin:     str = "https://example.invalid/old.git";
-    val clean_head: str = on_host("[project]\nmach = \">=5\"\nid = \"app\"\nversion = \"0.0.0\"\nsrc = \"src\"\nwork = \"out/{target.name}/{profile.name}\"\n\n[target.linux]\nisa = \"x86_64\"\nos = \"linux\"\nabi = \"sysv64\"\n\n[profile.debug]\noptimize = false\ndebug = false\nsimd = \"scalarize\"\n");
-    val root_tail:  str = "\n[artifact.app]\nkind = \"bin\"\nentry = \"main.mach\"\nout = \"{project.work}/bin/app\"\ntargets = [\"*\"]\nlink = []\nneed = []\n\n[dep.old]\ngit = \"https://example.invalid/old.git\"\nref = \"branch/main\"\n";
+    val origin:     str                              = "https://example.invalid/old.git";
+    val clean_head: str                              = on_host("[project]\nmach = \">=5\"\nid = \"app\"\nversion = \"0.0.0\"\nsrc = \"src\"\nwork = \"out/{target.name}/{profile.name}\"\n\n[target.linux]\nisa = \"x86_64\"\nos = \"linux\"\nabi = \"sysv64\"\n\n[profile.debug]\noptimize = false\ndebug = false\nsimd = \"scalarize\"\n");
+    val root_tail:  str                              = "\n[artifact.app]\nkind = \"bin\"\nentry = \"main.mach\"\nout = \"{project.work}/bin/app\"\ntargets = [\"*\"]\nlink = []\nneed = []\n\n[dep.old]\ngit = \"https://example.invalid/old.git\"\nref = \"branch/main\"\n";
     val unknown_r:  res[str, std_format.FormatError] = std_format.sprint(?alloc, "{}emit_ir = true\n{}", clean_head, root_tail);
     if (sel unknown_r.err) { ret 3; }
     var names:  [1]str              = [1]str{"main.mach"};
@@ -8402,22 +8401,22 @@ test manifest__the_root_and_each_dependency_are_held_to_one_rule_per_key {
     val dep_root: res[str, A.Error] = types_path.join(?alloc, root, "dep/old");
     if (sel dep_root.err) { ret 5; }
     val dep_manifest: str = "[project]\nmach = \">=5\"\nid = \"old\"\ndescription = \"an old library\"\nversion = \"0.0.0\"\nsrc = \"src\"\nwork = \"out/{target.name}/{profile.name}\"\n\n[artifact.lib]\nkind = \"static\"\nentry = \"lib.mach\"\nout = \"{project.work}/lib/l\"\ntargets = [\"*\"]\nlink = []\nneed = []\ndefault = true\n[profile.debug]\ndefault = true\noptimize = false\ndebug = true\nsimd = \"scalarize\"\n[profile.release]\noptimize = true\ndebug = false\nsimd = \"scalarize\"\n";
-    if (!git.t_put(?alloc, dep_root.ok, "mach.toml", dep_manifest))                { ret 6; }
+    if (!git.t_put(?alloc, dep_root.ok, "mach.toml", dep_manifest))               { ret 6; }
     if (!git.t_put(?alloc, dep_r.ok, "lib.mach", "pub fun v() i32 { ret 1; }\n")) { ret 6; }
-    if (!git.scratch_repo(?alloc, dep_root.ok, origin))                            { ret 7; }
-    if (!git.write_gitmodules(?alloc, root, "old", origin))                        { ret 8; }
-    if (!git.scratch_repo(?alloc, root, "https://example.invalid/app.git"))        { ret 9; }
+    if (!git.scratch_repo(?alloc, dep_root.ok, origin))                           { ret 7; }
+    if (!git.write_gitmodules(?alloc, root, "old", origin))                       { ret 8; }
+    if (!git.scratch_repo(?alloc, root, "https://example.invalid/app.git"))       { ret 9; }
 
     val root_refusal: opt[str] = build_refusal(?s, root);
-    if (sel root_refusal.none)                                                                  { ret 10; }
+    if (sel root_refusal.none)                                                                   { ret 10; }
     if (!str_contains(root_refusal.some, "mach.toml: unknown key 'emit_ir' in [profile.debug]")) { ret 11; }
 
     # with the root clean, the dependency's unknown key is refused under its name
     val fixed_r: res[str, std_format.FormatError] = std_format.sprint(?alloc, "{}{}", clean_head, root_tail);
-    if (sel fixed_r.err)                              { ret 12; }
+    if (sel fixed_r.err)                                   { ret 12; }
     if (!git.t_put(?alloc, root, "mach.toml", fixed_r.ok)) { ret 12; }
     val dep_refusal: opt[str] = build_refusal(?s, root);
-    if (sel dep_refusal.none)                                                                                  { ret 13; }
+    if (sel dep_refusal.none)                                                                                   { ret 13; }
     if (!str_contains(dep_refusal.some, "dependency 'old': mach.toml: unknown key 'description' in [project]")) { ret 14; }
 
     # a dependency is held to the rules of the project being built: one missing a
@@ -8590,7 +8589,7 @@ test git_dependency__transitive_resolves_flat_ignoring_the_nested_placeholder {
     val a_manifest:         str = joined(?alloc, lib_manifest(?alloc, "a"),
         "\n[dep.b]\ngit = \"https://example.invalid/b.git\"\nref = \"branch/main\"\n", "");
     val create_dir_all_r: err[fs.FsError] = fs.create_dir_all(?alloc, nested_placeholder, 493);
-    val node_written:  err[fail.Fail]  = write_node(?alloc, a_root, a_manifest,
+    val node_written:     err[fail.Fail]  = write_node(?alloc, a_root, a_manifest,
         "lib.mach", "pub fun a() i32 { ret 1; }\n");
     val node_written2: err[fail.Fail] = write_node(?alloc, b_root, lib_manifest(?alloc, "b"),
         "lib.mach", "pub fun b() i32 { ret 2; }\n");
@@ -8681,8 +8680,8 @@ test dep_closure__transitive_manifest_failures_name_the_dependency {
     val root:       str = root_r.ok;
     val a_manifest: str = joined(?alloc, lib_manifest(?alloc, "a"),
         "\n[dep.b]\npath = \"../source-b\"\n", "");
-    val a_root:           str            = joined(?alloc, root, "/", "dep/a");
-    val b_root:           str            = joined(?alloc, root, "/", "dep/b");
+    val a_root:        str            = joined(?alloc, root, "/", "dep/a");
+    val b_root:        str            = joined(?alloc, root, "/", "dep/b");
     val node_written2: err[fail.Fail] = write_node(?alloc, a_root, a_manifest, "lib.mach", "pub fun a() i32 { ret 1; }\n");
     val node_written:  err[fail.Fail] = write_node(?alloc, b_root, "not = [", "lib.mach", "pub fun b() i32 { ret 2; }\n");
     if (sel node_written2.err) {
@@ -8791,7 +8790,7 @@ test comptime_identity__a_dependency_reads_its_own_project {
         "\"\nversion = \"2.5.0\"\nsrc = \"src\"\nwork = \"out/{target.name}/{profile.name}\"\n[profile.debug]\noptimize = false\ndebug = false\nsimd = \"scalarize\"\n\n[artifact.lib]\nkind = \"static\"\nentry = \"lib.mach\"\nout = \"{project.work}/lib/l\"\ntargets = [\"*\"]\nlink = []\nneed = []\n");
     val lib_src: str            = "$if ($mach.project.id != \"a\" || $mach.project.version != \"2.5.0\" || $mach.project.version.minor != 5\n    || $project.id != \"app\" || $project.version != \"0.0.0\"\n    || $mach.source.file != \"src/lib.mach\" || $mach.source.module != \"a.lib\") {\n    val WRONG: i32 = unresolved;\n}\n\npub fun v() i32 { ret 1; }\n";
     val wa:      err[fail.Fail] = write_node(?alloc, joined(?alloc, root, "/", "dep/a"), a_manifest, "lib.mach", lib_src);
-    if (sel wa.err)                                                    { ret 1; }
+    if (sel wa.err)                                                         { ret 1; }
     if (!git.scratch_repo(?alloc, root, "https://example.invalid/app.git")) { ret 1; }
 
     val pr: res[project.Project, fail.Fail] = rebuild(?s, root);
@@ -8799,7 +8798,7 @@ test comptime_identity__a_dependency_reads_its_own_project {
     var p:        project.Project  = pr.ok;
     val standing: fail.PhaseStatus = frontend.frontend_status(?p);
     project.dnit_project(?p);
-    if (sel standing.kind.rejected)     { ret 3; }
+    if (sel standing.kind.rejected)            { ret 3; }
     if (diagnostic.error_count(?s.diags) != 0) { ret 4; }
     ret 0;
 }
@@ -9017,7 +9016,7 @@ pub fun write_node(alloc: *A.Allocator, dir: str, manifest_text: str, src_name: 
 # a project directory `dir`: its manifest and the `n` sources under its src
 #[testing]
 pub fun write_node_multi(alloc: *A.Allocator, dir: str, manifest_text: str, names: *str, texts: *str, n: u32) err[fail.Fail] {
-    val src_dir: str            = joined(alloc, dir, "/src");
+    val src_dir: str             = joined(alloc, dir, "/src");
     val made:    err[fs.FsError] = fs.create_dir_all(alloc, src_dir, 493);
     if (sel made.err) { ret err[fail.Fail].err{fail.fs_refused(made.err)}; }
     val wrote: err[fail.Fail] = git.t_write_file(alloc, dir, manifest.MANIFEST_FILE, manifest_text);
@@ -9037,4 +9036,3 @@ pub fun lib_manifest(alloc: *A.Allocator, id: str) str {
     ret joined(alloc, "[project]\nmach = \">=5\"\nid = \"", id,
         "\"\nversion = \"0.0.0\"\nsrc = \"src\"\nwork = \"out/{target.name}/{profile.name}\"\n[profile.debug]\noptimize = false\ndebug = false\nsimd = \"scalarize\"\n\n[artifact.lib]\nkind = \"static\"\nentry = \"lib.mach\"\nout = \"{project.work}/lib/l\"\ntargets = [\"*\"]\nlink = []\nneed = []\n");
 }
-
