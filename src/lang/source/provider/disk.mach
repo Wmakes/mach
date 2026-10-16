@@ -153,9 +153,13 @@ fun exists(ctx: ptr, a: *A.Allocator, fqn: intern.StrId) res[bool, fail.Fail] {
     ret spelled_exactly(a, dir, src, placed.some.tail);
 }
 
+# a refused read names the path it tried
 fun read(ctx: ptr, a: *A.Allocator, path: str) res[provider.Text, fail.Fail] {
+    val d:    *Disk                = ctx::*Disk;
     val text: res[str, fs.FsError] = fs.read_string(a, path);
-    if (sel text.err) { ret res[provider.Text, fail.Fail].err{fail.fs_refused(text.err)}; }
+    if (sel text.err) {
+        ret res[provider.Text, fail.Fail].err{fail.message_of(fail.format_intern(d.itn, a, "cannot read '{}': {}", path, fail.fs_text(text.err)))};
+    }
     ret res[provider.Text, fail.Fail].ok{provider.Text{data: text.ok, owned: true}};
 }
 
