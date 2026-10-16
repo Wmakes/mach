@@ -4823,7 +4823,7 @@ fun vendor_build(alloc: *A.Allocator, mtext: str, stale: str, needles: *str, nee
         val wrote: err[fs.FsError] = fs.write_bytes(driver.joined(alloc, stale_dir, "/", "window.o"), "stale-from-a-crashed-run"::*u8, 24, 420);
         if (sel wrote.err) { ret 2; }
     }
-    val refused: opt[str] = step_check(?s, alloc, root, false);
+    val refused: opt[str] = step_objects(?s, alloc, root, false);
     if (sel refused.none) {
         if (needle_len == 0) { ret 0; }
         ret 3;
@@ -4904,7 +4904,7 @@ $if ($mach.build.os != $mach.os.windows) {
                 val edited: err[fs.FsError] = fs.write_bytes(watched, "b"::*u8, 1, 420);
                 if (sel edited.err) { ret 2; }
             }
-            val refused: opt[str] = step_check(?s, ?alloc, root, round == 1);
+            val refused: opt[str] = step_objects(?s, ?alloc, root, round == 1);
             if (sel refused.some) { ret 3; }
             val text_r: res[str, fs.FsError] = fs.read_string(?alloc, counter);
             if (sel text_r.err) { ret 4; }
@@ -5058,7 +5058,7 @@ $if ($mach.build.os != $mach.os.windows) {
         val root: str = root_r.ok;
 
         var bad:     i32      = 0;
-        val refused: opt[str] = step_check(?s, ?alloc, root, false);
+        val refused: opt[str] = step_objects(?s, ?alloc, root, false);
         if (sel refused.some) { bad = 1; }
 
         val seen_r: res[str, A.Error] = types_path.resolve(?alloc, root, "seen");
@@ -5262,10 +5262,10 @@ test test_goal__compile_error_collects_no_tests {
 }
 
 
-# the failure checking the linux `app` artifact of the project at `root` reports, the steps it
-# needs run first, or none when it checked clean; `no_cache` reruns every step
+# the failure compiling the linux `app` artifact of the project at `root` to objects reports,
+# the steps it needs run first, or none when it compiled clean; `no_cache` reruns every step
 #[testing]
-fun step_check(s: *session.Session, alloc: *A.Allocator, root: str, no_cache: bool) opt[str] {
+fun step_objects(s: *session.Session, alloc: *A.Allocator, root: str, no_cache: bool) opt[str] {
     val loaded: res[manifest.Manifest, fail.Fail] = driver.load_manifest(s, root);
     if (sel loaded.err) { ret opt[str].some{fail.describe(loaded.err)}; }
     var m:  manifest.Manifest    = loaded.ok;
@@ -5273,7 +5273,7 @@ fun step_check(s: *session.Session, alloc: *A.Allocator, root: str, no_cache: bo
     rq.project_root = root;
     rq.target       = "linux";
     rq.artifact     = "app";
-    rq.goal         = request.GOAL_CHECK;
+    rq.goal         = request.GOAL_OBJECTS;
     rq.no_cache     = no_cache;
     val planned: res[build_plan.BuildPlan, fail.Fail] = build_plan.plan_to_run(alloc, s, toolchain.t_registry(), ?m, rq);
     if (sel planned.err) { ret opt[str].some{fail.describe(planned.err)}; }
