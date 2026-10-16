@@ -102,6 +102,7 @@ app_manifest: the `manifest` path, or STR_NIL when absent; `bin` artifacts only
 at: where the table's key is written
 default_at: where its `default` value is written, the zero place when absent
 export_at: where its `export` value is written, the zero place when absent
+entry_at: where its `entry` value is written
 out_at: where its `out` value is written
 targets_at: where its `targets` value is written
 link_at: where each `link` entry is written, parallel to `link`

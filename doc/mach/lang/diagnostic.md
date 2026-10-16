@@ -206,11 +206,11 @@ drop every warning of a kind in `set` that reaches the store from now on
 ## fun expect
 
 ```mach
-pub fun expect(store: *DiagnosticStore, list: Vector[Expectation]);
+pub fun expect(store: *DiagnosticStore, list: Vector[Expectation]) err[fail.Fail];
 ```
 
 acknowledge every warning an expectation in `list` covers as it reaches the
-store; the store takes the list
+store; the store takes the list, whatever the outcome, and indexes it by file
 
 ## fun report_unfulfilled
 

@@ -45,6 +45,14 @@ pub fun module_open(p: *project.Project, fqn: intern.StrId) res[session.ModuleId
 
 parse the module `fqn` names as a root, without walking it
 
+## fun module_unread
+
+```mach
+pub fun module_unread(p: *project.Project, fqn: intern.StrId) bool;
+```
+
+whether the load reached the module `fqn` names and never read its file
+
 ## fun module_reload
 
 ```mach

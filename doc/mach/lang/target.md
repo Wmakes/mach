@@ -115,6 +115,12 @@ pub rec TargetRequest;
 pub fun target_request(isa_name: str, os_name: str, abi_name: str) TargetRequest;
 ```
 
+## fun with_baseline
+
+```mach
+pub fun with_baseline(req: *TargetRequest, baseline_name: str);
+```
+
 ## fun with_extensions
 
 ```mach
@@ -157,9 +163,8 @@ pub fun resolve(reg: *TargetRegistry, req: *TargetRequest) res[binding.Binding, 
 pub fun registered_selection(arch_vt: *isa.IsaVTable, model: *target_model.Machine) isa.IsaVTable;
 ```
 
-the instruction set a [target.*] table selects by naming a registered isa:
-the template narrowed to the selection its registered name spells when its
-names carry a selection, every other template as registered. model backs the
+the instruction set a [target.*] table selects by naming a registered isa and no
+baseline: the template narrowed to the isa's default baseline. model backs the
 returned vtable's model pointer and must outlive it
 
 ## fun registered_tuple_capability
@@ -179,10 +184,10 @@ abi passes in
 pub fun selection_spelling(isa_vt: *isa.IsaVTable, model: *target_model.Machine, buf: *u8, cap: usize) str;
 ```
 
-the canonical selection string for an instruction set and the model selected
-on it (a resolved target's `model`, or the one registered_selection filled),
-written into buf: an isa whose names carry a selection spells the extensions
-the model holds, every other isa its name
+the selection an instruction set and the model selected on it hold (a resolved
+target's `model`, or the one registered_selection filled), written into buf: an
+isa whose catalog spells a selection gives masc's spelling of the extensions the
+model holds, every other isa its name
 
 ## fun host_request
 

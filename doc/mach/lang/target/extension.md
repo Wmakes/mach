@@ -41,34 +41,25 @@ catalog: masc's catalog of the instruction set's extensions, nil for a vocabular
          no masc catalog states
 rows: the extensions, each a row of the catalog
 count: how many
+float: the bits a value of a floating-point width needs to be held in float
+         registers, nil when every selection holds them
 
-## rec Span
-
-```mach
-pub rec Span;
-```
-
-the token a refusal of a selection is about: its offset and length in the
-name, zero-length when the refusal is about the name as a whole
-
-## rec Selection
+## def FloatRequirementFn
 
 ```mach
-pub rec Selection;
+pub def FloatRequirementFn: fun(u32) u64
 ```
 
-what a name spelled in a selection syntax selects: the registered
-instruction set it narrows, by its catalog spelling, and the extension bits
-it names
+the bits of a table a floating-point value of `bits` bits needs held
 
-## rec SelectionSyntax
+## fun float_absent
 
 ```mach
-pub rec SelectionSyntax;
+pub fun float_absent(t: *Table, bits: u32, selected: u64) u64;
 ```
 
-how an instruction set whose names carry a selection reads and writes them.
-an instruction set without one is named only by its registered name
+the bits a floating-point value of `bits` bits needs that `selected` lacks, 0
+when it lacks none
 
 ## val MAX_SELECTED
 
@@ -199,6 +190,14 @@ pub fun levels_append(b: *textbuild.TextBuilder, t: *Table) err[textbuild.Error]
 
 the catalog's levels whose members the code generator emits against any of,
 `, `-separated, appended to `b`
+
+## fun bits_append
+
+```mach
+pub fun bits_append(b: *textbuild.TextBuilder, t: *Table, bits: u64) err[textbuild.Error];
+```
+
+the names of every row whose bit is in `bits`, `, `-separated, appended to `b`
 
 ## fun names_append
 

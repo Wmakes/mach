@@ -882,14 +882,22 @@ what a manifest's `extensions` entry `name[0..len]` selects: a level's
 members when the model publishes one by that spelling, else the row's bit,
 0 when the vocabulary has neither
 
+## fun float_absence
+
+```mach
+pub fun float_absence(a: *A.Allocator, t: *extension.Table, bits: u32, selected: u64) res[opt[str], fail.Fail];
+```
+
+the text a spelling built into `b`, owned by `b`'s allocator (released with
+str_free), or the failure that stopped it; `b` is released either way
+why a selection holds no float registers for a value of `bits` bits, as a note
+naming the extensions it lacks, none when it lacks none
+
 ## fun spelling_finish
 
 ```mach
 pub fun spelling_finish(b: *textbuild.TextBuilder, r: err[textbuild.Error]) res[str, fail.Fail];
 ```
-
-the text a spelling built into `b`, owned by `b`'s allocator (released with
-str_free), or the failure that stopped it; `b` is released either way
 
 ## fun level_names
 
