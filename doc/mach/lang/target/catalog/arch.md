@@ -1,7 +1,10 @@
 # mach.lang.target.catalog.arch
 
-the instruction set catalog: every architecture id, its spelling, its
-fingerprint tag and the selection syntax its names may carry
+the instruction set catalog: the architectures of mink's catalog mach has a
+target for, each with its id, its fingerprint tag and the baseline a target of it
+stands on when it names none. it is an explicit projection: a row names mink's architecture
+row and is spelled by it, and an architecture of mink's no row names (x86,
+arm64e, wasm32, ...) is no instruction set here and no `$mach.arch` tag
 
 ## val UNKNOWN
 
@@ -67,34 +70,14 @@ version 2: catalog id 4 is reserved with no row and the tags after it moved up
 pub fun id_for(name: str) u32;
 ```
 
-## fun syntax_for
+## fun default_baseline
 
 ```mach
-pub fun syntax_for(name: str) *extension.SelectionSyntax;
+pub fun default_baseline(id: u32) str;
 ```
 
-the selection syntax that claims a name, nil when none does and only a
-spelling names an instruction set
-
-## fun syntax_of
-
-```mach
-pub fun syntax_of(id: u32) *extension.SelectionSyntax;
-```
-
-the selection syntax an instruction set's names carry, nil when it has none
-
-## fun float_absence_note
-
-```mach
-pub fun float_absence_note(name: str) res[opt[str], fail.Fail];
-```
-
-why a selection has no floating-point unit, for a diagnostic that already names
-the selection: what the selection syntax says it lacks, or none when the name
-carries no extension vocabulary the front end could ask the user to add. the
-name is the selection the target was resolved from, so one that does not
-parse is the failure that refused it
+the baseline a hosted target of the instruction set `id` stands on when it names
+none, in masc's spelling; nil when its catalog spells no selection, so it takes no baseline
 
 ## fun host_id
 
@@ -104,6 +87,14 @@ pub fun host_id() u32;
 
 the instruction set the compiler itself was built for, UNKNOWN when the
 catalog has no row for it
+
+## fun owner_of
+
+```mach
+pub fun owner_of(id: u32) *mink_arch.Arch;
+```
+
+mink's architecture row the instruction set `id` means, nil for an unknown id
 
 ## fun name_for
 

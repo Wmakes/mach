@@ -27,11 +27,13 @@ use std.types.string.str_equals;
 
 use A: std.allocator;
 
+use diagnostic_kind: mach.lang.diagnostic.kind;
 use mach.lang.fail;
 use mach.lang.manifest;
 
 use mach.lang.package;
 use package_closure: mach.lang.package.closure;
+use mach.lang.package.report;
 
 # the first pin seen for an identity: the commit, and the gitlink that records it
 rec Seen {
@@ -77,6 +79,21 @@ pub fun disagreements(op: *package_closure.Operation, reqs: *Vector[package_clos
         if (sel read_r.err) { ret read_r; }
     }
     ret err[fail.Fail].ok{};
+}
+
+# the refusal of a closure that pins a package at more than one commit, ok when `lines` is
+# empty: every line past the first is reported to the operation's report and the first is the
+# failure, so every command that walks a closure refuses a disagreement alike
+pub fun refused(op: *package_closure.Operation, lines: *Vector[str]) err[fail.Fail] {
+    if (lines.len == 0) { ret err[fail.Fail].ok{}; }
+    var k: usize = 1;
+    for (k < lines.len) {
+        report.fault(op.rep, fail.user(diagnostic_kind.DEP_CONFLICT, lines.data[k]));
+        k = k + 1;
+    }
+    val first: res[str, fail.Fail] = fail.text_retain(?op.s.interner, lines.data[0]);
+    if (sel first.err) { ret err[fail.Fail].err{first.err}; }
+    ret err[fail.Fail].err{fail.user(diagnostic_kind.DEP_CONFLICT, first.ok)};
 }
 
 pub fun free_lines(a: *A.Allocator, lines: *Vector[str]) {

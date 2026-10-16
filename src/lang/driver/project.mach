@@ -62,6 +62,7 @@ pub rec TargetEntry {
     name:          intern.StrId;
     os_name:       intern.StrId;
     isa_name:      intern.StrId;
+    baseline_name: intern.StrId;
     abi_name:      intern.StrId;
     of_name:       intern.StrId;
     platform_name: intern.StrId;
@@ -89,6 +90,7 @@ pub fun target_entry_of(bu: *manifest.BuildUnit) TargetEntry {
         name:            bu.target_name,
         os_name:         bu.target.os,
         isa_name:        bu.target.isa,
+        baseline_name:   bu.target.baseline,
         abi_name:        bu.target.abi,
         of_name:         bu.target.of,
         platform_name:   bu.target.platform,

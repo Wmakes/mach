@@ -44,7 +44,7 @@ pub val FORMATS: [FORMAT_COUNT]*target_of.OfVTable = [FORMAT_COUNT]*target_of.Of
 ## val OS_COUNT
 
 ```mach
-pub val OS_COUNT: u32 = 4
+pub val OS_COUNT: u32 = 5
 ```
 
 ## val OSES

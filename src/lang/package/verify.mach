@@ -321,16 +321,8 @@ pub fun project_closure(s: *session.Session, a: *A.Allocator, root: str, release
     fin { package_agreement.free_lines(a, ?split); }
     val agreed: err[fail.Fail] = package_agreement.disagreements(?op, ?reqs, ?split);
     if (sel agreed.err) { ret agreed; }
-    if (split.len > 0) {
-        var k: usize = 1;
-        for (k < split.len) {
-            report.fault(rep, fail.user(diagnostic_kind.DEP_CONFLICT, split.data[k]));
-            k = k + 1;
-        }
-        val first: res[str, fail.Fail] = fail.text_retain(?s.interner, split.data[0]);
-        if (sel first.err) { ret err[fail.Fail].err{first.err}; }
-        ret err[fail.Fail].err{fail.user(diagnostic_kind.DEP_CONFLICT, first.ok)};
-    }
+    val refused: err[fail.Fail] = package_agreement.refused(?op, ?split);
+    if (sel refused.err) { ret refused; }
     var i: usize = 0;
     for (i < overrides.len) {
         val text: res[str, fail.Fail] = root_override_text(s, ?overrides.data[i]);

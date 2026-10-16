@@ -4486,7 +4486,7 @@ test vector_arith__i64x2_multiply_is_vpmullq_under_avx512dq_and_avx512vl {
     ops[2] = lang_mir.op_preg(lang_mir.preg_id(x64.XMM3));
     var mi: lang_mir.MirInstr = lang_mir.instr(lang_mir.MIR_SEL_MUL, ?ops[0], 3, 16, 16);
     mi.vec_lane = lang_mir.vec_lane_make(lang_mir.VEC_LANE_INT, 8, 2);
-    x64_grammar.select_extensions(extension_x64.LEVEL_V4);
+    x64_grammar.select_extensions(extension_x64.level("x86-64-v4"));
     var want: [32]u8;
     val r:    err[fail.Fail] = encode_vector_arith(?st, ?f, ?mi);
     if (sel r.err) { ret 1; }

@@ -720,7 +720,7 @@ test token_resolve__a_format_without_link_inputs_refuses_every_token {
     var alloc: A.Allocator;
     val made:  err[A.Error] = page.make(?alloc);
     if (sel made.err) { ret 1; }
-    val tr: res[lang_target.Binding, fail.Fail] = lang_target.t_select("spirv", "freestanding", "spirv");
+    val tr: res[lang_target.Binding, fail.Fail] = lang_target.t_select("spirv", "vulkan", "spirv");
     if (sel tr.err) { ret 1; }
     var tgt:  lang_target.Binding   = tr.ok;
     var dirs: Vector[str]           = collections_vector.init[str](?alloc);

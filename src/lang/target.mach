@@ -1,5 +1,6 @@
 use mach.lang.fail;
 use mach.lang.float;
+use mink_arch: mink.catalog.arch;
 use std.allocator.page;
 use collections_vector: std.collections.vector;
 use std.collections.vector.Vector;
@@ -29,13 +30,16 @@ use T:          std.allocator.testing;
 use std.text.string.str_free;
 
 use mach.lang.ct;
+use diagnostic_kind:  mach.lang.diagnostic.kind;
 use lang_fingerprint: mach.lang.fingerprint;
 use mach.lang.intern;
+use mach.lang.layout;
 use lang_mir:  mach.lang.mir;
 use mir_debug: mach.lang.mir.debug;
 use mach.lang.target.abi;
 use mach.lang.target.abi.aapcs64;
 use mach.lang.target.abi.sysv;
+use target_baseline: mach.lang.target.baseline;
 use mach.lang.target.binding;
 use catalog_abi:       mach.lang.target.catalog.abi;
 use catalog_arch:      mach.lang.target.catalog.arch;
@@ -58,12 +62,15 @@ use mach.lang.target.of.macho;
 use lang_target_os:   mach.lang.target.os;
 use target_os_darwin: mach.lang.target.os.darwin;
 use target_os_linux:  mach.lang.target.os.linux;
+use target_owner:     mach.lang.target.owner;
 use target_registry:  mach.lang.target.registry;
 use mach.lang.target.resolved;
 use target_testing: mach.lang.target.testing;
 use mach.lang.target.tuple;
 use mach.lang.textbuild;
 use mach.lang.wire;
+
+use mirl_target: mirl.target;
 
 fwd target_model.ENDIAN_LITTLE;
 fwd target_model.ENDIAN_BIG;
@@ -242,6 +249,8 @@ pub rec TargetRequest {
     # names from the isa's extension vocabulary, borrowed for the call
     extensions:      *str;
     extension_count: u32;
+    # the selection the target stands on, in masc's spelling, "" for the isa's default
+    baseline_name: str;
 }
 
 pub fun target_request(isa_name: str, os_name: str, abi_name: str) TargetRequest {
@@ -255,7 +264,12 @@ pub fun target_request(isa_name: str, os_name: str, abi_name: str) TargetRequest
     r.stack_commit    = 0;
     r.extensions      = nil;
     r.extension_count = 0;
+    r.baseline_name   = "";
     ret r;
+}
+
+pub fun with_baseline(req: *TargetRequest, baseline_name: str) {
+    req.baseline_name = baseline_name;
 }
 
 pub fun with_extensions(req: *TargetRequest, names: *str, count: u32) {
@@ -303,7 +317,7 @@ fun vocabulary(reg: *TargetRegistry) res[extension.Vocabulary, fail.Fail] {
     var i: u32                  = 0;
     for (i < reg.isa.count) {
         val m: *target_model.Machine = reg.isa.members[i].model;
-        if (!extension.vocabulary_add(?v, m.extension_table, m.extension_count)) {
+        if (!extension.vocabulary_add(?v, m.extension_table)) {
             ret res[extension.Vocabulary, fail.Fail].err{fail.message(
                 "target: the registry declares more extension vocabularies than a description carries; raise extension.VOCABULARY_CAP")};
         }
@@ -330,19 +344,7 @@ pub fun resolve(reg: *TargetRegistry, req: *TargetRequest) res[binding.Binding, 
     }
     val os_vt: *lang_target_os.OsVTable = opt_os_vt.some;
 
-    var lookup_name: str                        = isa_name;
-    var selection:   opt[extension.Selection]   = opt[extension.Selection].none{};
-    val syntax:      *extension.SelectionSyntax = catalog_arch.syntax_for(isa_name);
-    if (syntax != nil) {
-        var bad:    extension.Span;
-        val parsed: res[extension.Selection, fail.Fail] = syntax.parse(isa_name, ?bad);
-        if (sel parsed.err) {
-            ret res[binding.Binding, fail.Fail].err{selection_refusal(?reg.alloc, fail.describe(parsed.err), isa_name, ?bad)};
-        }
-        selection   = opt[extension.Selection].some{parsed.ok};
-        lookup_name = parsed.ok.template;
-    }
-    val opt_arch_vt: opt[*isa.IsaVTable] = target_registry.find[isa.IsaVTable](?reg.isa, lookup_name);
+    val opt_arch_vt: opt[*isa.IsaVTable] = target_registry.find[isa.IsaVTable](?reg.isa, isa_name);
     if (sel opt_arch_vt.none) {
         ret res[binding.Binding, fail.Fail].err{unregistered[isa.IsaVTable](reg, ?reg.isa, isa_name)};
     }
@@ -369,6 +371,8 @@ pub fun resolve(reg: *TargetRegistry, req: *TargetRequest) res[binding.Binding, 
 
     val of_vt: *target_of.OfVTable = opt_of_vt.some;
 
+    val base_r: res[u64, fail.Fail] = baseline_bits(?reg.alloc, os_vt, arch_vt, req.baseline_name);
+    if (sel base_r.err) { ret res[binding.Binding, fail.Fail].err{base_r.err}; }
     val added_r: res[u64, fail.Fail] = requested_extensions(?reg.alloc, arch_vt, req);
     if (sel added_r.err) { ret res[binding.Binding, fail.Fail].err{added_r.err}; }
     val env_r: res[u32, fail.Fail] = resolve_environment(?reg.alloc, arch_vt, req);
@@ -377,7 +381,7 @@ pub fun resolve(reg: *TargetRegistry, req: *TargetRequest) res[binding.Binding, 
     val added: u64 = added_r.ok | isa_environment.extensions(?arch_vt.environments, env_r.ok);
 
     var selected_model: target_model.Machine;
-    val selected_isa:   isa.IsaVTable = select_isa(arch_vt, isa_name, selection, added, ?selected_model);
+    val selected_isa:   isa.IsaVTable = select_isa(arch_vt, base_r.ok, added, ?selected_model);
     val cap:            u32           = tuple.capability(os_vt, ?selected_isa, abi_vt, of_vt);
     if (cap != tuple.OK) {
         ret res[binding.Binding, fail.Fail].err{tuple.refusal(?reg.alloc, cap, os_vt, ?selected_isa, abi_vt, of_vt)};
@@ -488,12 +492,49 @@ pub fun resolve(reg: *TargetRegistry, req: *TargetRequest) res[binding.Binding, 
         }
     }
 
+    t.scalars = layout.scalars_none();
+    val row_r: res[opt[*mirl_target.Target], fail.Fail] = target_owner.row_for(?reg.alloc, os_vt.id, arch_vt.id, abi_vt.id);
+    if (sel row_r.err) { ret res[binding.Binding, fail.Fail].err{row_r.err}; }
+    if (sel row_r.ok.some) {
+        val held: res[layout.Scalars, fail.Fail] = target_owner.scalars_of(?reg.alloc, row_r.ok.some);
+        if (sel held.err) { ret res[binding.Binding, fail.Fail].err{held.err}; }
+        t.scalars = held.ok;
+        if (sel held.ok.pointer.some) { t.pointer_width = held.ok.pointer.some.size; }
+    }
+
     t.model              = selected_model;
     t.model.stack_align  = abi_vt.stack_align;
     t.model.red_zone     = abi_vt.red_zone;
     t.model.shadow_space = abi_vt.shadow_space;
 
     ret res[binding.Binding, fail.Fail].ok{b};
+}
+
+# the bits the target's baseline selects: the one it names, else the instruction
+# set's default, each read by masc's catalog for it. a freestanding target names
+# its baseline, since the chip decides it and no default is right. an instruction
+# set whose catalog spells no selection takes no baseline and stands on its
+# model's own extensions. `os_vt` is nil for a matrix cell, which no target names
+fun baseline_bits(a: *A.Allocator, os_vt: *lang_target_os.OsVTable, arch_vt: *isa.IsaVTable, named: str) res[u64, fail.Fail] {
+    val owner: *mink_arch.Arch = catalog_arch.owner_of(arch_vt.id);
+    if (!target_baseline.spells(owner)) {
+        if (!str_empty(named)) {
+            ret res[u64, fail.Fail].err{fail.formatted(a,
+                "target: isa '{}' takes no `baseline`: masc's extension catalog for it spells no selection; name what it adds with `extensions`", arch_vt.name)};
+        }
+        ret res[u64, fail.Fail].ok{arch_vt.model.extensions};
+    }
+    if (str_empty(named) && os_vt != nil && os_vt.id == catalog_os.FREESTANDING) {
+        ret res[u64, fail.Fail].err{fail.formatted_user(a, diagnostic_kind.TARGET_BASELINE_REQUIRED,
+            "target: a freestanding '{}' target must state its `baseline`, the selection its chip implements: the chip decides it, so no default is right", arch_vt.name)};
+    }
+    var spelled: str = catalog_arch.default_baseline(arch_vt.id);
+    if (!str_empty(named)) { spelled = named; }
+    val picked: res[u64, fail.Fail] = target_baseline.select(a, owner, arch_vt.model.extension_table, spelled);
+    if (sel picked.err) {
+        ret res[u64, fail.Fail].err{fail.formatted(a, "target: baseline `{}` on isa '{}': {}", spelled, arch_vt.name, fail.describe(picked.err))};
+    }
+    ret picked;
 }
 
 # the bits a request's extension names select in the isa's vocabulary; a name the
@@ -544,33 +585,27 @@ fun no_module_format(a: *A.Allocator, isa_vt: *isa.IsaVTable) fail.Fail {
     ret fail.formatted(a, "instruction set '{}' emits whole modules, but no registered object format carries a finished module for it", isa_vt.name);
 }
 
-# the instruction set a name selects: the registered template with the
-# selection's extensions, and those the request adds, applied. model backs the
-# returned vtable's model pointer and must outlive it
-fun select_isa(arch_vt: *isa.IsaVTable, name: str, selection: opt[extension.Selection], added: u64, model: *target_model.Machine) isa.IsaVTable {
+# the instruction set the registered template selects with the baseline's
+# extensions, and those the request adds, applied. model backs the returned
+# vtable's model pointer and must outlive it
+fun select_isa(arch_vt: *isa.IsaVTable, base: u64, added: u64, model: *target_model.Machine) isa.IsaVTable {
     @model = @arch_vt.model;
-    var base: u64 = model.extensions;
-    if (sel selection.some) { base = selection.some.extensions; }
     isa.extensions_select(arch_vt, model, target_model.extension_close(model, base | added));
     var selected: isa.IsaVTable = @arch_vt;
     selected.model = model;
-    selected.name  = name;
     ret selected;
 }
 
-# the instruction set a [target.*] table selects by naming a registered isa:
-# the template narrowed to the selection its registered name spells when its
-# names carry a selection, every other template as registered. model backs the
+# the instruction set a [target.*] table selects by naming a registered isa and no
+# baseline: the template narrowed to the isa's default baseline. model backs the
 # returned vtable's model pointer and must outlive it
 pub fun registered_selection(arch_vt: *isa.IsaVTable, model: *target_model.Machine) isa.IsaVTable {
-    var selection: opt[extension.Selection]   = opt[extension.Selection].none{};
-    val syntax:    *extension.SelectionSyntax = catalog_arch.syntax_of(arch_vt.id);
-    if (syntax != nil && syntax.claims(arch_vt.name)) {
-        var bad:    extension.Span;
-        val parsed: res[extension.Selection, fail.Fail] = syntax.parse(arch_vt.name, ?bad);
-        if (sel parsed.ok) { selection = opt[extension.Selection].some{parsed.ok}; }
-    }
-    ret select_isa(arch_vt, arch_vt.name, selection, 0, model);
+    var a: A.Allocator;
+    page.make(?a);
+    var base: u64                 = arch_vt.model.extensions;
+    val bits: res[u64, fail.Fail] = baseline_bits(?a, nil, arch_vt, "");
+    if (sel bits.ok) { base = bits.ok; }
+    ret select_isa(arch_vt, base, 0, model);
 }
 
 # the capability of one cell of the target matrix as a [target.*] table naming
@@ -583,16 +618,25 @@ pub fun registered_tuple_capability(os_vt: *lang_target_os.OsVTable, arch_vt: *i
     ret tuple.capability(os_vt, ?selected, abi_vt, of_vt);
 }
 
-# the canonical selection string for an instruction set and the model selected
-# on it (a resolved target's `model`, or the one registered_selection filled),
-# written into buf: an isa whose names carry a selection spells the extensions
-# the model holds, every other isa its name
+# the selection an instruction set and the model selected on it hold (a resolved
+# target's `model`, or the one registered_selection filled), written into buf: an
+# isa whose catalog spells a selection gives masc's spelling of the extensions the
+# model holds, every other isa its name
 pub fun selection_spelling(isa_vt: *isa.IsaVTable, model: *target_model.Machine, buf: *u8, cap: usize) str {
-    val syntax: *extension.SelectionSyntax = catalog_arch.syntax_of(isa_vt.id);
-    if (syntax != nil && syntax.claims(isa_vt.name)) {
-        ret syntax.spell(model.gpr_width, model.extensions, buf, cap);
+    var text: str = isa_vt.name;
+    var a:    A.Allocator;
+    page.make(?a);
+    if (target_baseline.spells(catalog_arch.owner_of(isa_vt.id))) {
+        val spelled: res[str, fail.Fail] = target_baseline.spell(?a, catalog_arch.owner_of(isa_vt.id), model.extension_table, model.extensions, false);
+        if (sel spelled.ok) {
+            var off: usize = buf_put(buf, cap, 0, spelled.ok);
+            str_free(?a, spelled.ok);
+            if (off >= cap) { off = cap - 1; }
+            buf[off] = 0;
+            ret buf::str;
+        }
     }
-    var off: usize = buf_put(buf, cap, 0, isa_vt.name);
+    var off: usize = buf_put(buf, cap, 0, text);
     if (off >= cap) { off = cap - 1; }
     buf[off] = 0;
     ret buf::str;
@@ -628,6 +672,14 @@ pub fun t_registry() *TargetRegistry {
 #[testing]
 pub fun t_select(isa_name: str, os_name: str, abi_name: str) res[binding.Binding, fail.Fail] {
     ret select(t_registry(), isa_name, os_name, abi_name);
+}
+
+# the target `isa_name` names on the baseline `baseline_name`, selected from the test catalog
+#[testing]
+pub fun t_select_on(isa_name: str, baseline_name: str, os_name: str, abi_name: str) res[binding.Binding, fail.Fail] {
+    var req: TargetRequest = target_request(isa_name, os_name, abi_name);
+    with_baseline(?req, baseline_name);
+    ret resolve(t_registry(), ?req);
 }
 
 pub fun artifact_naming(tgt: *binding.Binding, kind: catalog_artifact.Kind) res[target_of.ArtifactName, fail.Fail] {
@@ -832,18 +884,6 @@ fun environment_names_append(b: *textbuild.TextBuilder, arch_vt: *isa.IsaVTable)
         i = i + 1;
     }
     ret err[textbuild.Error].ok{};
-}
-
-# a refused RISC-V selection names the token it stumbled on and the whole string
-fun selection_refusal(a: *A.Allocator, why: str, name: str, bad: *extension.Span) fail.Fail {
-    if (bad.len == 0) { ret fail.formatted(a, "{}: selection '{}'", why, name); }
-    val made: res[*u8, A.Error] = A.allocate[u8](a, bad.len + 1);
-    if (sel made.err) { ret fail.refused(made.err); }
-    val tok: *u8 = made.ok;
-    fin { A.deallocate[u8](a, tok, bad.len + 1); }
-    memory.raw_copy(tok::ptr, (?name[bad.at])::ptr, bad.len);
-    tok[bad.len] = 0;
-    ret fail.formatted(a, "{}: '{}' in selection '{}'", why, tok::str, name);
 }
 
 fun unregistered[T](reg: *TargetRegistry, ax: *target_registry.Axis[T], name: str) fail.Fail {
@@ -1168,7 +1208,7 @@ test select__x86_64_freestanding_raw {
     if (t.os == nil)                              { ret 1; }
     if (t.os.id != catalog_os.FREESTANDING)       { ret 1; }
     if (!str_equals(t.os.entry_symbol, "_start")) { ret 1; }
-    if (!str_equals(t.os.default_of, "raw"))      { ret 1; }
+    if (!str_equals(t.os.default_of, "flat"))     { ret 1; }
     if (t.os.base_addr != 0)                      { ret 1; }
     if (t.os.page_size != 0)                      { ret 1; }
     if (t.target.page_size != 1)                  { ret 1; }
@@ -1197,14 +1237,17 @@ test select__page_size_comes_from_the_tuple {
     val arm_r: res[binding.Binding, fail.Fail] = select_of(reg, "aarch64", "freestanding", "aapcs64", "elf");
     if (sel arm_r.err)                     { ret 4; }
     if (arm_r.ok.target.page_size != 4096) { ret 5; }
-    val rv_r: res[binding.Binding, fail.Fail] = select_of(reg, "riscv32", "freestanding", "ilp32", "elf");
+    var rv_q: TargetRequest = target_request("riscv32", "freestanding", "ilp32");
+    with_of(?rv_q, "elf");
+    with_baseline(?rv_q, "rv32imac");
+    val rv_r: res[binding.Binding, fail.Fail] = resolve(reg, ?rv_q);
     if (sel rv_r.err)                     { ret 6; }
     if (rv_r.ok.target.page_size != 4096) { ret 7; }
 
-    val raw_r: res[binding.Binding, fail.Fail] = select_of(reg, "x86_64", "freestanding", "sysv64", "raw");
+    val raw_r: res[binding.Binding, fail.Fail] = select_of(reg, "x86_64", "freestanding", "sysv64", "flat");
     if (sel raw_r.err)                  { ret 8; }
     if (raw_r.ok.target.page_size != 1) { ret 9; }
-    val spv_r: res[binding.Binding, fail.Fail] = select_of(reg, "spirv", "freestanding", "spirv", "spv");
+    val spv_r: res[binding.Binding, fail.Fail] = select_of(reg, "spirv", "vulkan", "spirv", "spirv");
     if (sel spv_r.err)                  { ret 10; }
     if (spv_r.ok.target.page_size != 1) { ret 11; }
 
@@ -1296,12 +1339,12 @@ test select_of__object_format_chosen_by_name {
 test select__spirv_defaults_to_the_finished_module_format {
     val reg: *TargetRegistry = t_registry();
 
-    val r: res[binding.Binding, fail.Fail] = select(reg, "spirv", "freestanding", "spirv");
+    val r: res[binding.Binding, fail.Fail] = select(reg, "spirv", "vulkan", "spirv");
     if (sel r.err) { ret 1; }
     val t: binding.Binding = r.ok;
 
-    if (!isa.emits_whole_module(t.isa))      { ret 1; }
-    if (!str_equals(t.os.default_of, "raw")) { ret 1; }
+    if (!isa.emits_whole_module(t.isa))        { ret 1; }
+    if (!str_equals(t.os.default_of, "spirv")) { ret 1; }
 
     if (t.of == nil)                             { ret 1; }
     if (t.of.id != target_of.SPV)                { ret 1; }
@@ -1322,17 +1365,15 @@ test select__spirv_defaults_to_the_finished_module_format {
 test select_of__rejects_crossed_emission_shapes {
     val reg: *TargetRegistry = t_registry();
 
-    val rw: res[binding.Binding, fail.Fail] = select_of(reg, "spirv", "freestanding", "spirv", "raw");
+    val rw: res[binding.Binding, fail.Fail] = select_of(reg, "spirv", "vulkan", "spirv", "flat");
     if (!sel rw.err) { ret 1; }
     val mw: str = fail.describe(rw.err);
-    if (!str_contains(mw, "spirv"))            { ret 1; }
-    if (!str_contains(mw, "raw"))              { ret 1; }
-    if (!str_contains(mw, "finished modules")) { ret 1; }
+    if (!str_contains(mw, "flat")) { ret 1; }
 
-    val re: res[binding.Binding, fail.Fail] = select_of(reg, "spirv", "freestanding", "spirv", "elf");
+    val re: res[binding.Binding, fail.Fail] = select_of(reg, "spirv", "vulkan", "spirv", "elf");
     if (!sel re.err) { ret 1; }
 
-    val rr: res[binding.Binding, fail.Fail] = select_of(reg, "x86_64", "freestanding", "sysv64", "spv");
+    val rr: res[binding.Binding, fail.Fail] = select_of(reg, "x86_64", "freestanding", "sysv64", "spirv");
     if (!sel rr.err) { ret 1; }
 
     ret 0;
@@ -1345,7 +1386,7 @@ test select_of__freestanding_raw_emits_flat_image {
 
     val reg: *TargetRegistry = t_registry();
 
-    val res_target: res[binding.Binding, fail.Fail] = select_of(reg, "x86_64", "freestanding", "sysv64", "raw");
+    val res_target: res[binding.Binding, fail.Fail] = select_of(reg, "x86_64", "freestanding", "sysv64", "flat");
     if (sel res_target.err) { ret 1; }
     val t: binding.Binding = res_target.ok;
     if (t.of == nil)              { ret 1; }
@@ -1492,7 +1533,7 @@ test select__vector_lane_ceiling {
     if (sel tr.err)                                                                 { ret 1; }
     if (tr.ok.target.model.max_vector_lanes != target_model.VECTOR_LANES_UNBOUNDED) { ret 1; }
 
-    val ts: res[binding.Binding, fail.Fail] = select_of(reg, "spirv", "freestanding", "spirv", "spv");
+    val ts: res[binding.Binding, fail.Fail] = select_of(reg, "spirv", "vulkan", "spirv", "spirv");
     if (sel ts.err) { ret 1; }
     val ms: target_model.Machine = ts.ok.target.model;
     if (ms.max_vector_lanes != 4)                                                      { ret 1; }
@@ -1660,7 +1701,7 @@ test select__slot_read_widths {
     val mr: target_model.Machine = tr.ok.target.model;
     if (target_model.reads_slot_operand(?mr, 8)) { ret 10; }
 
-    val ts: res[binding.Binding, fail.Fail] = select_of(reg, "spirv", "freestanding", "spirv", "spv");
+    val ts: res[binding.Binding, fail.Fail] = select_of(reg, "spirv", "vulkan", "spirv", "spirv");
     if (sel ts.err) { ret 11; }
     val ms: target_model.Machine = ts.ok.target.model;
     if (target_model.reads_slot_operand(?ms, 4)) { ret 12; }
@@ -1682,7 +1723,7 @@ test select__alu_min_width {
     if (sel tr.err)                                           { ret 1; }
     if (target_model.alu_min_width(?tr.ok.target.model) != 4) { ret 1; }
 
-    val ts: res[binding.Binding, fail.Fail] = select_of(reg, "spirv", "freestanding", "spirv", "spv");
+    val ts: res[binding.Binding, fail.Fail] = select_of(reg, "spirv", "vulkan", "spirv", "spirv");
     if (sel ts.err)                                           { ret 1; }
     if (target_model.alu_min_width(?ts.ok.target.model) != 1) { ret 1; }
     ret 0;
@@ -1721,7 +1762,7 @@ test select_of__resolves_debug_model {
     if (ct.of.debug_offset_kind != target_of.RK_SECREL32) { ret 1; }
     if (et.of.debug_offset_kind != target_of.RK_ABS32)    { ret 1; }
 
-    val tr: res[binding.Binding, fail.Fail] = select_of(reg, "x86_64", "freestanding", "sysv64", "raw");
+    val tr: res[binding.Binding, fail.Fail] = select_of(reg, "x86_64", "freestanding", "sysv64", "flat");
     if (sel tr.err)                                     { ret 1; }
     if (tr.ok.debug != nil)                             { ret 1; }
     if (tr.ok.target.debug_id != target_of.DBG_UNKNOWN) { ret 1; }
@@ -1926,7 +1967,7 @@ test artifact_naming__flat_image_and_finished_module_formats_refuse_archive_and_
 
     var bad: i32 = 0;
 
-    val raw_o: opt[*target_of.OfVTable] = target_registry.find[target_of.OfVTable](?reg.of, "raw");
+    val raw_o: opt[*target_of.OfVTable] = target_registry.find[target_of.OfVTable](?reg.of, "flat");
     if (sel raw_o.none) { ret 1; }
     val raw_vt: *target_of.OfVTable                    = raw_o.some;
     var naming: res[target_of.ArtifactName, fail.Fail] = target_of.artifact_naming(raw_vt, t_system_naming(reg, "freestanding"), catalog_artifact.STATIC);
@@ -1938,7 +1979,7 @@ test artifact_naming__flat_image_and_finished_module_formats_refuse_archive_and_
     val raw_exe: target_of.ArtifactName = raw_exe_r.ok;
     if (!str_empty(raw_exe.prefix) || !str_empty(raw_exe.suffix)) { bad = 1; }
 
-    val spv_o: opt[*target_of.OfVTable] = target_registry.find[target_of.OfVTable](?reg.of, "spv");
+    val spv_o: opt[*target_of.OfVTable] = target_registry.find[target_of.OfVTable](?reg.of, "spirv");
     if (sel spv_o.none) { ret 1; }
     val spv_vt: *target_of.OfVTable = spv_o.some;
     naming = target_of.artifact_naming(spv_vt, t_system_naming(reg, "freestanding"), catalog_artifact.STATIC);
@@ -2001,7 +2042,7 @@ test registry__every_isa_declares_its_index_and_vector_axes {
 test resolve__env_is_member_owned_and_unknown_or_undefined_values_are_refused {
     val reg: *TargetRegistry = t_registry();
 
-    var gpu: TargetRequest = target_request("spirv", "freestanding", "spirv");
+    var gpu: TargetRequest = target_request("spirv", "vulkan", "spirv");
     with_env(?gpu, "vulkan1.2", "");
     val ok: res[binding.Binding, fail.Fail] = resolve(reg, ?gpu);
     if (sel ok.err) { ret 2; }
@@ -2010,12 +2051,12 @@ test resolve__env_is_member_owned_and_unknown_or_undefined_values_are_refused {
     val view: isa.BackendTarget = binding.backend_target(?t);
     if (view.identity.env_id != 2 || !str_equals(view.identity.env_name, "vulkan1.2")) { ret 4; }
 
-    var none:  TargetRequest                   = target_request("spirv", "freestanding", "spirv");
+    var none:  TargetRequest                   = target_request("spirv", "vulkan", "spirv");
     val plain: res[binding.Binding, fail.Fail] = resolve(reg, ?none);
     if (sel plain.err)                                  { ret 5; }
     if (plain.ok.target.env_id != isa_environment.NONE) { ret 5; }
 
-    var bogus: TargetRequest = target_request("spirv", "freestanding", "spirv");
+    var bogus: TargetRequest = target_request("spirv", "vulkan", "spirv");
     with_env(?bogus, "vulkan9.9", "[target.gpu] env = \"vulkan9.9\"");
     val rejected: res[binding.Binding, fail.Fail] = resolve(reg, ?bogus);
     if (sel rejected.ok) { ret 6; }
@@ -2084,7 +2125,9 @@ test tuple_capability__a_hosted_os_constrains_the_abi_to_its_declared_set {
     # freestanding declares itself unconstrained, so every convention the isa covers stays legal
     val bare_win: res[binding.Binding, fail.Fail] = select(reg, "x86_64", "freestanding", "win64");
     if (sel bare_win.err) { ret 8; }
-    val bare_soft: res[binding.Binding, fail.Fail] = select(reg, "riscv64", "freestanding", "lp64");
+    var soft_q: TargetRequest = target_request("riscv64", "freestanding", "lp64");
+    with_baseline(?soft_q, "rv64gc");
+    val bare_soft: res[binding.Binding, fail.Fail] = resolve(reg, ?soft_q);
     if (sel bare_soft.err) { ret 9; }
 
     # the code is its own row, judged after every lower-level capability
@@ -2231,9 +2274,11 @@ test select_of__every_capable_tuple_is_selectable_and_the_census_is_stable {
                     val of_vt: *target_of.OfVTable = of_vt_r.some;
                     if (tuple.capability(os_vt, isa_vt, abi_vt, of_vt) == tuple.OK) {
                         capable = capable + 1;
-                        var concrete_isa: str = isa_vt.name;
-                        if (isa_vt.id == catalog_arch.RISCV32) { concrete_isa = "rv32imafdc"; }
-                        val r: res[binding.Binding, fail.Fail] = select_of(reg, concrete_isa, os_vt.name, abi_vt.name, of_vt.name);
+                        var req: TargetRequest = target_request(isa_vt.name, os_vt.name, abi_vt.name);
+                        with_of(?req, of_vt.name);
+                        if (isa_vt.id == catalog_arch.RISCV32)                                        { with_baseline(?req, "rv32imafdc"); }
+                        or (isa_vt.id == catalog_arch.RISCV64 && os_vt.id == catalog_os.FREESTANDING) { with_baseline(?req, "rv64gc"); }
+                        val r: res[binding.Binding, fail.Fail] = resolve(reg, ?req);
                         if (sel r.ok) { selectable = selectable + 1; }
                     }
                     fi = fi + 1;

@@ -736,7 +736,7 @@ pub fun rv64_machine() *target_model.Machine {
 pub fun select_extensions(bits: u64) {
     t_model        = model_riscv.MACHINE64;
     t_model_copied = true;
-    model_riscv.features_select(?t_model, extension.close(?extension_riscv.NAMES[0], extension_riscv.NAME_COUNT, bits));
+    model_riscv.features_select(?t_model, extension.close(?extension_riscv.TABLE, bits));
 }
 
 #[testing]

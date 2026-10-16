@@ -1,3 +1,4 @@
+use mink_windows: mink.catalog.os.windows;
 use std.types.bool.true;
 use std.types.string.str;
 
@@ -40,7 +41,7 @@ val ISA_ROWS: [2]lang_target_os.IsaRow = [2]lang_target_os.IsaRow{
 
 pub val VTABLE: lang_target_os.OsVTable = lang_target_os.OsVTable{
     id:                 catalog_os.WINDOWS,
-    name:               "windows",
+    name:               mink_windows.WINDOWS.name,
     default_of:         "coff",
     supported_ofs:      ?SUPPORTED_OFS[0],
     supported_of_count: 1,

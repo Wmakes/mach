@@ -33,7 +33,8 @@ os  = "linux"
 abi = "lp64d"
 
 [target.riscv64zfh-linux]
-isa = "rv64gc_zfh"
+isa = "riscv64"
+baseline = "rv64gc_zfh"
 os  = "linux"
 abi = "lp64d"
 

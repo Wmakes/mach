@@ -624,6 +624,7 @@ pub fun select_target(p: *project.Project, t: *project.TargetEntry) err[fail.Fai
     var req: lang_target.TargetRequest = lang_target.target_request(isa_name, os_name, abi_name);
     lang_target.with_of(?req, of_name);
     lang_target.with_image(?req, t.base, t.stack_reserve, t.stack_commit);
+    if (!intern.str_is_nil(t.baseline_name)) { lang_target.with_baseline(?req, intern.text(?p.s.interner, t.baseline_name)); }
     var env_name: str = "";
     if (!intern.str_is_nil(t.env_name)) { env_name = intern.text(?p.s.interner, t.env_name); }
     # a target the manifest does not name is labelled by its isa

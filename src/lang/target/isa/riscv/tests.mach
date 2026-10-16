@@ -1,7 +1,9 @@
-# the riscv selection strings, psABI variants and object attributes, resolved
+# the riscv baselines, psABI variants and object attributes, resolved
 # through the whole target registry
 use mach.lang.fail;
+use riscv_extension: masc.isa.riscv.extension;
 use std.allocator.page;
+use std_format: std.format;
 use std.types.bool.bool;
 use std.types.bool.false;
 use std.types.bool.true;
@@ -11,15 +13,19 @@ use std.types.size.usize;
 use std.types.string.str;
 use std.types.string.str_contains;
 use std.types.string.str_equals;
+use std.types.string.str_len;
+use std.types.string.str_region_equals;
 
 use A: std.allocator;
 
-use lang_mir:    mach.lang.mir;
-use lang_target: mach.lang.target;
+use diagnostic_kind: mach.lang.diagnostic.kind;
+use lang_mir:        mach.lang.mir;
+use lang_target:     mach.lang.target;
 use mach.lang.target.abi;
 use mach.lang.target.binding;
-use catalog_abi:     mach.lang.target.catalog.abi;
-use catalog_arch:    mach.lang.target.catalog.arch;
+use catalog_abi:  mach.lang.target.catalog.abi;
+use catalog_arch: mach.lang.target.catalog.arch;
+use mach.lang.target.extension;
 use extension_riscv: mach.lang.target.extension.riscv;
 use isa_inst:        mach.lang.target.isa.inst;
 use target_model:    mach.lang.target.model;
@@ -30,15 +36,15 @@ use target_testing: mach.lang.target.testing;
 
 # whether select refuses its arguments
 #[testing]
-fun select_refused(isa_name: str, os_name: str, abi_name: str) bool {
-    val got: res[binding.Binding, fail.Fail] = lang_target.t_select(isa_name, os_name, abi_name);
+fun select_refused(isa_name: str, baseline_name: str, os_name: str, abi_name: str) bool {
+    val got: res[binding.Binding, fail.Fail] = lang_target.t_select_on(isa_name, baseline_name, os_name, abi_name);
     ret sel got.err;
 }
 
 test select__riscv32_freestanding_raw {
     val reg: *lang_target.TargetRegistry = lang_target.t_registry();
 
-    val res_target: res[binding.Binding, fail.Fail] = lang_target.t_select("rv32imafdc", "freestanding", "ilp32d");
+    val res_target: res[binding.Binding, fail.Fail] = lang_target.t_select_on("riscv32", "rv32imafdc", "freestanding", "ilp32d");
     if (sel res_target.err) { ret 1; }
     val t: binding.Binding = res_target.ok;
 
@@ -86,35 +92,37 @@ test select__riscv32_freestanding_raw {
     if (af.class != abi.CLASS_FP)                                                         { ret 1; }
     if (lang_mir.preg_regid(af.reg) != isa_inst.regid_make(isa_inst.REG_CLASS_ID_FP, 10)) { ret 1; }
 
-    if (t.of == nil)                         { ret 1; }
-    if (!str_equals(t.os.default_of, "raw")) { ret 1; }
+    if (t.of == nil)                          { ret 1; }
+    if (!str_equals(t.os.default_of, "flat")) { ret 1; }
 
-    val small_r: res[binding.Binding, fail.Fail] = lang_target.t_select("rv32imc", "freestanding", "ilp32");
+    val small_r: res[binding.Binding, fail.Fail] = lang_target.t_select_on("riscv32", "rv32imc", "freestanding", "ilp32");
     if (sel small_r.err) { ret 2; }
     val small: binding.Binding = small_r.ok;
     if (small.target.model.extensions != (extension_riscv.I | extension_riscv.M | extension_riscv.C)
         || small.target.model.has_float || small.target.model.flen_bits != 0 || small.target.model.reg_class_len != 1
         || !small.target.model.has_mul || extension_riscv.has(small.target.model.extensions, extension_riscv.A)) { ret 3; }
-    val small_d: res[binding.Binding, fail.Fail] = lang_target.t_select("rv32imc", "freestanding", "ilp32d");
-    if (sel small_d.ok)                                       { ret 4; }
-    if (!str_contains(fail.describe(small_d.err), "rv32imc")) { ret 4; }
-    if (!select_refused("riscv32", "freestanding", "ilp32f")) { ret 5; }
-    val default_r: res[binding.Binding, fail.Fail] = lang_target.t_select("riscv32", "freestanding", "ilp32");
-    if (sel default_r.err)                                                 { ret 6; }
-    if (default_r.ok.target.model.extensions != extension_riscv.DEFAULT32) { ret 7; }
+    val small_d: res[binding.Binding, fail.Fail] = lang_target.t_select_on("riscv32", "rv32imc", "freestanding", "ilp32d");
+    if (sel small_d.ok)                                                   { ret 4; }
+    if (!str_contains(fail.describe(small_d.err), "riscv32"))             { ret 4; }
+    if (!select_refused("riscv32", "rv32imac", "freestanding", "ilp32f")) { ret 5; }
+    # a freestanding target states its baseline, which only the chip decides
+    val unstated: res[binding.Binding, fail.Fail] = lang_target.t_select("riscv32", "freestanding", "ilp32");
+    if (sel unstated.ok)                                                        { ret 6; }
+    if (fail.kind_of(unstated.err) != diagnostic_kind.TARGET_BASELINE_REQUIRED) { ret 7; }
     if (t.target.model.flen_bits != 64 || t.target.model.reg_class_len != 2
         || t.isa != small.isa || small.target.model.flen_bits != 0) { ret 8; }
-    val f_r: res[binding.Binding, fail.Fail] = lang_target.t_select("rv64if", "freestanding", "lp64f");
+    val f_r: res[binding.Binding, fail.Fail] = lang_target.t_select_on("riscv64", "rv64if", "freestanding", "lp64f");
     if (sel f_r.err) { ret 9; }
     val f_only: binding.Binding = f_r.ok;
     if (f_only.target.model.flen_bits != 32 || !f_only.target.model.has_float || f_only.target.model.has_mul) { ret 10; }
-    if (!select_refused("rv64if", "freestanding", "lp64d"))                                                   { ret 11; }
+    if (!select_refused("riscv64", "rv64if", "freestanding", "lp64d"))                                        { ret 11; }
     val default64: res[binding.Binding, fail.Fail] = lang_target.t_select("riscv64", "linux", "lp64d");
     if (sel default64.err)                                                 { ret 12; }
     if (default64.ok.target.model.extensions != extension_riscv.DEFAULT64) { ret 12; }
-    if (!select_refused("rv32e", "freestanding", "ilp32"))                 { ret 13; }
-    if (!select_refused("rv64iv", "linux", "lp64"))                        { ret 13; }
-    if (!select_refused("rv64i_zba", "linux", "lp64"))                     { ret 13; }
+    if (!select_refused("riscv32", "rv32e", "freestanding", "ilp32"))      { ret 13; }
+    if (!select_refused("riscv64", "rv32imc", "linux", "lp64"))            { ret 16; }
+    if (!select_refused("riscv64", "rv64imm", "linux", "lp64"))            { ret 17; }
+    if (!select_refused("rv64gc", "", "linux", "lp64d"))                   { ret 18; }
     val compressed_flags: u32            = elf_riscv.EF_RVC;
     val validated:        err[fail.Fail] = target_of.attributes_validate(?elf.VTABLE, ?small.object, nil, 0, compressed_flags);
     if (sel validated.err) { ret 14; }
@@ -126,25 +134,26 @@ test select__riscv32_freestanding_raw {
 
 #[testing]
 rec MatrixRow {
-    isa:  str;
-    os:   str;
-    abi:  str;
-    exts: u64;
-    flen: u32;
+    isa:      str;
+    baseline: str;
+    os:       str;
+    abi:      str;
+    exts:     u64;
+    flen:     u32;
 }
 
-# one retained RISC-V tuple: the selection string, the model it narrows to, the
-# ABI's float requirement and the emitted Tag_RISCV_arch must all say the same thing
+# one retained RISC-V tuple: the baseline, the model it narrows to, the ABI's float
+# requirement and the emitted Tag_RISCV_arch must all say the same thing, the
+# attribute naming each selected row at masc's revision of it
 #[testing]
 fun matrix_row(alloc: *A.Allocator, row: *MatrixRow) i32 {
-    val res_: res[binding.Binding, fail.Fail] = lang_target.t_select(row.isa, row.os, row.abi);
+    val res_: res[binding.Binding, fail.Fail] = lang_target.t_select_on(row.isa, row.baseline, row.os, row.abi);
     if (sel res_.err) { ret 1; }
-    val t:      binding.Binding                           = res_.ok;
-    val parsed: res[extension_riscv.Selection, fail.Fail] = extension_riscv.parse(row.isa);
-    if (sel parsed.err) { ret 2; }
-    val selection: extension_riscv.Selection = parsed.ok;
-    if (selection.extensions != row.exts || t.target.model.extensions != row.exts)                      { ret 3; }
-    if (t.target.model.gpr_width != selection.width || t.target.model.pointer_width != selection.width) { ret 4; }
+    val t:     binding.Binding = res_.ok;
+    var width: u32             = 8;
+    if (catalog_arch.id_for(row.isa) == catalog_arch.RISCV32)                       { width = 4; }
+    if (t.target.model.extensions != row.exts)                                      { ret 3; }
+    if (t.target.model.gpr_width != width || t.target.model.pointer_width != width) { ret 4; }
     if (t.target.model.has_float != extension_riscv.has(row.exts, extension_riscv.F)
         || t.target.model.has_mul != extension_riscv.has(row.exts, extension_riscv.M)
         || t.target.model.flen_bits != row.flen) { ret 5; }
@@ -163,37 +172,34 @@ fun matrix_row(alloc: *A.Allocator, row: *MatrixRow) i32 {
     val bytes:       *u8            = built.ok;
     var at:          elf_riscv.Attrs;
     val body_parsed: err[fail.Fail] = elf_riscv.parse_body(bytes, len, ?at);
-    if (sel body_parsed.err)                 { ret 9; }
-    if (!at.has_arch)                        { ret 9; }
-    if (at.arch.xlen != selection.width * 8) { ret 10; }
-    var ei:      usize = 0;
-    var emitted: u32   = 0;
-    for (ei < extension_riscv.EXT_COUNT) {
-        val spec:    extension_riscv.ExtSpec = extension_riscv.EXTS[ei];
-        var present: bool                    = false;
-        var xi:      u32                     = 0;
-        for (xi < at.arch.count) {
-            val e: *elf_riscv.Ext = ?at.arch.exts[xi];
-            if (extension_riscv.ext_index((?e.name[0])::str, e.name_len::usize) == ei) {
-                present = true;
-                if (e.major != spec.major || e.minor != spec.minor) { ret 11; }
-            }
-            xi = xi + 1;
-        }
-        val selected: bool = spec.emitted && extension_riscv.has(row.exts, spec.requires);
-        if (present != selected) { ret 12; }
-        if (present)             { emitted = emitted + 1; }
-        ei = ei + 1;
+    if (sel body_parsed.err)       { ret 9; }
+    if (!at.has_arch)              { ret 9; }
+    if (at.arch.xlen != width * 8) { ret 10; }
+    var seen: u64 = 0;
+    var xi:   u32 = 0;
+    for (xi < at.arch.count) {
+        val e:   *elf_riscv.Ext       = ?at.arch.exts[xi];
+        val ext: *extension.Extension = extension.row_of(?extension_riscv.TABLE, (?e.name[0])::str, e.name_len::usize);
+        if (ext == nil || (row.exts & ext.bit) == 0) { ret 11; }
+        var rev: [16]u8;
+        var n:   usize = std_format.put_u64(?rev[0], e.major::u64);
+        rev[n] = 'p';
+        n      = n + 1;
+        n      = n + std_format.put_u64(?rev[n], e.minor::u64);
+        if (!str_region_equals(riscv_extension.CATALOG.extensions[ext.handle].revision, 0, n, (?rev[0])::str)
+            || str_len(riscv_extension.CATALOG.extensions[ext.handle].revision) != n) { ret 12; }
+        seen = seen | ext.bit;
+        xi   = xi + 1;
     }
-    if (emitted != at.arch.count) { ret 13; }
+    if (seen != row.exts) { ret 13; }
     val validated: err[fail.Fail] = target_of.attributes_validate(?elf.VTABLE, ?t.object, bytes, len, flags);
     if (sel validated.err) { ret 14; }
     ret 0;
 }
 
 #[testing]
-fun refused_naming(isa_name: str, os_name: str, abi_name: str, names: str) bool {
-    val res_: res[binding.Binding, fail.Fail] = lang_target.t_select(isa_name, os_name, abi_name);
+fun refused_naming(isa_name: str, baseline_name: str, os_name: str, abi_name: str, names: str) bool {
+    val res_: res[binding.Binding, fail.Fail] = lang_target.t_select_on(isa_name, baseline_name, os_name, abi_name);
     if (sel res_.ok) { ret false; }
     ret str_contains(fail.describe(res_.err), names);
 }
@@ -203,55 +209,46 @@ test select__riscv_retained_matrix_agrees_on_selection_abi_and_attributes {
     val made:  err[A.Error] = page.make(?alloc);
     if (sel made.err) { ret 1; }
 
-    val g:    u64           = extension_riscv.G;
-    val rows: [13]MatrixRow = [13]MatrixRow{
-        MatrixRow{isa: "riscv64", os: "linux", abi: "lp64d", exts: extension_riscv.DEFAULT64, flen: 64},
-        MatrixRow{isa: "rv64gc", os: "linux", abi: "lp64d", exts: extension_riscv.DEFAULT64, flen: 64},
-        MatrixRow{isa: "riscv64", os: "linux", abi: "lp64f", exts: extension_riscv.DEFAULT64, flen: 64},
-        MatrixRow{isa: "riscv64", os: "linux", abi: "lp64", exts: extension_riscv.DEFAULT64, flen: 64},
-        MatrixRow{isa: "rv64imafd", os: "linux", abi: "lp64d", exts: g & ~extension_riscv.ZIFENCEI, flen: 64},
-        MatrixRow{isa: "rv64imafc", os: "freestanding", abi: "lp64f", exts: extension_riscv.I | extension_riscv.M | extension_riscv.A | extension_riscv.F | extension_riscv.C | extension_riscv.ZICSR, flen: 32},
-        MatrixRow{isa: "rv64if", os: "freestanding", abi: "lp64f", exts: extension_riscv.I | extension_riscv.F | extension_riscv.ZICSR, flen: 32},
-        MatrixRow{isa: "rv64i", os: "freestanding", abi: "lp64", exts: extension_riscv.I, flen: 0},
-        MatrixRow{isa: "riscv32", os: "freestanding", abi: "ilp32", exts: extension_riscv.DEFAULT32, flen: 0},
-        MatrixRow{isa: "rv32imac", os: "freestanding", abi: "ilp32", exts: extension_riscv.DEFAULT32, flen: 0},
-        MatrixRow{isa: "rv32imc", os: "freestanding", abi: "ilp32", exts: extension_riscv.I | extension_riscv.M | extension_riscv.C, flen: 0},
-        MatrixRow{isa: "rv32imafdc", os: "freestanding", abi: "ilp32d", exts: (g & ~extension_riscv.ZIFENCEI) | extension_riscv.C, flen: 64},
-        MatrixRow{isa: "rv32imafc", os: "freestanding", abi: "ilp32f", exts: extension_riscv.I | extension_riscv.M | extension_riscv.A | extension_riscv.F | extension_riscv.C | extension_riscv.ZICSR, flen: 32},
+    val g:    u64           = extension_riscv.DEFAULT64 & ~extension_riscv.C;
+    val rows: [12]MatrixRow = [12]MatrixRow{
+        MatrixRow{isa: "riscv64", baseline: "", os: "linux", abi: "lp64d", exts: extension_riscv.DEFAULT64, flen: 64},
+        MatrixRow{isa: "riscv64", baseline: "rv64gc", os: "linux", abi: "lp64d", exts: extension_riscv.DEFAULT64, flen: 64},
+        MatrixRow{isa: "riscv64", baseline: "", os: "linux", abi: "lp64f", exts: extension_riscv.DEFAULT64, flen: 64},
+        MatrixRow{isa: "riscv64", baseline: "", os: "linux", abi: "lp64", exts: extension_riscv.DEFAULT64, flen: 64},
+        MatrixRow{isa: "riscv64", baseline: "rv64imafd", os: "linux", abi: "lp64d", exts: g & ~extension_riscv.ZIFENCEI, flen: 64},
+        MatrixRow{isa: "riscv64", baseline: "rv64imafc", os: "freestanding", abi: "lp64f", exts: extension_riscv.I | extension_riscv.M | extension_riscv.A | extension_riscv.F | extension_riscv.C | extension_riscv.ZICSR, flen: 32},
+        MatrixRow{isa: "riscv64", baseline: "rv64if", os: "freestanding", abi: "lp64f", exts: extension_riscv.I | extension_riscv.F | extension_riscv.ZICSR, flen: 32},
+        MatrixRow{isa: "riscv64", baseline: "rv64i", os: "freestanding", abi: "lp64", exts: extension_riscv.I, flen: 0},
+        MatrixRow{isa: "riscv32", baseline: "rv32imac", os: "freestanding", abi: "ilp32", exts: extension_riscv.DEFAULT32, flen: 0},
+        MatrixRow{isa: "riscv32", baseline: "rv32imc", os: "freestanding", abi: "ilp32", exts: extension_riscv.I | extension_riscv.M | extension_riscv.C, flen: 0},
+        MatrixRow{isa: "riscv32", baseline: "rv32imafdc", os: "freestanding", abi: "ilp32d", exts: (g & ~extension_riscv.ZIFENCEI) | extension_riscv.C, flen: 64},
+        MatrixRow{isa: "riscv32", baseline: "rv32imafc", os: "freestanding", abi: "ilp32f", exts: extension_riscv.I | extension_riscv.M | extension_riscv.A | extension_riscv.F | extension_riscv.C | extension_riscv.ZICSR, flen: 32},
     };
     var i: usize = 0;
-    for (i < 13) {
+    for (i < 12) {
         val code: i32 = matrix_row(?alloc, ?rows[i]);
         if (code != 0) { ret (i::i32 + 1) * 16 + code; }
         i = i + 1;
     }
-    val rv32_d: res[binding.Binding, fail.Fail] = lang_target.t_select("rv32imafdc", "freestanding", "ilp32");
-    val rv32_f: res[binding.Binding, fail.Fail] = lang_target.t_select("rv32imafdc", "freestanding", "ilp32f");
+    val rv32_d: res[binding.Binding, fail.Fail] = lang_target.t_select_on("riscv32", "rv32imafdc", "freestanding", "ilp32");
+    val rv32_f: res[binding.Binding, fail.Fail] = lang_target.t_select_on("riscv32", "rv32imafdc", "freestanding", "ilp32f");
     if (sel rv32_d.err) { ret 2; }
     if (sel rv32_f.err) { ret 2; }
 
-    # the ABI needs F or D the selection lacks: the letter and the selection are named
-    if (!refused_naming("rv32imc", "freestanding", "ilp32d", "lacks the F and D extensions")
-        || !refused_naming("rv32imc", "freestanding", "ilp32d", "'rv32imc'")) { ret 3; }
-    if (!refused_naming("riscv32", "freestanding", "ilp32f", "lacks the F extension")
-        || !refused_naming("riscv32", "freestanding", "ilp32f", "'riscv32'")) { ret 4; }
-    if (!refused_naming("rv64if", "freestanding", "lp64d", "lacks the D extension")
-        || !refused_naming("rv64if", "freestanding", "lp64d", "'rv64if'")) { ret 5; }
-    if (!refused_naming("rv64i", "linux", "lp64f", "lacks the F extension")) { ret 6; }
-    # the E base, an unknown extension, a noncanonical order, a version: token and string
-    if (!refused_naming("rv32e", "freestanding", "ilp32", "E is unsupported")
-        || !refused_naming("rv32e", "freestanding", "ilp32", "'rv32e'")) { ret 7; }
-    if (!refused_naming("rv64iv", "linux", "lp64", "unknown or unavailable RISC-V extension: 'v' in selection 'rv64iv'"))            { ret 8; }
-    if (!refused_naming("rv64i_zba", "linux", "lp64", "'zba' in selection 'rv64i_zba'"))                                             { ret 9; }
-    if (!refused_naming("rv64icm", "linux", "lp64", "noncanonical RISC-V extension order: 'm' in selection 'rv64icm'"))              { ret 10; }
-    if (!refused_naming("rv64imm", "linux", "lp64", "duplicate or noncanonical RISC-V extension order: 'm' in selection 'rv64imm'")) { ret 11; }
-    if (!refused_naming("rv64i3p0", "linux", "lp64", "'3p0' in selection 'rv64i3p0'"))                                               { ret 12; }
-    if (!refused_naming("rv64id", "linux", "lp64", "D extension requires F: selection 'rv64id'"))                                    { ret 13; }
-    if (!refused_naming("rv64i_", "linux", "lp64", "trailing separator in RISC-V extension string: '_' in selection 'rv64i_'"))      { ret 14; }
+    # the ABI needs F or D the selection lacks: the extensions and the isa are named
+    if (!refused_naming("riscv32", "rv32imc", "freestanding", "ilp32d", "lacks the f, d extensions")
+        || !refused_naming("riscv32", "rv32imc", "freestanding", "ilp32d", "'riscv32'")) { ret 3; }
+    if (!refused_naming("riscv32", "rv32imac", "freestanding", "ilp32f", "lacks the f extension")) { ret 4; }
+    if (!refused_naming("riscv64", "rv64if", "freestanding", "lp64d", "lacks the d extension"))    { ret 5; }
+    if (!refused_naming("riscv64", "rv64i", "linux", "lp64f", "lacks the f extension"))            { ret 6; }
+    # a baseline masc's catalog refuses, or the architecture does not enter, names it
+    if (!refused_naming("riscv32", "rv32e", "freestanding", "ilp32", "baseline `rv32e` on isa 'riscv32'"))     { ret 7; }
+    if (!refused_naming("riscv64", "rv32imc", "linux", "lp64", "baseline `rv32imc` on isa 'riscv64'"))         { ret 8; }
+    if (!refused_naming("riscv64", "rv64imm", "linux", "lp64", "baseline `rv64imm` on isa 'riscv64': masc's")) { ret 9; }
     ret 0;
 }
 
-# a manifest list widens a selection string, closed over what each name implies
+# a manifest list widens a baseline, closed over what each name implies
 test resolve__extensions_widen_a_selection {
     val reg: *lang_target.TargetRegistry = lang_target.t_registry();
 
@@ -272,8 +269,9 @@ test resolve__extensions_widen_a_selection {
 }
 
 #[testing]
-fun with_extension_list(reg: *lang_target.TargetRegistry, isa_name: str, abi_name: str, names: *str, count: u32) res[binding.Binding, fail.Fail] {
-    var req: lang_target.TargetRequest = lang_target.target_request(isa_name, "linux", abi_name);
+fun with_extension_list(reg: *lang_target.TargetRegistry, baseline_name: str, abi_name: str, names: *str, count: u32) res[binding.Binding, fail.Fail] {
+    var req: lang_target.TargetRequest = lang_target.target_request("riscv64", "linux", abi_name);
+    lang_target.with_baseline(?req, baseline_name);
     lang_target.with_extensions(?req, names, count);
     ret lang_target.resolve(reg, ?req);
 }

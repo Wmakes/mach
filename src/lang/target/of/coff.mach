@@ -2,6 +2,7 @@ use diagnostic_kind: mach.lang.diagnostic.kind;
 use mach.lang.fail;
 use mach.lang.growth;
 use output_testing: mach.lang.output.testing;
+use mink_format:    mink.catalog.format;
 use std.allocator.page;
 use std.collections.sort;
 use std.collections.vector.Vector;
@@ -4175,7 +4176,7 @@ fun segment_tables(img: *target_of.LinkedImage, tables: *target_of.TableList) er
 pub val VTABLE: target_of.OfVTable = target_of.OfVTable{
     id:                  target_of.COFF,
     fingerprint_tag:     3,
-    name:                "coff",
+    name:                mink_format.COFF.name,
     links_from_image:    true,
     object_suffix:       ".o",
     object_emit:         object_emit,

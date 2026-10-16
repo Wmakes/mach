@@ -1389,7 +1389,7 @@ fun admit_extensions(st: *isa_encode.EncodeState, c: *Cursor, item: *Item) err[f
     if (extension.admits(admitted, item.requires)) { ret err[fail.Fail].ok{}; }
     val missing: u64                   = item.requires & ~admitted;
     val m:       *target_model.Machine = st.model;
-    val ext:     str                   = extension.first_name(m.extension_table, m.extension_count, missing);
+    val ext:     str                   = extension.first_name(m.extension_table, missing);
     if (ext == nil || item.mnemonic == nil) {
         ret err[fail.Fail].err{fail.message("asm: a required extension or the instruction's mnemonic is unnamed")};
     }

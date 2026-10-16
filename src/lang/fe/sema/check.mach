@@ -33,13 +33,14 @@ use mach.lang.layout;
 use mach.lang.module;
 use mach.lang.session;
 use lang_source:  mach.lang.source;
-use catalog_arch: mach.lang.target.catalog.arch;
+use target_model: mach.lang.target.model;
 use mach.lang.type;
 use mach.lang.type.query.deep;
 use mach.lang.type.query.extent;
 use mach.lang.type.query.reach;
 use mach.lang.type.query.secrecy;
 use mach.lang.wide;
+use std.text.string.str_free;
 
 fun check_assignable(sc: *sema_context.SemaContext, expected: type.TypeId, actual: type.TypeId, span: lang_source.Span) bool {
     if (type.is_error(expected) || type.is_error(actual)) { ret true; }
@@ -1025,7 +1026,8 @@ pub fun check_float_capability(sc: *sema_context.SemaContext, tid: type.TypeId, 
     if (sel ts.none) { ret; }
     fin { type_str_free(sc, ts.some); }
 
-    val note: res[opt[str], fail.Fail] = catalog_arch.float_absence_note(target_name);
+    val view: target_model.ExtensionView = sc.view.ctx.env.target.extensions;
+    val note: res[opt[str], fail.Fail]   = target_model.float_absence(sc.s.alloc, view.table, 32, view.selected);
     if (sel note.err) {
         fail.internal(?sc.status, fail.describe(note.err));
         ret;
@@ -1033,6 +1035,7 @@ pub fun check_float_capability(sc: *sema_context.SemaContext, tid: type.TypeId, 
     if (sel note.ok.some) {
         sema_context.reportf(sc, diagnostic_kind.TARGET_NO_FLOAT, span,
             "`{}` uses a floating-point type, which target `{}` does not support: {}", ts.some, target_name, note.ok.some);
+        str_free(sc.s.alloc, note.ok.some);
         ret;
     }
     sema_context.reportf(sc, diagnostic_kind.TARGET_NO_FLOAT, span,

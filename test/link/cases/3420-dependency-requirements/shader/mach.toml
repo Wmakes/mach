@@ -12,7 +12,7 @@ abi = "sysv64"
 
 [target.spirv]
 isa = "spirv"
-os  = "freestanding"
+os  = "vulkan"
 abi = "spirv"
 
 [artifact.shader]

@@ -526,7 +526,7 @@ fun eval_unary[T](ev: *Evaluation[T], un: *ast_expr.ExprUnary, fw: float.FloatWi
 
     if (un.op == ast_expr.UN_NEG) {
         if (v.kind == comptime_value.CT_KIND_INT)   { ret comptime_value.ct_negate(v); }
-        if (v.kind == comptime_value.CT_KIND_FLOAT) { ret comptime_value.float_value(float.f64_neg(v.data.f), v.float_width); }
+        if (v.kind == comptime_value.CT_KIND_FLOAT) { ret comptime_value.float_value(comptime_value.float_negated(v.data.f, v.float_width), v.float_width); }
         ret comptime_value.reject(diagnostic_kind.COMPTIME_OPERAND_TYPE, "unary - requires a numeric operand");
     }
     if (un.op == ast_expr.UN_NOT) {
@@ -539,8 +539,8 @@ fun eval_unary[T](ev: *Evaluation[T], un: *ast_expr.ExprUnary, fw: float.FloatWi
     }
     if (un.op == ast_expr.UN_BIT_NOT) {
         if (v.kind != comptime_value.CT_KIND_INT) { ret comptime_value.reject(diagnostic_kind.COMPTIME_OPERAND_TYPE, "unary ~ requires an integer operand"); }
-        if (v.int_width == 0)                     { ret comptime_value.make_int_wide(wide.not(v.data.w), v.int_unsigned); }
-        ret comptime_value.cast_int(wide.not(v.data.w), v.int_width::u32, !v.int_unsigned);
+        if (v.int_width == 0)                     { ret comptime_value.make_int_wide(comptime_value.complement(v.data.w), v.int_unsigned); }
+        ret comptime_value.cast_int(comptime_value.complement(v.data.w), v.int_width::u32, !v.int_unsigned);
     }
     ret comptime_value.reject(diagnostic_kind.COMPTIME_NOT_EVALUABLE, "unsupported unary operator");
 }
@@ -1374,7 +1374,7 @@ test tag_for__registry_names_are_the_only_names {
         if (r.ok == catalog_os.UNKNOWN)          { ret 1; }
         i = i + 1;
     }
-    if (catalog_os.count() != 4) { ret 1; }
+    if (catalog_os.count() != 5) { ret 1; }
 
     val arch_tag_for_1: res[u32, fail.Fail] = comptime_path.arch_tag_for(t_view("spirv"));
     if (sel arch_tag_for_1.err) { ret 1; }

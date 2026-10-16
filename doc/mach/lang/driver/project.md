@@ -96,7 +96,8 @@ req_scopes: one requirement scope per project the cell compiles, the declaring
 pub rec ArtifactEntry;
 ```
 
-an artifact entry the union walk loads: the entry module and the artifact it is of
+an artifact entry the union walk loads: the entry module, the artifact it is of and
+where the artifact's `entry` is written in the manifest
 
 ## rec ModuleEntry
 

@@ -2234,8 +2234,14 @@ test link_modules__riscv_inputs_merge_and_refuse_only_conflicts {
     var s: session.Session = sr.ok;
     fin { session.dnit(?s); }
 
-    val full_r: res[lang_target.Binding, fail.Fail] = lang_target.select_of(lang_target.t_registry(), "rv64imafdc", "freestanding", "lp64d", "elf");
-    val base_r: res[lang_target.Binding, fail.Fail] = lang_target.select_of(lang_target.t_registry(), "rv64i", "freestanding", "lp64", "elf");
+    var full_q: lang_target.TargetRequest = lang_target.target_request("riscv64", "freestanding", "lp64d");
+    var base_q: lang_target.TargetRequest = lang_target.target_request("riscv64", "freestanding", "lp64");
+    lang_target.with_of(?full_q, "elf");
+    lang_target.with_of(?base_q, "elf");
+    lang_target.with_baseline(?full_q, "rv64imafdc");
+    lang_target.with_baseline(?base_q, "rv64i");
+    val full_r: res[lang_target.Binding, fail.Fail] = lang_target.resolve(lang_target.t_registry(), ?full_q);
+    val base_r: res[lang_target.Binding, fail.Fail] = lang_target.resolve(lang_target.t_registry(), ?base_q);
     if (sel full_r.err) { ret 2; }
     if (sel base_r.err) { ret 2; }
     var full: lang_target.Binding = full_r.ok;
@@ -3359,9 +3365,13 @@ fun t_riscv_got_pointer(arch: str, abi: str, width: u32) i32 {
     fin { linkage.dnit(?l); }
     var s: session.Session = sr.ok;
     fin { session.dnit(?s); }
-    var system: str = "linux";
-    if (width == 4) { system = "freestanding"; }
-    val selected: res[lang_target.Binding, fail.Fail] = lang_target.select_of(lang_target.t_registry(), arch, system, abi, "elf");
+    var req: lang_target.TargetRequest = lang_target.target_request(arch, "linux", abi);
+    if (width == 4) {
+        req = lang_target.target_request(arch, "freestanding", abi);
+        lang_target.with_baseline(?req, "rv32imac");
+    }
+    lang_target.with_of(?req, "elf");
+    val selected: res[lang_target.Binding, fail.Fail] = lang_target.resolve(lang_target.t_registry(), ?req);
     if (sel selected.err) { ret 3; }
     var tgt:   lang_target.Binding = selected.ok;
     var bytes: [24]u8;

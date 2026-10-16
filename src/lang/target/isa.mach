@@ -441,14 +441,9 @@ fun model_validate(a: *A.Allocator, vt: *IsaVTable) err[fail.Fail] {
     if (!target_model.vector_lanes_valid(m)) {
         ret err[fail.Fail].err{fail.formatted(a, "mach.lang.target.isa: instruction set '{}' declares a vector lane count whose 64-bit lanes span more bits than a u32 holds", vt.name)};
     }
-    if ((m.extension_count > 0 && m.extension_table == nil)
-        || (m.extension_table != nil && !extension.table_valid(m.extension_table, m.extension_count))
+    if ((m.extension_table != nil && !extension.table_valid(m.extension_table))
         || (m.extensions & ~target_model.extension_domain(m)) != 0) {
         ret err[fail.Fail].err{fail.formatted(a, "mach.lang.target.isa: instruction set '{}' declares an extension vocabulary with a repeated or non-identifier name, a bit that is not a single bit, or a selected bit it does not name", vt.name)};
-    }
-    if ((m.level_count > 0 && m.level_table == nil)
-        || !extension.levels_valid(m.level_table, m.level_count, m.extension_table, m.extension_count)) {
-        ret err[fail.Fail].err{fail.formatted(a, "mach.lang.target.isa: instruction set '{}' declares a level that is not a hyphenated spelling, is also a row's name, names a member outside its vocabulary, or does not extend the level before it", vt.name)};
     }
     val mul_why: opt[str] = target_model.ct_mul_forms_refusal(m);
     if (sel mul_why.some) {

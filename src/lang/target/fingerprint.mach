@@ -207,7 +207,7 @@ test put__sensitive_to_arch_abi_os_of_debug_backend_and_image {
     if (!t_put(?td_arch, ?e_arch))     { ret 1; }
     if (t_same_bytes(?ebase, ?e_arch)) { ret 1; }
 
-    val diff_of: res[binding.Binding, fail.Fail] = lang_target.select_of(reg, "x86_64", "freestanding", "sysv64", "raw");
+    val diff_of: res[binding.Binding, fail.Fail] = lang_target.select_of(reg, "x86_64", "freestanding", "sysv64", "flat");
     val same_of: res[binding.Binding, fail.Fail] = lang_target.select_of(reg, "x86_64", "freestanding", "sysv64", "elf");
     if (sel diff_of.err) { ret 1; }
     if (sel same_of.err) { ret 1; }
@@ -226,7 +226,7 @@ test put__sensitive_to_arch_abi_os_of_debug_backend_and_image {
     if (!t_put(?td_os, ?e_os))       { ret 1; }
     if (t_same_bytes(?ebase, ?e_os)) { ret 1; }
 
-    val diff_backend: res[binding.Binding, fail.Fail] = lang_target.select_of(reg, "spirv", "freestanding", "spirv", "spv");
+    val diff_backend: res[binding.Binding, fail.Fail] = lang_target.select_of(reg, "spirv", "vulkan", "spirv", "spirv");
     if (sel diff_backend.err) { ret 1; }
     var td_backend: binding.Binding = diff_backend.ok;
     var e_backend:  wire.Sink       = wire.grown(?alloc);

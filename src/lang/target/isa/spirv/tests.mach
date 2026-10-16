@@ -221,7 +221,7 @@ test oblivious__refused_on_spirv {
 
 #[testing]
 fun spirv_env_manifest(alloc: *A.Allocator, env_line: str) str {
-    ret driver.joined(alloc, "[project]\nmach = \">=5\"\nid = \"envtest\"\nversion = \"0.0.0\"\nsrc = \"src\"\nwork = \"out/{target.name}/{profile.name}\"\n\n[target.gpu]\nisa = \"spirv\"\nos = \"freestanding\"\nabi = \"spirv\"\n", env_line, "\n[artifact.k]\nkind = \"bin\"\nentry = \"k.mach\"\nout = \"{project.work}/k.spv\"\ntargets = [\"*\"]\nlink = []\nneed = []\n[profile.debug]\ndefault = true\noptimize = false\ndebug = true\nsimd = \"scalarize\"\n[profile.release]\noptimize = true\ndebug = false\nsimd = \"scalarize\"\n");
+    ret driver.joined(alloc, "[project]\nmach = \">=5\"\nid = \"envtest\"\nversion = \"0.0.0\"\nsrc = \"src\"\nwork = \"out/{target.name}/{profile.name}\"\n\n[target.gpu]\nisa = \"spirv\"\nos = \"vulkan\"\nabi = \"spirv\"\n", env_line, "\n[artifact.k]\nkind = \"bin\"\nentry = \"k.mach\"\nout = \"{project.work}/k.spv\"\ntargets = [\"*\"]\nlink = []\nneed = []\n[profile.debug]\ndefault = true\noptimize = false\ndebug = true\nsimd = \"scalarize\"\n[profile.release]\noptimize = true\ndebug = false\nsimd = \"scalarize\"\n");
 }
 
 #[testing]

@@ -6,7 +6,8 @@ src = "src"
 work = "out/{target.name}/{profile.name}"
 
 [target.riscv32]
-isa  = "rv32imafdc"
+isa  = "riscv32"
+baseline = "rv32imafdc"
 os   = "freestanding"
 abi  = "ilp32d"
 of   = "elf"

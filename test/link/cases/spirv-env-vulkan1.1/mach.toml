@@ -7,7 +7,7 @@ work = "out/link"
 
 [target.spirv]
 isa = "spirv"
-os  = "freestanding"
+os  = "vulkan"
 abi = "spirv"
 env = "vulkan1.1"
 

@@ -34,6 +34,7 @@ use mir_debug:   mach.lang.mir.debug;
 use mir_unit:    mach.lang.mir.unit;
 use lang_source: mach.lang.source;
 use mach.lang.target.binding;
+use catalog_arch: mach.lang.target.catalog.arch;
 use mach.lang.target.isa;
 use isa_asm:        mach.lang.target.isa.asm;
 use isa_inst:       mach.lang.target.isa.inst;
@@ -41,21 +42,32 @@ use target_of:      mach.lang.target.of;
 use lang_target_os: mach.lang.target.os;
 use mach.lang.target.resolved;
 
+use masc_ct:   masc.core.ct;
+use masc_set:  masc.core.set;
+use masc_isa:  masc.isa.isa;
+use mink_arch: mink.catalog.arch;
+
 pub fun validate(tgt: *binding.Binding, m: *lang_mir.MirModule) err[fail.Fail] {
     if (tgt == nil)     { ret err[fail.Fail].err{fail.message("ctvalidate: nil target")}; }
     if (tgt.isa == nil) { ret err[fail.Fail].err{fail.message("ctvalidate: target has no instruction set")}; }
     if (m == nil)       { ret err[fail.Fail].err{fail.message("ctvalidate: nil mir module")}; }
 
-    val unverifiable: bool = isa.emits_whole_module(tgt.isa);
+    val timing: opt[masc_ct.Timing] = timing_of(tgt.target.arch_id);
 
     var i: u32 = 0;
     for (i < m.function_len) {
         val f: *lang_mir.MirFunction = ?m.functions[i];
         if (f.oblivious) {
-            if (unverifiable) {
-                val why: res[str, fail.Fail] = unverifiable_msg(m.alloc, m.interner, f.name, tgt.isa.name);
-                if (sel why.err) { ret err[fail.Fail].err{why.err}; }
-                ret err[fail.Fail].err{lang_mir.reject_function(m, diagnostic_kind.SECRET_TARGET_UNVERIFIABLE, f, why.ok)};
+            if (sel timing.some) {
+                if (sel timing.some.none) {
+                    val why: res[str, fail.Fail] = unverifiable_msg(m.alloc, m.interner, f.name, tgt.isa.name);
+                    if (sel why.err) { ret err[fail.Fail].err{why.err}; }
+                    ret err[fail.Fail].err{lang_mir.reject_function(m, diagnostic_kind.SECRET_TARGET_UNVERIFIABLE, f, why.ok)};
+                }
+                if (sel timing.some.unguaranteed) {
+                    val warned: err[fail.Fail] = warn_unenforceable(m, f, tgt.isa.name);
+                    if (sel warned.err) { ret warned; }
+                }
             }
             val result: err[fail.Fail] = validate_function(tgt, m, f);
             if (sel result.err) { ret result; }
@@ -63,6 +75,31 @@ pub fun validate(tgt: *binding.Binding, m: *lang_mir.MirModule) err[fail.Fail] {
         i = i + 1;
     }
     ret err[fail.Fail].ok{};
+}
+
+# what masc's instruction set for the target's architecture says of its timing:
+# its rows classify it, it cannot be guaranteed, or none is classified. none when
+# masc registers no set for the architecture, which keeps mach's own walk (#4779)
+fun timing_of(arch_id: u32) opt[masc_ct.Timing] {
+    val owner: *mink_arch.Arch = catalog_arch.owner_of(arch_id);
+    if (owner == nil) { ret opt[masc_ct.Timing].none{}; }
+    val found: opt[*masc_set.Set] = masc_set.find(?masc_isa.REGISTRY, owner);
+    if (sel found.none) { ret opt[masc_ct.Timing].none{}; }
+    ret opt[masc_ct.Timing].some{found.some.ct};
+}
+
+# the warning at an oblivious function's mark that its target cannot practically
+# enforce constant-time execution, as masc says of wasm
+fun warn_unenforceable(m: *lang_mir.MirModule, f: *lang_mir.MirFunction, arch: str) err[fail.Fail] {
+    if (m.diags == nil) { ret err[fail.Fail].ok{}; }
+    var name: str = "";
+    if (m.interner != nil && !intern.str_is_nil(f.name)) { name = intern.text(m.interner, f.name); }
+    val text: res[str, fail.Fail] = fail.format(m.alloc,
+        "#[oblivious] function `{}` compiles for the `{}` target, which cannot practically enforce constant-time execution: its runtime decides the instructions that execute and their timing",
+        name, arch);
+    if (sel text.err) { ret err[fail.Fail].err{text.err}; }
+    val loc: lang_source.Location = lang_mir.refusal_loc(f, nil);
+    ret diagnostic.report(m.diags, diagnostic_kind.SECRET_TARGET_UNENFORCEABLE, loc.file, loc.span, text.ok);
 }
 
 fun validate_function(tgt: *binding.Binding, m: *lang_mir.MirModule, f: *lang_mir.MirFunction) err[fail.Fail] {
@@ -584,6 +621,26 @@ val T_ADDRESS_REFUSAL: str = "uses a secret value as a memory address";
 fun t_refused_with(r: err[fail.Fail], want: str) bool {
     if (sel r.ok) { ret false; }
     ret str_contains(fail.describe(r.err), want);
+}
+
+# the constant-time decision is masc's per set: x86_64 and the risc-v sets classify
+# their rows, spir-v classifies none, and aarch64, which masc registers no set for
+# yet, keeps mach's own walk
+test timing_of__reads_masc_s_set_for_the_architecture {
+    val x: opt[masc_ct.Timing] = timing_of(catalog_arch.X86_64);
+    if (sel x.none)         { ret 1; }
+    if (!(sel x.some.rows)) { ret 1; }
+    val r: opt[masc_ct.Timing] = timing_of(catalog_arch.RISCV64);
+    if (sel r.none)         { ret 2; }
+    if (!(sel r.some.rows)) { ret 2; }
+    val v: opt[masc_ct.Timing] = timing_of(catalog_arch.SPIRV);
+    if (sel v.none)         { ret 3; }
+    if (!(sel v.some.none)) { ret 3; }
+    val a: opt[masc_ct.Timing] = timing_of(catalog_arch.AARCH64);
+    if (sel a.some) { ret 4; }
+    val u: opt[masc_ct.Timing] = timing_of(catalog_arch.UNKNOWN);
+    if (sel u.some) { ret 5; }
+    ret 0;
 }
 
 test rederive__phi_join_branch {
@@ -1127,7 +1184,8 @@ test scope__whole_module_backend_refused {
     if (sel run_r.err) { ret 1; }
 
     var wvt: isa.IsaVTable = t_isa("spirv", true);
-    t.isa = ?wvt;
+    t.isa            = ?wvt;
+    t.target.arch_id = catalog_arch.SPIRV;
     val run_r2: err[fail.Fail] = validate(?t, ?mm_on);
     if (sel run_r2.ok)                       { ret 1; }
     if (!fail.is_reported(run_r2.err))       { ret 2; }

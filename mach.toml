@@ -61,3 +61,15 @@ need = []
 [dep.std]
 git = "https://github.com/briar-systems/mach-std"
 ref = "branch/dev"
+
+[dep.mink]
+git = "https://github.com/briar-systems/mink"
+ref = "branch/dev"
+
+[dep.masc]
+git = "https://github.com/briar-systems/masc"
+ref = "branch/dev"
+
+[dep.mirl]
+git = "https://github.com/briar-systems/mirl"
+ref = "branch/dev"

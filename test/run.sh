@@ -57,27 +57,28 @@ cflags_O0="-std=c11 -O0 -ffp-contract=off -Wall -Wextra"
 cflags_O2="-std=c11 -O2 -ffp-contract=off -Wall -Wextra"
 cflags_ubsan="-std=c11 -O0 -ffp-contract=off -fsanitize=undefined -fno-sanitize-recover=all"
 
-# the targets: name isa os abi of kind entry qemu env ext. qemu names the
+# the targets: name isa os abi of kind entry qemu env bl ext. qemu names the
 # qemu-user command that runs the target under --qemu, or - for none. a direct
 # target with one also builds a run bin from test/lib/start_<name>.mach, re-laid
 # by test/lib/elf_loadable.py, since qemu-user cannot map a freestanding image.
-# env is the manifest `env` the target declares, or - for none. ext is the
-# manifest `extensions` the target selects, comma-separated, or - for none.
+# env is the manifest `env` the target declares, or - for none. bl is the manifest
+# `baseline` the target stands on, or - for the isa's default. ext is the manifest
+# `extensions` the target selects, comma-separated, or - for none.
 targets_all='
-x86_64-linux       x86_64      linux         sysv64   -    bin     hosted  -             -          -
-x86_64v3-linux     x86_64      linux         sysv64   -    bin     hosted  -             -          x86-64-v3
-aarch64-linux      aarch64     linux         aapcs64  -    bin     hosted  qemu-aarch64  -          -
-aarch64fp16-linux  aarch64     linux         aapcs64  -    bin     hosted  qemu-aarch64  -          fp16
-riscv64-linux      riscv64     linux         lp64d    -    bin     hosted  qemu-riscv64  -          -
-riscv64zkt-linux   rv64gc_zkt  linux         lp64d    -    bin     hosted  qemu-riscv64  -          -
-riscv64zfh-linux   rv64gc_zfh  linux         lp64d    -    bin     hosted  qemu-riscv64  -          -
-x86_64-windows     x86_64      windows       win64    -    bin     hosted  -             -          -
-x86_64-darwin      x86_64      darwin        sysv64   -    bin     hosted  -             -          -
-aarch64-darwin     aarch64     darwin        aapcs64  -    bin     hosted  -             -          -
-spirv              spirv       freestanding  spirv    -    bin     direct  -             -          -
-spirv-vk12         spirv       freestanding  spirv    -    bin     direct  -             vulkan1.2  int8,int16,int64,float64,float16,storage_buffer_8bit_access,storage_buffer_16bit_access
-spirv-vk13         spirv       freestanding  spirv    -    bin     direct  -             vulkan1.3  int8,int16,int64,float64,float16,storage_buffer_8bit_access,storage_buffer_16bit_access
-riscv32            rv32imafdc  freestanding  ilp32d   elf  static  direct  qemu-riscv32  -          -
+x86_64-linux       x86_64   linux         sysv64   -    bin     hosted  -             -          -           -
+x86_64v3-linux     x86_64   linux         sysv64   -    bin     hosted  -             -          -           x86-64-v3
+aarch64-linux      aarch64  linux         aapcs64  -    bin     hosted  qemu-aarch64  -          -           -
+aarch64fp16-linux  aarch64  linux         aapcs64  -    bin     hosted  qemu-aarch64  -          -           fp16
+riscv64-linux      riscv64  linux         lp64d    -    bin     hosted  qemu-riscv64  -          -           -
+riscv64zkt-linux   riscv64  linux         lp64d    -    bin     hosted  qemu-riscv64  -          rv64gc_zkt  -
+riscv64zfh-linux   riscv64  linux         lp64d    -    bin     hosted  qemu-riscv64  -          rv64gc_zfh  -
+x86_64-windows     x86_64   windows       win64    -    bin     hosted  -             -          -           -
+x86_64-darwin      x86_64   darwin        sysv64   -    bin     hosted  -             -          -           -
+aarch64-darwin     aarch64  darwin        aapcs64  -    bin     hosted  -             -          -           -
+spirv              spirv    vulkan        spirv    -    bin     direct  -             -          -           -
+spirv-vk12         spirv    vulkan        spirv    -    bin     direct  -             vulkan1.2  -           int8,int16,int64,float64,float16,storage_buffer_8bit_access,storage_buffer_16bit_access
+spirv-vk13         spirv    vulkan        spirv    -    bin     direct  -             vulkan1.3  -           int8,int16,int64,float64,float16,storage_buffer_8bit_access,storage_buffer_16bit_access
+riscv32            riscv32  freestanding  ilp32d   elf  static  direct  qemu-riscv32  -          rv32imafdc  -
 '
 # where a run bin is based: above the host's mmap floor with a page for its headers
 run_base=0x20000
@@ -334,9 +335,10 @@ manifest() {
     echo '[project]'; echo 'id = "corpus"'; echo 'version = "0.0.0"'; echo 'mach = ">=5"'; echo 'src = "src"'
     echo 'work = "o/{target.name}/{profile.name}"'; echo
     names=
-    printf '%s\n' "$targets_all" | while read -r name isa os abi of kind entry q env ext; do
+    printf '%s\n' "$targets_all" | while read -r name isa os abi of kind entry q env bl ext; do
         [ -n "$name" ] && [ "$entry" = "$shape" ] || continue
         echo "[target.$name]"; echo "isa = \"$isa\""; echo "os  = \"$os\""; echo "abi = \"$abi\""
+        [ "$bl" != - ] && echo "baseline = \"$bl\""
         [ "$of" != - ] && echo "of  = \"$of\""
         [ "$env" != - ] && echo "env = \"$env\""
         [ "$ext" != - ] && echo "extensions = [\"$(echo "$ext" | sed 's/,/", "/g')\"]"
@@ -366,7 +368,7 @@ manifest() {
                 echo "targets = [$(printf '%s\n' "$targets_all" | awk -v k="$kind" '$7 == "direct" && $6 == k { printf "%s\"%s\"", (n++ ? ", " : ""), $1 }')]"
                 echo 'link = []'; echo 'need = []'; echo
             done
-            printf '%s\n' "$targets_all" | while read -r name isa os abi of kind entry q env ext; do
+            printf '%s\n' "$targets_all" | while read -r name isa os abi of kind entry q env bl ext; do
                 [ -n "$name" ] && [ "$entry" = direct ] && [ "$q" != - ] || continue
                 echo "[artifact.${a}_run_$name]"; echo 'kind = "bin"'; echo "entry = \"run/$name/$a.mach\""
                 echo "out = \"{project.work}/run/$a\""
@@ -1169,7 +1171,7 @@ f16proof_rule() {
     case "$(target_field "$1" 2)" in
         x86_64*) echo x86 ;;
         aarch64*) echo arm ;;
-        rv64*|riscv64*) echo riscv ;;
+        riscv64) echo riscv ;;
         *) echo - ;;
     esac
 }

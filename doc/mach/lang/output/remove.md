@@ -11,13 +11,23 @@ pub rec Removal;
 ```
 
 a failed removal names its kind; code is the native code behind it, 0 when
-the removal refused on its own
+the removal refused on its own, and cleanup_code the first close that failed
+on the way out, 0 when none did
 
 ## fun message
 
 ```mach
 pub fun message(r: Removal) str;
 ```
+
+## fun with_cleanup
+
+```mach
+pub fun with_cleanup(a: *A.Allocator, f: fail.Fail, r: Removal) fail.Fail;
+```
+
+the failure `f` reported for removal `r`, also naming the close that failed
+on the way out when there was one
 
 ## fun open_dir
 

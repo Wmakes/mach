@@ -139,7 +139,7 @@ use mach.lang.testrun;
 
 #[testing]
 fun manifest_riscv_pair() str {
-    ret "[project]\nmach = \">=5\"\nid = \"uniontest\"\nversion = \"0.0.0\"\nsrc = \"src\"\nwork = \"out/{target.name}/{profile.name}\"\n\n[target.rv32]\nisa = \"rv32imafdc\"\nos = \"freestanding\"\nabi = \"ilp32d\"\nof = \"elf\"\n\n[target.rv64]\nisa = \"riscv64\"\nos = \"freestanding\"\nabi = \"lp64d\"\nof = \"elf\"\n\n[artifact.uniontest]\nkind = \"bin\"\nentry = \"main.mach\"\nout = \"{project.work}/bin/uniontest\"\ntargets = [\"*\"]\nlink = []\nneed = []\n[profile.debug]\ndefault = true\noptimize = false\ndebug = true\nsimd = \"scalarize\"\n[profile.release]\noptimize = true\ndebug = false\nsimd = \"scalarize\"\n";
+    ret "[project]\nmach = \">=5\"\nid = \"uniontest\"\nversion = \"0.0.0\"\nsrc = \"src\"\nwork = \"out/{target.name}/{profile.name}\"\n\n[target.rv32]\nisa = \"riscv32\"\nbaseline = \"rv32imafdc\"\nos = \"freestanding\"\nabi = \"ilp32d\"\nof = \"elf\"\n\n[target.rv64]\nisa = \"riscv64\"\nbaseline = \"rv64gc\"\nos = \"freestanding\"\nabi = \"lp64d\"\nof = \"elf\"\n\n[artifact.uniontest]\nkind = \"bin\"\nentry = \"main.mach\"\nout = \"{project.work}/bin/uniontest\"\ntargets = [\"*\"]\nlink = []\nneed = []\n[profile.debug]\ndefault = true\noptimize = false\ndebug = true\nsimd = \"scalarize\"\n[profile.release]\noptimize = true\ndebug = false\nsimd = \"scalarize\"\n";
 }
 
 #[testing]
@@ -2335,7 +2335,7 @@ test rv32_debug__wide_local_has_piece_locations {
     names[0] = "main.mach";
     var texts: [1]str;
     texts[0] = "#[noinline]\nfun take(v: u64) u32 { ret (v >> 32)::u32; }\n\n#[noinline]\npub fun keep(seed: u64) u64 {\n    var a: u64 = seed * 7;\n    var b: u64 = seed * 11;\n    val h: u32 = take(a);\n    a = a + h::u64 + b;\n    ret a;\n}\n";
-    val mtext:  str                 = "[project]\nmach = \">=5\"\nid = \"lanedbg\"\nversion = \"0.0.0\"\nsrc = \"src\"\nwork = \"out/{target.name}/{profile.name}\"\n\n[target.rv32]\nisa = \"rv32imafdc\"\nos = \"freestanding\"\nabi = \"ilp32d\"\nof = \"elf\"\nbase = 0x10000\n\n[artifact.app]\nkind = \"bin\"\nentry = \"main.mach\"\nout = \"{project.work}/bin/app\"\ntargets = [\"*\"]\nlink = []\nneed = []\n[profile.debug]\ndefault = true\noptimize = false\ndebug = true\nsimd = \"scalarize\"\n";
+    val mtext:  str                 = "[project]\nmach = \">=5\"\nid = \"lanedbg\"\nversion = \"0.0.0\"\nsrc = \"src\"\nwork = \"out/{target.name}/{profile.name}\"\n\n[target.rv32]\nisa = \"riscv32\"\nbaseline = \"rv32imafdc\"\nos = \"freestanding\"\nabi = \"ilp32d\"\nof = \"elf\"\nbase = 0x10000\n\n[artifact.app]\nkind = \"bin\"\nentry = \"main.mach\"\nout = \"{project.work}/bin/app\"\ntargets = [\"*\"]\nlink = []\nneed = []\n[profile.debug]\ndefault = true\noptimize = false\ndebug = true\nsimd = \"scalarize\"\n";
     val root_r: res[str, fail.Fail] = driver.scaffold(?alloc, mtext, ?names[0], ?texts[0], 1);
     if (sel root_r.err) {
         session.dnit(?s);
@@ -2777,7 +2777,7 @@ fun rv32_xbank_sweep(mem: *u8) i32 {
 # the rv32 target with a debug (o0, default) and a release (o2) profile
 #[testing]
 fun rv32_profiles_manifest() str {
-    ret "[project]\nmach = \">=5\"\nid = \"ix\"\nversion = \"0.0.0\"\nsrc = \"src\"\nwork = \"out/{target.name}/{profile.name}\"\n\n[target.rv32]\nisa = \"rv32imafdc\"\nos = \"freestanding\"\nabi = \"ilp32d\"\n\n[profile.debug]\ndefault = true\noptimize = false\ndebug = false\nsimd = \"scalarize\"\n\n[profile.release]\noptimize = true\ndebug = false\nsimd = \"scalarize\"\n\n[artifact.ix]\nkind = \"bin\"\nentry = \"main.mach\"\nout = \"{project.work}/bin/ix\"\ntargets = [\"*\"]\nlink = []\nneed = []\n";
+    ret "[project]\nmach = \">=5\"\nid = \"ix\"\nversion = \"0.0.0\"\nsrc = \"src\"\nwork = \"out/{target.name}/{profile.name}\"\n\n[target.rv32]\nisa = \"riscv32\"\nbaseline = \"rv32imafdc\"\nos = \"freestanding\"\nabi = \"ilp32d\"\n\n[profile.debug]\ndefault = true\noptimize = false\ndebug = false\nsimd = \"scalarize\"\n\n[profile.release]\noptimize = true\ndebug = false\nsimd = \"scalarize\"\n\n[artifact.ix]\nkind = \"bin\"\nentry = \"main.mach\"\nout = \"{project.work}/bin/ix\"\ntargets = [\"*\"]\nlink = []\nneed = []\n";
 }
 
 # which 0-5: the repro of its signed and 16-bit kin, sub-word arithmetic
@@ -5252,7 +5252,7 @@ test testing_mark__emitted_only_for_tests {
 
 #[testing]
 fun fs_elf_manifest() str {
-    ret "[project]\nmach = \">=5\"\nid = \"fself\"\nversion = \"0.0.0\"\nsrc = \"src\"\nwork = \"out/{target.name}/{profile.name}\"\n\n[target.fsx]\nisa = \"x86_64\"\nos = \"freestanding\"\nabi = \"sysv64\"\nof = \"elf\"\n\n[target.fsr32]\nisa = \"rv32imafdc\"\nos = \"freestanding\"\nabi = \"ilp32d\"\nof = \"elf\"\n\n[target.lx]\nisa = \"x86_64\"\nos = \"linux\"\nabi = \"sysv64\"\n\n[profile.debug]\noptimize = false\ndebug = false\nsimd = \"scalarize\"\n\n[artifact.fself]\nkind = \"bin\"\nentry = \"main.mach\"\nout = \"{project.work}/bin/fself\"\ntargets = [\"*\"]\nlink = []\nneed = []\n";
+    ret "[project]\nmach = \">=5\"\nid = \"fself\"\nversion = \"0.0.0\"\nsrc = \"src\"\nwork = \"out/{target.name}/{profile.name}\"\n\n[target.fsx]\nisa = \"x86_64\"\nos = \"freestanding\"\nabi = \"sysv64\"\nof = \"elf\"\n\n[target.fsr32]\nisa = \"riscv32\"\nbaseline = \"rv32imafdc\"\nos = \"freestanding\"\nabi = \"ilp32d\"\nof = \"elf\"\n\n[target.lx]\nisa = \"x86_64\"\nos = \"linux\"\nabi = \"sysv64\"\n\n[profile.debug]\noptimize = false\ndebug = false\nsimd = \"scalarize\"\n\n[artifact.fself]\nkind = \"bin\"\nentry = \"main.mach\"\nout = \"{project.work}/bin/fself\"\ntargets = [\"*\"]\nlink = []\nneed = []\n";
 }
 
 #[testing]

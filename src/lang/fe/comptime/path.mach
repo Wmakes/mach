@@ -421,12 +421,12 @@ fun project_field(value: intern.StrId) res[comptime_value.CTValue, comptime_fail
 fun extension_value(c: *comptime_scope.ComptimeCtx, name: View) res[comptime_value.CTValue, comptime_failure.EvalFail] {
     val ext: target_model.ExtensionView = c.env.target.extensions;
     if (ext.table == nil) { ret comptime_value.reject(diagnostic_kind.COMPTIME_PATH_UNAVAILABLE, "`$mach.build.extensions.*` is not available in this context"); }
-    val bit: u64 = extension.bit_of(ext.table, ext.count, name.data::str, name.len);
+    val bit: u64 = extension.bit_of(ext.table, name.data::str, name.len);
     if (bit != 0) {
         if ((ext.selected & bit) != 0) { ret comptime_value.u8_value(1); }
         ret comptime_value.u8_value(0);
     }
-    val known_r: res[str, fail.Fail] = target_model.table_names(c.env.alloc, ext.table, ext.count);
+    val known_r: res[str, fail.Fail] = target_model.table_names(c.env.alloc, ext.table);
     if (sel known_r.err) { ret comptime_value.internal_failure(fail.describe(known_r.err)); }
     val known: str = known_r.ok;
     fin { str_free(c.env.alloc, known); }

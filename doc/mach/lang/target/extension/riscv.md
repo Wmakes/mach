@@ -69,7 +69,7 @@ select
 ## val ZFHMIN
 
 ```mach
-pub val ZFHMIN:    u64 = 1024
+pub val ZFHMIN: u64 = 1024
 ```
 
 the half-precision float extensions: Zfhmin moves, loads, stores and
@@ -79,52 +79,19 @@ arithmetic, comparison and integer conversions. both need F
 ## val ZFH
 
 ```mach
-pub val ZFH:       u64 = 2048
-```
-
-## val G
-
-```mach
-pub val G:         u64 = I | M | A | F | D | ZICSR | ZIFENCEI
-```
-
-## val DEFAULT32
-
-```mach
-pub val DEFAULT32: u64 = I | M | A | C
-```
-
-## val DEFAULT64
-
-```mach
-pub val DEFAULT64: u64 = G | C
+pub val ZFH:    u64 = 2048
 ```
 
 ## val ALL
 
 ```mach
-pub val ALL:       u64 = DEFAULT64 | ZKT | ZICOND | ZFHMIN | ZFH
+pub val ALL:    u64 = I | M | A | F | D | C | ZICSR | ZIFENCEI | ZKT | ZICOND | ZFHMIN | ZFH
 ```
 
-## val NAME_COUNT
+## val TABLE
 
 ```mach
-pub val NAME_COUNT: u32 = 12
-```
-
-the riscv extension vocabulary: the letters and z-extensions a selection
-string spells, each the same bit the string sets, so a manifest's
-`extensions` list and an `rv64imac` isa string feed one set. d brings f and
-f brings zicsr, as the string grammar has it. i is the baseline, c is a
-code-size selection mach never emits, and f and d select the float register
-file and the calling convention's float registers, so none of the four is a
-function's to admit alone. zkt is a timing promise about the whole machine
-the constant-time rows read, so it is the target's too
-
-## val NAMES
-
-```mach
-pub val NAMES: [NAME_COUNT]extension.Extension = [NAME_COUNT]extension.Extension;
+pub val TABLE: extension.Table = extension.Table;
 ```
 
 ## fun widen
@@ -136,115 +103,18 @@ pub fun widen(bits: u64, added: u64) u64;
 a selection widened by names from a manifest list and closed over what they
 imply: d brings f, f brings zicsr
 
-## rec ExtSpec
-
-```mach
-pub rec ExtSpec;
-```
-
-the extensions a standard toolchain names in an object's Tag_RISCV_arch, and what
-a selection must hold for the object's use of one to be executable on the target.
-a ratified subset names its SUPERSET: zmmul is the multiply-only part of m, zaamo
-and zalrsc the two halves of a, zca/zcf/zcd the compressed encodings of c with f
-and d, so a toolchain that decomposes rv64gc into subsets admits against exactly
-the selection the undecomposed string admits against. the version is the revision
-mach models; an object naming another one is refused rather than assumed
-compatible. `emitted` rows are the ones mach writes into its own objects, in this
-order, when the selection holds them. adding an extension is one row here.
-
-this is the ADMISSION and EMISSION axis and is deliberately not `parse`'s table:
-parse reads a user's target selection, which is canonically ordered and may only
-name what the backend can generate, while an object's string is unordered and may
-name subsets no selection can spell.
-
-## val EXT_COUNT
-
-```mach
-pub val EXT_COUNT: usize = 18
-```
-
-## val EXTS
-
-```mach
-pub val EXTS: [EXT_COUNT]ExtSpec = [EXT_COUNT]ExtSpec;
-```
-
-## fun ext_index
-
-```mach
-pub fun ext_index(name: str, len: usize) usize;
-```
-
-EXT_COUNT when the name is not one mach models
-
-## rec Selection
-
-```mach
-pub rec Selection;
-```
-
-## fun has
-
-```mach
-pub fun has(bits: u64, required: u64) bool;
-```
-
-## fun valid
-
-```mach
-pub fun valid(bits: u64) bool;
-```
-
-## fun is_name
-
-```mach
-pub fun is_name(name: str) bool;
-```
-
-## fun parse
-
-```mach
-pub fun parse(name: str) res[Selection, fail.Fail];
-```
-
-## fun parse_at
-
-```mach
-pub fun parse_at(name: str, bad: *extension.Span) res[Selection, fail.Fail];
-```
-
-## fun letters
-
-```mach
-pub fun letters(bits: u64) str;
-```
-
-the extension letters a mask holds, in canonical order, for diagnostics
-
 ## fun float_requirement
 
 ```mach
 pub fun float_requirement(bits: u32) u64;
 ```
 
-the extension a floating-point width needs: Zfhmin for 16-bit values, F for
-32-bit ones, F and D for 64
+the bits a floating-point width needs passed in float registers: zfhmin for 16-bit
+values, f for 32-bit ones, f and d for 64
 
-## fun spell
-
-```mach
-pub fun spell(width: u32, bits: u64, buf: *u8, cap: usize) str;
-```
-
-the canonical selection string for a mask: the shortest string parse maps back
-to it, G abbreviating its seven members and Zicsr left implied by F. width is
-the register width in bytes as Selection carries it
-
-## val SYNTAX
+## fun has
 
 ```mach
-pub val SYNTAX: extension.SelectionSyntax = extension.SelectionSyntax;
+pub fun has(bits: u64, required: u64) bool;
 ```
-
-the rv32 and rv64 selection strings, which riscv32 and riscv64 read
 

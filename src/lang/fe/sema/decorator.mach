@@ -513,12 +513,18 @@ fun report_unknown_extension(sc: *sema_context.SemaContext, at: lang_source.Span
         ret;
     }
     fin { str_free(sc.s.alloc, known.ok); }
+    val sources: res[str, fail.Fail] = target_model.vocabulary_sources(sc.s.alloc, vocabulary);
+    if (sel sources.err) {
+        fail.internal(?sc.status, fail.describe(sources.err));
+        ret;
+    }
+    fin { str_free(sc.s.alloc, sources.ok); }
     val spelled: opt[str] = extension_spelled(sc, name, len);
     if (sel spelled.none) { ret; }
     fin { str_free(sc.s.alloc, spelled.some); }
     sema_context.reportf(sc, diagnostic_kind.EXTENSION_UNKNOWN, at,
-        "`extensions` decorator: no instruction set declares an extension `{}`; the known extensions are: {}",
-        spelled.some, known.ok);
+        "`extensions` decorator: no extension catalog names `{}` (read from {}); the extensions mach emits against are: {}",
+        spelled.some, sources.ok, known.ok);
 }
 
 fun validate_naked(sc: *sema_context.SemaContext, d: *ast_decl.Decl, dec: *ast_decl.Decorator) {

@@ -23,6 +23,7 @@ use mach.lang.layout;
 use mach.lang.module;
 use mach.lang.session;
 use lang_source: mach.lang.source;
+use mach.lang.target.resolved;
 use mach.lang.type;
 use type_query: mach.lang.type.query;
 use mach.lang.type.query.logical;
@@ -775,7 +776,8 @@ fun symbol_by_id(sc: *SemaContext, sid: resolve.SymbolId) opt[*resolve.Symbol] {
 }
 
 pub fun machine_of(sc: *SemaContext) layout.Machine {
-    ret layout.machine(sc.view.ctx.env.target.pointer_width, sc.view.ctx.env.target.vector_bits, sc.view.ctx.env.target.register_bits);
+    val facts: *resolved.Facts = ?sc.view.ctx.env.target;
+    ret layout.with_scalars(layout.machine(facts.pointer_width, facts.vector_bits, facts.register_bits), facts.scalars);
 }
 
 val TEMPLATE_TRAIL_LABEL: str = "in this generic body, checked against this instance's type arguments";

@@ -266,6 +266,7 @@ to whichever *declared* target matches the host.
 | Key   | Required | Meaning |
 |-------|----------|---------|
 | `isa` | yes      | Instruction-set architecture. Read by `$project.target.arch`. |
+| `baseline` | absent: the os's floor; required on `freestanding` | The selection the target stands on, spelled as masc's catalog for the isa spells one, such as `rv32imc`. Only an isa whose catalog spells selections takes it. See [RISC-V baselines](#risc-v-baselines). |
 | `os`  | yes      | Operating system. Read by `$project.target.os`. |
 | `abi` | yes      | Application binary interface. Read by `$project.target.abi`. |
 | `of`  | absent: the os's format | Object-format override; defers to the os's format when omitted. See [Object-format override](#object-format-override). |
@@ -296,7 +297,7 @@ comptime member, `$mach.build.extensions.<name>` (see [`$mach`](comptime-mach.md
 |-------|----------|------------|
 | `x86_64` | SSE2 | `ssse3`, `sse41`, `sse42`, `sha`, `fsgsbase`, `popcnt`, `lzcnt`, `bmi1`, `bmi2`, `cx16`, `avx`, `avx2`, `fma`, `movbe`, `f16c`, `avx512f`, `avx512bw`, `avx512cd`, `avx512dq`, `avx512vl`, `aes`, `pclmul` |
 | `aarch64` | AdvSIMD | `sha2`, `sb`, `aes`, `pmull`, `fp16` |
-| `riscv64`, `riscv32` | the isa string's selection | `i`, `m`, `a`, `f`, `d`, `c`, `zicond`, `zicsr`, `zifencei`, `zfhmin`, `zfh`, `zkt` |
+| `riscv64`, `riscv32` | the target's `baseline` | `i`, `m`, `a`, `f`, `d`, `c`, `zicond`, `zicsr`, `zifencei`, `zfhmin`, `zfh`, `zkt` |
 | `spirv` | | `float16`, `int8`, `int16`, `int64`, `float64`, `zero_init_workgroup`, `storage_read_without_format`, `storage_write_without_format`, `vulkan_memory_model`, `vulkan_memory_model_device_scope`, `buffer_device_address`, `subgroup_arithmetic`, `subgroup_clustered`, `subgroup_vote`, `subgroup_ballot`, `subgroup_shuffle`, `subgroup_shuffle_relative`, `subgroup_quad`, `subgroup_graphics_stages`, `buffer_int64_atomics`, `shared_int64_atomics`, `buffer_float32_atomics`, `buffer_float32_atomic_add`, `buffer_float32_atomic_min_max`, `buffer_float64_atomics`, `buffer_float64_atomic_add`, `buffer_float64_atomic_min_max`, `shared_float32_atomics`, `shared_float32_atomic_add`, `shared_float32_atomic_min_max`, `shared_float64_atomics`, `shared_float64_atomic_add`, `shared_float64_atomic_min_max`, `buffer_float16_atomics`, `buffer_float16_atomic_add`, `buffer_float16_atomic_min_max`, `shared_float16_atomics`, `shared_float16_atomic_add`, `shared_float16_atomic_min_max`, `image_int64_atomics`, `image_float32_atomics`, `image_float32_atomic_add`, `image_float32_atomic_min_max`, `storage_image_multisample`, `resource_min_lod`, `image_gather_extended`, `maintenance8`, `storage_buffer_16bit_access`, `uniform_and_storage_buffer_16bit_access`, `storage_push_constant16`, `storage_input_output16`, `storage_buffer_8bit_access`, `uniform_and_storage_buffer_8bit_access`, `storage_push_constant8` |
 
 On `spirv` each name is a device feature a module may require.
@@ -319,14 +320,19 @@ x86-64-v2, x86-64-v3, x86-64-v4
 The array must hold strings, each an identifier (`sse41`, not `sse4.1`) or a level
 spelling (`x86-64-v2`), listed once.
 
-A level is a bundle, never an axis of its own: each name may imply others, and the
-selection is closed over that once, when the target resolves. `sse41` brings `ssse3`
-(the chain stops there; SSE3 is not modelled), `sse42` brings `sse41`, `avx` brings
-`sse42`, `avx2`, `fma` and `f16c` bring `avx`, and every `avx512*` set brings
-`avx512f`, which brings `avx2`. On aarch64 `pmull` brings `aes`. On riscv `d` brings
-`f`, `zfh` brings `zfhmin`, `zfhmin` brings `f`, and `f` brings `zicsr`, as the isa string's own grammar has it, so `extensions = ["d"]` on `rv64i` selects
-`rv64ifd` with Zicsr. The isa string and the list feed one set: `isa = "rv64i"` with
-`extensions = ["m"]` selects the same machine as `isa = "rv64im"`. A name nothing in
+The x86_64 and riscv names, what each implies and the x86-64 levels are read from
+masc's extension catalog for the instruction set, and mach adds only which of its
+rows the compiler emits against. The aarch64 and spirv names are mach's own until a
+catalog names them one to one. A level is a bundle, never an axis of its own: each
+name may imply others, and the selection is closed over that once, when the target
+resolves. `sse41` brings `ssse3` (the chain stops there; SSE3 is not a name),
+`sse42` brings `sse41`, `avx` brings `sse42`, `avx2`, `fma` and `f16c` bring `avx`,
+and every `avx512*` set brings `avx512f`, which brings `avx2`, `fma` and `f16c`. On
+aarch64 `pmull` brings `aes`. On riscv `d` brings
+`f`, `zfh` brings `zfhmin`, `zfhmin` brings `f`, and `f` brings `zicsr`, as masc's
+riscv catalog has it, so `extensions = ["d"]` on `baseline = "rv64i"` selects
+`rv64ifd` with Zicsr. The baseline and the list feed one set: `baseline = "rv64i"`
+with `extensions = ["m"]` selects the same machine as `baseline = "rv64im"`. A name nothing in
 the compiler encodes against yet (`avx`, `avx512f`) is still a declared requirement:
 the inline assembler has no rows to admit under it, so today it records only the
 promise the binary makes about its hosts, and the promise is the program's to check.
@@ -338,8 +344,8 @@ spelling that expands to its member names, so it may stand alone or beside names
 (`["x86-64-v2", "sha"]`), and it includes every lower level. It has no bit of its own:
 `$mach.build.extensions.x86-64-v2` and `#[extensions("x86-64-v2")]` do not exist,
 programs ask about the members (`.avx2`). `sse2`, `cmpxchg8b` and `lahf-sahf` are the
-`x86_64` baseline and are not names. The table here is the compiler's, held together by
-a test:
+`x86_64` baseline and are not names. The levels are masc's x86 catalog's, and a test
+holds this table to them:
 
 | Level | Members beyond the level before |
 |-------|----------------------------------|
@@ -351,7 +357,7 @@ a test:
 in the manifest, never inferred from the build machine.
 
 The list is never part of `{target.isa}`. That placeholder is the `isa` value as
-written (`rv64i`, `x86_64`), on every isa; the list belongs to the target's identity
+written (`riscv64`, `x86_64`), on every isa; the list belongs to the target's identity
 and to `{target.name}`.
 
 "Selects" means the extension is assumed of every machine the binary runs on: the
@@ -487,13 +493,29 @@ such an image is refused at link rather than silently dropped.
 | Axis  | Values |
 |-------|--------|
 | `isa` | `x86_64`, `aarch64`, `riscv64`, `riscv32`, `spirv` |
-| `os`  | `linux`, `windows`, `darwin`, `freestanding` |
+| `os`  | `linux`, `windows`, `darwin`, `freestanding`, `vulkan` |
 | `abi` | `sysv64`, `win64`, `aapcs64`, `lp64`, `lp64f`, `lp64d`, `ilp32`, `ilp32f`, `ilp32d`, `spirv` |
-| `of`  | `elf`, `macho`, `coff`, `raw`, `spv` |
+| `of`  | `elf`, `macho`, `coff`, `flat`, `spirv` |
 | `env` | `vulkan1.0`, `vulkan1.1`, `vulkan1.2`, `vulkan1.3` |
 
-`isa` also takes a canonical RISC-V extension string such as `rv32imc`, described
-below. `env` is defined only by `spirv`.
+Each `isa`, `os` and `of` value is the name of a row of mink's catalog: `isa` an
+architecture, `os` a system and `of` a format. mach reads the spelling from that row,
+and the catalog's rows mach has no target for (`x86`, `wasm32`, `uefi`, `wasi`, ...)
+are not values here. A spelling mink names otherwise is refused where it is written,
+naming the new spelling and carrying the rewrite `mach migrate` applies:
+
+| Key | Retired | Written now |
+|-----|---------|-------------|
+| `of` | `raw` | `flat` |
+| `of` | `spv` | `spirv` |
+| `os` (on `isa = "spirv"`) | `freestanding` | `vulkan` |
+| `isa` | a RISC-V selection such as `rv32imc` | `isa = "riscv32"` and `baseline = "rv32imc"` |
+
+```
+error[target.retired_spelling]: mach.toml: [target.metal].of = "raw" is a retired spelling; write "flat", mink's name for it
+```
+
+`env` is defined only by `spirv`.
 
 A `[target.*]` naming an `isa`, `os` or `abi` outside these lists is refused
 through the registry's own lookup (`no isa implementation registered for
@@ -511,21 +533,38 @@ not an os of its own. `spirv` is not a machine at all — it
 emits a finished GPU module rather than machine code (see
 [Finished-module targets](#finished-module-targets)).
 
-`riscv64` and `riscv32` are width-only spellings, and each names a **default
-profile**: `riscv64` is `rv64gc` and `riscv32` is `rv32imac`. A canonical
-extension string such as `rv32imc` or `rv64imafd` selects a smaller machine.
-The retained vocabulary is I, M, A, F, D, C, Zicond, Zicsr, Zifencei and Zkt,
-written in lowercase canonical order with multi-letter names after an
-underscore, so `rv64gc_zicond`; `g` expands to IMAFD plus Zicsr and Zifencei.
-F carries its required Zicsr, and D requires F. Zicond adds `czero.eqz` and
-`czero.nez`, which a branch-free select compiles to where a selection holds it
-and the xor-and-mask sequence it replaces does otherwise. Zkt changes no
-instruction. It states that the listed operations run in data-independent time,
-which is what lets a secret multiply compile (see `secrecy.md`). An optional
-version must be the one mach models: I 2.1, M 2.0, A 2.1, F and D 2.2, C 2.0,
-Zicond 1.0, Zicsr and Zifencei 2.0, Zkt 1.0. Unknown extensions,
-other versions, duplicates, noncanonical order and the E base are refused
-rather than rounded up to the default machine.
+### RISC-V baselines
+
+`isa` names the architecture, and `baseline` the selection the target stands on,
+spelled as masc's riscv catalog spells one. A target with an operating system that
+names no baseline stands on that system's **floor** for the isa: `riscv64` is
+`rv64gc`. A `freestanding` target must name its baseline, since the chip decides
+it and a default would fault on hardware that lacks an extension; leaving it out is
+refused (`target.baseline_required`). A baseline such as `rv32imc` or `rv64imafd`
+selects a smaller machine, and `extensions` adds names on top of it:
+
+```toml
+[target.board]
+isa      = "riscv32"
+baseline = "rv32imc"
+os       = "freestanding"
+abi      = "ilp32"
+```
+
+masc reads the baseline, closes it over the catalog's implications (`g` is IMAFD
+plus Zicsr and Zifencei, D brings F and F brings Zicsr) and says whether the
+architecture enters it. A baseline masc's catalog refuses, or one of the other
+width (`rv64gc` on `riscv32`) or the E base, is refused naming the baseline and the
+isa. An isa whose catalog spells no selection (`x86_64`, `aarch64`, `spirv`) refuses
+`baseline` outright, naming the isa: name what it adds with `extensions`.
+
+mach emits against I, M, A, F, D, C, Zicond, Zicsr, Zifencei, Zfhmin, Zfh and Zkt.
+Zicond adds `czero.eqz` and `czero.nez`, which a branch-free select compiles to
+where a selection holds it and the xor-and-mask sequence it replaces does
+otherwise. Zkt changes no instruction. It states that the listed operations run in
+data-independent time, which is what lets a secret multiply compile (see
+`secrecy.md`). The `Tag_RISCV_arch` mach writes into its own objects is masc's
+spelling of the selection with masc's revision of each extension.
 
 The selected ISA bounds what the compiler generates and what named inline
 assembly may use: an instruction needing an extension the selection lacks is
@@ -537,10 +576,9 @@ the documented unchecked encoding boundary. C is accepted as a capability of the
 selected machine, but the emitter writes full-width instructions only.
 
 The ABI still selects the calling convention on its own, and it must fit the
-selected machine: `rv32imc` has no floating-point registers, so it takes
-`ilp32`, and `riscv32` (rv32imac) is refused with `ilp32f` or `ilp32d`; spell
-`rv32imafdc` when RV32 hardware floating point is wanted. `mach init` scaffolds
-`riscv32`/`freestanding` with `ilp32` for that reason.
+selected machine: `rv32imc` and `rv32imac` have no floating-point registers, so
+they take `ilp32` and are refused with `ilp32f` or `ilp32d`; name
+`baseline = "rv32imafdc"` when RV32 hardware floating point is wanted.
 
 `lp64`, `lp64f`, `lp64d`, `ilp32`, `ilp32f`, and `ilp32d` are the RISC-V psABI
 calling-convention family, one `abi` per member. The lp64 three target
@@ -575,28 +613,28 @@ caught rather than silently never matching.
 ### Object-format override
 
 `of` overrides the object format a target implies. Each os has a default format —
-`linux` → `elf`, `windows` → `coff`, `darwin` → `macho`, `freestanding` → `raw` —
-and `of` names a different one from the same closed set: `elf`,
-`coff`, `macho`, `raw`, `spv`. `of` is optional; omit it to
+`linux` → `elf`, `windows` → `coff`, `darwin` → `macho`, `freestanding` → `flat`,
+`vulkan` → `spirv` — and `of` names a different one from the same closed set: `elf`,
+`coff`, `macho`, `flat`, `spirv`. `of` is optional; omit it to
 take the default. An os accepts only the formats it can load, so an override the
 os cannot enter is refused.
 
 ```toml
 [target.metal]
 isa = "x86_64"
-os  = "freestanding"   # os default object format is "raw"
+os  = "freestanding"   # os default object format is "flat"
 abi = "sysv64"
 of  = "elf"            # override: emit an ELF object instead
 ```
 
 The default is a function of the whole tuple, not the os alone. An os default
 carries relocatable machine text, which a whole-module emitter does not produce,
-so a `spirv` target resolves to `spv` — the format that carries a finished
-module — regardless of the os it names.
+so a `spirv` target resolves to `spirv`, the format that carries a finished
+module, which is also the only format `vulkan` accepts.
 
 An `of` naming a format whose emission shape does not match the instruction set's
 is refused at composition (`instruction set 'spirv' emits finished modules, but
-object format 'raw' carries linkable objects`), so the override cannot compose a
+object format 'flat' carries linkable objects`), so the override cannot compose a
 tuple that would emit nothing.
 
 The page an image is laid out at is a function of the same tuple. A format a
@@ -606,8 +644,8 @@ page where the os declares one (`linux` on `aarch64` lays out at 64 KiB, the
 largest page a kernel may use, `darwin` on `aarch64` at 16 KiB, 4 KiB elsewhere),
 and the instruction set's hardware page (4 KiB on `x86_64`, `aarch64`, `riscv64`
 and `riscv32`) where the os has no loader of its own, which is what `freestanding`
-with `of = "elf"` gives a bootloader such as Limine or GRUB. A flat image (`raw`)
-and a finished module (`spv`) have no page and are laid out byte-tight.
+with `of = "elf"` gives a bootloader such as Limine or GRUB. A flat image (`flat`)
+and a finished module (`spirv`) have no page and are laid out byte-tight.
 
 ### Finished-module targets
 
@@ -621,7 +659,7 @@ linker: the build publishes the entry module at the artifact's resolved `out` (o
 ```toml
 [target.gpu]
 isa = "spirv"
-os  = "freestanding"
+os  = "vulkan"
 abi = "spirv"
 # no `of`: the finished-module format resolves on its own
 ```
@@ -768,7 +806,7 @@ class, which the 8-bit feature does not reach.
 ```toml
 [target.gpu]
 isa        = "spirv"
-os         = "freestanding"
+os         = "vulkan"
 abi        = "spirv"
 env        = "vulkan1.0"
 extensions = ["int16", "int64", "float64"]
@@ -795,7 +833,7 @@ appendix's required version: 1.0, 1.3, 1.5 and 1.6.
 ```toml
 [target.gpu]
 isa = "spirv"
-os  = "freestanding"
+os  = "vulkan"
 abi = "spirv"
 env = "vulkan1.2"
 ```
@@ -821,7 +859,7 @@ os       = "freestanding"
 abi      = "sysv64"
 base     = 0xFFFF800000000000   # BareMetal copies the flat image here and calls it
 platform = "bmos"               # selects the mach-bmos backend
-# no `of`: freestanding's default object format is "raw"
+# no `of`: freestanding's default object format is "flat"
 ```
 
 - The artifact is a **flat binary** — no header, no sections, no entry record.
@@ -1024,6 +1062,7 @@ reused for a different kind: see [the registry](diagnostics.md#the-registry).
 | `target.skipped` | multi-target analysis skips a declared target this build does not support | no |
 | `vector.scalarize` | a vector operation falls back to scalar code on the target (see `simd`); portable code silences it | no |
 | `expect.unfulfilled` | an `#[expect]` names a key decided by source and no such warning is raised inside its declaration | no |
+| `secret.target_unenforceable` | an `#[oblivious]` function compiles for a target whose instruction set masc says cannot guarantee constant-time execution (wasm) | no |
 
 A kind decided by source warns or not from the source text alone, whatever the
 target, goal or profile. Only such a key is reported when an `#[expect]`
@@ -1176,7 +1215,7 @@ any of them (see [test.md](test.md#which-tests-run)).
   whose `SONAME` is its file name. mach writes no Mach-O `.dylib` or PE `.dll`,
   so a `darwin` or `windows` target refuses with `link: object format cannot
   write shared libraries`. A `freestanding` target never
-  writes one: its default `raw` format refuses with `a flat-image object format
+  writes one: its default `flat` format refuses with `a flat-image object format
   produces only executables`, and setting `of = "elf"` moves the refusal to the
   link, `link: a shared library needs a loader to map it, and os =
   "freestanding" has none`, because a shared library only exists to be mapped by
@@ -1205,7 +1244,7 @@ any of them (see [test.md](test.md#which-tests-run)).
     link: shared library '<artifact>' exports nothing: a shared library needs at least one `pub` declaration in the project, or a `fwd` re-export of one
     ```
 
-    A `freestanding` target is refused as well. With its default `raw` format
+    A `freestanding` target is refused as well. With its default `flat` format
     the artifact fails naming (`artifact naming: this object format has no
     shared-library form`), and with `of = "elf"` the link refuses with
     `link: a shared library needs a loader to map it, and os = "freestanding"

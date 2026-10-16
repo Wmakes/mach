@@ -7,6 +7,7 @@ work = "out/{target.name}/{profile.name}"
 
 [target.freestanding-riscv64]
 isa = "riscv64"
+baseline = "rv64gc"
 os  = "freestanding"
 abi = "lp64d"
 

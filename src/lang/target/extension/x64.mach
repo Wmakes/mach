@@ -1,9 +1,14 @@
+use std.types.string.str;
+use std.types.string.str_len;
+
+use x86_extension: masc.isa.x86.extension;
+
 use mach.lang.target.extension;
 
-# the x86_64 extension vocabulary over the SSE2 baseline. a row is a name the
-# manifest, `$mach.build.extensions.<name>`, `#[extensions(...)]` and the
-# inline-asm `requires:` rows all spell; a row nothing encodes against yet is
-# still a declared, probed requirement
+# the x86_64 extensions the code generator emits against, over the SSE2 baseline,
+# each a row of masc's x86 catalog, which names it, says what it implies and
+# publishes the x86-64-v2, v3 and v4 levels over it. a row nothing encodes against
+# yet is still a declared, probed requirement
 pub val SSSE3: u64 = 0x1;
 
 pub val SSE41: u64 = 0x2;
@@ -26,19 +31,19 @@ pub val AVX: u64 = 0x200;
 
 pub val AVX2: u64 = 0x400;
 
-val BMI2: u64 = 0x800;
+pub val BMI2: u64 = 0x800;
 
-val FMA: u64 = 0x1000;
+pub val FMA: u64 = 0x1000;
 
-val MOVBE: u64 = 0x2000;
+pub val MOVBE: u64 = 0x2000;
 
 pub val F16C: u64 = 0x4000;
 
 pub val AVX512F: u64 = 0x8000;
 
-val AVX512BW: u64 = 0x10000;
+pub val AVX512BW: u64 = 0x10000;
 
-val AVX512CD: u64 = 0x20000;
+pub val AVX512CD: u64 = 0x20000;
 
 pub val AVX512DQ: u64 = 0x40000;
 
@@ -48,52 +53,37 @@ pub val AES: u64 = 0x100000;
 
 pub val PCLMUL: u64 = 0x200000;
 
-pub val NAME_COUNT: u32 = 22;
+val ROW_COUNT: u32 = 22;
 
-# sse41 brings ssse3 (sse3 is not modelled, so the chain stops there), sse42
-# brings sse41, avx brings sse42, avx2, fma and f16c bring avx, and every
-# avx512 set brings avx512f, which brings avx2
-pub val NAMES: [NAME_COUNT]extension.Extension = [NAME_COUNT]extension.Extension{
-    extension.Extension{name: "ssse3", bit: SSSE3, implies: 0, target_only: nil},
-    extension.Extension{name: "sse41", bit: SSE41, implies: SSSE3, target_only: nil},
-    extension.Extension{name: "sha", bit: SHA, implies: 0, target_only: nil},
-    extension.Extension{name: "fsgsbase", bit: FSGSBASE, implies: 0, target_only: nil},
-    extension.Extension{name: "popcnt", bit: POPCNT, implies: 0, target_only: nil},
-    extension.Extension{name: "lzcnt", bit: LZCNT, implies: 0, target_only: nil},
-    extension.Extension{name: "bmi1", bit: BMI1, implies: 0, target_only: nil},
-    extension.Extension{name: "sse42", bit: SSE42, implies: SSE41, target_only: nil},
-    extension.Extension{name: "cx16", bit: CX16, implies: 0, target_only: nil},
-    extension.Extension{name: "avx", bit: AVX, implies: SSE42, target_only: nil},
-    extension.Extension{name: "avx2", bit: AVX2, implies: AVX, target_only: nil},
-    extension.Extension{name: "bmi2", bit: BMI2, implies: 0, target_only: nil},
-    extension.Extension{name: "fma", bit: FMA, implies: AVX, target_only: nil},
-    extension.Extension{name: "movbe", bit: MOVBE, implies: 0, target_only: nil},
-    extension.Extension{name: "f16c", bit: F16C, implies: AVX, target_only: nil},
-    extension.Extension{name: "avx512f", bit: AVX512F, implies: AVX2, target_only: nil},
-    extension.Extension{name: "avx512bw", bit: AVX512BW, implies: AVX512F, target_only: nil},
-    extension.Extension{name: "avx512cd", bit: AVX512CD, implies: AVX512F, target_only: nil},
-    extension.Extension{name: "avx512dq", bit: AVX512DQ, implies: AVX512F, target_only: nil},
-    extension.Extension{name: "avx512vl", bit: AVX512VL, implies: AVX512F, target_only: nil},
-    extension.Extension{name: "aes", bit: AES, implies: 0, target_only: nil},
-    extension.Extension{name: "pclmul", bit: PCLMUL, implies: 0, target_only: nil},
+val ROWS: [ROW_COUNT]extension.Extension = [ROW_COUNT]extension.Extension{
+    extension.Extension{handle: x86_extension.id.SSSE3, bit: SSSE3},
+    extension.Extension{handle: x86_extension.id.SSE41, bit: SSE41},
+    extension.Extension{handle: x86_extension.id.SHA, bit: SHA},
+    extension.Extension{handle: x86_extension.id.FSGSBASE, bit: FSGSBASE},
+    extension.Extension{handle: x86_extension.id.POPCNT, bit: POPCNT},
+    extension.Extension{handle: x86_extension.id.LZCNT, bit: LZCNT},
+    extension.Extension{handle: x86_extension.id.BMI1, bit: BMI1},
+    extension.Extension{handle: x86_extension.id.SSE42, bit: SSE42},
+    extension.Extension{handle: x86_extension.id.CX16, bit: CX16},
+    extension.Extension{handle: x86_extension.id.AVX, bit: AVX},
+    extension.Extension{handle: x86_extension.id.AVX2, bit: AVX2},
+    extension.Extension{handle: x86_extension.id.BMI2, bit: BMI2},
+    extension.Extension{handle: x86_extension.id.FMA, bit: FMA},
+    extension.Extension{handle: x86_extension.id.MOVBE, bit: MOVBE},
+    extension.Extension{handle: x86_extension.id.F16C, bit: F16C},
+    extension.Extension{handle: x86_extension.id.AVX512F, bit: AVX512F},
+    extension.Extension{handle: x86_extension.id.AVX512BW, bit: AVX512BW},
+    extension.Extension{handle: x86_extension.id.AVX512CD, bit: AVX512CD},
+    extension.Extension{handle: x86_extension.id.AVX512DQ, bit: AVX512DQ},
+    extension.Extension{handle: x86_extension.id.AVX512VL, bit: AVX512VL},
+    extension.Extension{handle: x86_extension.id.AES, bit: AES},
+    extension.Extension{handle: x86_extension.id.PCLMUL, bit: PCLMUL},
 };
 
-# the published x86-64 microarchitecture levels as manifest spellings. each
-# level lists its own members over the v1 baseline (sse2, cmpxchg8b and
-# lahf-sahf are the baseline and are not rows) and includes every lower level;
-# closing the selection over `implies` adds nothing a level does not already
-# name. doc/language/manifest.md carries the same table and a test holds the
-# two together
-pub val LEVEL_V2: u64 = SSSE3 | SSE41 | SSE42 | POPCNT | CX16;
+pub val TABLE: extension.Table = extension.Table{source: "masc's x86 catalog", catalog: ?x86_extension.CATALOG, rows: ?ROWS[0], count: ROW_COUNT};
 
-pub val LEVEL_V3: u64 = LEVEL_V2 | AVX | AVX2 | BMI1 | BMI2 | FMA | LZCNT | MOVBE | F16C;
-
-pub val LEVEL_V4: u64 = LEVEL_V3 | AVX512F | AVX512BW | AVX512CD | AVX512DQ | AVX512VL;
-
-pub val LEVEL_COUNT: u32 = 3;
-
-pub val LEVELS: [LEVEL_COUNT]extension.Level = [LEVEL_COUNT]extension.Level{
-    extension.Level{name: "x86-64-v2", members: LEVEL_V2},
-    extension.Level{name: "x86-64-v3", members: LEVEL_V3},
-    extension.Level{name: "x86-64-v4", members: LEVEL_V4},
-};
+# the bits of the catalog's level `name`, 0 when it names none
+#[testing]
+pub fun level(name: str) u64 {
+    ret extension.level_of(?TABLE, name, str_len(name));
+}

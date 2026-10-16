@@ -154,14 +154,15 @@ fun fallback_reason(m: *me_ir.Module, tgt: *resolved.Target, site: *me_legalize.
     val op:  opt[target_model.VecOp] = vecform.vec_op_of(site.op, site.uniform_count);
     if (sel op.some) { ext = target_model.packing_extension(?tgt.model, op.some, site.is_float, site.lane_bits, site.from_bits); }
     if (ext == 0)    { ret std_format.sprint(m.alloc, "no packed form for it at any extension"); }
-    var names: str = "";
-    var k:     u32 = 0;
-    for (k < tgt.model.extension_count) {
-        val row: *extension.Extension = ?tgt.model.extension_table[k];
-        if ((row.bit & ext) != 0) {
+    var names: str              = "";
+    var k:     u32              = 0;
+    val table: *extension.Table = tgt.model.extension_table;
+    for (table != nil && k < table.count) {
+        if ((table.rows[k].bit & ext) != 0) {
+            val name:   str = extension.row_name(table, k);
             var joined: res[str, std_format.FormatError];
-            if (str_len(names) == 0) { joined = std_format.sprint(m.alloc, "`{}`", row.name); }
-            or                       { joined = std_format.sprint(m.alloc, "{} and `{}`", names, row.name); }
+            if (str_len(names) == 0) { joined = std_format.sprint(m.alloc, "`{}`", name); }
+            or                       { joined = std_format.sprint(m.alloc, "{} and `{}`", names, name); }
             if (sel joined.err)      { ret joined; }
             names = joined.ok;
         }

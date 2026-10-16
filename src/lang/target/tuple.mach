@@ -2,6 +2,7 @@
 use mach.lang.fail;
 use mach.lang.float;
 use std.types.error.err;
+use std.types.option.opt;
 use std.types.result.res;
 use std.types.size.usize;
 use std.types.string.str;
@@ -13,7 +14,6 @@ use std.text.string.str_free;
 use mach.lang.target.abi;
 use catalog_abi:  mach.lang.target.catalog.abi;
 use catalog_arch: mach.lang.target.catalog.arch;
-use mach.lang.target.extension;
 use mach.lang.target.isa;
 use target_model:   mach.lang.target.model;
 use target_of:      mach.lang.target.of;
@@ -86,16 +86,12 @@ pub fun refusal(a: *A.Allocator, code: u32, os_vt: *lang_target_os.OsVTable, isa
         ret fail.formatted(a, "calling convention '{}' does not target instruction set '{}'", abi_vt.name, isa_vt.name);
     }
     if (code == ABI_NEEDS_FLOAT) {
-        val syntax: *extension.SelectionSyntax = catalog_arch.syntax_of(isa_vt.id);
-        if (syntax != nil && syntax.claims(isa_vt.name)) {
-            val absent: u64 = syntax.float_requirement(abi_vt.float_arg_bits) & ~isa_vt.model.extensions;
-            if (absent != 0) {
-                var noun: str = "extension";
-                if ((absent & (absent - 1)) != 0) { noun = "extensions"; }
-                ret fail.formatted(a,
-                    "calling convention '{}' passes floating-point arguments in {}-bit float registers, but instruction set '{}' has {}-bit float registers: the selection lacks the {} {}",
-                    abi_vt.name, abi_vt.float_arg_bits, isa_vt.name, isa_vt.model.flen_bits, syntax.letters(absent), noun);
-            }
+        val note: res[opt[str], fail.Fail] = target_model.float_absence(a, isa_vt.model.extension_table, abi_vt.float_arg_bits, isa_vt.model.extensions);
+        if (sel note.err) { ret note.err; }
+        if (sel note.ok.some) {
+            ret fail.formatted(a,
+                "calling convention '{}' passes floating-point arguments in {}-bit float registers, but instruction set '{}' has {}-bit float registers: {}",
+                abi_vt.name, abi_vt.float_arg_bits, isa_vt.name, isa_vt.model.flen_bits, note.ok.some);
         }
         ret fail.formatted(a,
             "calling convention '{}' passes floating-point arguments in {}-bit float registers, but instruction set '{}' has {}-bit float registers",

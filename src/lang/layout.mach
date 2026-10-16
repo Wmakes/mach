@@ -4,6 +4,7 @@ use std.types.bool.bool;
 use std.types.bool.false;
 use std.types.bool.true;
 use std.types.option.opt;
+use std.types.size.usize;
 use std.types.string.str;
 
 use mach.lang.stack;
@@ -20,6 +21,34 @@ pub val NODE_ZERO:      NodeKind = 6;
 pub val NODE_OPAQUE:    NodeKind = 7;
 pub val NODE_TAG:       NodeKind = 8;
 
+# the integer and float widths a primitive takes, the rows of `Scalars`
+pub val INTEGER_WIDTHS: [5]u32 = [5]u32{8, 16, 32, 64, 128};
+pub val FLOAT_WIDTHS:   [3]u32 = [3]u32{16, 32, 64};
+
+# the extents the target's owner lays each primitive out at: mirl's data layout of
+# the target's row, read once when the target resolves. a machine that holds none,
+# a target whose cell no owner has a row for yet (#4779) or a fixture, lays a scalar
+# out at its size and a pointer at `ptr_width`
+# ---
+# held:     whether the owner's extents are held
+# integers: one per INTEGER_WIDTHS row
+# floats:   one per FLOAT_WIDTHS row
+# pointer:  a pointer of the default address space, none where the owner holds
+#           pointers logically, with no representation in memory
+pub rec Scalars {
+    held:     bool;
+    integers: [5]Extent;
+    floats:   [3]Extent;
+    pointer:  opt[Extent];
+}
+
+pub fun scalars_none() Scalars {
+    var s: Scalars;
+    s.held    = false;
+    s.pointer = opt[Extent].none{};
+    ret s;
+}
+
 # `vector_bits` is the narrowest vector register and `register_bits` the
 # widest the selected extensions give, each a power of two times the one
 # before: 128 and 256 on x86-64 with avx
@@ -27,6 +56,7 @@ pub rec Machine {
     ptr_width:     u32;
     vector_bits:   u32;
     register_bits: u32;
+    scalars:       Scalars;
 }
 
 pub fun machine(ptr_width: u32, vector_bits: u32, register_bits: u32) Machine {
@@ -34,7 +64,42 @@ pub fun machine(ptr_width: u32, vector_bits: u32, register_bits: u32) Machine {
     m.ptr_width     = ptr_width;
     m.vector_bits   = vector_bits;
     m.register_bits = register_bits;
+    m.scalars       = scalars_none();
     ret m;
+}
+
+# `m` laying its primitives out at the owner's extents `s`
+pub fun with_scalars(m: Machine, s: Scalars) Machine {
+    var out: Machine = m;
+    out.scalars = s;
+    ret out;
+}
+
+# the extent of a scalar of `bytes` bytes, a float when `float`
+fun scalar_extent(m: Machine, bytes: u32, float: bool) Extent {
+    if (!m.scalars.held) { ret extent(bytes, bytes); }
+    var i: usize = 0;
+    if (float) {
+        for (i < 3) {
+            if (FLOAT_WIDTHS[i] == bytes * 8) { ret m.scalars.floats[i]; }
+            i = i + 1;
+        }
+        ret unknown_extent(EXTENT_UNKNOWN_NODE);
+    }
+    for (i < 5) {
+        if (INTEGER_WIDTHS[i] == bytes * 8) { ret m.scalars.integers[i]; }
+        i = i + 1;
+    }
+    ret unknown_extent(EXTENT_UNKNOWN_NODE);
+}
+
+# the extent of a pointer: the owner's where it lays pointers out in memory
+fun pointer_extent(m: Machine) Extent {
+    if (m.scalars.held) {
+        if (sel m.scalars.pointer.some) { ret m.scalars.pointer.some; }
+    }
+    if (m.ptr_width == 0) { ret unknown_extent(EXTENT_INVALID_ALIGN); }
+    ret extent(m.ptr_width, m.ptr_width);
 }
 
 # a vector at least as wide as the narrowest vector register aligns to the
@@ -55,6 +120,8 @@ pub rec Node {
     decl_align:  u32;
     overlays:    bool;
     packed:      bool;
+    # a scalar node's `bytes` hold a float
+    float: bool;
 }
 
 pub def ExtentCause: u8;
@@ -109,6 +176,7 @@ pub fun node(kind: NodeKind) Node {
     n.decl_align  = 0;
     n.overlays    = false;
     n.packed      = false;
+    n.float       = false;
     ret n;
 }
 
@@ -201,12 +269,9 @@ fun walk[T](g: *Graph[T], m: Machine, id: u32, path: *Path) Extent {
     if (n.kind == NODE_ZERO) { ret extent(0, 1); }
     if (n.kind == NODE_SCALAR) {
         if (n.bytes == 0) { ret unknown_extent(EXTENT_INVALID_ALIGN); }
-        ret extent(n.bytes, n.bytes);
+        ret scalar_extent(m, n.bytes, n.float);
     }
-    if (n.kind == NODE_POINTER) {
-        if (m.ptr_width == 0) { ret unknown_extent(EXTENT_INVALID_ALIGN); }
-        ret extent(m.ptr_width, m.ptr_width);
-    }
+    if (n.kind == NODE_POINTER) { ret pointer_extent(m); }
     if (n.kind == NODE_OPAQUE) {
         if (n.decl_align == 0) { ret unknown_extent(EXTENT_INVALID_ALIGN); }
         ret extent(n.bytes, n.decl_align);

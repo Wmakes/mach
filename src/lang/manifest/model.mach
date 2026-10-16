@@ -75,6 +75,7 @@ pub rec TargetDef {
     name:            intern.StrId;
     env:             intern.StrId;
     isa:             intern.StrId;
+    baseline:        intern.StrId;
     os:              intern.StrId;
     abi:             intern.StrId;
     of:              intern.StrId;

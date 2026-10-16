@@ -24,18 +24,16 @@ use catalog_os:        mach.lang.target.catalog.os;
 use target_definition: mach.lang.target.definition;
 use mach.lang.target.extension;
 #[testing]
-use extension_riscv: mach.lang.target.extension.riscv;
+use extension_x64: mach.lang.target.extension.x64;
+use target_model:  mach.lang.target.model;
 #[testing]
-use extension_x64:   mach.lang.target.extension.x64;
-use target_model:    mach.lang.target.model;
+use model_arm64:   mach.lang.target.model.arm64;
 #[testing]
-use model_arm64:     mach.lang.target.model.arm64;
+use model_riscv:   mach.lang.target.model.riscv;
 #[testing]
-use model_riscv:     mach.lang.target.model.riscv;
+use model_spirv:   mach.lang.target.model.spirv;
 #[testing]
-use model_spirv:     mach.lang.target.model.spirv;
-#[testing]
-use model_x64:       mach.lang.target.model.x64;
+use model_x64:     mach.lang.target.model.x64;
 #[testing]
 use std.types.size.usize;
 
@@ -85,6 +83,9 @@ pub rec Target {
     # every extension vocabulary the registered instruction sets declare, which
     # `#[extensions(...)]` names are read against beside the selected one
     vocabulary: extension.Vocabulary;
+    # the extents the target's owner row lays each primitive out at, none held for a
+    # cell no owner has a row for yet
+    scalars: layout.Scalars;
 }
 
 # the layout machine of a resolved target. total over what resolve produces,
@@ -93,7 +94,7 @@ pub fun layout_machine(tgt: *Target) layout.Machine {
     if (tgt == nil) {
         panic("target.resolved: layout query needs a resolved target with an instruction set\n");
     }
-    ret layout.machine(tgt.pointer_width, tgt.model.vector_bits, target_model.vector_register_bits(?tgt.model));
+    ret layout.with_scalars(layout.machine(tgt.pointer_width, tgt.model.vector_bits, target_model.vector_register_bits(?tgt.model)), tgt.scalars);
 }
 
 # whether the target guarantees the data-independent-timing mode a DIT_MODE
@@ -132,6 +133,8 @@ pub rec Facts {
     has_assembly:  bool;
     # whether a pointer is an address, or on a logical target a reference to a declared type
     flat_addressing: bool;
+    # the extents the target's owner row lays each primitive out at
+    scalars: layout.Scalars;
 }
 
 pub fun facts(tgt: *Target) Facts {
@@ -140,7 +143,8 @@ pub fun facts(tgt: *Target) Facts {
         vector_bits: tgt.model.vector_bits, register_bits: target_model.vector_register_bits(?tgt.model),
         has_float:   tgt.model.has_float, va_list_size: tgt.va_list_size, va_list_align: tgt.va_list_align,
         defs:        tgt.defs, ct_mul: ct_mul_admitted(tgt), extensions: target_model.extension_view(?tgt.model),
-        vocabulary:  tgt.vocabulary, nan_rule: tgt.model.nan_rule, has_assembly: tgt.has_assembly, flat_addressing: tgt.model.flat_addressing
+        vocabulary:  tgt.vocabulary, nan_rule: tgt.model.nan_rule, has_assembly: tgt.has_assembly, flat_addressing: tgt.model.flat_addressing,
+        scalars:     tgt.scalars
     };
 }
 
@@ -150,8 +154,9 @@ pub fun facts_none() Facts {
     ret Facts{
         os_id:        0, arch_id: 0, abi_id: 0, pointer_width: 8, vector_bits: 128, register_bits: 128, has_float: true,
         va_list_size: 0, va_list_align: 0, defs: nil, ct_mul: ct.mul_mask_none(),
-        extensions:   target_model.ExtensionView{selected: 0, table: nil, count: 0},
-        vocabulary:   extension.vocabulary_empty(), nan_rule: float.NAN_RULE_NONE, has_assembly: true, flat_addressing: true
+        extensions:   target_model.ExtensionView{selected: 0, table: nil},
+        vocabulary:   extension.vocabulary_empty(), nan_rule: float.NAN_RULE_NONE, has_assembly: true, flat_addressing: true,
+        scalars:      layout.scalars_none()
     };
 }
 
@@ -178,7 +183,8 @@ pub fun described(model: *target_model.Machine, arch_id: u32) Target {
     t.passing       = catalog_abi.PASSING_CARRIERS;
     t.page_size     = 4096;
     t.vocabulary    = extension.vocabulary_empty();
-    if (!extension.vocabulary_add(?t.vocabulary, model.extension_table, model.extension_count)) {
+    t.scalars       = layout.scalars_none();
+    if (!extension.vocabulary_add(?t.vocabulary, model.extension_table)) {
         panic("target.resolved: a described model's vocabulary does not fit\n");
     }
     ret t;
@@ -205,26 +211,18 @@ val DECLARED:       [DECLARED_COUNT]Declared = [DECLARED_COUNT]Declared{
 };
 
 # the target an instruction set's catalog name selects with the extensions and levels
-# `names` adds, described from its declared model as a `[target.*]` table selects it: the
-# selection the name spells, or the model's own extensions, with the named ones added and
-# everything they imply. a name the model's vocabulary does not hold is refused
+# `names` adds, described from its declared model: every extension the model
+# declares with the named ones added and everything they imply. a name the model's vocabulary does not hold is refused
 #[testing]
 pub fun described_selecting(isa_name: str, names: *str, count: u32) res[Target, fail.Fail] {
     val arch: u32   = catalog_arch.id_for(isa_name);
     var i:    usize = 0;
     for (i < DECLARED_COUNT) {
         if (DECLARED[i].arch == arch) {
-            var m:      target_model.Machine       = @DECLARED[i].model;
-            var base:   u64                        = m.extensions;
-            val syntax: *extension.SelectionSyntax = catalog_arch.syntax_for(isa_name);
-            if (syntax != nil) {
-                var bad:    extension.Span;
-                val picked: res[extension.Selection, fail.Fail] = syntax.parse(isa_name, ?bad);
-                if (sel picked.err) { ret res[Target, fail.Fail].err{picked.err}; }
-                or (sel picked.ok)  { base = picked.ok.extensions; }
-            }
-            var added: u64 = 0;
-            var k:     u32 = 0;
+            var m:     target_model.Machine = @DECLARED[i].model;
+            val base:  u64                  = m.extensions;
+            var added: u64                  = 0;
+            var k:     u32                  = 0;
             for (k < count) {
                 val bit: u64 = target_model.extension_bundle(?m, names[k], str_len(names[k]));
                 if (bit == 0) { ret res[Target, fail.Fail].err{fail.message("target.resolved: a selected name is not an extension or level of the instruction set")}; }
@@ -242,22 +240,14 @@ pub fun described_selecting(isa_name: str, names: *str, count: u32) res[Target, 
 }
 
 # the target an instruction set's catalog name selects, described from its
-# declared model: a name that carries a selection narrows the model to the
-# extensions it spells, as a selection does
+# declared model
 #[testing]
 pub fun described_named(isa_name: str) Target {
     val arch: u32   = catalog_arch.id_for(isa_name);
     var i:    usize = 0;
     for (i < DECLARED_COUNT) {
         if (DECLARED[i].arch == arch) {
-            var m:      target_model.Machine       = @DECLARED[i].model;
-            val syntax: *extension.SelectionSyntax = catalog_arch.syntax_for(isa_name);
-            if (syntax != nil && DECLARED[i].narrow != nil) {
-                var bad:    extension.Span;
-                val picked: res[extension.Selection, fail.Fail] = syntax.parse(isa_name, ?bad);
-                if (sel picked.err) { panic("target.resolved: a described name does not parse\n"); }
-                or (sel picked.ok)  { DECLARED[i].narrow(?m, picked.ok.extensions); }
-            }
+            var m: target_model.Machine = @DECLARED[i].model;
             ret described(?m, arch);
         }
         i = i + 1;
@@ -266,15 +256,9 @@ pub fun described_named(isa_name: str) Target {
     ret described(?model_x64.MACHINE, catalog_arch.X86_64);
 }
 
-# a selection spelled in the name narrows the model, a named extension adds itself and what it
-# implies, and a name the vocabulary does not hold is refused
-test described_selecting__narrows_adds_and_refuses {
-    var none: [1]str                 = [1]str{""};
-    val rv32: res[Target, fail.Fail] = described_selecting("rv32imc", ?none[0], 0);
-    if (sel rv32.err) { ret 1; }
-    if (sel rv32.ok) {
-        if ((rv32.ok.model.extensions & extension_riscv.F) != 0) { ret 2; }
-    }
+# a named extension adds itself and what it implies, and a name the vocabulary does
+# not hold is refused
+test described_selecting__adds_and_refuses {
     var avx2: [1]str                 = [1]str{"avx2"};
     val x64:  res[Target, fail.Fail] = described_selecting("x86_64", ?avx2[0], 1);
     if (sel x64.err) { ret 3; }

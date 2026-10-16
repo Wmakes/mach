@@ -73,41 +73,11 @@ pub fun is_negative(a: Wide) bool;
 pub fun add(a: Wide, b: Wide) Wide;
 ```
 
-## fun add_carry
-
-```mach
-pub fun add_carry(a: Wide, b: Wide, carry_out: *bool) Wide;
-```
-
 ## fun sub
 
 ```mach
 pub fun sub(a: Wide, b: Wide) Wide;
 ```
-
-## fun sub_borrow
-
-```mach
-pub fun sub_borrow(a: Wide, b: Wide, borrow_out: *bool) Wide;
-```
-
-## fun add_signed
-
-```mach
-pub fun add_signed(a: Wide, b: Wide, overflow_out: *bool) Wide;
-```
-
-the two's complement sum, flagging a signed overflow: both operands share a
-sign the sum does not
-
-## fun sub_signed
-
-```mach
-pub fun sub_signed(a: Wide, b: Wide, overflow_out: *bool) Wide;
-```
-
-the two's complement difference, flagging a signed overflow: the operands
-differ in sign and the difference does not share the minuend's
 
 ## fun neg
 
@@ -161,18 +131,6 @@ pub fun mul_u64(a: u64, b: u64) Wide;
 
 ```mach
 pub fun mul(a: Wide, b: Wide) Wide;
-```
-
-## fun mul_overflows_u
-
-```mach
-pub fun mul_overflows_u(a: Wide, b: Wide) bool;
-```
-
-## fun mul_overflows_s
-
-```mach
-pub fun mul_overflows_s(a: Wide, b: Wide) bool;
 ```
 
 ## rec QuotRem
@@ -275,18 +233,6 @@ pub fun is_pow2(a: Wide) bool;
 
 ```mach
 pub fun mul_add_small(a: Wide, m: u64, d: u64, overflow: *bool) Wide;
-```
-
-## fun to_f64_u
-
-```mach
-pub fun to_f64_u(a: Wide) f64;
-```
-
-## fun to_f64_s
-
-```mach
-pub fun to_f64_s(a: Wide) f64;
 ```
 
 ## fun from_f64_u

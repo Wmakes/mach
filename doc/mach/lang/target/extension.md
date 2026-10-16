@@ -2,13 +2,16 @@
 
 the extension vocabulary of an instruction set
 
-each isa module declares one table of named bits, and that table is the
-authority for every surface that spells an extension: the manifest's
-`[target.X].extensions`, `$mach.build.extensions.<name>`, `#[extensions(...)]` and the
-inline-asm refusals. a name is an identifier, so it can be a comptime member
-and a field of a runtime feature record. a bit is the isa's own: the same
-bit means different things on different instruction sets, and only a name
-crosses between them
+an instruction set's extensions are masc's: its catalog names every extension
+and level and says what each implies, and mach states only which rows of it the
+code generator emits against and the selection bit each carries. every surface
+that spells an extension reads the catalog: the manifest's `[target.X].extensions`,
+`$mach.build.extensions.<name>`, `#[extensions(...)]` and the inline-asm refusals.
+a name is a key of the catalog's name index, an identifier, so it can be a comptime
+member and a field of a runtime feature record. a bit is the isa's own: the same bit
+means different things on different instruction sets, and only a name crosses
+between them. spir-v's vocabulary names vulkan device features, which no masc
+catalog states, so its table states its names itself until one does
 
 ## rec Extension
 
@@ -16,33 +19,47 @@ crosses between them
 pub rec Extension;
 ```
 
-## rec Span
+one extension the code generator emits against
+
+handle: its row of the table's masc catalog
+name: in a table with no catalog, the name it is spelled by, nil otherwise
+bit: the bit it carries in a selection
+implies: in a table with no catalog, the bits it brings, 0 otherwise
+target_only: nil when a function may admit the extension alone with
+             `#[extensions]`; otherwise why only a target selects it
+
+## rec Table
 
 ```mach
-pub rec Span;
+pub rec Table;
 ```
 
-the token a refusal of a selection is about: its offset and length in the
-name, zero-length when the refusal is about the name as a whole
+the extensions an instruction set's code generator emits against
 
-## rec Selection
+source: where its names are read from, for a diagnostic
+catalog: masc's catalog of the instruction set's extensions, nil for a vocabulary
+         no masc catalog states
+rows: the extensions, each a row of the catalog
+count: how many
+float: the bits a value of a floating-point width needs to be held in float
+         registers, nil when every selection holds them
+
+## def FloatRequirementFn
 
 ```mach
-pub rec Selection;
+pub def FloatRequirementFn: fun(u32) u64
 ```
 
-what a name spelled in a selection syntax selects: the registered
-instruction set it narrows, by its catalog spelling, and the extension bits
-it names
+the bits of a table a floating-point value of `bits` bits needs held
 
-## rec SelectionSyntax
+## fun float_absent
 
 ```mach
-pub rec SelectionSyntax;
+pub fun float_absent(t: *Table, bits: u32, selected: u64) u64;
 ```
 
-how an instruction set whose names carry a selection reads and writes them.
-an instruction set without one is named only by its registered name
+the bits a floating-point value of `bits` bits needs that `selected` lacks, 0
+when it lacks none
 
 ## val MAX_SELECTED
 
@@ -50,44 +67,60 @@ an instruction set without one is named only by its registered name
 pub val MAX_SELECTED: u32 = 64
 ```
 
-the most names a selection can hold: one per bit
+the most rows a table holds: one per bit
 
-## rec Level
+## fun row_name
 
 ```mach
-pub rec Level;
+pub fun row_name(t: *Table, i: u32) str;
 ```
 
-a level is a published bundle of an isa's extensions under one manifest
-spelling (`x86-64-v3`). it is not a row: it has no bit, so it is never a
-comptime member, a decorator argument or a feature-record field, and only
-the manifest and a target request spell it. its members are closed over
-`implies` with the rest of the selection, so a level is exactly the union
-of its rows and whatever they bring
+the name of row `i` of `t`
+
+## fun row_of
+
+```mach
+pub fun row_of(t: *Table, name: str, len: usize) *Extension;
+```
+
+the row of `t` the name `name[0..len]` names alone, nil when it names none of them
+
+## fun known
+
+```mach
+pub fun known(t: *Table, name: str, len: usize) bool;
+```
+
+whether `name[0..len]` is a key of the table's catalog, or in a table with no catalog
+the name of a row
 
 ## fun bit_of
 
 ```mach
-pub fun bit_of(table: *Extension, count: u32, name: str, len: usize) u64;
+pub fun bit_of(t: *Table, name: str, len: usize) u64;
 ```
 
-the bit `table` gives the name at `name[0..len]`, 0 when the table does not name it
+the bits `t` gives the extension `name[0..len]` names, 0 when it names none the code
+generator emits against or names a level
 
 ## fun level_of
 
 ```mach
-pub fun level_of(table: *Level, count: u32, name: str, len: usize) u64;
+pub fun level_of(t: *Table, name: str, len: usize) u64;
 ```
 
-the members of the level `table` names at `name[0..len]`, 0 when it names none
+the bits of the members of the level the catalog names `name[0..len]`, 0 when it
+names none
 
 ## fun close
 
 ```mach
-pub fun close(table: *Extension, count: u32, bits: u64) u64;
+pub fun close(t: *Table, bits: u64) u64;
 ```
 
-`bits` closed over `implies`: every extension a selected one brings, to a fixpoint
+`bits` closed over what each selected extension implies: every extension a selected
+one brings, to a fixpoint. a selection is closed once, at target resolution, so a
+level is a bundle of bits and never an axis of its own
 
 ## fun admitted
 
@@ -109,7 +142,7 @@ pub fun admits(admitted_bits: u64, required: u64) bool;
 ## fun domain
 
 ```mach
-pub fun domain(table: *Extension, count: u32) u64;
+pub fun domain(t: *Table) u64;
 ```
 
 every bit the table names
@@ -117,7 +150,7 @@ every bit the table names
 ## fun first_name
 
 ```mach
-pub fun first_name(table: *Extension, count: u32, bits: u64) str;
+pub fun first_name(t: *Table, bits: u64) str;
 ```
 
 the first name the table gives any bit of `bits`, nil when it names none
@@ -139,38 +172,37 @@ pub fun is_spelling(name: str, len: usize) bool;
 
 what a manifest's `extensions` entry may spell: a name or a level
 
-## fun levels_valid
-
-```mach
-pub fun levels_valid(levels: *Level, count: u32, table: *Extension, ext_count: u32) bool;
-```
-
-a level table is well formed against its extension table: every spelling a
-level spelling that no row also answers, no spelling repeated, every member
-a row of the table, nonempty, and each level a strict superset of the one
-before it, which is the order the published levels have
-
 ## fun table_valid
 
 ```mach
-pub fun table_valid(table: *Extension, count: u32) bool;
+pub fun table_valid(t: *Table) bool;
 ```
 
-a table is well formed: every name an identifier, every bit a single nonzero
-bit, no name or bit repeated, and every implied bit another row of the table
+a table is well formed: every bit a single nonzero bit, no bit or row repeated, every
+row of its catalog and named by an identifier, and in a table with no catalog every
+implied bit another row of the table
 
 ## fun levels_append
 
 ```mach
-pub fun levels_append(b: *textbuild.TextBuilder, levels: *Level, count: u32) err[textbuild.Error];
+pub fun levels_append(b: *textbuild.TextBuilder, t: *Table) err[textbuild.Error];
 ```
 
-the level table's spellings, `, `-separated, appended to `b`
+the catalog's levels whose members the code generator emits against any of,
+`, `-separated, appended to `b`
+
+## fun bits_append
+
+```mach
+pub fun bits_append(b: *textbuild.TextBuilder, t: *Table, bits: u64) err[textbuild.Error];
+```
+
+the names of every row whose bit is in `bits`, `, `-separated, appended to `b`
 
 ## fun names_append
 
 ```mach
-pub fun names_append(b: *textbuild.TextBuilder, table: *Extension, count: u32) err[textbuild.Error];
+pub fun names_append(b: *textbuild.TextBuilder, t: *Table) err[textbuild.Error];
 ```
 
 the table's names, `, `-separated, appended to `b`
@@ -202,10 +234,18 @@ pub fun vocabulary_empty() Vocabulary;
 ## fun vocabulary_add
 
 ```mach
-pub fun vocabulary_add(v: *Vocabulary, table: *Extension, count: u32) bool;
+pub fun vocabulary_add(v: *Vocabulary, t: *Table) bool;
 ```
 
-`table` joins `v` unless it is empty or already there; false when `v` is full
+`t` joins `v` unless it is empty or already there; false when `v` is full
+
+## fun sources_append
+
+```mach
+pub fun sources_append(b: *textbuild.TextBuilder, v: *Vocabulary) err[textbuild.Error];
+```
+
+where the names of every table of `v` are read from, `, `-separated
 
 ## fun vocabulary_append
 

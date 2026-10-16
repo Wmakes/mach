@@ -2080,10 +2080,10 @@ test inline_asm__aes_and_pmull_need_their_extension_or_an_outlier {
     for (i < T_CRYPTO_BODY_COUNT) {
         val body: str = T_CRYPTO_BODIES[i];
         val need: u64 = T_CRYPTO_NEEDS[i];
-        if (!t_sha_refused(body, 0, 0, "needs the `"))                                                                                         { ret 20 + i::i32; }
-        if (!t_sha_refused(body, extension.without(?extension_arm64.NAMES[0], extension_arm64.NAME_COUNT, T_EXT_ALL, need), 0, "needs the `")) { ret 40 + i::i32; }
-        if (!t_sha_admitted(body, need, 0))                                                                                                    { ret 60 + i::i32; }
-        if (!t_sha_admitted(body, 0, need))                                                                                                    { ret 80 + i::i32; }
+        if (!t_sha_refused(body, 0, 0, "needs the `"))                                                          { ret 20 + i::i32; }
+        if (!t_sha_refused(body, extension.without(?extension_arm64.TABLE, T_EXT_ALL, need), 0, "needs the `")) { ret 40 + i::i32; }
+        if (!t_sha_admitted(body, need, 0))                                                                     { ret 60 + i::i32; }
+        if (!t_sha_admitted(body, 0, need))                                                                     { ret 80 + i::i32; }
         i = i + 1;
     }
     # pmull brings aes, as the one ID_AA64ISAR0_EL1.AES field does

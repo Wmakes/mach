@@ -1670,7 +1670,7 @@ test resolve_build_unit__artifact_suffix_maps_every_kind_on_every_object_format 
     var itn:     intern.Interner;
     if (!tinit(?backing, ?ar, ?alloc, ?itn)) { ret 1; }
     fin { arena.dnit(?ar); }
-    val targets:   str                      = "[target.linux]\nisa=\"x86_64\"\nos=\"linux\"\nabi=\"sysv64\"\n[target.win]\nisa=\"x86_64\"\nos=\"windows\"\nabi=\"win64\"\n[target.mac]\nisa=\"aarch64\"\nos=\"darwin\"\nabi=\"aapcs64\"\n[target.raw]\nisa=\"x86_64\"\nos=\"freestanding\"\nabi=\"sysv64\"\n[target.gpu]\nisa=\"spirv\"\nos=\"freestanding\"\nabi=\"spirv\"\n";
+    val targets:   str                      = "[target.linux]\nisa=\"x86_64\"\nos=\"linux\"\nabi=\"sysv64\"\n[target.win]\nisa=\"x86_64\"\nos=\"windows\"\nabi=\"win64\"\n[target.mac]\nisa=\"aarch64\"\nos=\"darwin\"\nabi=\"aapcs64\"\n[target.raw]\nisa=\"x86_64\"\nos=\"freestanding\"\nabi=\"sysv64\"\n[target.gpu]\nisa=\"spirv\"\nos=\"vulkan\"\nabi=\"spirv\"\n";
     val artifacts: str                      = "[artifact.tool]\nkind=\"bin\"\nentry=\"main.mach\"\nout=\"{project.work}/bin/tool{artifact.suffix}\"\ntargets=[\"*\"]\nlink=[]\nneed=[]\n[artifact.archive]\nkind=\"static\"\nentry=\"lib.mach\"\nout=\"{project.work}/lib/libarchive{artifact.suffix}\"\ntargets=[\"*\"]\nlink=[]\nneed=[]\n[artifact.dyn]\nkind=\"shared\"\nentry=\"lib.mach\"\nout=\"{project.work}/lib/libdyn{artifact.suffix}\"\ntargets=[\"*\"]\nlink=[]\nneed=[]\n";
     val parsed:    res[Manifest, fail.Fail] = tparse(?alloc, ?itn, t_fmt(?alloc, "{}{}{}", need_head(), targets, artifacts));
     if (sel parsed.err) { ret 2; }
