@@ -2937,7 +2937,7 @@ fun lib_manifest(alloc: *A.Allocator, id: str) str {
 # ---
 # ret: the entries, which the caller frees with driver_environment.strings_free
 #[testing]
-pub fun fixture_environment(a: *A.Allocator, root: str, inherited: exec.Environment) res[driver_environment.Strings, fail.Fail] {
+fun fixture_environment(a: *A.Allocator, root: str, inherited: exec.Environment) res[driver_environment.Strings, fail.Fail] {
     val prefix: res[str, A.Error] = types_path.join(a, root, "wine-prefix");
     if (sel prefix.err) { ret res[driver_environment.Strings, fail.Fail].err{fail.refused(prefix.err)}; }
     fin { str_free(a, prefix.ok); }
