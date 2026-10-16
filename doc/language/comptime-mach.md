@@ -35,7 +35,8 @@ $mach.build.extensions.<name>   # live; 1 when the target selects that instructi
 
 `$mach.build.arch` answers the target's `isa` key: the manifest calls the axis
 `isa` and both comptime roots call it `arch`, and the tags are the isa catalog's
-spellings. A riscv isa string such as `rv32imc` answers `$mach.arch.riscv32`.
+spellings. A target's `baseline` never changes it: `isa = "riscv32"` on
+`baseline = "rv32imc"` answers `$mach.arch.riscv32`.
 
 `$mach.build.mode` answers which pipeline the build runs, whatever the profile is
 named: `$mach.mode.release` when the build runs the optimization passes (the
@@ -95,7 +96,7 @@ $or {
 
 One `u8` member per extension name of the selected isa, like `$mach.build.pie`. It is
 1 when the target selects that extension and 0 otherwise. A build selects extensions
-with the target's `extensions` key and, on riscv, its isa string, closed over what
+with the target's `extensions` key and, on riscv, its `baseline`, closed over what
 each one implies (see
 [Instruction-set extensions](manifest.md#instruction-set-extensions)), so
 `extensions = ["sse41"]` answers 1 for `ssse3` too. On spirv the target's `env`

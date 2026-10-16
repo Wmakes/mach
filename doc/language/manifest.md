@@ -266,6 +266,7 @@ to whichever *declared* target matches the host.
 | Key   | Required | Meaning |
 |-------|----------|---------|
 | `isa` | yes      | Instruction-set architecture. Read by `$project.target.arch`. |
+| `baseline` | absent: the isa's default | The selection the target stands on, spelled as masc's catalog for the isa spells one, such as `rv32imc`. Only an isa whose catalog spells selections takes it. See [RISC-V baselines](#risc-v-baselines). |
 | `os`  | yes      | Operating system. Read by `$project.target.os`. |
 | `abi` | yes      | Application binary interface. Read by `$project.target.abi`. |
 | `of`  | absent: the os's format | Object-format override; defers to the os's format when omitted. See [Object-format override](#object-format-override). |
@@ -296,7 +297,7 @@ comptime member, `$mach.build.extensions.<name>` (see [`$mach`](comptime-mach.md
 |-------|----------|------------|
 | `x86_64` | SSE2 | `ssse3`, `sse41`, `sse42`, `sha`, `fsgsbase`, `popcnt`, `lzcnt`, `bmi1`, `bmi2`, `cx16`, `avx`, `avx2`, `fma`, `movbe`, `f16c`, `avx512f`, `avx512bw`, `avx512cd`, `avx512dq`, `avx512vl`, `aes`, `pclmul` |
 | `aarch64` | AdvSIMD | `sha2`, `sb`, `aes`, `pmull`, `fp16` |
-| `riscv64`, `riscv32` | the isa string's selection | `i`, `m`, `a`, `f`, `d`, `c`, `zicond`, `zicsr`, `zifencei`, `zfhmin`, `zfh`, `zkt` |
+| `riscv64`, `riscv32` | the target's `baseline` | `i`, `m`, `a`, `f`, `d`, `c`, `zicond`, `zicsr`, `zifencei`, `zfhmin`, `zfh`, `zkt` |
 | `spirv` | | `float16`, `int8`, `int16`, `int64`, `float64`, `zero_init_workgroup`, `storage_read_without_format`, `storage_write_without_format`, `vulkan_memory_model`, `vulkan_memory_model_device_scope`, `buffer_device_address`, `subgroup_arithmetic`, `subgroup_clustered`, `subgroup_vote`, `subgroup_ballot`, `subgroup_shuffle`, `subgroup_shuffle_relative`, `subgroup_quad`, `subgroup_graphics_stages`, `buffer_int64_atomics`, `shared_int64_atomics`, `buffer_float32_atomics`, `buffer_float32_atomic_add`, `buffer_float32_atomic_min_max`, `buffer_float64_atomics`, `buffer_float64_atomic_add`, `buffer_float64_atomic_min_max`, `shared_float32_atomics`, `shared_float32_atomic_add`, `shared_float32_atomic_min_max`, `shared_float64_atomics`, `shared_float64_atomic_add`, `shared_float64_atomic_min_max`, `buffer_float16_atomics`, `buffer_float16_atomic_add`, `buffer_float16_atomic_min_max`, `shared_float16_atomics`, `shared_float16_atomic_add`, `shared_float16_atomic_min_max`, `image_int64_atomics`, `image_float32_atomics`, `image_float32_atomic_add`, `image_float32_atomic_min_max`, `storage_image_multisample`, `resource_min_lod`, `image_gather_extended`, `maintenance8`, `storage_buffer_16bit_access`, `uniform_and_storage_buffer_16bit_access`, `storage_push_constant16`, `storage_input_output16`, `storage_buffer_8bit_access`, `uniform_and_storage_buffer_8bit_access`, `storage_push_constant8` |
 
 On `spirv` each name is a device feature a module may require.
@@ -328,9 +329,10 @@ resolves. `sse41` brings `ssse3` (the chain stops there; SSE3 is not a name),
 `sse42` brings `sse41`, `avx` brings `sse42`, `avx2`, `fma` and `f16c` bring `avx`,
 and every `avx512*` set brings `avx512f`, which brings `avx2`, `fma` and `f16c`. On
 aarch64 `pmull` brings `aes`. On riscv `d` brings
-`f`, `zfh` brings `zfhmin`, `zfhmin` brings `f`, and `f` brings `zicsr`, as the isa string's own grammar has it, so `extensions = ["d"]` on `rv64i` selects
-`rv64ifd` with Zicsr. The isa string and the list feed one set: `isa = "rv64i"` with
-`extensions = ["m"]` selects the same machine as `isa = "rv64im"`. A name nothing in
+`f`, `zfh` brings `zfhmin`, `zfhmin` brings `f`, and `f` brings `zicsr`, as masc's
+riscv catalog has it, so `extensions = ["d"]` on `baseline = "rv64i"` selects
+`rv64ifd` with Zicsr. The baseline and the list feed one set: `baseline = "rv64i"`
+with `extensions = ["m"]` selects the same machine as `baseline = "rv64im"`. A name nothing in
 the compiler encodes against yet (`avx`, `avx512f`) is still a declared requirement:
 the inline assembler has no rows to admit under it, so today it records only the
 promise the binary makes about its hosts, and the promise is the program's to check.
@@ -355,7 +357,7 @@ holds this table to them:
 in the manifest, never inferred from the build machine.
 
 The list is never part of `{target.isa}`. That placeholder is the `isa` value as
-written (`rv64i`, `x86_64`), on every isa; the list belongs to the target's identity
+written (`riscv64`, `x86_64`), on every isa; the list belongs to the target's identity
 and to `{target.name}`.
 
 "Selects" means the extension is assumed of every machine the binary runs on: the
@@ -507,13 +509,13 @@ naming the new spelling and carrying the rewrite `mach migrate` applies:
 | `of` | `raw` | `flat` |
 | `of` | `spv` | `spirv` |
 | `os` (on `isa = "spirv"`) | `freestanding` | `vulkan` |
+| `isa` | a RISC-V selection such as `rv32imc` | `isa = "riscv32"` and `baseline = "rv32imc"` |
 
 ```
 error[target.retired_spelling]: mach.toml: [target.metal].of = "raw" is a retired spelling; write "flat", mink's name for it
 ```
 
-`isa` also takes a canonical RISC-V extension string such as `rv32imc`, described
-below. `env` is defined only by `spirv`.
+`env` is defined only by `spirv`.
 
 A `[target.*]` naming an `isa`, `os` or `abi` outside these lists is refused
 through the registry's own lookup (`no isa implementation registered for
@@ -531,21 +533,36 @@ not an os of its own. `spirv` is not a machine at all — it
 emits a finished GPU module rather than machine code (see
 [Finished-module targets](#finished-module-targets)).
 
-`riscv64` and `riscv32` are width-only spellings, and each names a **default
-profile**: `riscv64` is `rv64gc` and `riscv32` is `rv32imac`. A canonical
-extension string such as `rv32imc` or `rv64imafd` selects a smaller machine.
-The retained vocabulary is I, M, A, F, D, C, Zicond, Zicsr, Zifencei and Zkt,
-written in lowercase canonical order with multi-letter names after an
-underscore, so `rv64gc_zicond`; `g` expands to IMAFD plus Zicsr and Zifencei.
-F carries its required Zicsr, and D requires F. Zicond adds `czero.eqz` and
-`czero.nez`, which a branch-free select compiles to where a selection holds it
-and the xor-and-mask sequence it replaces does otherwise. Zkt changes no
-instruction. It states that the listed operations run in data-independent time,
-which is what lets a secret multiply compile (see `secrecy.md`). An optional
-version must be the one mach models: I 2.1, M 2.0, A 2.1, F and D 2.2, C 2.0,
-Zicond 1.0, Zicsr and Zifencei 2.0, Zkt 1.0. Unknown extensions,
-other versions, duplicates, noncanonical order and the E base are refused
-rather than rounded up to the default machine.
+### RISC-V baselines
+
+`isa` names the architecture, and `baseline` the selection the target stands on,
+spelled as masc's riscv catalog spells one. A target that names no baseline stands
+on its isa's **default profile**: `riscv64` is `rv64gc` and `riscv32` is `rv32imac`.
+A baseline such as `rv32imc` or `rv64imafd` selects a smaller machine, and
+`extensions` adds names on top of it:
+
+```toml
+[target.board]
+isa      = "riscv32"
+baseline = "rv32imc"
+os       = "freestanding"
+abi      = "ilp32"
+```
+
+masc reads the baseline, closes it over the catalog's implications (`g` is IMAFD
+plus Zicsr and Zifencei, D brings F and F brings Zicsr) and says whether the
+architecture enters it. A baseline masc's catalog refuses, or one of the other
+width (`rv64gc` on `riscv32`) or the E base, is refused naming the baseline and the
+isa. An isa whose catalog spells no selection (`x86_64`, `aarch64`, `spirv`) refuses
+`baseline` outright, naming the isa: name what it adds with `extensions`.
+
+mach emits against I, M, A, F, D, C, Zicond, Zicsr, Zifencei, Zfhmin, Zfh and Zkt.
+Zicond adds `czero.eqz` and `czero.nez`, which a branch-free select compiles to
+where a selection holds it and the xor-and-mask sequence it replaces does
+otherwise. Zkt changes no instruction. It states that the listed operations run in
+data-independent time, which is what lets a secret multiply compile (see
+`secrecy.md`). The `Tag_RISCV_arch` mach writes into its own objects is masc's
+spelling of the selection with masc's revision of each extension.
 
 The selected ISA bounds what the compiler generates and what named inline
 assembly may use: an instruction needing an extension the selection lacks is
@@ -558,8 +575,8 @@ selected machine, but the emitter writes full-width instructions only.
 
 The ABI still selects the calling convention on its own, and it must fit the
 selected machine: `rv32imc` has no floating-point registers, so it takes
-`ilp32`, and `riscv32` (rv32imac) is refused with `ilp32f` or `ilp32d`; spell
-`rv32imafdc` when RV32 hardware floating point is wanted. `mach init` scaffolds
+`ilp32`, and `riscv32` (rv32imac) is refused with `ilp32f` or `ilp32d`; name
+`baseline = "rv32imafdc"` when RV32 hardware floating point is wanted. `mach init` scaffolds
 `riscv32`/`freestanding` with `ilp32` for that reason.
 
 `lp64`, `lp64f`, `lp64d`, `ilp32`, `ilp32f`, and `ilp32d` are the RISC-V psABI

@@ -140,9 +140,10 @@ abi = "sysv64"
 extensions = ["x86-64-v3", "sha"]
 
 [target.board]
-isa = "rv32imc"
-os  = "freestanding"
-abi = "ilp32"
+isa      = "riscv32"
+baseline = "rv32imc"
+os       = "freestanding"
+abi      = "ilp32"
 
 [target.gpu]
 isa = "spirv"
