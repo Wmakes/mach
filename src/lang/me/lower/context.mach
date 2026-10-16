@@ -2053,20 +2053,22 @@ test request__refuses_a_module_product_that_does_not_correspond {
 
     var code: i32 = 0;
 
-    val good: res[LowerRequest, fail.Fail] = request(?s, ?l, ?tgt, ?alloc, ?f.a1, f.fqn, f.mid, ?f.sm1, ?f.rr1, ?f.cc1, nil, false, false, true, nil, reader);
+    val good: res[LowerRequest, fail.Fail] = request(?s, ?l, ?tgt, ?alloc, ?f.a1, f.fqn, f.mid, ?f.sm1, ?f.rr1, ?f.cc1, nil, false, false, true, ?s.diags, reader);
     if (sel good.err) { ret 1; }
     val req: LowerRequest = good.ok;
     if (req.module.a != ?f.a1 || !module.same(req.module.own_module, f.mid)) { code = 1; }
     if (req.instances != ?f.sm1.instances)                                   { code = 1; }
 
-    val r_2066: res[LowerRequest, fail.Fail] = request(?s, ?l, nil, ?alloc, ?f.a1, f.fqn, f.mid, ?f.sm1, ?f.rr1, ?f.cc1, nil, false, false, true, nil, reader);
+    val r_2066: res[LowerRequest, fail.Fail] = request(?s, ?l, nil, ?alloc, ?f.a1, f.fqn, f.mid, ?f.sm1, ?f.rr1, ?f.cc1, nil, false, false, true, ?s.diags, reader);
     if (sel r_2066.ok) { code = 1; }
-    val r_2067: res[LowerRequest, fail.Fail] = request(?s, ?l, ?tgt, nil, ?f.a1, f.fqn, f.mid, ?f.sm1, ?f.rr1, ?f.cc1, nil, false, false, true, nil, reader);
+    val r_2067: res[LowerRequest, fail.Fail] = request(?s, ?l, ?tgt, nil, ?f.a1, f.fqn, f.mid, ?f.sm1, ?f.rr1, ?f.cc1, nil, false, false, true, ?s.diags, reader);
     if (sel r_2067.ok) { code = 1; }
-    val r_2068: res[LowerRequest, fail.Fail] = request(?s, ?l, ?tgt, ?alloc, ?f.a2, f.fqn, f.mid, ?f.sm1, ?f.rr1, ?f.cc1, nil, false, false, true, nil, reader);
+    val r_2068: res[LowerRequest, fail.Fail] = request(?s, ?l, ?tgt, ?alloc, ?f.a2, f.fqn, f.mid, ?f.sm1, ?f.rr1, ?f.cc1, nil, false, false, true, ?s.diags, reader);
     if (sel r_2068.ok) { code = 1; }
-    val r_2069: res[LowerRequest, fail.Fail] = request(?s, ?l, ?tgt, ?alloc, ?f.a1, f.fqn, f.mid, ?f.sm1, ?f.rr1, ?f.cc1, nil, false, false, true, nil, unread);
+    val r_2069: res[LowerRequest, fail.Fail] = request(?s, ?l, ?tgt, ?alloc, ?f.a1, f.fqn, f.mid, ?f.sm1, ?f.rr1, ?f.cc1, nil, false, false, true, ?s.diags, unread);
     if (sel r_2069.ok) { code = 1; }
+    val no_store: res[LowerRequest, fail.Fail] = request(?s, ?l, ?tgt, ?alloc, ?f.a1, f.fqn, f.mid, ?f.sm1, ?f.rr1, ?f.cc1, nil, false, false, true, nil, reader);
+    if (sel no_store.ok) { code = 1; }
 
     ret code;
 }
