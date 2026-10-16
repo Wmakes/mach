@@ -496,6 +496,11 @@ fun eval_binary[T](ev: *Evaluation[T], eid: ast_id.ExprId, bin: *ast_expr.ExprBi
     }
     val result: res[comptime_value.CTValue, comptime_failure.EvalFail] = comptime_value.apply_arith(bin.op, lhs, rhs);
     if (sel result.err) { ret result; }
+    # a NaN result folds only where the target states the NaN it computes
+    if (result.ok.kind == comptime_value.CT_KIND_FLOAT && result.ok.data.f != result.ok.data.f
+        && ev.c.env.target.nan_rule == float.NAN_UNSPECIFIED) {
+        ret comptime_value.nan_unspecified(ev.interner, ev.c.env.target.arch_id);
+    }
     if ((bin.op == ast_expr.BIN_BIT_AND || bin.op == ast_expr.BIN_BIT_OR || bin.op == ast_expr.BIN_BIT_XOR)
         && comptime_capability.capabilities_have_types[T](ev.cap_ctx, ev.caps)) {
         ret ev.caps.scalar(ev.cap_ctx, eid, result.ok);
