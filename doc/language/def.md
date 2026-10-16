@@ -7,6 +7,7 @@ underlying type are interchangeable; there is no nominal distinction.
 
 ```mach fragment
 def NAME: TYPE;
+#[DECORATOR(...)] def NAME;
 ```
 
 ## Examples
@@ -34,6 +35,22 @@ fun parse(x: i64) R {
     ret R.ok{x};
 }
 ```
+
+## A `def` with no type
+
+A `def` that states no type is a declaration whose type something else
+supplies: a decorator that defines it. `#[handle(...)]` declares a type the
+owning target mints ([types.md](types.md#handles)), and `#[abi_type(...)]` a C
+type whose layout the target declares ([types.md](types.md#abi-types)):
+
+```mach fragment
+#[abi_type("va_list")]
+pub def VaList;
+```
+
+Without such a decorator, `def NAME;` names nothing and is refused at the
+declaration (`def.no_type`). The refusal is the only diagnostic it produces:
+a use of the name is not reported again.
 
 ## Stdlib aliases
 

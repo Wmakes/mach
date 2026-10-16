@@ -485,6 +485,17 @@ test generic_growth__answered_over_the_declaration {
     ret bad;
 }
 
+# a `def` with no type is refused once at its declaration, and its uses say nothing more;
+# one a decorator defines is accepted
+test def_with_no_type__is_refused_unless_a_decorator_defines_it {
+    val bare: str = "def X;\nfun main() i32 { var x: X; ret 0; }\n";
+    if (!sema_checked.sema_rejects_at(bare, "a `def` with no type names nothing", 0, 6))                                       { ret 1; }
+    if (sema_checked.sema_errors(bare) != 1)                                                                                   { ret 2; }
+    if (sema_checked.sema_diag("#[deprecated(\"gone\")]\ndef X;\nfun main() i32 { ret 0; }\n", "`handle` or `abi_type`") != 0) { ret 3; }
+    if (!sema_checked.sema_clean("#[handle(\"spirv\", \"sampler\")]\ndef S;\nfun main() i32 { ret 0; }\n"))                    { ret 4; }
+    ret 0;
+}
+
 test recursive_union__reports_its_real_defect {
     var bad: i32 = 0;
 

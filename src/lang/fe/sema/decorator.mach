@@ -62,6 +62,17 @@ pub fun validate_decorators(sc: *sema_context.SemaContext, d: *ast_decl.Decl) {
     }
     validate_no_inline_conflict(sc, d);
     if (d.kind == ast_decl.DECL_KIND_TAG) { validate_case_decorators(sc, ?d.data.tag_); }
+    if (d.kind == ast_decl.DECL_KIND_DEF) { validate_def_defined(sc, d); }
+}
+
+# a `def` that states no type takes it from a decorator that supplies one, and is refused
+# without one; its uses then see the error type and say nothing more
+fun validate_def_defined(sc: *sema_context.SemaContext, d: *ast_decl.Decl) {
+    if (!ast_id.type_is_nil(d.data.def_.ty))                               { ret; }
+    if (decorator.count_flagged(sc.view.a, d, decorator.FLAG_DEFINES) > 0) { ret; }
+    report_decorator_listing(sc, diagnostic_kind.DEF_NO_TYPE, d.span,
+        "a `def` with no type names nothing: state the type it aliases, as in `def Name: T;`, or give it a decorator that defines it, ",
+        decorator.FLAG_DEFINES, decorator.places_of(d), "or", "");
 }
 
 # a tag case's decorators answer to their rows alone: every rule a decorator adds
