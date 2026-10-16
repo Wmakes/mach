@@ -30,6 +30,7 @@ use T:          std.allocator.testing;
 use std.text.string.str_free;
 
 use mach.lang.ct;
+use diagnostic_kind:  mach.lang.diagnostic.kind;
 use lang_fingerprint: mach.lang.fingerprint;
 use mach.lang.intern;
 use mach.lang.layout;
@@ -370,7 +371,7 @@ pub fun resolve(reg: *TargetRegistry, req: *TargetRequest) res[binding.Binding, 
 
     val of_vt: *target_of.OfVTable = opt_of_vt.some;
 
-    val base_r: res[u64, fail.Fail] = baseline_bits(?reg.alloc, arch_vt, req.baseline_name);
+    val base_r: res[u64, fail.Fail] = baseline_bits(?reg.alloc, os_vt, arch_vt, req.baseline_name);
     if (sel base_r.err) { ret res[binding.Binding, fail.Fail].err{base_r.err}; }
     val added_r: res[u64, fail.Fail] = requested_extensions(?reg.alloc, arch_vt, req);
     if (sel added_r.err) { ret res[binding.Binding, fail.Fail].err{added_r.err}; }
@@ -510,10 +511,11 @@ pub fun resolve(reg: *TargetRegistry, req: *TargetRequest) res[binding.Binding, 
 }
 
 # the bits the target's baseline selects: the one it names, else the instruction
-# set's default, each read by masc's catalog for it. an instruction set whose
-# catalog spells no selection takes no baseline and stands on its model's own
-# extensions
-fun baseline_bits(a: *A.Allocator, arch_vt: *isa.IsaVTable, named: str) res[u64, fail.Fail] {
+# set's default, each read by masc's catalog for it. a freestanding target names
+# its baseline, since the chip decides it and no default is right. an instruction
+# set whose catalog spells no selection takes no baseline and stands on its
+# model's own extensions. `os_vt` is nil for a matrix cell, which no target names
+fun baseline_bits(a: *A.Allocator, os_vt: *lang_target_os.OsVTable, arch_vt: *isa.IsaVTable, named: str) res[u64, fail.Fail] {
     val owner: *mink_arch.Arch = catalog_arch.owner_of(arch_vt.id);
     if (!target_baseline.spells(owner)) {
         if (!str_empty(named)) {
@@ -521,6 +523,10 @@ fun baseline_bits(a: *A.Allocator, arch_vt: *isa.IsaVTable, named: str) res[u64,
                 "target: isa '{}' takes no `baseline`: masc's extension catalog for it spells no selection; name what it adds with `extensions`", arch_vt.name)};
         }
         ret res[u64, fail.Fail].ok{arch_vt.model.extensions};
+    }
+    if (str_empty(named) && os_vt != nil && os_vt.id == catalog_os.FREESTANDING) {
+        ret res[u64, fail.Fail].err{fail.formatted_user(a, diagnostic_kind.TARGET_BASELINE_REQUIRED,
+            "target: a freestanding '{}' target must state its `baseline`, the selection its chip implements: the chip decides it, so no default is right", arch_vt.name)};
     }
     var spelled: str = catalog_arch.default_baseline(arch_vt.id);
     if (!str_empty(named)) { spelled = named; }
@@ -597,7 +603,7 @@ pub fun registered_selection(arch_vt: *isa.IsaVTable, model: *target_model.Machi
     var a: A.Allocator;
     page.make(?a);
     var base: u64                 = arch_vt.model.extensions;
-    val bits: res[u64, fail.Fail] = baseline_bits(?a, arch_vt, "");
+    val bits: res[u64, fail.Fail] = baseline_bits(?a, nil, arch_vt, "");
     if (sel bits.ok) { base = bits.ok; }
     ret select_isa(arch_vt, base, 0, model);
 }
@@ -1231,7 +1237,10 @@ test select__page_size_comes_from_the_tuple {
     val arm_r: res[binding.Binding, fail.Fail] = select_of(reg, "aarch64", "freestanding", "aapcs64", "elf");
     if (sel arm_r.err)                     { ret 4; }
     if (arm_r.ok.target.page_size != 4096) { ret 5; }
-    val rv_r: res[binding.Binding, fail.Fail] = select_of(reg, "riscv32", "freestanding", "ilp32", "elf");
+    var rv_q: TargetRequest = target_request("riscv32", "freestanding", "ilp32");
+    with_of(?rv_q, "elf");
+    with_baseline(?rv_q, "rv32imac");
+    val rv_r: res[binding.Binding, fail.Fail] = resolve(reg, ?rv_q);
     if (sel rv_r.err)                     { ret 6; }
     if (rv_r.ok.target.page_size != 4096) { ret 7; }
 
@@ -2116,7 +2125,9 @@ test tuple_capability__a_hosted_os_constrains_the_abi_to_its_declared_set {
     # freestanding declares itself unconstrained, so every convention the isa covers stays legal
     val bare_win: res[binding.Binding, fail.Fail] = select(reg, "x86_64", "freestanding", "win64");
     if (sel bare_win.err) { ret 8; }
-    val bare_soft: res[binding.Binding, fail.Fail] = select(reg, "riscv64", "freestanding", "lp64");
+    var soft_q: TargetRequest = target_request("riscv64", "freestanding", "lp64");
+    with_baseline(?soft_q, "rv64gc");
+    val bare_soft: res[binding.Binding, fail.Fail] = resolve(reg, ?soft_q);
     if (sel bare_soft.err) { ret 9; }
 
     # the code is its own row, judged after every lower-level capability
@@ -2265,7 +2276,8 @@ test select_of__every_capable_tuple_is_selectable_and_the_census_is_stable {
                         capable = capable + 1;
                         var req: TargetRequest = target_request(isa_vt.name, os_vt.name, abi_vt.name);
                         with_of(?req, of_vt.name);
-                        if (isa_vt.id == catalog_arch.RISCV32) { with_baseline(?req, "rv32imafdc"); }
+                        if (isa_vt.id == catalog_arch.RISCV32)                                        { with_baseline(?req, "rv32imafdc"); }
+                        or (isa_vt.id == catalog_arch.RISCV64 && os_vt.id == catalog_os.FREESTANDING) { with_baseline(?req, "rv64gc"); }
                         val r: res[binding.Binding, fail.Fail] = resolve(reg, ?req);
                         if (sel r.ok) { selectable = selectable + 1; }
                     }

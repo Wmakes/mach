@@ -547,6 +547,7 @@ pub val OP_RESULT_FLOW:                   Kind = 504;
 pub val GENERIC_GROWING_CYCLE:            Kind = 505;
 pub val TARGET_RETIRED_SPELLING:          Kind = 506;
 pub val SECRET_TARGET_UNENFORCEABLE:      Kind = 507;
+pub val TARGET_BASELINE_REQUIRED:         Kind = 508;
 
 # kind:    the row's own kind, which is its position in the table plus one
 # key:     the dotted key the kind is printed and selected by
@@ -563,7 +564,7 @@ pub rec Spec {
     retired: bool;
 }
 
-pub val COUNT: usize       = 507;
+pub val COUNT: usize       = 508;
 val     KINDS: [COUNT]Spec = [COUNT]Spec{
     Spec{kind: IMPORT_UNUSED, key: "import.unused", level: LEVEL_WARNING, source: true, retired: false},
     Spec{kind: DECL_DEPRECATED, key: "decl.deprecated", level: LEVEL_WARNING, source: true, retired: false},
@@ -1072,6 +1073,7 @@ val     KINDS: [COUNT]Spec = [COUNT]Spec{
     Spec{kind: GENERIC_GROWING_CYCLE, key: "generic.growing_cycle", level: LEVEL_ERROR, source: false, retired: false},
     Spec{kind: TARGET_RETIRED_SPELLING, key: "target.retired_spelling", level: LEVEL_ERROR, source: false, retired: false},
     Spec{kind: SECRET_TARGET_UNENFORCEABLE, key: "secret.target_unenforceable", level: LEVEL_WARNING, source: false, retired: false},
+    Spec{kind: TARGET_BASELINE_REQUIRED, key: "target.baseline_required", level: LEVEL_ERROR, source: false, retired: false},
 };
 
 # the row at `i` in declaration order, nil past the end
@@ -1220,7 +1222,7 @@ rec Issued {
 }
 
 #[testing]
-val ISSUED_COUNT: usize = 507;
+val ISSUED_COUNT: usize = 508;
 
 #[testing]
 val ISSUED: [ISSUED_COUNT]Issued = [ISSUED_COUNT]Issued{
@@ -1731,6 +1733,7 @@ val ISSUED: [ISSUED_COUNT]Issued = [ISSUED_COUNT]Issued{
     Issued{key: "generic.growing_cycle", level: LEVEL_ERROR},
     Issued{key: "target.retired_spelling", level: LEVEL_ERROR},
     Issued{key: "secret.target_unenforceable", level: LEVEL_WARNING},
+    Issued{key: "target.baseline_required", level: LEVEL_ERROR},
 };
 
 # the table is append-only: every key ever issued keeps its row, its position

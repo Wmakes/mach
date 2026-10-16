@@ -30,8 +30,9 @@ rec Row {
     arch:            u32;
     owner:           *mink_arch.Arch;
     fingerprint_tag: u8;
-    # the baseline a target naming no `baseline` stands on, spelled as masc's catalog
-    # spells a selection; nil for an instruction set whose catalog spells none
+    # the baseline a hosted target naming no `baseline` stands on, spelled as masc's
+    # catalog spells a selection; nil for an instruction set whose catalog spells
+    # none. mach's until mink's os rows state each system's floor (mink#400)
     default_baseline: str;
 }
 
@@ -70,8 +71,8 @@ pub fun id_for(name: str) u32 {
     ret UNKNOWN;
 }
 
-# the baseline a target of the instruction set `id` stands on when it names none, in
-# masc's spelling; nil when its catalog spells no selection, so it takes no baseline
+# the baseline a hosted target of the instruction set `id` stands on when it names
+# none, in masc's spelling; nil when its catalog spells no selection, so it takes no baseline
 pub fun default_baseline(id: u32) str {
     val spec: *Row = row_of(id);
     if (spec == nil) { ret nil; }

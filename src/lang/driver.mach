@@ -4431,7 +4431,7 @@ test manifest__empty_target_table_synthesizes_native {
 # two declared targets that no supported host matches
 #[testing]
 fun manifest_foreign_only() str {
-    ret "[project]\nmach = \">=5\"\nid = \"foreign\"\nversion = \"0.0.0\"\nsrc = \"src\"\nwork = \"out/{target.name}/{profile.name}\"\n\n[target.bare]\nisa = \"aarch64\"\nos = \"freestanding\"\nabi = \"aapcs64\"\nof = \"elf\"\n\n[target.spare]\nisa = \"riscv64\"\nos = \"freestanding\"\nabi = \"lp64d\"\nof = \"elf\"\n\n[artifact.foreign]\nkind = \"bin\"\nentry = \"main.mach\"\nout = \"{project.work}/bin/foreign\"\ntargets = [\"*\"]\nlink = []\nneed = []\n[profile.debug]\ndefault = true\noptimize = false\ndebug = true\nsimd = \"scalarize\"\n";
+    ret "[project]\nmach = \">=5\"\nid = \"foreign\"\nversion = \"0.0.0\"\nsrc = \"src\"\nwork = \"out/{target.name}/{profile.name}\"\n\n[target.bare]\nisa = \"aarch64\"\nos = \"freestanding\"\nabi = \"aapcs64\"\nof = \"elf\"\n\n[target.spare]\nisa = \"riscv64\"\nbaseline = \"rv64gc\"\nos = \"freestanding\"\nabi = \"lp64d\"\nof = \"elf\"\n\n[artifact.foreign]\nkind = \"bin\"\nentry = \"main.mach\"\nout = \"{project.work}/bin/foreign\"\ntargets = [\"*\"]\nlink = []\nneed = []\n[profile.debug]\ndefault = true\noptimize = false\ndebug = true\nsimd = \"scalarize\"\n";
 }
 
 # `native` with no declared host target is refused before any step runs, and `-t` still selects it

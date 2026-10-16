@@ -3365,9 +3365,13 @@ fun t_riscv_got_pointer(arch: str, abi: str, width: u32) i32 {
     fin { linkage.dnit(?l); }
     var s: session.Session = sr.ok;
     fin { session.dnit(?s); }
-    var system: str = "linux";
-    if (width == 4) { system = "freestanding"; }
-    val selected: res[lang_target.Binding, fail.Fail] = lang_target.select_of(lang_target.t_registry(), arch, system, abi, "elf");
+    var req: lang_target.TargetRequest = lang_target.target_request(arch, "linux", abi);
+    if (width == 4) {
+        req = lang_target.target_request(arch, "freestanding", abi);
+        lang_target.with_baseline(?req, "rv32imac");
+    }
+    lang_target.with_of(?req, "elf");
+    val selected: res[lang_target.Binding, fail.Fail] = lang_target.resolve(lang_target.t_registry(), ?req);
     if (sel selected.err) { ret 3; }
     var tgt:   lang_target.Binding = selected.ok;
     var bytes: [24]u8;

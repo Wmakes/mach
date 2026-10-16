@@ -139,7 +139,7 @@ use mach.lang.testrun;
 
 #[testing]
 fun manifest_riscv_pair() str {
-    ret "[project]\nmach = \">=5\"\nid = \"uniontest\"\nversion = \"0.0.0\"\nsrc = \"src\"\nwork = \"out/{target.name}/{profile.name}\"\n\n[target.rv32]\nisa = \"riscv32\"\nbaseline = \"rv32imafdc\"\nos = \"freestanding\"\nabi = \"ilp32d\"\nof = \"elf\"\n\n[target.rv64]\nisa = \"riscv64\"\nos = \"freestanding\"\nabi = \"lp64d\"\nof = \"elf\"\n\n[artifact.uniontest]\nkind = \"bin\"\nentry = \"main.mach\"\nout = \"{project.work}/bin/uniontest\"\ntargets = [\"*\"]\nlink = []\nneed = []\n[profile.debug]\ndefault = true\noptimize = false\ndebug = true\nsimd = \"scalarize\"\n[profile.release]\noptimize = true\ndebug = false\nsimd = \"scalarize\"\n";
+    ret "[project]\nmach = \">=5\"\nid = \"uniontest\"\nversion = \"0.0.0\"\nsrc = \"src\"\nwork = \"out/{target.name}/{profile.name}\"\n\n[target.rv32]\nisa = \"riscv32\"\nbaseline = \"rv32imafdc\"\nos = \"freestanding\"\nabi = \"ilp32d\"\nof = \"elf\"\n\n[target.rv64]\nisa = \"riscv64\"\nbaseline = \"rv64gc\"\nos = \"freestanding\"\nabi = \"lp64d\"\nof = \"elf\"\n\n[artifact.uniontest]\nkind = \"bin\"\nentry = \"main.mach\"\nout = \"{project.work}/bin/uniontest\"\ntargets = [\"*\"]\nlink = []\nneed = []\n[profile.debug]\ndefault = true\noptimize = false\ndebug = true\nsimd = \"scalarize\"\n[profile.release]\noptimize = true\ndebug = false\nsimd = \"scalarize\"\n";
 }
 
 #[testing]
