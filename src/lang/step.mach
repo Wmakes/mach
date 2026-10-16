@@ -444,22 +444,43 @@ fun execute_step_invocation(a: *A.Allocator, execution_root: str, program: str,
     var interrupt_source: *events.Source      = nil;
     if (has_source) { interrupt_source = ?source; }
 
-    val wait_r: res[*subprocess.OwnedSubprocess, subprocess.Error] = subprocess.wait_any(a, ?child, 1, ?scope, interrupt_source);
-    if (has_source) { events.close(?source); }
+    val wait_r:   res[*subprocess.OwnedSubprocess, subprocess.Error] = subprocess.wait_any(a, ?child, 1, ?scope, interrupt_source);
+    var released: err[fail.Fail]                                     = err[fail.Fail].ok{};
+    if (has_source) { released = source_closed(a, ?source); }
+    # a root scope made here holds no child, registration or waiter once the wait returns, so destroy cannot refuse
     sync_cancel.destroy(?scope);
+    val ended: err[fail.Fail] = step_ended(a, ?child, wait_r, program, step_name, timeout);
+    if (sel released.err) {
+        if (sel ended.err) { ret err[fail.Fail].err{fail.with_secondary(a, ended.err, released.err)}; }
+        ret released;
+    }
+    ret ended;
+}
+
+# the process event source closed and its handlers restored; a refusal is the
+# step's failure, since the handlers may still be installed
+fun source_closed(a: *A.Allocator, source: *events.Source) err[fail.Fail] {
+    val closed: err[io_error.Error] = events.close(source);
+    if (sel closed.err) { ret err[fail.Fail].err{fail.environment_of(diagnostic_kind.STEP_WAIT, fail.format(a, "failed to restore the process event handlers: {}", fail.io_text(closed.err)))}; }
+    ret err[fail.Fail].ok{};
+}
+
+# how a build step's executable ended, once `wait_r` answered for `child`
+fun step_ended(a: *A.Allocator, child: *subprocess.OwnedSubprocess, wait_r: res[*subprocess.OwnedSubprocess, subprocess.Error],
+    program: str, step_name: str, timeout: chrono_duration.Duration) err[fail.Fail] {
     if (sel wait_r.err) {
         val wait_err: subprocess.Error                                     = wait_r.err;
-        val cancel_r: res[subprocess.SubprocessTerminal, subprocess.Error] = subprocess.cancel(a, ?child, 0);
+        val cancel_r: res[subprocess.SubprocessTerminal, subprocess.Error] = subprocess.cancel(a, child, 0);
         if (sel cancel_r.err) {
-            val msg: fail.Fail = fail.formatted_user(a, diagnostic_kind.STEP_WAIT, "failed to wait for build step executable '{}': {}: {}; cancellation also failed: {}: {}", program,
-                wait_err.identity, subprocess.cause_text(wait_err.cause), cancel_r.err.identity, subprocess.cause_text(cancel_r.err.cause));
-            ret err[fail.Fail].err{msg};
+            val waited: fail.Fail = fail.formatted_user(a, diagnostic_kind.STEP_WAIT, "failed to wait for build step executable '{}': {}: {}", program,
+                wait_err.identity, subprocess.cause_text(wait_err.cause));
+            ret err[fail.Fail].err{fail.with_secondary(a, waited, subprocess.refusal(a, diagnostic_kind.STEP_WAIT, cancel_r.err))};
         }
         val msg: fail.Fail = fail.formatted_user(a, diagnostic_kind.STEP_WAIT, "failed to wait for build step executable '{}': {}: {}; child was canceled and reaped", program,
             wait_err.identity, subprocess.cause_text(wait_err.cause));
         ret err[fail.Fail].err{msg};
     }
-    if (subprocess.expired(?child)) {
+    if (subprocess.expired(child)) {
         val t:   duration.Text = duration.text(timeout);
         val msg: fail.Fail     = fail.formatted_user(a, diagnostic_kind.STEP_TIMEOUT, "build step '{}' exceeded its timeout of {}{} and its process group was terminated", step_name, t.n, t.unit);
         ret err[fail.Fail].err{msg};
@@ -911,6 +932,11 @@ fun step_staging_root(a: *A.Allocator, output_root: str, step_name: str) res[str
     ret layout.within(a, output_root, layout.STAGE, step_name);
 }
 
+# a staging root the step could not clear on its way out
+fun staging_left(a: *A.Allocator, staging_root: str, e: fs.FsError) fail.Fail {
+    ret fail.environment_of(diagnostic_kind.FS_REMOVE, fail.format(a, "cannot remove build step staging area '{}': {}", staging_root, fail.fs_text(e)));
+}
+
 fun step_prepare_staging(a: *A.Allocator, output_root: str, staging_root: str, step_name: str) err[fail.Fail] {
     val stage_r: err[fail.Fail] = step_walk.owned_directory_ensure(a, output_root, layout.STAGE, "build step staging area");
     if (sel stage_r.err) { ret stage_r; }
@@ -1126,12 +1152,14 @@ fun run_one_step(a: *A.Allocator, p: *project.Project, step: *manifest.StepDef, 
 
     val finished: err[fail.Fail] = combine_step_terminal_results(a, object_integrity, output_integrity, res_run);
     if (sel finished.err) {
-        fs.remove_all(a, staging_root);
+        val cleared: err[fs.FsError] = fs.remove_all(a, staging_root);
+        if (sel cleared.err) { ret err[fail.Fail].err{fail.with_secondary(a, finished.err, staging_left(a, staging_root, cleared.err))}; }
         ret finished;
     }
 
     val publish_r: err[fail.Fail] = publish_staged_outputs(a, staging_root, output_root, ?outputs);
     if (sel publish_r.err) { ret publish_r; }
+    # the outputs are published, and the next run of the step clears a staging root left here before it stages
     fs.remove_all(a, staging_root);
 
     var stamped: err[fail.Fail] = err[fail.Fail].ok{};
