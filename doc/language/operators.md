@@ -22,7 +22,8 @@ finite dividend over an infinite divisor gives the dividend unchanged, its sign
 and a zero dividend's sign included, as C `fmod` does. Where the result is NaN,
 only the NaN is defined, not its sign or payload. In a constant expression a
 zero divisor is refused as division by zero, and the other cases fold to the
-same results as at run time.
+same results as at run time, except a NaN on spirv
+([A NaN in a constant on spirv](#a-nan-in-a-constant-on-spirv)).
 
 ```mach
 use std.print;
@@ -427,6 +428,24 @@ depends on when the cast is evaluated:
   the minimum, one above its maximum gives the maximum, and a NaN gives 0, the
   same on every target.
 
+### A NaN in a constant on spirv
+
+Vulkan leaves the NaN a float operation returns unspecified unless the module
+states a float-controls execution mode, and mach never states one. On spirv a
+float operation whose result would be a NaN, arithmetic or a conversion between
+float widths, is therefore not folded at compile time:
+
+- **Where a constant is required**, a module `val`, an array length, a `$if`
+  condition or a comptime argument, it has no value and is refused
+  (`comptime.nan_unspecified`). The error names the target and the reason. This
+  holds for a NaN anywhere in the expression, so `$if` over a comparison of such
+  a NaN is refused too.
+- **In a function body** the operation runs on the device, as it would with
+  operands known only at run time.
+
+`:~` is not an operation on the value, so a NaN read from its bits is a constant
+on spirv as on every target.
+
 ### `f16` conversions
 
 `::` to and from `f16` follows the rule of the other float widths:
@@ -489,10 +508,12 @@ because it is what the target's own conversion instruction does:
 |---|---|
 | x86-64, aarch64 | keeps its sign and the top of its payload, with the quiet bit set |
 | riscv32, riscv64 | the canonical NaN, positive and quiet with an empty payload |
-| spirv | the canonical NaN (SPIR-V leaves the payload unspecified, so a device may differ) |
+| spirv | unspecified: a device may return any NaN |
 
 A conversion folded at compile time follows the build target's rule, so a folded
-`::` gives the bits the same `::` gives at run time on that target. An `f16`
+`::` gives the bits the same `::` gives at run time on that target. On spirv the
+NaN has no rule to follow, so a constant that converts one is refused
+([A NaN in a constant on spirv](#a-nan-in-a-constant-on-spirv)). An `f16`
 conversion the target has no instruction for follows the same rule. `:~` never
 converts, so it reads and writes a NaN's bits exactly on every target.
 
