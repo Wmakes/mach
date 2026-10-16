@@ -724,6 +724,8 @@ fun comptime_expression(lc: *LowerContext, a: *ast.Ast, eid: ast_id.ExprId) res[
     ret res[ast_expr.Expr, comptime.EvalFail].ok{result.ok};
 }
 
+# a lowering capability; a nil context, which the capability check refuses before any call,
+# answers as an evaluation with no lowering would
 pub fun resolve_module_member_const(lc: *LowerContext, eid: ast_id.ExprId) res[opt[comptime.CTValue], comptime.EvalFail] {
     if (lc == nil) { ret res[opt[comptime.CTValue], comptime.EvalFail].ok{opt[comptime.CTValue].none{}}; }
     val rr: *resolve.ResolveResult = lc.scope.rr;
@@ -757,6 +759,8 @@ pub fun resolve_module_member_const(lc: *LowerContext, eid: ast_id.ExprId) res[o
     ret res[opt[comptime.CTValue], comptime.EvalFail].ok{scalar};
 }
 
+# a lowering capability; a nil context, which the capability check refuses before any call,
+# answers as an evaluation with no lowering would
 pub fun comptime_ident_is_runtime(lc: *LowerContext, eid: ast_id.ExprId) bool {
     if (lc == nil) { ret false; }
     ret resolve.expr_is_runtime(lc.scope.rr, eid);
@@ -776,6 +780,8 @@ fun resolve_scalar_cast(lc: *LowerContext, eid: ast_id.ExprId, value: comptime.C
         expr_type_of(lc, node.data.cast.value), type_resolved_of(lc, node.data.cast.ty), node.data.cast.reinterpret);
 }
 
+# a lowering capability; a nil context, which the capability check refuses before any call,
+# answers as an evaluation with no lowering would
 pub fun resolve_type_comparison_operand(lc: *LowerContext, eid: ast_id.ExprId) res[opt[u32], comptime.EvalFail] {
     if (lc == nil) { ret res[opt[u32], comptime.EvalFail].ok{opt[u32].none{}}; }
     val t: type.TypeId = expr_type_of(lc, eid);
@@ -789,11 +795,15 @@ pub fun resolve_type_comparison_operand(lc: *LowerContext, eid: ast_id.ExprId) r
     ret res[opt[u32], comptime.EvalFail].ok{opt[u32].some{t::u32}};
 }
 
+# a lowering capability; a nil context, which the capability check refuses before any call,
+# answers as an evaluation with no lowering would
 pub fun resolve_type_query(lc: *LowerContext, tid: u32, which: u8) res[opt[comptime.CTValue], comptime.EvalFail] {
     if (lc == nil) { ret res[opt[comptime.CTValue], comptime.EvalFail].ok{opt[comptime.CTValue].none{}}; }
     ret sema_declared.answer_type_query(lc.s, tid, which);
 }
 
+# a lowering capability; a nil context, which the capability check refuses before any call,
+# answers as an evaluation with no lowering would
 pub fun resolve_layout_intrinsic(lc: *LowerContext, eid: u32) res[opt[comptime.CTValue], comptime.EvalFail] {
     if (lc == nil) { ret res[opt[comptime.CTValue], comptime.EvalFail].ok{opt[comptime.CTValue].none{}}; }
     val e:         ast_id.ExprId = eid::ast_id.ExprId;
