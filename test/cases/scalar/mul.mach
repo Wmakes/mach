@@ -117,7 +117,7 @@ fun mul_i64(seed: u64) u64 {
 
 # products of two extended 32-bit operands at 64 bits, signed and unsigned,
 # and the low and high halves read back from each: the shape a widening
-# multiply forms from, which every target must realize (#4163).
+# multiply forms from, which every target must realize.
 #[noinline]
 fun mul_widen(seed: u64) u64 {
     var h: u64 = fold.init();

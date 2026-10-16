@@ -1,4 +1,4 @@
-/* the C half of the foreign-unwind case (mach #4048): the frames between the
+/* the C half of the foreign-unwind case: the frames between the
  * mach functions, and the walk that records where each frame's function
  * starts. compiled by the runner's own toolchain, with a section per function
  * where the format has them, so the link can collect what nothing calls. */
@@ -143,7 +143,7 @@ __attribute__((noinline)) long long c_middle(long long depth) {
 }
 
 /* nothing calls c_unused, so the link collects it and its unwind records,
- * and the walk still unwinds the functions kept around it (mach #3410) */
+ * and the walk still unwinds the functions kept around it */
 long long c_unused(long long depth) {
     volatile long long pad[2];
     pad[0] = depth;

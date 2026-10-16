@@ -1,4 +1,4 @@
-/* C half of the naturally aligned record controls (mach #3929). Compiled at -O0 so
+/* C half of the naturally aligned record controls. Compiled at -O0 so
  * every read really happens. */
 #ifdef _WIN32
 int _fltused = 0;

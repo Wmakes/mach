@@ -1,18 +1,53 @@
-use mach.lang.fail;
+use A: std.allocator;
 use std.allocator.page;
+use fs:         std.filesystem;
+use std_format: std.format;
+use io_error:   std.io.error;
+use io_writer:  std.io.writer;
 use std.print;
 use std.types.bool.bool;
 use std.types.bool.false;
 use std.types.bool.true;
+use std.types.char.char;
 use std.types.error.err;
 use std.types.option.opt;
+use types_path: std.types.path;
 use std.types.result.res;
 use std.types.size.usize;
 use std.types.string.str;
+use std.types.string.str_contains;
+use std.types.string.str_equals;
 use std.types.string.str_len;
 use std.types.string.str_region_equals;
 
+use mach.lang.be.codegen;
+use mach.lang.be.codegen.testing.codegen_target_ok;
+use mach.lang.be.codegen.testing.ct_edge_project;
+use mach.lang.be.codegen.testing.ext_manifest;
+use mach.lang.be.codegen.testing.run_codegen_err;
+use mach.lang.be.codegen.testing.run_codegen_ok;
+use mach.lang.be.codegen.testing.sema_clean;
+use mach.lang.be.codegen.testing.spv_diag_fired;
+use mach.lang.be.codegen.testing.vec_diag;
+use mach.lang.be.codegen.testing.vec_lower;
 use mach.lang.ct;
+use mach.lang.diagnostic;
+use mach.lang.driver;
+use driver_closure: mach.lang.driver.closure;
+use mach.lang.driver.project;
+use mach.lang.driver.toolchain;
+use mach.lang.fail;
+use mach.lang.intern;
+use mach.lang.lexis;
+use mach.lang.manifest;
+use mach.lang.manifest.template;
+use mir_unit: mach.lang.mir.unit;
+use mach.lang.module;
+use mach.lang.reference;
+use mach.lang.session;
+use lang_source: mach.lang.source;
+use lang_target: mach.lang.target;
+use mach.lang.target.abi;
 use catalog_arch: mach.lang.target.catalog.arch;
 use mach.lang.target.extension;
 use extension_arm64: mach.lang.target.extension.arm64;
@@ -20,25 +55,15 @@ use extension_riscv: mach.lang.target.extension.riscv;
 use extension_spirv: mach.lang.target.extension.spirv;
 use extension_x64:   mach.lang.target.extension.x64;
 use mach.lang.target.isa;
-use arm64_register: mach.lang.target.isa.arm64.register;
-use riscv_register: mach.lang.target.isa.riscv.register;
-use spirv_register: mach.lang.target.isa.spirv.register;
-use x64_register:   mach.lang.target.isa.x64.register;
-use target_model:   mach.lang.target.model;
-use mach.lang.textbuild;
-use A:          std.allocator;
-use fs:         std.filesystem;
-use io_error:   std.io.error;
-use types_path: std.types.path;
-
-use mach.lang.driver.toolchain;
-use mach.lang.reference;
-use lang_source: mach.lang.source;
-use lang_target: mach.lang.target;
-use mach.lang.target.abi;
+use arm64_register:  mach.lang.target.isa.arm64.register;
 use isa_environment: mach.lang.target.isa.environment;
+use riscv_register:  mach.lang.target.isa.riscv.register;
+use spirv_register:  mach.lang.target.isa.spirv.register;
+use x64_register:    mach.lang.target.isa.x64.register;
+use target_model:    mach.lang.target.model;
 use target_of:       mach.lang.target.of;
 use lang_target_os:  mach.lang.target.os;
+use mach.lang.textbuild;
 
 # the exit code of a test that could not read what it checks
 #[testing]
@@ -187,7 +212,7 @@ test manifest_doc__levels_match_the_compiler_table {
             ret 4;
         }
         if ((add.some & below) != 0 || (below | add.some) != lv.members) {
-            print.eprintlnf("levels: {} in manifest.md is {} but extension_x64.LEVELS has {}", lv.name, t_x64_bits_text(below | add.some), t_x64_bits_text(lv.members));
+            print.eprintlnf("levels: {} in manifest.md is {} but extension_x64.LEVELS has {}", lv.name, x64_bits_text(below | add.some), x64_bits_text(lv.members));
             ret 5;
         }
         below = lv.members;
@@ -199,7 +224,7 @@ test manifest_doc__levels_match_the_compiler_table {
 
 # the x86-64 extension names in `bits`, for a failing test's report
 #[testing]
-fun t_x64_bits_text(bits: u64) str {
+fun x64_bits_text(bits: u64) str {
     var a:    A.Allocator;
     val made: err[A.Error] = page.make(?a);
     if (sel made.err) { ret "(the names could not be spelled: no allocator)"; }
@@ -814,5 +839,1208 @@ test reference__target_lists_are_the_registry {
     val skill_tags: opt[lang_source.Span] = reference.line_after(skill.some, "- The architecture tag is mandatory: one of");
     if (sel skill_tags.none)                                                                                                       { ret 10; }
     if (!reference.agree(?alloc, "SKILL.md asm tags", skill.some, skill_tags.some, reference.WORDS_CODE, assembled_at, AXIS_SPAN)) { ret 11; }
+    ret 0;
+}
+
+# an instruction set that declares no assembly capability refuses `asm` in source at the
+# block, before anything reaches its emitter
+test asm__refused_on_an_isa_without_assembly {
+    var alloc:  A.Allocator;
+    val make_r: err[A.Error] = page.make(?alloc);
+    if (sel make_r.err) { ret 1; }
+    val shader: str = "#[output(0)] var o: i32;\n#[stage(\"vertex\")]\nfun vs() {\n    asm spirv { nop }\n    o = 1;\n}\nfun main() i32 { ret 0; }\n";
+    val native: str = "fun f() {\n    asm x86_64 { nop }\n}\n#[symbol(\"main\")]\nfun main(argc: i64, argv: **u8) i32 { f(); ret 0; }\n";
+
+    val sr: res[session.Session, fail.Fail] = toolchain.session_init(?alloc);
+    if (sel sr.err) { ret 1; }
+    var s:   session.Session                 = sr.ok;
+    val pr:  res[project.Project, fail.Fail] = vec_lower(?s, ?alloc, shader, "spirv");
+    var bad: i32                             = 0;
+    if (sel pr.ok) {
+        var p: project.Project = pr.ok;
+        project.dnit_project(?p);
+        bad = 2;
+    }
+    or (!diagnostic.error_located(?s.diags, ?s.sources, "inline assembly is not available on instruction set 'spirv'", "main.mach", 4, 5)) {
+        bad = 3;
+    }
+    session.dnit(?s);
+    if (bad != 0) { ret bad; }
+
+    val nr: res[session.Session, fail.Fail] = toolchain.session_init(?alloc);
+    if (sel nr.err) { ret 1; }
+    var n:   session.Session                 = nr.ok;
+    val npr: res[project.Project, fail.Fail] = vec_lower(?n, ?alloc, native, "linux");
+    if (sel npr.ok) {
+        var np: project.Project = npr.ok;
+        project.dnit_project(?np);
+    }
+    or { bad = 4; }
+    session.dnit(?n);
+    ret bad;
+}
+
+#[testing]
+fun float_on_rv32(target_name: str, needle: str, want_refusal: bool) i32 {
+    var alloc:  A.Allocator;
+    val make_r: err[A.Error] = page.make(?alloc);
+    if (sel make_r.err) { ret 1; }
+    val sr: res[session.Session, fail.Fail] = toolchain.session_init(?alloc);
+    if (sel sr.err) { ret 1; }
+    var s: session.Session = sr.ok;
+    fin { session.dnit(?s); }
+    val pr: res[project.Project, fail.Fail] = ct_edge_project(?s, ?alloc,
+        "fun main() i32 { val x: f32 = 1.0; ret x::i32; }\n", target_name);
+    if (sel pr.err) { ret 2; }
+    var p: project.Project = pr.ok;
+    fin { project.dnit_project(?p); }
+    val sem: err[fail.Fail] = driver.run_sema_pass(?p);
+    if (want_refusal) {
+        if (sel sem.ok)                               { ret 3; }
+        if (!fail.is_reported(sem.err))               { ret 4; }
+        if (!diagnostic.error_says(?s.diags, needle)) { ret 5; }
+        ret 0;
+    }
+    if (sel sem.err)                             { ret 6; }
+    if (diagnostic.error_says(?s.diags, needle)) { ret 7; }
+    ret 0;
+}
+
+# the sema refusal of a float on a selection without F names the extension, not
+# only the selection string; the same program on an F selection is clean
+test float__refusal_names_the_missing_f_extension {
+    val no_f: i32 = float_on_rv32("rv32nf",
+        "which target `rv32imc` does not support: the selection lacks the F extension", true);
+    if (no_f != 0) { ret no_f; }
+    val with_f: i32 = float_on_rv32("rv32s", "floating-point", false);
+    if (with_f != 0) { ret 10 + with_f; }
+    ret 0;
+}
+
+# an `op` declaration names a set the target publishes, an instruction of that set, and its operand count
+test op_decl__checks_set_name_and_arity {
+    var alloc:  A.Allocator;
+    val make_r: err[A.Error] = page.make(?alloc);
+    if (sel make_r.err) { ret 1; }
+
+    val arity:     str = "is not one the instruction's operand count admits";
+    val bad_arity: str = "#[op(\"spirv\", \"GLSL.std.450\", \"Refract\")]\nfun refract(i: f32x3, n: f32x3) f32x3;\n\nfun main() i32 { ret 0; }\n";
+    val ok_arity:  str = "#[op(\"spirv\", \"GLSL.std.450\", \"Refract\")]\nfun refract(i: f32x3, n: f32x3, eta: f32) f32x3;\n\nfun main() i32 { ret 0; }\n";
+    if (!spv_diag_fired(?alloc, bad_arity, arity)) { ret 2; }
+    if (spv_diag_fired(?alloc, ok_arity, arity))   { ret 3; }
+
+    val set:     str = "defines no instruction set of this name";
+    val bad_set: str = "#[op(\"spirv\", \"GLSL.std.451\", \"Sqrt\")]\nfun sq(x: f32) f32;\n\nfun main() i32 { ret 0; }\n";
+    if (!spv_diag_fired(?alloc, bad_set, set)) { ret 4; }
+
+    val name:        str = "defines no instruction of this name";
+    val misspelled:  str = "#[op(\"spirv\", \"GLSL.std.450\", \"Sqrtf\")]\nfun f(x: f32) f32;\n\nfun main() i32 { ret 0; }\n";
+    val ext_in_core: str = "#[op(\"spirv\", \"core\", \"Normalize\")]\nfun f(v: f32x4) f32x4;\n\nfun main() i32 { ret 0; }\n";
+    val core_in_ext: str = "#[op(\"spirv\", \"GLSL.std.450\", \"OpDot\")]\nfun f(a: f32x4, b: f32x4) f32;\n\nfun main() i32 { ret 0; }\n";
+    val ext_ok:      str = "#[op(\"spirv\", \"GLSL.std.450\", \"Normalize\")]\nfun f(v: f32x4) f32x4;\n\nfun main() i32 { ret 0; }\n";
+    val core_ok:     str = "#[op(\"spirv\", \"core\", \"OpDot\")]\nfun f(a: f32x4, b: f32x4) f32;\n\nfun main() i32 { ret 0; }\n";
+    if (!spv_diag_fired(?alloc, misspelled, name))  { ret 5; }
+    if (!spv_diag_fired(?alloc, ext_in_core, name)) { ret 6; }
+    if (!spv_diag_fired(?alloc, core_in_ext, name)) { ret 7; }
+    if (spv_diag_fired(?alloc, ext_ok, name))       { ret 8; }
+    if (spv_diag_fired(?alloc, core_ok, name))      { ret 9; }
+    if (spv_diag_fired(?alloc, ext_ok, set))        { ret 10; }
+    ret 0;
+}
+
+#[testing]
+fun va_diag(target_name: str, src: str, needle: str) bool {
+    var alloc:  A.Allocator;
+    val make_r: err[A.Error] = page.make(?alloc);
+    if (sel make_r.err) { ret false; }
+    val sr: res[session.Session, fail.Fail] = toolchain.session_init(?alloc);
+    if (sel sr.err) { ret false; }
+    var s: session.Session = sr.ok;
+    fin { session.dnit(?s); }
+
+    var names: [1]str;
+    names[0] = "main.mach";
+    var texts: [1]str;
+    texts[0] = src;
+    val root_r: res[str, fail.Fail] = driver.scaffold(?alloc, driver.fixture_manifest(), ?names[0], ?texts[0], 1);
+    if (sel root_r.err) { ret false; }
+    val root: str = root_r.ok;
+
+    var tsel_14921: manifest.Selectors              = manifest.t_selectors("", target_name, "");
+    val pr:         res[project.Project, fail.Fail] = driver.build_project(?s, root, ?tsel_14921);
+    fs.remove_all(?alloc, root);
+    if (sel pr.err) {
+        val fired_early: bool = diagnostic.error_says(?s.diags, needle);
+        ret fired_early;
+    }
+    var p:               project.Project = pr.ok;
+    val run_sema_pass_r: err[fail.Fail]  = driver.run_sema_pass(?p);
+    if (sel run_sema_pass_r.ok) {
+        driver.run_lower_pass(?p);
+    }
+    val fired: bool = diagnostic.error_says(?p.s.diags, needle);
+    project.dnit_project(?p);
+    ret fired;
+}
+
+#[testing]
+val VA_PRELUDE: str = "#[abi_type(\"va_list\")]\npub def VaList;\next fun sink(fmt: *u8, ap: VaList) i64;\n";
+
+#[testing]
+fun va(target_name: str, tail: str, needle: str) bool {
+    var alloc:  A.Allocator;
+    val make_r: err[A.Error] = page.make(?alloc);
+    if (sel make_r.err) { ret false; }
+    val rj: res[str, std_format.FormatError] = std_format.sprint(?alloc, "{}{}", VA_PRELUDE, tail);
+    if (sel rj.err) { ret false; }
+    val src:   str  = rj.ok;
+    val fired: bool = va_diag(target_name, src, needle);
+    A.deallocate[char](?alloc, src::*char, str_len(src) + 1);
+    ret fired;
+}
+
+#[testing]
+val VA_EXCLUDED: str = "cannot be read, constructed, or stored in mach";
+
+test va_list__extent_comes_from_the_target {
+    val gate: str = "$if ($size_of(VaList) == 32 && $align_of(VaList) == 8) { $error(\"aapcs64 composite\"); }\n$if ($size_of(VaList) == 8 && $align_of(VaList) == 8) { $error(\"pointer shaped\"); }\nfun main() i32 { ret 0; }\n";
+
+    if (!va("linux-arm64", gate, "aapcs64 composite")) { ret 1; }
+    if (va("linux-arm64", gate, "pointer shaped"))     { ret 1; }
+
+    if (!va("linux", gate, "pointer shaped"))   { ret 1; }
+    if (va("linux", gate, "aapcs64 composite")) { ret 1; }
+
+    if (!va("darwin-arm64", gate, "pointer shaped"))   { ret 1; }
+    if (va("darwin-arm64", gate, "aapcs64 composite")) { ret 1; }
+
+    if (!va("linux-riscv64", gate, "pointer shaped")) { ret 1; }
+    if (!va("windows", gate, "pointer shaped"))       { ret 1; }
+    ret 0;
+}
+
+# a va_list may only be forwarded: a copy, a field, a global, a pointer to one, a return and a cast are refused
+test va_list__may_only_be_forwarded {
+    val forward: str = "#[symbol(\"trace\")]\npub fun trace(fmt: *u8, ap: VaList) i64 { ret sink(fmt, ap); }\nfun main() i32 { ret 0; }\n";
+    val local:   str = "#[symbol(\"trace\")]\npub fun trace(fmt: *u8, ap: VaList) i64 { val a: VaList = ap; ret sink(fmt, a); }\nfun main() i32 { ret 0; }\n";
+    val field:   str = "rec Box { ap: VaList; }\nfun main() i32 { ret 0; }\n";
+    val field_u: str = "uni Box { ap: VaList; n: i32; }\nfun main() i32 { ret 0; }\n";
+    val global:  str = "var held: VaList;\nfun main() i32 { ret 0; }\n";
+    val behind:  str = "#[symbol(\"trace\")]\npub fun trace(ap: *VaList) i64 { ret 0; }\nfun main() i32 { ret 0; }\n";
+    val made:    str = "ext fun make() VaList;\nfun main() i32 { ret 0; }\n";
+    val out_r:   str = "#[symbol(\"trace\")]\npub fun trace(ap: VaList) i64 { ret (ap :~ ptr)::i64; }\nfun main() i32 { ret 0; }\n";
+    val out_c:   str = "#[symbol(\"trace\")]\npub fun trace(ap: VaList) i64 { ret (ap :: ptr)::i64; }\nfun main() i32 { ret 0; }\n";
+    val in_r:    str = "#[symbol(\"trace\")]\npub fun trace(fmt: *u8, p: ptr) i64 { ret sink(fmt, p :~ VaList); }\nfun main() i32 { ret 0; }\n";
+
+    if (va("linux", forward, VA_EXCLUDED))       { ret 1; }
+    if (va("linux-arm64", forward, VA_EXCLUDED)) { ret 2; }
+    if (!va("linux", local, VA_EXCLUDED))        { ret 3; }
+    if (!va("linux", field, VA_EXCLUDED))        { ret 4; }
+    if (!va("linux", field_u, VA_EXCLUDED))      { ret 5; }
+    if (!va("linux", global, VA_EXCLUDED))       { ret 6; }
+    if (!va("linux", behind, VA_EXCLUDED))       { ret 7; }
+    if (!va("linux", made, VA_EXCLUDED))         { ret 8; }
+    if (!va("linux", out_r, VA_EXCLUDED))        { ret 9; }
+    if (!va("linux", out_c, VA_EXCLUDED))        { ret 10; }
+    if (!va("linux", in_r, VA_EXCLUDED))         { ret 11; }
+    if (!va("linux-arm64", out_r, VA_EXCLUDED))  { ret 12; }
+    ret 0;
+}
+
+test abi_type__name_is_closed {
+    val bad:   str = "#[abi_type(\"jmp_buf\")]\npub def JmpBuf;\nfun main() i32 { ret 0; }\n";
+    val body:  str = "#[abi_type(\"va_list\")]\npub def Aliased: ptr;\nfun main() i32 { ret 0; }\n";
+    val nargs: str = "#[abi_type]\npub def Nothing;\nfun main() i32 { ret 0; }\n";
+    val ok:    str = "#[abi_type(\"va_list\")]\npub def VaList;\nfun main() i32 { ret 0; }\n";
+
+    if (!va_diag("linux", bad, "no such ABI type"))                    { ret 1; }
+    if (!va_diag("linux", body, "declaration has no body"))            { ret 1; }
+    if (!va_diag("linux", nargs, "takes exactly one string argument")) { ret 1; }
+    if (va_diag("linux", ok, "no such ABI type"))                      { ret 1; }
+    ret 0;
+}
+
+#[testing]
+val CT_WIDTHS: [4]u8 = [4]u8{8, 16, 32, 64};
+
+# a one-target project for a registered tuple; a static library everywhere
+# but spirv, which only builds programs
+#[testing]
+fun ct_mul_manifest(alloc: *A.Allocator, isa_name: str, os_name: str, abi_name: str, of_name: str) str {
+    var kind: str = "static";
+    var out:  str = "lib/ctmul.a";
+    if (str_equals(of_name, "spv")) {
+        kind = "bin";
+        out  = "bin/ctmul";
+    }
+    val r: res[str, std_format.FormatError] = std_format.sprint(alloc,
+        "[project]\nmach = \">=5\"\nid = \"ctmul\"\nversion = \"0.0.0\"\nsrc = \"src\"\nwork = \"out/{{target.name}}/{{profile.name}}\"\n\n[target.t]\nisa = \"{}\"\nos = \"{}\"\nabi = \"{}\"\nof = \"{}\"\n\n[artifact.ctmul]\nkind = \"{}\"\nentry = \"main.mach\"\nout = \"{}\"\ntargets = [\"*\"]\nlink = []\nneed = []\n[profile.debug]\ndefault = true\noptimize = false\ndebug = false\nsimd = \"scalarize\"\n[profile.release]\noptimize = true\ndebug = false\nsimd = \"scalarize\"\n",
+        isa_name, os_name, abi_name, of_name, kind, out);
+    if (sel r.err) { ret ""; }
+    ret r.ok;
+}
+
+# 0 when a secret multiply lowered, 1 when a gate refused it as a variable-
+# latency multiply, 2 for any other failure, which the comparison refuses
+# the two spellings of a refused secret multiply: a cell the target declares
+# nowhere, and a cell it declares only under a DIT the os does not guarantee
+#[testing]
+fun ct_is_mul_refusal(d: *diagnostic.DiagnosticStore) bool {
+    if (diagnostic.error_says(d, "variable-latency integer multiply")) { ret true; }
+    ret diagnostic.error_says(d, "integer multiply whose timing is data-independent only under PSTATE.DIT");
+}
+
+#[testing]
+fun ct_codegen(p: *project.Project) i32 {
+    val se: err[fail.Fail] = driver.run_sema_pass(p);
+    if (sel se.err) { ret 2; }
+    val le: err[fail.Fail] = driver.run_lower_pass(p);
+    if (sel le.err) { ret 2; }
+    val ce: err[fail.Fail] = driver.run_codegen_pass(p);
+    if (sel ce.ok)                                                 { ret 0; }
+    if (fail.is_reported(ce.err) && ct_is_mul_refusal(?p.s.diags)) { ret 1; }
+    var di: usize = 0;
+    for (di < diagnostic.len(?p.s.diags)) {
+        print.println(p.s.diags.items.data[di].message);
+        di = di + 1;
+    }
+    print.printf("ct_mul: codegen {}\n", fail.describe(ce.err));
+    ret 2;
+}
+
+#[testing]
+fun ct_op_name(op: u32) str {
+    val name: opt[str] = ct.mul_op_name(op::ct.CtMulOp);
+    if (sel name.some) { ret name.some; }
+    ret "";
+}
+
+# the query program for one cell: a gate that reports when the cell is admitted
+#[testing]
+fun ct_mul_query_program(alloc: *A.Allocator, op: u32, width: u8) str {
+    val name: str                              = ct_op_name(op);
+    val line: res[str, std_format.FormatError] = std_format.sprint(alloc,
+        "$if ($mach.build.ct_mul({}, {}) == 1) {{ $error(\"ct_mul admits {} {}\"); }}\n", name, width, name, width);
+    if (sel line.err) { ret ""; }
+    ret line.ok;
+}
+
+#[testing]
+rec CtTuple {
+    isa_name: str;
+    os_name:  str;
+    abi_name: str;
+    of_name:  str;
+}
+
+# a registered instruction set a test replaced with a copy carrying its own
+# rows: the members are static data, so the registry's slot is pointed at the
+# copy and pointed back after
+#[testing]
+rec CtSwap {
+    original: *isa.IsaVTable;
+    index:    u32;
+    vt:       isa.IsaVTable;
+    model:    target_model.Machine;
+}
+
+# install `rows` on the named instruction set, nothing when row_len is 0;
+# every swap is restored before its session goes
+#[testing]
+fun ct_mul_swap(kept: *CtSwap, isa_name: str, rows: *ct.CtMulForm, row_len: u32) {
+    kept.original = nil;
+    if (row_len == 0) { ret; }
+    val reg: *lang_target.TargetRegistry = toolchain.t_registry();
+    var ii:  u32                         = 0;
+    for (ii < reg.isa.count && kept.original == nil) {
+        val v: *isa.IsaVTable = reg.isa.members[ii];
+        if (str_equals(v.name, isa_name)) {
+            kept.original              = v;
+            kept.index                 = ii;
+            kept.model                 = @v.model;
+            kept.model.ct_mul_forms    = rows;
+            kept.model.ct_mul_form_len = row_len;
+            kept.vt                    = @v;
+            kept.vt.model              = ?kept.model;
+            reg.isa.members[ii]        = ?kept.vt;
+        }
+        ii = ii + 1;
+    }
+}
+
+#[testing]
+fun ct_mul_restore(kept: *CtSwap) {
+    if (kept.original == nil) { ret; }
+    toolchain.t_registry().isa.members[kept.index] = kept.original;
+}
+
+# one build of `program` for the tuple, with the synthetic rows installed on
+# its instruction set; the project, or the refusal's diagnostics searched for
+# `needle`
+#[testing]
+fun ct_mul_build(alloc: *A.Allocator, t: *CtTuple, rows: *ct.CtMulForm, row_len: u32,
+    program: str, needle: str, mask: *ct.CtMulMask, found: *bool, gate: *i32) i32 {
+    val sr: res[session.Session, fail.Fail] = toolchain.session_init(alloc);
+    if (sel sr.err) { ret 1; }
+    var s: session.Session = sr.ok;
+    fin { session.dnit(?s); }
+    var kept: CtSwap;
+    ct_mul_swap(?kept, t.isa_name, rows, row_len);
+    fin { ct_mul_restore(?kept); }
+    var names:  [1]str              = [1]str{"main.mach"};
+    var texts:  [1]str              = [1]str{program};
+    val root_r: res[str, fail.Fail] = driver.scaffold(alloc, ct_mul_manifest(alloc, t.isa_name, t.os_name, t.abi_name, t.of_name), ?names[0], ?texts[0], 1);
+    if (sel root_r.err) { ret 4; }
+    val root: str = root_r.ok;
+    fin { fs.remove_all(alloc, root); }
+    var pick: manifest.Selectors              = manifest.t_selectors("", "t", "");
+    val bp:   res[project.Project, fail.Fail] = driver.build_project(?s, root, ?pick);
+    if (sel bp.err) {
+        if (!fail.is_reported(bp.err)) { ret 5; }
+        @found = diagnostic.error_says(?s.diags, needle);
+        if (!@found) { ret 10; }
+        ret 0;
+    }
+    var p: project.Project = bp.ok;
+    fin { project.dnit_project(?p); }
+    @mask = lang_target.ct_mul_admitted(?p.target.target);
+    if (gate != nil) {
+        @gate = ct_codegen(?p);
+        ret 0;
+    }
+    val se: err[fail.Fail] = driver.run_sema_pass(?p);
+    @found = diagnostic.error_says(?s.diags, needle);
+    if (sel se.err && !@found) { ret 6; }
+    ret 0;
+}
+
+# 0 when every build ran; `admitted` holds the query's answer per cell, in
+# op then width order, and `gate_ok` per low-half width whether a secret
+# multiply in an oblivious function lowered
+#[testing]
+fun ct_mul_run(alloc: *A.Allocator, t: *CtTuple, rows: *ct.CtMulForm, row_len: u32,
+    mask: *ct.CtMulMask, admitted: *bool, gate_ok: *bool) i32 {
+    var ci: usize = 0;
+    var op: u32   = 1;
+    for (op < ct.CT_MUL_OP_COUNT) {
+        var wi: usize = 0;
+        for (wi < 4) {
+            val w:      u8                               = CT_WIDTHS[wi];
+            val needle: res[str, std_format.FormatError] = std_format.sprint(alloc, "ct_mul admits {} {}", ct_op_name(op), w);
+            if (sel needle.err) { ret 7; }
+            var found: bool = false;
+            val code:  i32  = ct_mul_build(alloc, t, rows, row_len, ct_mul_query_program(alloc, op, w), needle.ok, mask, ?found, nil);
+            if (code != 0) { ret code; }
+            admitted[ci] = found;
+            ci           = ci + 1;
+            wi           = wi + 1;
+        }
+        op = op + 1;
+    }
+    var gi: usize = 0;
+    for (gi < 4) {
+        val w:  u8                               = CT_WIDTHS[gi];
+        val pr: res[str, std_format.FormatError] = std_format.sprint(alloc,
+            "#[noinline]\n#[oblivious]\npub fun product(a: ^u{}, b: ^u{}) ^u{} {{ ret a * b; }}\n", w, w, w);
+        if (sel pr.err) { ret 3; }
+        var found: bool = false;
+        var gate:  i32  = 2;
+        val code:  i32  = ct_mul_build(alloc, t, rows, row_len, pr.ok, "", mask, ?found, ?gate);
+        if (code != 0) { ret code; }
+        if (gate == 2) { ret 9; }
+        gate_ok[gi] = gate == 0;
+        gi          = gi + 1;
+    }
+    ret 0;
+}
+
+# 0 when, for the tuple, the query answers every cell as the target's one
+# decision does and the lowering gate accepts a secret low-half multiply
+# exactly where the query admits it
+#[testing]
+fun ct_mul_agree(alloc: *A.Allocator, t: *CtTuple, rows: *ct.CtMulForm, row_len: u32) i32 {
+    var admitted: [28]bool;
+    var gate_ok:  [4]bool;
+    var mask:     ct.CtMulMask = ct.mul_mask_none();
+    val run:      i32          = ct_mul_run(alloc, t, rows, row_len, ?mask, ?admitted[0], ?gate_ok[0]);
+    if (run != 0) { ret run; }
+    var ci: usize = 0;
+    var op: u32   = 1;
+    for (op < ct.CT_MUL_OP_COUNT) {
+        var wi: usize = 0;
+        for (wi < 4) {
+            val decided: bool = ct.mul_mask_has(mask, ct.mul_cell(op::ct.CtMulOp, CT_WIDTHS[wi], false));
+            if (admitted[ci] != decided)                                        { ret 20; }
+            if (op::ct.CtMulOp == ct.CT_MUL_LOW && gate_ok[wi] != admitted[ci]) { ret 21; }
+            ci = ci + 1;
+            wi = wi + 1;
+        }
+        op = op + 1;
+    }
+    ret 0;
+}
+
+# the query answers every cell as the target's one decision does, and the
+# lowering gate accepts a secret low-half multiply exactly where the query
+# admits it, on one tuple per decision: aarch64 admitted through DIT on linux
+# and refused without it freestanding, riscv64 admitted through Zkt and refused
+# without it, and an isa with no rows. x86_64 is ct_mul_query__x86_64_answers
+test ct_mul_query__agrees_with_the_lowering_gate {
+    var alloc:  A.Allocator;
+    val make_r: err[A.Error] = page.make(?alloc);
+    if (sel make_r.err) { ret 1; }
+    var tuples: [5]CtTuple = [5]CtTuple{
+        CtTuple{isa_name: "aarch64", os_name: "linux", abi_name: "aapcs64", of_name: "elf"},
+        CtTuple{isa_name: "aarch64", os_name: "freestanding", abi_name: "aapcs64", of_name: "elf"},
+        CtTuple{isa_name: "rv64gc_zkt", os_name: "linux", abi_name: "lp64d", of_name: "elf"},
+        CtTuple{isa_name: "rv64gc", os_name: "linux", abi_name: "lp64d", of_name: "elf"},
+        CtTuple{isa_name: "spirv", os_name: "freestanding", abi_name: "spirv", of_name: "spv"}
+    };
+    var ti: usize = 0;
+    for (ti < 5) {
+        val code: i32 = ct_mul_agree(?alloc, ?tuples[ti], nil, 0);
+        if (code != 0) {
+            print.printf("ct_mul: {}-{} disagrees ({})\n", tuples[ti].os_name, tuples[ti].isa_name, code);
+            ret 100 + code;
+        }
+        ti = ti + 1;
+    }
+    ret 0;
+}
+
+# the same agreement on a synthetic x86_64 model that admits two cells, so a
+# query reading anything but the target's one decision is caught
+test ct_mul_query__agrees_on_a_synthetic_model {
+    var alloc:  A.Allocator;
+    val make_r: err[A.Error] = page.make(?alloc);
+    if (sel make_r.err) { ret 1; }
+    var rows: [3]ct.CtMulForm = [3]ct.CtMulForm{
+        ct.CtMulForm{op: ct.CT_MUL_LOW, width: 16, lanes: 0, cond: ct.CT_MUL_ALWAYS, ext: 0},
+        ct.CtMulForm{op: ct.CT_MUL_LOW, width: 32, lanes: 0, cond: ct.CT_MUL_ALWAYS, ext: 0},
+        ct.CtMulForm{op: ct.CT_MUL_WIDE_S, width: 64, lanes: 0, cond: ct.CT_MUL_ALWAYS, ext: 0}
+    };
+    var t:        CtTuple      = CtTuple{isa_name: "x86_64", os_name: "linux", abi_name: "sysv64", of_name: "elf"};
+    var admitted: [28]bool;
+    var gate_ok:  [4]bool;
+    var mask:     ct.CtMulMask = ct.mul_mask_none();
+    if (ct_mul_run(?alloc, ?t, ?rows[0], 3, ?mask, ?admitted[0], ?gate_ok[0]) != 0) { ret 2; }
+    if (!ct.mul_mask_has(mask, ct.mul_cell(ct.CT_MUL_LOW, 32, false)))              { ret 3; }
+    if (!ct.mul_mask_has(mask, ct.mul_cell(ct.CT_MUL_WIDE_S, 64, false)))           { ret 4; }
+    if (!gate_ok[1] || !gate_ok[2] || gate_ok[3] || gate_ok[0])                     { ret 5; }
+    val code: i32 = ct_mul_agree(?alloc, ?t, ?rows[0], 3);
+    if (code != 0) { ret 10 + code; }
+    # a packed lane multiply is its own cell, which no row may declare yet
+    var found: bool = false;
+    var gate:  i32  = 2;
+    val lanes: i32  = ct_mul_build(?alloc, ?t, ?rows[0], 3,
+        "#[noinline]\n#[oblivious]\npub fun product(a: ^u16x8, b: ^u16x8) ^u16x8 { ret a * b; }\n", "", ?mask, ?found, ?gate);
+    if (lanes != 0 || gate != 1) { ret 40; }
+    ret 0;
+}
+
+# the instruction families the shape check reads from a codegen listing
+#[testing]
+val CT_X86: u32 = 0;
+
+#[testing]
+val CT_ARM: u32 = 1;
+
+#[testing]
+val CT_RISCV: u32 = 2;
+
+#[testing]
+val CT_X86_MUL: [2]str = [2]str{"imul", "mul"};
+
+#[testing]
+val CT_ARM_MUL: [10]str = [10]str{"mul", "madd", "msub", "mneg", "smull", "umull", "smulh", "umulh", "smaddl", "umaddl"};
+
+#[testing]
+val CT_RV_MUL: [5]str = [5]str{"mul", "mulw", "mulh", "mulhu", "mulhsu"};
+
+#[testing]
+val CT_ARM_CTL: [9]str = [9]str{"b", "bl", "br", "blr", "cbz", "cbnz", "tbz", "tbnz", "svc"};
+
+#[testing]
+val CT_X86_CTL: [4]str = [4]str{"call", "syscall", "rep", "repe"};
+
+#[testing]
+fun ct_mnemonic_in(m: str, names: *str, len: u32) bool {
+    var i: u32 = 0;
+    for (i < len) {
+        if (str_equals(m, names[i])) { ret true; }
+        i = i + 1;
+    }
+    ret false;
+}
+
+#[testing]
+fun ct_is_multiply(family: u32, m: str) bool {
+    if (family == CT_X86) { ret ct_mnemonic_in(m, ?CT_X86_MUL[0], 2); }
+    if (family == CT_ARM) { ret ct_mnemonic_in(m, ?CT_ARM_MUL[0], 10); }
+    ret ct_mnemonic_in(m, ?CT_RV_MUL[0], 5);
+}
+
+# a call, branch, jump or loop instruction; the closing return is read apart
+#[testing]
+fun ct_is_control(family: u32, m: str) bool {
+    val n: usize = str_len(m);
+    if (n == 0) { ret false; }
+    if (family == CT_X86) {
+        ret m[0] == 'j' || (n >= 4 && str_region_equals(m, 0, 4, "loop")) || str_equals(m, "ret")
+            || ct_mnemonic_in(m, ?CT_X86_CTL[0], 4);
+    }
+    if (family == CT_ARM) {
+        ret (n >= 2 && str_region_equals(m, 0, 2, "b.")) || str_equals(m, "ret") || ct_mnemonic_in(m, ?CT_ARM_CTL[0], 9);
+    }
+    ret m[0] == 'b' || m[0] == 'j' || str_equals(m, "ecall") || str_equals(m, "ebreak");
+}
+
+#[testing]
+fun ct_is_return(family: u32, line: str) bool {
+    if (family == CT_RISCV) { ret str_equals(line, "jalr zero, 0(ra)"); }
+    ret str_equals(line, "ret");
+}
+
+# 0 when the listing's section for `name` is one block of instructions holding
+# exactly one multiply and no call, branch or loop before its closing return
+#[testing]
+fun ct_mul_shape(alloc: *A.Allocator, text: *u8, len: usize, name: str, family: u32) i32 {
+    val hr: res[str, std_format.FormatError] = std_format.sprint(alloc, "# {}:\n", name);
+    if (sel hr.err) { ret 30; }
+    val header: str   = hr.ok;
+    val hl:     usize = str_len(header);
+    var at:     usize = 0;
+    var found:  bool  = false;
+    for (!found && at + hl <= len) {
+        if (str_region_equals(text::str, at, hl, header)) { found = true; }
+        or                                                { at = at + 1; }
+    }
+    if (!found) { ret 31; }
+    at = at + hl;
+    var labels:   u32  = 0;
+    var muls:     u32  = 0;
+    var control:  u32  = 0;
+    var returned: bool = false;
+    var after:    u32  = 0;
+    var line:     [128]u8;
+    var mn:       [32]u8;
+    for (at < len && text[at] != '\n') {
+        var ll: usize = 0;
+        for (at < len && (text[at] == ' ' || text[at] == '\t')) { at = at + 1; }
+        for (at < len && text[at] != '\n') {
+            if (ll + 1 < 128) {
+                line[ll] = text[at];
+                ll       = ll + 1;
+            }
+            at = at + 1;
+        }
+        at       = at + 1;
+        line[ll] = 0;
+        val l: str = ?line[0];
+        if (ll > 0 && line[0] == '.' && line[ll - 1] == ':') { labels = labels + 1; }
+        or (str_region_equals(l, 0, 8, ".balign "))          {}
+        or (ll > 0 && returned)                              { after = after + 1; }
+        or (ll > 0 && ct_is_return(family, l))               { returned = true; }
+        or (ll > 0) {
+            var k: usize = 0;
+            for (k < ll && k < 31 && line[k] != ' ' && line[k] != '\t') {
+                mn[k] = line[k];
+                k     = k + 1;
+            }
+            mn[k] = 0;
+            val m: str = ?mn[0];
+            if (ct_is_multiply(family, m)) { muls = muls + 1; }
+            if (ct_is_control(family, m))  { control = control + 1; }
+        }
+    }
+    if (labels != 1)  { ret 32; }
+    if (muls != 1)    { ret 33; }
+    if (control != 0) { ret 34; }
+    if (!returned)    { ret 35; }
+    if (after != 0)   { ret 36; }
+    ret 0;
+}
+
+# the codegen listing of `program` built at opt 2 for the tuple, with the
+# synthetic rows installed: 0 when it built, 1 when a gate refused a secret
+# multiply, 2 for any other failure
+#[testing]
+fun ct_mul_listing(alloc: *A.Allocator, t: *CtTuple, rows: *ct.CtMulForm, row_len: u32, program: str,
+    out: *u8, cap: usize, out_len: *usize) i32 {
+    val sr: res[session.Session, fail.Fail] = toolchain.session_init(alloc);
+    if (sel sr.err) { ret 2; }
+    var s: session.Session = sr.ok;
+    fin { session.dnit(?s); }
+    var kept: CtSwap;
+    ct_mul_swap(?kept, t.isa_name, rows, row_len);
+    fin { ct_mul_restore(?kept); }
+    var names:  [1]str              = [1]str{"main.mach"};
+    var texts:  [1]str              = [1]str{program};
+    val root_r: res[str, fail.Fail] = driver.scaffold(alloc, ct_mul_manifest(alloc, t.isa_name, t.os_name, t.abi_name, t.of_name), ?names[0], ?texts[0], 1);
+    if (sel root_r.err) { ret 2; }
+    val root: str = root_r.ok;
+    fin { fs.remove_all(alloc, root); }
+    var pick: manifest.Selectors              = manifest.t_selectors("", "t", "release");
+    val bp:   res[project.Project, fail.Fail] = driver.build_project(?s, root, ?pick);
+    if (sel bp.err) { ret 2; }
+    var p: project.Project = bp.ok;
+    fin { project.dnit_project(?p); }
+    val se: err[fail.Fail] = driver.run_sema_pass(?p);
+    if (sel se.err) { ret 2; }
+    val le: err[fail.Fail] = driver.run_lower_pass(?p);
+    if (sel le.err) { ret 2; }
+    val mid: session.ModuleId = project.module_named(?p, "ctmul.main");
+    if (module.is_nil(mid)) { ret 2; }
+    var b:  io_writer.Memory;
+    var w:  io_writer.Writer                      = io_writer.memory(?b, out, cap);
+    val cg: res[target_of.ObjectImage, fail.Fail] = codegen.codegen_unit(?s, ?p.target, project.module_at(?p, mid::u32).ir_module, mir_unit.ir_set_empty(), ?w, codegen.no_debug(), ?s.diags);
+    if (sel cg.err) {
+        if (fail.is_reported(cg.err) && ct_is_mul_refusal(?s.diags)) { ret 1; }
+        print.printf("ct_mul: codegen {}\n", fail.describe(cg.err));
+        ret 2;
+    }
+    var image: target_of.ObjectImage = cg.ok;
+    target_of.object_image_dnit(?image);
+    @out_len = b.len;
+    ret 0;
+}
+
+# the secret multiplies each width is checked through: two secrets, a square,
+# and secret constants a strength reduction would turn into shifts and adds
+#[testing]
+fun ct_mul_program(alloc: *A.Allocator, w: u8) str {
+    val r: res[str, std_format.FormatError] = std_format.sprint(alloc,
+        "#[noinline]\n#[oblivious]\npub fun product(a: ^u{}, b: ^u{}) ^u{} {{ ret a * b; }}\n#[noinline]\n#[oblivious]\npub fun square(a: ^u{}) ^u{} {{ ret a * a; }}\n#[noinline]\n#[oblivious]\npub fun by8(a: ^u{}) ^u{} {{ val k: ^u{} = 8; ret a * k; }}\n#[noinline]\n#[oblivious]\npub fun by10(a: ^u{}) ^u{} {{ val k: ^u{} = 10; ret k * a; }}\n",
+        w, w, w, w, w, w, w, w, w, w, w);
+    if (sel r.err) { ret ""; }
+    ret r.ok;
+}
+
+#[testing]
+val CT_SHAPED: [4]str = [4]str{"ctmul.main.product", "ctmul.main.square", "ctmul.main.by8", "ctmul.main.by10"};
+
+# 0 when every probe at every width lowers to one multiply instruction and
+# nothing that branches
+#[testing]
+fun ct_mul_shapes(alloc: *A.Allocator, t: *CtTuple, rows: *ct.CtMulForm, row_len: u32, family: u32) i32 {
+    val cap: usize             = 65536;
+    val br:  res[*u8, A.Error] = A.allocate[u8](alloc, cap);
+    if (sel br.err) { ret 1; }
+    val buf: *u8 = br.ok;
+    fin { A.deallocate[u8](alloc, buf, cap); }
+    var wi: usize = 0;
+    for (wi < 4) {
+        val w:    u8    = CT_WIDTHS[wi];
+        var len:  usize = 0;
+        val code: i32   = ct_mul_listing(alloc, t, rows, row_len, ct_mul_program(alloc, w), buf, cap, ?len);
+        if (code != 0) {
+            print.printf("ct_mul: {} at {} bits did not lower ({})\n", t.isa_name, w, code);
+            ret 2;
+        }
+        var fi: usize = 0;
+        for (fi < 4) {
+            val shape: i32 = ct_mul_shape(alloc, buf, len, CT_SHAPED[fi], family);
+            if (shape != 0) {
+                print.printf("ct_mul: {} {} at {} bits has shape {}\n", t.isa_name, CT_SHAPED[fi], w, shape);
+                ret 3;
+            }
+            fi = fi + 1;
+        }
+        wi = wi + 1;
+    }
+    ret 0;
+}
+
+# a secret multiply decodes to exactly the declared instruction on each ISA: one
+# multiply, no call, branch or loop, and no strength reduction of a square or a
+# secret constant. riscv64 lowers through its registered Zkt rows, x86_64
+# through its registered ALWAYS rows with no os declaration (freestanding), and aarch64 through its registered
+# DIT_MODE rows on linux and darwin, the two operating systems that declare
+# the mode guaranteed
+test ct_mul__lowers_to_one_multiply_on_each_isa {
+    var alloc:  A.Allocator;
+    val make_r: err[A.Error] = page.make(?alloc);
+    if (sel make_r.err) { ret 1; }
+
+    var rv:     CtTuple = CtTuple{isa_name: "rv64gc_zkt", os_name: "linux", abi_name: "lp64d", of_name: "elf"};
+    var x86:    CtTuple = CtTuple{isa_name: "x86_64", os_name: "freestanding", abi_name: "sysv64", of_name: "elf"};
+    var arm:    CtTuple = CtTuple{isa_name: "aarch64", os_name: "linux", abi_name: "aapcs64", of_name: "elf"};
+    var arm_dw: CtTuple = CtTuple{isa_name: "aarch64", os_name: "darwin", abi_name: "aapcs64", of_name: "macho"};
+    val rc:     i32     = ct_mul_shapes(?alloc, ?rv, nil, 0, CT_RISCV);
+    if (rc != 0) { ret 3; }
+    val xc: i32 = ct_mul_shapes(?alloc, ?x86, nil, 0, CT_X86);
+    if (xc != 0) { ret 4; }
+    val ac: i32 = ct_mul_shapes(?alloc, ?arm, nil, 0, CT_ARM);
+    if (ac != 0) { ret 5; }
+    val dc: i32 = ct_mul_shapes(?alloc, ?arm_dw, nil, 0, CT_ARM);
+    if (dc != 0) { ret 6; }
+    ret 0;
+}
+
+# 0 when a secret 64-bit multiply is refused on the tuple with its registered rows
+#[testing]
+fun ct_mul_refused(alloc: *A.Allocator, isa_name: str, os_name: str, abi_name: str, of_name: str) i32 {
+    var t:    CtTuple = CtTuple{isa_name: isa_name, os_name: os_name, abi_name: abi_name, of_name: of_name};
+    var buf:  [16384]u8;
+    var len:  usize   = 0;
+    val code: i32     = ct_mul_listing(alloc, ?t, nil, 0,
+        "#[noinline]\n#[oblivious]\npub fun product(a: ^u64, b: ^u64) ^u64 { ret a * b; }\n", ?buf[0], 16384, ?len);
+    if (code != 1) {
+        print.printf("ct_mul: {}-{}-{}-{} was not refused ({})\n", os_name, isa_name, abi_name, of_name, code);
+        ret 1;
+    }
+    ret 0;
+}
+
+# whether the object codegen emits for `program` on the tuple carries the DIT
+# need marker: 1 when it does, 0 when it does not, 2 when the build failed
+#[testing]
+fun ct_mul_marker(alloc: *A.Allocator, t: *CtTuple, program: str) i32 {
+    val sr: res[session.Session, fail.Fail] = toolchain.session_init(alloc);
+    if (sel sr.err) { ret 2; }
+    var s: session.Session = sr.ok;
+    fin { session.dnit(?s); }
+    var names:  [1]str              = [1]str{"main.mach"};
+    var texts:  [1]str              = [1]str{program};
+    val root_r: res[str, fail.Fail] = driver.scaffold(alloc, ct_mul_manifest(alloc, t.isa_name, t.os_name, t.abi_name, t.of_name), ?names[0], ?texts[0], 1);
+    if (sel root_r.err) { ret 2; }
+    val root: str = root_r.ok;
+    fin { fs.remove_all(alloc, root); }
+    var pick: manifest.Selectors              = manifest.t_selectors("", "t", "release");
+    val bp:   res[project.Project, fail.Fail] = driver.build_project(?s, root, ?pick);
+    if (sel bp.err) { ret 2; }
+    var p: project.Project = bp.ok;
+    fin { project.dnit_project(?p); }
+    val se: err[fail.Fail] = driver.run_sema_pass(?p);
+    if (sel se.err) { ret 2; }
+    val le: err[fail.Fail] = driver.run_lower_pass(?p);
+    if (sel le.err) { ret 2; }
+    val mid: session.ModuleId = project.module_named(?p, "ctmul.main");
+    if (module.is_nil(mid)) { ret 2; }
+    val cg: res[target_of.ObjectImage, fail.Fail] = codegen.codegen_unit(?s, ?p.target, project.module_at(?p, mid::u32).ir_module, mir_unit.ir_set_empty(), nil, codegen.no_debug(), ?s.diags);
+    if (sel cg.err) {
+        print.printf("ct_mul: codegen {}\n", fail.describe(cg.err));
+        ret 2;
+    }
+    var image: target_of.ObjectImage = cg.ok;
+    fin { target_of.object_image_dnit(?image); }
+    val marker: res[intern.StrId, A.Error] = intern.add(?s.interner, ct.DIT_NEED_MARKER);
+    if (sel marker.err) { ret 2; }
+    var found: i32 = 0;
+    var si:    u32 = 0;
+    for (si < image.symbol_count) {
+        val sym: *target_of.Symbol = ?image.symbols[si];
+        if (intern.str_same(sym.name, marker.ok)) {
+            if (!target_of.section_is_absolute(sym.section) || sym.absolute_value != ct.DIT_NEED_VALUE) { ret 3; }
+            if ((sym.flags & target_of.SYM_OBJ_FLAG_GLOBAL) != 0)                                       { ret 4; }
+            found = 1;
+        }
+        si = si + 1;
+    }
+    ret found;
+}
+
+# the DIT need is recorded in the object exactly when a secret multiply lowers
+# through a DIT_MODE row: on aarch64-linux and aarch64-darwin a secret
+# multiply carries the marker, a public multiply and a secret add do not, and
+# the x86_64 ALWAYS rows carry nothing for the same secret multiply
+test ct_mul__dit_need_is_marked_only_for_a_dit_multiply {
+    var alloc:  A.Allocator;
+    val make_r: err[A.Error] = page.make(?alloc);
+    if (sel make_r.err) { ret 1; }
+    val secret_mul: str     = "#[noinline]\n#[oblivious]\npub fun product(a: ^u64, b: ^u64) ^u64 { ret a * b; }\n";
+    val secret_add: str     = "#[noinline]\n#[oblivious]\npub fun sum(a: ^u64, b: ^u64) ^u64 { ret a + b; }\n";
+    val public_mul: str     = "#[noinline]\npub fun product(a: u64, b: u64) u64 { ret a * b; }\n";
+    val narrow_mul: str     = "#[noinline]\n#[oblivious]\npub fun product(a: ^u8, b: ^u8) ^u8 { ret a * b; }\n";
+    var arm:        CtTuple = CtTuple{isa_name: "aarch64", os_name: "linux", abi_name: "aapcs64", of_name: "elf"};
+    var arm_dw:     CtTuple = CtTuple{isa_name: "aarch64", os_name: "darwin", abi_name: "aapcs64", of_name: "macho"};
+    var x86:        CtTuple = CtTuple{isa_name: "x86_64", os_name: "linux", abi_name: "sysv64", of_name: "elf"};
+    var rv:         CtTuple = CtTuple{isa_name: "rv64gc_zkt", os_name: "linux", abi_name: "lp64d", of_name: "elf"};
+    if (ct_mul_marker(?alloc, ?arm, secret_mul) != 1)    { ret 2; }
+    if (ct_mul_marker(?alloc, ?arm, narrow_mul) != 1)    { ret 3; }
+    if (ct_mul_marker(?alloc, ?arm_dw, secret_mul) != 1) { ret 4; }
+    if (ct_mul_marker(?alloc, ?arm, secret_add) != 0)    { ret 5; }
+    if (ct_mul_marker(?alloc, ?arm, public_mul) != 0)    { ret 6; }
+    if (ct_mul_marker(?alloc, ?x86, secret_mul) != 0)    { ret 7; }
+    if (ct_mul_marker(?alloc, ?rv, secret_mul) != 0)     { ret 8; }
+    ret 0;
+}
+
+# every branch a secret multiply is refused on: an ISA with no rows, a riscv64
+# selection without Zkt or without M, and aarch64's DIT_MODE rows on an OS
+# that declares no DIT guarantee (freestanding; linux and darwin declare it and
+# admit). the control shows the same build lowers where the rows hold
+test ct_mul__refuses_every_undeclared_isa_os_and_condition {
+    var alloc:  A.Allocator;
+    val make_r: err[A.Error] = page.make(?alloc);
+    if (sel make_r.err) { ret 1; }
+    var bad: i32 = 0;
+    if (ct_mul_refused(?alloc, "rv32imac_zkt", "freestanding", "ilp32", "elf") != 0)      { bad = bad | 1; }
+    if (ct_mul_refused(?alloc, "spirv", "freestanding", "spirv", "spv") != 0)             { bad = bad | 2; }
+    if (ct_mul_refused(?alloc, "rv64gc", "linux", "lp64d", "elf") != 0)                   { bad = bad | 4; }
+    if (ct_mul_refused(?alloc, "rv64imafd_zicsr_zifencei", "linux", "lp64d", "elf") != 0) { bad = bad | 8; }
+    if (ct_mul_refused(?alloc, "rv64i_zkt", "linux", "lp64", "elf") != 0)                 { bad = bad | 16; }
+    if (ct_mul_refused(?alloc, "aarch64", "freestanding", "aapcs64", "elf") != 0)         { bad = bad | 128; }
+    var control: CtTuple = CtTuple{isa_name: "rv64gc_zkt", os_name: "linux", abi_name: "lp64d", of_name: "elf"};
+    var buf:     [16384]u8;
+    var len:     usize   = 0;
+    if (ct_mul_listing(?alloc, ?control, nil, 0, "#[noinline]\n#[oblivious]\npub fun product(a: ^u64, b: ^u64) ^u64 { ret a * b; }\n", ?buf[0], 16384, ?len) != 0) { bad = bad | 256; }
+    if (bad != 0) {
+        print.printf("ct_mul: refusal branches failed: {}\n", bad);
+        ret 1;
+    }
+    ret 0;
+}
+
+# `$mach.build.ct_mul(op, width)` answers 1 on x86_64 for the low half, both
+# high halves and both widening products at every width, and 0 for the
+# signed-by-unsigned high half no row declares; the lowering gate agrees at
+# each low-half width
+test ct_mul_query__x86_64_answers {
+    var alloc:  A.Allocator;
+    val make_r: err[A.Error] = page.make(?alloc);
+    if (sel make_r.err) { ret 1; }
+    var t:        CtTuple      = CtTuple{isa_name: "x86_64", os_name: "linux", abi_name: "sysv64", of_name: "elf"};
+    var admitted: [28]bool;
+    var gate_ok:  [4]bool;
+    var mask:     ct.CtMulMask = ct.mul_mask_none();
+    if (ct_mul_run(?alloc, ?t, nil, 0, ?mask, ?admitted[0], ?gate_ok[0]) != 0) { ret 2; }
+    var ci: usize = 0;
+    var op: u32   = 1;
+    for (op < ct.CT_MUL_OP_COUNT) {
+        var wi: usize = 0;
+        for (wi < 4) {
+            val want: bool = op::ct.CtMulOp != ct.CT_MUL_HIGH_SU;
+            if (admitted[ci] != want) {
+                print.printf("ct_mul: x86_64 query for {} {} disagrees with the rows\n", ct_op_name(op), CT_WIDTHS[wi]);
+                ret 3;
+            }
+            ci = ci + 1;
+            wi = wi + 1;
+        }
+        op = op + 1;
+    }
+    if (!gate_ok[0] || !gate_ok[1] || !gate_ok[2] || !gate_ok[3]) { ret 4; }
+    ret 0;
+}
+
+# the query folds to a u8 like `$mach.build.pie`, coerces to a wider binding,
+# lowers as a constant, and refuses a malformed call naming what it accepts
+test ct_mul_query__folds_to_u8_and_refuses_malformed_calls {
+    if (!sema_clean("val Q: u8 = $mach.build.ct_mul(low, 64);\nval W: u64 = $mach.build.ct_mul(high_su, 8);\n$if ($mach.build.ct_mul(wide_s, 32) == 0) { val OFF: u8 = 0; }\nfun main() i32 { ret ($mach.build.ct_mul(high_u, 16) + Q)::i32 + W::i32; }\n")) { ret 1; }
+    if (codegen_target_ok("fun main() i32 { val q: u8 = $mach.build.ct_mul(low, 32); ret q::i32; }\n", "linux") != 0)                                                                                                                                        { ret 2; }
+    if (vec_diag("val Q: u8 = $mach.build.ct_mul(mid, 64);\nfun main() i32 { ret 0; }\n",
+        "unknown multiply `mid`; expected one of low, high_u, high_s, high_su, wide_u, wide_s") != 0) { ret 3; }
+    if (vec_diag("val Q: u8 = $mach.build.ct_mul(low, 24);\nfun main() i32 { ret 0; }\n",
+        "the operand width must be 8, 16, 32, 64 or 128") != 0) { ret 4; }
+    if (vec_diag("val Q: u8 = $mach.build.ct_mul(low, 256);\nfun main() i32 { ret 0; }\n",
+        "the operand width must be 8, 16, 32, 64 or 128") != 0) { ret 8; }
+    if (vec_diag("val Q: u8 = $mach.build.ct_mul(low, 18446744073709551744);\nfun main() i32 { ret 0; }\n",
+        "the operand width must be 8, 16, 32, 64 or 128") != 0) { ret 9; }
+    if (!sema_clean("val Q: u8 = $mach.build.ct_mul(low, 128);\n$if ($mach.build.ct_mul(low, 128) == 0) { val OFF: u8 = 0; }\n$if ($mach.build.ct_mul(low, 128) == 1) { val ON: u8 = 1; }\nfun main() i32 { ret Q::i32; }\n")) { ret 10; }
+    if (vec_diag("val Q: u8 = $mach.build.ct_mul(low);\nfun main() i32 { ret 0; }\n",
+        "takes a multiply and an operand width") != 0) { ret 5; }
+    if (vec_diag("val Q: u8 = $mach.build.ct_mul(1, 64);\nfun main() i32 { ret 0; }\n",
+        "the multiply is a bare word, one of low") != 0) { ret 6; }
+    if (vec_diag("val Q: u32 = $mach.build.os(1);\nfun main() i32 { ret 0; }\n",
+        "this comptime path takes no arguments") != 0) { ret 7; }
+    ret 0;
+}
+
+# 0 when the build reports an error containing `needle`, or, for an empty
+# needle, when it loads and passes sema with no error at all
+#[testing]
+fun ext_probe(isa_name: str, os_name: str, abi_name: str, exts: str, program: str, needle: str) i32 {
+    var alloc: A.Allocator;
+    val made:  err[A.Error] = page.make(?alloc);
+    if (sel made.err) { ret 1; }
+    val sr: res[session.Session, fail.Fail] = toolchain.session_init(?alloc);
+    if (sel sr.err) { ret 1; }
+    var s: session.Session = sr.ok;
+    fin { session.dnit(?s); }
+    var names:  [1]str              = [1]str{"main.mach"};
+    var texts:  [1]str              = [1]str{program};
+    val root_r: res[str, fail.Fail] = driver.scaffold(?alloc, ext_manifest(?alloc, isa_name, os_name, abi_name, exts), ?names[0], ?texts[0], 1);
+    if (sel root_r.err) { ret 2; }
+    val root: str = root_r.ok;
+    fin { fs.remove_all(?alloc, root); }
+    var pick:   manifest.Selectors              = manifest.t_selectors("", "t", "");
+    val bp:     res[project.Project, fail.Fail] = driver.build_project(?s, root, ?pick);
+    val expect: bool                            = str_len(needle) != 0;
+    if (sel bp.err) {
+        if (!expect)                                                                                { ret 3; }
+        if (diagnostic.error_says(?s.diags, needle) || str_contains(fail.describe(bp.err), needle)) { ret 0; }
+        ret 4;
+    }
+    var p: project.Project = bp.ok;
+    fin { project.dnit_project(?p); }
+    val se: err[fail.Fail] = driver.run_sema_pass(?p);
+    if (expect) {
+        if (diagnostic.error_says(?s.diags, needle)) { ret 0; }
+        ret 5;
+    }
+    if (sel se.err || diagnostic.error_count(?s.diags) != 0) { ret 6; }
+    ret 0;
+}
+
+# 0 when the program reaches codegen and the encoder reports an error containing
+# `needle`, or, for an empty needle, when it encodes with no error at all
+#[testing]
+fun ext_codegen(isa_name: str, os_name: str, abi_name: str, exts: str, program: str, needle: str) i32 {
+    ret ext_codegen_at(isa_name, os_name, abi_name, exts, program, needle, 0, 0);
+}
+
+# as ext_codegen, and a nonzero `line` also holds the error to main.mach at `line`:`col`
+#[testing]
+fun ext_codegen_at(isa_name: str, os_name: str, abi_name: str, exts: str, program: str, needle: str, line: usize, col: usize) i32 {
+    var alloc: A.Allocator;
+    val made:  err[A.Error] = page.make(?alloc);
+    if (sel made.err) { ret 1; }
+    val sr: res[session.Session, fail.Fail] = toolchain.session_init(?alloc);
+    if (sel sr.err) { ret 1; }
+    var s: session.Session = sr.ok;
+    fin { session.dnit(?s); }
+    var names:  [1]str              = [1]str{"main.mach"};
+    var texts:  [1]str              = [1]str{program};
+    val root_r: res[str, fail.Fail] = driver.scaffold(?alloc, ext_manifest(?alloc, isa_name, os_name, abi_name, exts), ?names[0], ?texts[0], 1);
+    if (sel root_r.err) { ret 2; }
+    val root: str = root_r.ok;
+    fin { fs.remove_all(?alloc, root); }
+    var pick: manifest.Selectors              = manifest.t_selectors("", "t", "");
+    val bp:   res[project.Project, fail.Fail] = driver.build_project(?s, root, ?pick);
+    if (sel bp.err) { ret 3; }
+    var p: project.Project = bp.ok;
+    fin { project.dnit_project(?p); }
+    if (str_len(needle) == 0) { ret run_codegen_ok(?p); }
+    val code: i32 = run_codegen_err(?p, needle);
+    if (code == 0 && line != 0 && !diagnostic.error_located(?s.diags, ?s.sources, needle, "main.mach", line, col)) { ret 5; }
+    ret code;
+}
+
+# the aes and carry-less multiply rows are a located error where neither the
+# target nor the function admits their extension, and encode under either; on
+# aarch64 pmull brings aes
+test extensions__aes_and_carry_less_rows_need_their_extension {
+    val x:   str = "x86_64";
+    val l:   str = "linux";
+    val v:   str = "sysv64";
+    val aes: str = "fun f() {\n    asm x86_64 { aesenc xmm0, xmm1\n aeskeygenassist xmm2, xmm1, 1 }\n}\n";
+    val clm: str = "fun f() {\n    asm x86_64 { pclmulqdq xmm0, xmm1, 0x11 }\n}\n";
+    if (ext_codegen_at(x, l, v, "", aes, "inline-asm instruction 'aesenc' needs the `aes` extension", 2, 5) != 0)                                      { ret 1; }
+    if (ext_codegen(x, l, v, "[\"aes\"]", aes, "") != 0)                                                                                               { ret 2; }
+    if (ext_codegen_at(x, l, v, "[\"aes\"]", clm, "inline-asm instruction 'pclmulqdq' needs the `pclmul` extension", 2, 5) != 0)                       { ret 3; }
+    if (ext_codegen(x, l, v, "[\"pclmul\"]", clm, "") != 0)                                                                                            { ret 4; }
+    if (ext_codegen(x, l, v, "", "#[extensions(aes, pclmul)]\nfun f() { asm x86_64 { aesdeclast xmm0, xmm1\n pclmulqdq xmm0, xmm1, 0 } }\n", "") != 0) { ret 5; }
+
+    val a:       str = "aarch64";
+    val c:       str = "aapcs64";
+    val arm_aes: str = "fun f() {\n    asm aarch64 { aese v0.16b, v1.16b\n aesmc v0.16b, v0.16b }\n}\n";
+    val arm_clm: str = "fun f() {\n    asm aarch64 { pmull v0.1q, v1.1d, v2.1d\n pmull2 v3.1q, v1.2d, v2.2d }\n}\n";
+    if (ext_codegen_at(a, l, c, "", arm_aes, "inline-asm instruction 'aese' needs the `aes` extension", 2, 5) != 0)                                      { ret 6; }
+    if (ext_codegen(a, l, c, "[\"aes\"]", arm_aes, "") != 0)                                                                                             { ret 7; }
+    if (ext_codegen(a, l, c, "[\"pmull\"]", arm_aes, "") != 0)                                                                                           { ret 8; }
+    if (ext_codegen_at(a, l, c, "[\"aes\"]", arm_clm, "inline-asm instruction 'pmull' needs the `pmull` extension", 2, 5) != 0)                          { ret 9; }
+    if (ext_codegen(a, l, c, "[\"pmull\"]", arm_clm, "") != 0)                                                                                           { ret 10; }
+    if (ext_codegen(a, l, c, "", "#[extensions(aes, pmull)]\nfun f() { asm aarch64 { aesimc v0.16b, v1.16b\n pmull v0.1q, v1.1d, v2.1d } }\n", "") != 0) { ret 11; }
+    if (ext_answer(a, l, c, "[\"pmull\"]", "aes") != 1)                                                                                                  { ret 12; }
+    if (ext_answer(x, l, v, "[\"pclmul\"]", "aes") != 0)                                                                                                 { ret 13; }
+    ret 0;
+}
+
+# the answer `$mach.build.extensions.<name>` gives on a target: 1, 0, or -1 when the build fails otherwise
+#[testing]
+fun ext_answer(isa_name: str, os_name: str, abi_name: str, exts: str, name: str) i32 {
+    var alloc: A.Allocator;
+    val made:  err[A.Error] = page.make(?alloc);
+    if (sel made.err) { ret -1; }
+    val program: res[str, std_format.FormatError] = std_format.sprint(?alloc,
+        "$if ($mach.build.extensions.{} == 1) {{ $error(\"ext answered one\"); }}\nval W: u64 = $mach.build.extensions.{};\n", name, name);
+    if (sel program.err)                                                                   { ret -1; }
+    if (ext_probe(isa_name, os_name, abi_name, exts, program.ok, "ext answered one") == 0) { ret 1; }
+    if (ext_probe(isa_name, os_name, abi_name, exts, program.ok, "") == 0)                 { ret 0; }
+    ret -1;
+}
+
+# `$mach.build.extensions.<name>` is 1 for an extension the target selects and 0
+# for one it does not; it reads the selected isa's vocabulary only, so another
+# isa's name is refused like an unknown one, never folded; a union of a riscv
+# isa string and a manifest list answers for both
+test build_extensions__answers_the_selected_isa_only {
+    if (ext_answer("x86_64", "linux", "sysv64", "[\"sha\"]", "sha") != 1)     { ret 1; }
+    if (ext_answer("x86_64", "linux", "sysv64", "[\"sha\"]", "sse41") != 0)   { ret 2; }
+    if (ext_answer("x86_64", "linux", "sysv64", "[\"sha\"]", "sha2") != -1)   { ret 3; }
+    if (ext_answer("x86_64", "linux", "sysv64", "[\"sha\"]", "m") != -1)      { ret 4; }
+    if (ext_answer("x86_64", "linux", "sysv64", "", "sha") != 0)              { ret 5; }
+    if (ext_answer("aarch64", "linux", "aapcs64", "[\"sha2\"]", "sha2") != 1) { ret 6; }
+    if (ext_answer("aarch64", "linux", "aapcs64", "[\"sha2\"]", "sha") != -1) { ret 7; }
+    if (ext_answer("aarch64", "linux", "aapcs64", "", "sha2") != 0)           { ret 8; }
+
+    val unknown: str = "$if ($mach.build.extensions.avx9 == 1) { val X: u8 = 1; }\n";
+    if (ext_probe("x86_64", "linux", "sysv64", "", unknown,
+        "`$mach.build.extensions.avx9`: `avx9` is not an extension of isa 'x86_64'; its extensions are: ssse3, sse41, sha, fsgsbase, popcnt, lzcnt, bmi1, sse42, cx16, avx, avx2, bmi2, fma, movbe, f16c, avx512f, avx512bw, avx512cd, avx512dq, avx512vl, aes, pclmul") != 0) { ret 9; }
+    if (ext_probe("aarch64", "linux", "aapcs64", "", "$if ($mach.build.extensions.sha == 1) { val X: u8 = 1; }\n",
+        "`$mach.build.extensions.sha`: `sha` is not an extension of isa 'aarch64'; its extensions are: sha2, sb, aes, pmull") != 0) { ret 16; }
+    if (ext_probe("x86_64", "linux", "sysv64", "", "val X: u8 = $mach.build.extensions;\n", "names one extension") != 0) { ret 10; }
+    # `&&` does not guard the right-hand side: the path is checked on its own,
+    # so another isa's name needs the nested form under an arch guard
+    val one_line: str = "$if ($mach.build.arch == $mach.arch.x86_64 && $mach.build.extensions.sha == 1) { $error(\"guarded one\"); }\n";
+    if (ext_probe("x86_64", "linux", "sysv64", "[\"sha\"]", one_line, "guarded one") != 0)                             { ret 17; }
+    if (ext_probe("aarch64", "linux", "aapcs64", "[\"sha2\"]", one_line, "is not an extension of isa 'aarch64'") != 0) { ret 18; }
+    val nested: str = "$if ($mach.build.arch == $mach.arch.x86_64) {\n    $if ($mach.build.extensions.sha == 1) { $error(\"guarded one\"); }\n}\n";
+    if (ext_probe("x86_64", "linux", "sysv64", "[\"sha\"]", nested, "guarded one") != 0) { ret 19; }
+    if (ext_probe("aarch64", "linux", "aapcs64", "[\"sha2\"]", nested, "") != 0)         { ret 20; }
+
+    if (ext_answer("rv64i", "freestanding", "lp64", "[\"m\"]", "m") != 1)  { ret 11; }
+    if (ext_answer("rv64i", "freestanding", "lp64", "[\"m\"]", "a") != 0)  { ret 12; }
+    if (ext_answer("rv64ia", "freestanding", "lp64", "[\"m\"]", "a") != 1) { ret 13; }
+    if (ext_answer("rv64i", "freestanding", "lp64", "", "m") != 0)         { ret 14; }
+    if (ext_answer("rv64i", "freestanding", "lp64", "", "sha") != -1)      { ret 15; }
+    # zkt is one vocabulary with the isa string: `_zkt` and the list select the same bit
+    if (ext_answer("rv64gc_zkt", "freestanding", "lp64d", "", "zkt") != 1)      { ret 21; }
+    if (ext_answer("rv64gc", "freestanding", "lp64d", "[\"zkt\"]", "zkt") != 1) { ret 22; }
+    if (ext_answer("rv64gc", "freestanding", "lp64d", "", "zkt") != 0)          { ret 23; }
+    if (ext_answer("x86_64", "linux", "sysv64", "", "zkt") != -1)               { ret 24; }
+    if (ext_answer("rv64gc", "freestanding", "lp64d", "[\"zkt\"]", "m") != 1)   { ret 25; }
+    ret 0;
+}
+
+# a level is a bundle: selecting sse41 alone selects ssse3 with it, so the
+# encoder admits pshufb and the comptime member answers 1, and on riscv d
+# brings f brings zicsr. the selection is closed once, at target resolution
+test extensions__selection_closes_over_implied {
+    val shuffle: str = "fun f() { asm x86_64 { pshufb xmm0, xmm1 } }\n";
+    if (ext_codegen("x86_64", "linux", "sysv64", "[\"sse41\"]", shuffle, "") != 0)                          { ret 1; }
+    if (ext_codegen("x86_64", "linux", "sysv64", "", shuffle, "needs the `ssse3` extension") != 0)          { ret 2; }
+    if (ext_codegen("x86_64", "linux", "sysv64", "[\"sha\"]", shuffle, "needs the `ssse3` extension") != 0) { ret 3; }
+    if (ext_answer("x86_64", "linux", "sysv64", "[\"sse41\"]", "ssse3") != 1)                               { ret 4; }
+    if (ext_answer("x86_64", "linux", "sysv64", "[\"ssse3\"]", "sse41") != 0)                               { ret 5; }
+    if (ext_answer("rv64i", "freestanding", "lp64", "[\"d\"]", "f") != 1)                                   { ret 6; }
+    if (ext_answer("rv64i", "freestanding", "lp64", "[\"d\"]", "zicsr") != 1)                               { ret 7; }
+    if (ext_answer("rv64i", "freestanding", "lp64", "[\"f\"]", "d") != 0)                                   { ret 8; }
+    ret 0;
+}
+
+# every name in every registered isa's vocabulary is one lexer identifier and
+# no keyword: it is spelled in the manifest, as a comptime member, inside
+# #[extensions(...)], in asm refusals and as a runtime feature field
+test extensions__names_are_identifiers {
+    var alloc: A.Allocator;
+    val made:  err[A.Error] = page.make(?alloc);
+    if (sel made.err) { ret 1; }
+    val sr: res[session.Session, fail.Fail] = toolchain.session_init(?alloc);
+    if (sel sr.err) { ret 1; }
+    var s: session.Session = sr.ok;
+    fin { session.dnit(?s); }
+    val reg:   *lang_target.TargetRegistry = toolchain.t_registry();
+    var names: u32                         = 0;
+    var i:     u32                         = 0;
+    for (i < reg.isa.count) {
+        val m: *target_model.Machine = reg.isa.members[i].model;
+        var j: u32                   = 0;
+        for (j < m.extension_count) {
+            val name: str   = m.extension_table[j].name;
+            val len:  usize = str_len(name);
+            if (!lexis.is_identifier(name, len)) { ret 2; }
+            if (lexis.is_keyword(name, len))     { ret 3; }
+            names = names + 1;
+            j     = j + 1;
+        }
+        i = i + 1;
+    }
+    # x86_64 three, aarch64 one, and riscv's letters and z-extensions
+    if (names < 12) { ret 4; }
+    ret 0;
+}
+
+# `#[extensions(...)]` takes bare names some isa declares, each once, on a
+# function with a body; a name only another isa declares admits nothing and is
+# not an error, so one source serves every target
+test extensions_decorator__checked_against_every_vocabulary {
+    val x: str = "x86_64";
+    val l: str = "linux";
+    val a: str = "sysv64";
+    if (ext_probe(x, l, a, "", "#[extensions(sha, sse41)]\nfun f() i32 { ret 0; }\n", "") != 0)                          { ret 1; }
+    if (ext_probe(x, l, a, "", "#[extensions(sha2, zicsr)]\nfun f() i32 { ret 0; }\n", "") != 0)                         { ret 2; }
+    if (ext_probe(x, l, a, "", "#[extensions(sha)]\nval V: i32 = 0;\n", "applies only to functions") != 0)               { ret 3; }
+    if (ext_probe(x, l, a, "", "#[extensions(sha)]\next fun f() i32;\n", "applies only to a function with a body") != 0) { ret 4; }
+    if (ext_probe(x, l, a, "", "#[extensions()]\nfun f() i32 { ret 0; }\n", "names at least one extension") != 0)        { ret 5; }
+    if (ext_probe(x, l, a, "", "#[extensions(\"sha\")]\nfun f() i32 { ret 0; }\n", "bare extension names") != 0)         { ret 6; }
+    if (ext_probe(x, l, a, "", "#[extensions(sha, sha)]\nfun f() i32 { ret 0; }\n", "names this extension twice") != 0)  { ret 7; }
+    val unknown: str = "#[extensions(avx9)]\nfun f() i32 { ret 0; }\n";
+    if (ext_probe(x, l, a, "", unknown,
+        "`extensions` decorator: no instruction set declares an extension `avx9`; the known extensions are: ") != 0) { ret 8; }
+    if (ext_probe(x, l, a, "", unknown, "ssse3, sse41, sha, fsgsbase, popcnt, lzcnt, bmi1") != 0)                   { ret 9; }
+    if (ext_probe(x, l, a, "", unknown, "sha2") != 0)                                                               { ret 10; }
+    if (ext_probe("rv64i", "freestanding", "lp64", "", "#[extensions(m, sha)]\nfun f() i32 { ret 0; }\n", "") != 0) { ret 11; }
+    # a row only a target selects is never a function's, on its own isa or another's
+    if (ext_probe("rv64i", "freestanding", "lp64", "", "#[extensions(f)]\nfun f() i32 { ret 0; }\n",
+        "`extensions` decorator: `f` is not a function's to admit, it selects the float register file and the calling convention's float registers for the whole target; select it with the target's `extensions` or isa string") != 0) { ret 12; }
+    if (ext_probe("rv64i", "freestanding", "lp64", "", "#[extensions(d)]\nfun f() i32 { ret 0; }\n", "`d` is not a function's to admit") != 0)                                                           { ret 13; }
+    if (ext_probe("rv64i", "freestanding", "lp64", "", "#[extensions(i)]\nfun f() i32 { ret 0; }\n", "it is the baseline every selection holds") != 0)                                                   { ret 14; }
+    if (ext_probe("rv64i", "freestanding", "lp64", "", "#[extensions(c)]\nfun f() i32 { ret 0; }\n", "it is a code-size selection of the whole target; mach emits no compressed forms") != 0)            { ret 15; }
+    if (ext_probe("rv64i", "freestanding", "lp64", "", "#[extensions(zkt)]\nfun f() i32 { ret 0; }\n", "`zkt` is not a function's to admit, it is a promise about the machine's execution timing") != 0) { ret 18; }
+    if (ext_probe(x, l, a, "", "#[extensions(f)]\nfun f() i32 { ret 0; }\n", "`f` is not a function's to admit") != 0)                                                                                   { ret 16; }
+    if (ext_probe(x, l, a, "", "#[extensions(zicsr, a)]\nfun f() i32 { ret 0; }\n", "") != 0)                                                                                                            { ret 17; }
+    ret 0;
+}
+
+# `{target.isa}` is the manifest's `isa` value as written, on every isa: the
+# `extensions` list is part of the target's identity and of `{target.name}`,
+# never of the isa placeholder, so `rv64i` plus `["m"]` still expands to `rv64i`
+#[testing]
+fun ext_isa_placeholder(isa_name: str, os_name: str, abi_name: str, exts: str, want: str) i32 {
+    var alloc: A.Allocator;
+    val made:  err[A.Error] = page.make(?alloc);
+    if (sel made.err) { ret 1; }
+    val sr: res[session.Session, fail.Fail] = toolchain.session_init(?alloc);
+    if (sel sr.err) { ret 1; }
+    var s: session.Session = sr.ok;
+    fin { session.dnit(?s); }
+    var names:  [1]str              = [1]str{"main.mach"};
+    var texts:  [1]str              = [1]str{"fun f() i32 { ret 0; }\n"};
+    val root_r: res[str, fail.Fail] = driver.scaffold(?alloc, ext_manifest(?alloc, isa_name, os_name, abi_name, exts), ?names[0], ?texts[0], 1);
+    if (sel root_r.err) { ret 2; }
+    val root: str = root_r.ok;
+    fin { fs.remove_all(?alloc, root); }
+    var pick: manifest.Selectors              = manifest.t_selectors("", "t", "");
+    val bp:   res[project.Project, fail.Fail] = driver.build_project(?s, root, ?pick);
+    if (sel bp.err) { ret 3; }
+    var p: project.Project = bp.ok;
+    fin { project.dnit_project(?p); }
+    val v: template.Values = driver_closure.cell_tmpl_vars(?p);
+    if (!str_equals(v.isa, want)) { ret 4; }
+    ret 0;
+}
+
+test target_isa_placeholder__omits_the_extensions_list {
+    if (ext_isa_placeholder("rv64i", "freestanding", "lp64", "[\"m\"]", "rv64i") != 0) { ret 1; }
+    if (ext_isa_placeholder("x86_64", "linux", "sysv64", "[\"sha\"]", "x86_64") != 0)  { ret 2; }
+    ret 0;
+}
+
+# the manifest key is an array of identifiers, each listed once, and the
+# selected isa refuses a name its vocabulary does not hold, naming the ones it
+# does; d alone is fine, it brings f and zicsr
+test manifest_extensions__checked_against_the_isa_vocabulary {
+    val ok: str = "fun f() i32 { ret 0; }\n";
+    if (ext_probe("x86_64", "linux", "sysv64", "[\"sha\", \"ssse3\", \"sse41\"]", ok, "") != 0) { ret 1; }
+    if (ext_probe("x86_64", "linux", "sysv64", "[\"sha2\"]", ok,
+        "`sha2` is not an extension or level of isa 'x86_64'; its extensions are: ssse3, sse41, sha, fsgsbase, popcnt, lzcnt, bmi1, sse42, cx16, avx, avx2, bmi2, fma, movbe, f16c, avx512f, avx512bw, avx512cd, avx512dq, avx512vl, aes, pclmul; its levels are: x86-64-v2, x86-64-v3, x86-64-v4") != 0) { ret 2; }
+    if (ext_probe("aarch64", "linux", "aapcs64", "[\"sha\"]", ok,
+        "`sha` is not an extension of isa 'aarch64'; its extensions are: sha2, sb, aes, pmull") != 0) { ret 3; }
+    if (ext_probe("x86_64", "linux", "sysv64", "[\"sse4.1\"]", ok, "is not an extension name or level") != 0) { ret 4; }
+    # a level is a manifest spelling that expands to its members, beside names
+    # or alone, and an unknown level names the known ones
+    if (ext_probe("x86_64", "linux", "sysv64", "[\"x86-64-v2\", \"sha\"]", ok, "") != 0) { ret 8; }
+    if (ext_probe("x86_64", "linux", "sysv64", "[\"x86-64-v5\"]", ok,
+        "`x86-64-v5` is not an extension or level of isa 'x86_64'; its extensions are: ssse3, sse41, sha, fsgsbase, popcnt, lzcnt, bmi1, sse42, cx16, avx, avx2, bmi2, fma, movbe, f16c, avx512f, avx512bw, avx512cd, avx512dq, avx512vl, aes, pclmul; its levels are: x86-64-v2, x86-64-v3, x86-64-v4") != 0) { ret 9; }
+    if (ext_probe("aarch64", "linux", "aapcs64", "[\"x86-64-v2\"]", ok,
+        "`x86-64-v2` is not an extension of isa 'aarch64'; its extensions are: sha2, sb, aes, pmull") != 0) { ret 10; }
+    if (ext_answer("x86_64", "linux", "sysv64", "[\"x86-64-v3\"]", "avx2") != 1)                              { ret 11; }
+    if (ext_answer("x86_64", "linux", "sysv64", "[\"x86-64-v3\"]", "sse41") != 1)                             { ret 12; }
+    if (ext_answer("x86_64", "linux", "sysv64", "[\"x86-64-v2\"]", "avx") != 0)                               { ret 13; }
+    if (ext_probe("x86_64", "linux", "sysv64", "[\"sha\", \"sha\"]", ok, "lists \"sha\" twice") != 0)         { ret 5; }
+    if (ext_probe("x86_64", "linux", "sysv64", "\"sha\"", ok, "extensions must be an array of strings") != 0) { ret 6; }
+    if (ext_probe("rv64i", "freestanding", "lp64", "[\"d\"]", ok, "") != 0)                                   { ret 7; }
     ret 0;
 }

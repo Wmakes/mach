@@ -1,0 +1,207 @@
+use std.types.bool.bool;
+use std.types.error.err;
+use std.types.result.res;
+use std.types.size.usize;
+use std.types.string.str;
+use std.types.string.str_equals;
+
+use std.text.string.str_dup;
+use std.text.string.str_free;
+
+use collections_vector: std.collections.vector;
+use std.collections.vector.Vector;
+
+use A: std.allocator;
+use std.allocator.page;
+use T: std.allocator.testing;
+
+# a collected test and how it ran: the test a dispatcher runs, each run's
+# result, and the tally over a run's results
+
+# a collected test: its qualified name, where it is declared, the test object
+# that holds it, the dispatcher that runs it as `<exe> <idx>`, and the target and
+# profile that dispatcher was built for
+pub rec TestArtifact {
+    module:  *u8;
+    name:    *u8;
+    file:    *u8;
+    line:    u32;
+    object:  *u8;
+    exe:     *u8;
+    idx:     u32;
+    target:  *u8;
+    profile: *u8;
+}
+
+# how a test ran: passed, disagreed with what it checks, or could not be judged
+pub def GateResultKind: u8;
+
+pub val RESULT_PASS:                   GateResultKind = 0;
+pub val RESULT_SEMANTIC_MISMATCH:      GateResultKind = 1;
+val     RESULT_UNSUPPORTED_INPUT:      GateResultKind = 2;
+pub val RESULT_TOOL_UNAVAILABLE:       GateResultKind = 3;
+pub val RESULT_INFRASTRUCTURE_FAILURE: GateResultKind = 4;
+pub val RESULT_RESOURCE_EXHAUSTION:    GateResultKind = 5;
+val     RESULT_INVALID_INJECTION:      GateResultKind = 6;
+
+# what decided a result's kind
+pub def GateCause: u8;
+
+pub val CAUSE_PASS:                 GateCause = 0;
+#[testing]
+val     CAUSE_UNSUPPORTED:          GateCause = 1;
+#[testing]
+pub val CAUSE_TOOL_UNAVAILABLE:     GateCause = 2;
+#[testing]
+val     CAUSE_INVALID_INJECTOR:     GateCause = 3;
+pub val CAUSE_ORACLE_TIMEOUT:       GateCause = 4;
+#[testing]
+val     CAUSE_ORACLE_OUTPUT_LIMIT:  GateCause = 5;
+pub val CAUSE_ORACLE_SPAWN_FAILURE: GateCause = 6;
+pub val CAUSE_ORACLE_CAPTURE:       GateCause = 7;
+pub val CAUSE_ORACLE_SIGNAL:        GateCause = 8;
+pub val CAUSE_ORACLE_EXIT:          GateCause = 9;
+pub val CAUSE_INVALID_TERMINAL:     GateCause = 10;
+
+# one test's result; the tally owns a recorded result's detail
+pub rec GateResult {
+    kind:            GateResultKind;
+    cause:           GateCause;
+    detail_identity: str;
+}
+
+pub fun gate_result(kind: GateResultKind, cause: GateCause, detail_identity: str) GateResult {
+    ret GateResult{kind: kind, cause: cause, detail_identity: detail_identity};
+}
+
+pub rec GateTally {
+    pass:                   u32;
+    semantic_mismatch:      u32;
+    unsupported_input:      u32;
+    tool_unavailable:       u32;
+    infrastructure_failure: u32;
+    resource_exhaustion:    u32;
+    invalid_injection:      u32;
+    results:                Vector[GateResult];
+}
+
+pub fun gate_tally_init(a: *A.Allocator) GateTally {
+    var gt: GateTally;
+    gt.pass                   = 0;
+    gt.semantic_mismatch      = 0;
+    gt.unsupported_input      = 0;
+    gt.tool_unavailable       = 0;
+    gt.infrastructure_failure = 0;
+    gt.resource_exhaustion    = 0;
+    gt.invalid_injection      = 0;
+    gt.results                = collections_vector.init[GateResult](a);
+    ret gt;
+}
+
+#[testing]
+pub fun gate_tally_dnit(gt: *GateTally) {
+    if (gt == nil) { ret; }
+    var i: usize = 0;
+    for (i < gt.results.len) {
+        val r: *GateResult = ?gt.results.data[i];
+        if (r.detail_identity != nil) { str_free(gt.results.a, r.detail_identity); }
+        i = i + 1;
+    }
+    collections_vector.dnit[GateResult](?gt.results);
+    gt.pass                   = 0;
+    gt.semantic_mismatch      = 0;
+    gt.unsupported_input      = 0;
+    gt.tool_unavailable       = 0;
+    gt.infrastructure_failure = 0;
+    gt.resource_exhaustion    = 0;
+    gt.invalid_injection      = 0;
+}
+
+pub fun record_gate(gt: *GateTally, a: *A.Allocator, r: GateResult) err[A.Error] {
+    var stored: GateResult = r;
+    if (r.detail_identity != nil) {
+        val dup_r: res[str, A.Error] = str_dup(a, r.detail_identity);
+        if (sel dup_r.err) { ret err[A.Error].err{dup_r.err}; }
+        stored.detail_identity = dup_r.ok;
+    }
+
+    val push_r: res[usize, A.Error] = collections_vector.push[GateResult](?gt.results, stored);
+    if (sel push_r.err) {
+        if (stored.detail_identity != nil) { str_free(a, stored.detail_identity); }
+        ret err[A.Error].err{push_r.err};
+    }
+
+    if (r.kind == RESULT_PASS)                   { gt.pass = gt.pass + 1; }
+    or (r.kind == RESULT_SEMANTIC_MISMATCH)      { gt.semantic_mismatch = gt.semantic_mismatch + 1; }
+    or (r.kind == RESULT_UNSUPPORTED_INPUT)      { gt.unsupported_input = gt.unsupported_input + 1; }
+    or (r.kind == RESULT_TOOL_UNAVAILABLE)       { gt.tool_unavailable = gt.tool_unavailable + 1; }
+    or (r.kind == RESULT_INFRASTRUCTURE_FAILURE) { gt.infrastructure_failure = gt.infrastructure_failure + 1; }
+    or (r.kind == RESULT_RESOURCE_EXHAUSTION)    { gt.resource_exhaustion = gt.resource_exhaustion + 1; }
+    or (r.kind == RESULT_INVALID_INJECTION)      { gt.invalid_injection = gt.invalid_injection + 1; }
+    ret err[A.Error].ok{};
+}
+
+#[testing]
+pub fun gate_tally_total(gt: *GateTally) u32 {
+    ret gt.pass + gt.semantic_mismatch + gt.unsupported_input + gt.tool_unavailable
+        + gt.infrastructure_failure + gt.resource_exhaustion + gt.invalid_injection;
+}
+
+#[testing]
+fun t_owned_nothing(t: *T.Testing) bool {
+    ret !T.tracking_exhausted(t) && !T.leaked(t) && T.double_free_count(t) == 0;
+}
+
+#[testing]
+fun t_refused(r: err[A.Error]) bool {
+    ret sel r.err;
+}
+
+test gate_tally__counts_and_retains_identity_for_every_kind {
+    var a: A.Allocator;
+    page.make(?a);
+    var gt: GateTally = gate_tally_init(?a);
+
+    if (t_refused(record_gate(?gt, ?a, gate_result(RESULT_PASS, CAUSE_PASS, nil))))                               { ret 1; }
+    if (t_refused(record_gate(?gt, ?a, gate_result(RESULT_SEMANTIC_MISMATCH, CAUSE_ORACLE_EXIT, "case-a"))))      { ret 2; }
+    if (t_refused(record_gate(?gt, ?a, gate_result(RESULT_UNSUPPORTED_INPUT, CAUSE_UNSUPPORTED, nil))))           { ret 3; }
+    if (t_refused(record_gate(?gt, ?a, gate_result(RESULT_TOOL_UNAVAILABLE, CAUSE_TOOL_UNAVAILABLE, nil))))       { ret 4; }
+    if (t_refused(record_gate(?gt, ?a, gate_result(RESULT_INFRASTRUCTURE_FAILURE, CAUSE_ORACLE_CAPTURE, nil))))   { ret 5; }
+    if (t_refused(record_gate(?gt, ?a, gate_result(RESULT_RESOURCE_EXHAUSTION, CAUSE_ORACLE_OUTPUT_LIMIT, nil)))) { ret 6; }
+    if (t_refused(record_gate(?gt, ?a, gate_result(RESULT_INVALID_INJECTION, CAUSE_INVALID_INJECTOR, nil))))      { ret 7; }
+
+    var bad: i32 = 0;
+    if (gt.pass != 1)                                              { bad = 1; }
+    or (gt.semantic_mismatch != 1)                                 { bad = 1; }
+    or (gt.unsupported_input != 1)                                 { bad = 1; }
+    or (gt.tool_unavailable != 1)                                  { bad = 1; }
+    or (gt.infrastructure_failure != 1)                            { bad = 1; }
+    or (gt.resource_exhaustion != 1)                               { bad = 1; }
+    or (gt.invalid_injection != 1)                                 { bad = 1; }
+    or (gate_tally_total(?gt) != 7)                                { bad = 1; }
+    or (gt.results.len != 7)                                       { bad = 1; }
+    or (!str_equals(gt.results.data[1].detail_identity, "case-a")) { bad = 1; }
+
+    gate_tally_dnit(?gt);
+    if (gate_tally_total(?gt) != 0 || gt.results.len != 0) { bad = 1; }
+
+    ret bad;
+}
+
+test record_gate__fails_closed_and_frees_the_duplicated_identity {
+    var failing: T.Testing;
+    val made:    err[A.Error] = T.make(?failing);
+    if (sel made.err) { ret 1; }
+    fin { T.dnit(?failing); }
+    T.fail_at_ordinal(?failing, 2::usize);
+
+    var gt: GateTally    = gate_tally_init(T.allocator_of(?failing));
+    val r:  err[A.Error] = record_gate(?gt, T.allocator_of(?failing),
+        gate_result(RESULT_SEMANTIC_MISMATCH, CAUSE_ORACLE_EXIT, "identity"));
+    if (sel r.ok)                                          { ret 1; }
+    if (gt.results.len != 0 || gate_tally_total(?gt) != 0) { ret 2; }
+
+    gate_tally_dnit(?gt);
+    if (!t_owned_nothing(?failing)) { ret 1; }
+    ret 0;
+}

@@ -1,4 +1,4 @@
-# the fixture from #3362's repro: a `#[section(...)]` data object the image must
+# the fixture: a `#[section(...)]` data object the image must
 # keep by name, and a page-aligned zero-initialized table that must land in a real
 # `.bss`. `_start` touches both so nothing here is dead.
 

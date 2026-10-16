@@ -1,4 +1,4 @@
-# widen-then-multiply on integer lanes (#3462): one noinline probe per operand lane
+# widen-then-multiply on integer lanes: one noinline probe per operand lane
 # width, signedness and lane count, so the shapes that fuse into the target's
 # packed widening multiply and the ones that keep the extend-then-multiply path
 # each run on their own.

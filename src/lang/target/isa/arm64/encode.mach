@@ -4733,7 +4733,7 @@ test neon_convert__the_work_register_follows_the_plan_alias_property {
 
 # an offset past 2^31 reaches both halves of the adrp pair whole: the page
 # relocation and the low-12 one of an address, a load and a store
-test regression__far_symbol_offset_reaches_both_relocations {
+test far_symbol_offset__reaches_both_relocations {
     var st:    isa_encode.EncodeState;
     var alloc: A.Allocator;
     arm64_emit.tbuf(?st, ?alloc);

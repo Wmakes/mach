@@ -1,4 +1,4 @@
-# links probe.s, whose debug info the linker cannot merge (#4106)
+# links probe.s, whose debug info the linker cannot merge
 
 use std.runtime;
 

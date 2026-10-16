@@ -8,11 +8,11 @@ src = "src"
 # fixture still exercises the psABI hi/lo spelling, so its path must not move.
 work = "out/link/build"
 
-# lp64d, not lp64: since #2777/#2811 those are distinct vtables and `lp64` really
+# lp64d, not lp64: those are distinct vtables and `lp64` really
 # means soft-float. cc.sh builds this probe with `-mabi=lp64d`, so a target declaring
 # plain `lp64` would pass `scale`'s double in an integer register the callee never
 # reads - which this case reports as `scale=0 0 0`, the same believable-zero shape
-# #2797 produced for a different reason.
+# the pairing defect produced for a different reason.
 [target.riscv64-linux]
 isa = "riscv64"
 os  = "linux"

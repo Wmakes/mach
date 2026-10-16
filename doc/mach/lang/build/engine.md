@@ -42,20 +42,3 @@ oa: owns the returned outcome
 sink: where the unit's failures, diagnostics and phase rows are sent as they happen; nil for none
 ret: the outcome of that one unit, released with outcome.outcome_dnit, or an engine failure
 
-## fun set_link_config_input
-
-```mach
-pub fun set_link_config_input(p: *project.Project, out_path: *u8, product: *u8, out_kind: u32,
-ext: *target_of.ObjectInput, ext_count: u32,
-dynlibs: *target_of.DynLib, dynlib_count: u32,
-image: *build_emit.LoadedImageOptions) err[fail.Fail];
-```
-
-publish the link configuration of a project as the Q_LINK_CONFIG query input: the
-output path, product name, link kind, external inputs, dynamic libraries with their
-provider policy, and the loaded-image options, fingerprinted so an unchanged
-configuration keeps its revision and any change invalidates the link
-
-p: the project whose session holds the query db
-ret: ok, or the fingerprint or query failure
-

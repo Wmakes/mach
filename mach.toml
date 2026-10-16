@@ -58,15 +58,6 @@ targets = ["*"]
 link = []
 need = []
 
-# the test-only modules no compiler entry reaches; `mach test . -a tests` runs them
-[artifact.tests]
-kind = "static"
-entry = "lib/tests.mach"
-out = "{project.work}/lib/tests"
-targets = ["*"]
-link = []
-need = []
-
 [dep.std]
 git = "https://github.com/briar-systems/mach-std"
 ref = "branch/dev"

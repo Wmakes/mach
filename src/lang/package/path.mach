@@ -754,7 +754,7 @@ pub fun realize(s: *session.Session, root: str, id: str, src_dir: str, rep: *rep
 fun t_copy_in(a: *A.Allocator, src: str, dst: str, consumer: str) res[bool, fail.Fail] {
     var quiet: report.Report = report.discard(a);
     fin { report.dnit(?quiet); }
-    ret copy_tree(a, exec.Environment.inherit{}, src, dst, consumer, ?quiet);
+    ret copy_tree(a, git.scratch_environ(), src, dst, consumer, ?quiet);
 }
 
 # dst is `<consumer>/dep/<id>`, so the consumer is two levels up
@@ -775,7 +775,7 @@ test path_copy__a_git_source_copies_what_git_keeps {
     var a:      A.Allocator;
     val make_r: err[A.Error] = page.make(?a);
     if (sel make_r.err) { ret 1; }
-    val gi_r: res[git.Inspector, fail.Fail] = git.inspector_init(?a, exec.Environment.inherit{});
+    val gi_r: res[git.Inspector, fail.Fail] = git.inspector_init(?a, git.scratch_environ());
     if (sel gi_r.err) { ret 2; }
     var gi: git.Inspector = gi_r.ok;
     fin { git.inspector_dnit(?a, ?gi); }
@@ -850,7 +850,7 @@ test path_copy__a_source_under_an_enclosing_repository {
     var a:      A.Allocator;
     val make_r: err[A.Error] = page.make(?a);
     if (sel make_r.err) { ret 1; }
-    val gi_r: res[git.Inspector, fail.Fail] = git.inspector_init(?a, exec.Environment.inherit{});
+    val gi_r: res[git.Inspector, fail.Fail] = git.inspector_init(?a, git.scratch_environ());
     if (sel gi_r.err) { ret 2; }
     var gi: git.Inspector = gi_r.ok;
     fin { git.inspector_dnit(?a, ?gi); }

@@ -1,4 +1,4 @@
-# integer reductions the vectorizer takes with no float reassociation (#3345):
+# integer reductions the vectorizer takes with no float reassociation:
 # a plain sum, product and bitwise folds, a multiply-accumulate at the element
 # width and a widened scale-accumulate, and predicated updates, where a
 # compare picks the lanes that add, multiply or and their value in, both the
@@ -8,7 +8,7 @@
 # runs, and the -O0 and -O2 answers are each other's oracle as well as the C
 # reference's. a count of 3 per failed compare over 1400 bytes counts in byte
 # lanes past the 85 vector iterations one block holds, so it folds into the
-# wide accumulator inside the loop as well as after it (#4161).
+# wide accumulator inside the loop as well as after it.
 
 use corpus.lib.fold;
 

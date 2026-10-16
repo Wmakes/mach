@@ -1,7 +1,7 @@
 # a call carrying a 128-bit integer and a vector together: the integer is two
 # general registers (or memory, as windows returns it) and the vector one
 # vector register, so each piece the call lowering moves has its own lane
-# shape (#4177).
+# shape.
 
 use corpus.lib.fold;
 use corpus.lib.fold128;

@@ -1,4 +1,4 @@
-/* the C consumer of the shared-unwind case (mach #4047): walks its own stack
+/* the C consumer of the shared-unwind case: walks its own stack
  * from inside the library with libgcc's unwinder and reports the frame each
  * function was found in, innermost first */
 #include <stdio.h>

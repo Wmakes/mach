@@ -1,7 +1,7 @@
 # secrets the convention passes and returns through memory: a 32-byte vector, a
 # 40-byte record, a 16-byte record, a five-element array and a record holding a
 # secret array, each crossing an #[oblivious] call by value and coming back by
-# value (#4133). a stack-passed or indirectly passed argument and the hidden
+# value. a stack-passed or indirectly passed argument and the hidden
 # result pointer are public addresses to secret bytes, so every column that
 # checks constant time builds these; `chain` also passes each result straight on
 # as the next call's argument.

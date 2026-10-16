@@ -1,4 +1,4 @@
-# SPIR-V sampled-image fixture, written with declared handles (#2888)
+# SPIR-V sampled-image fixture, written with declared handles
 #
 # The subject is the handle: an `OpTypeImage` with its operands, the
 # `OpTypeSampledImage` over it, the `UniformConstant` variable bound at a descriptor

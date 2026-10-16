@@ -1,5 +1,5 @@
 /* division and remainder by constants at 8, 16, 32 and 64 bits, signed and
- * unsigned (#3350). generated: one noinline part per type. */
+ * unsigned. generated: one noinline part per type. */
 #include "corpus.h"
 
 static uint64_t divconst_u8(uint64_t seed) {

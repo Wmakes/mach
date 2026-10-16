@@ -1,4 +1,4 @@
-# narrow fixed stack-argument surface case (mach #2598)
+# narrow fixed stack-argument surface case
 #
 # Calls two real clang/gcc-built C functions whose fixed arguments overflow the
 # register file with a tail narrower than eight bytes, and asserts every argument

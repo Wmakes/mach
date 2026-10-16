@@ -8,7 +8,7 @@
 # rather than byte-identical. the deliberately over-page-aligned text section
 # proves ADDR32NB patching and PE framing use the same explicit image base, and
 # a comdat section per function lets the link collect qz_unused with its
-# associative .pdata and .xdata (#3410).
+# associative .pdata and .xdata.
 set -eu
 out=$1
 mkdir -p "$(dirname "$out")"

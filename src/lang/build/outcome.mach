@@ -20,69 +20,14 @@ use T: std.allocator.testing;
 use diagnostic_kind: mach.lang.diagnostic.kind;
 use mach.lang.fail;
 use catalog_artifact: mach.lang.target.catalog.artifact;
+use mach.lang.testrun;
 
-# the build engine's bookkeeping: what a build produced and recorded, and the
-# tally of how each test ran. failures are `fail.Fail`
-
-# how a test ran: passed, disagreed with what it checks, or could not be judged
-pub def GateResultKind: u8;
-
-pub val RESULT_PASS:                   GateResultKind = 0;
-pub val RESULT_SEMANTIC_MISMATCH:      GateResultKind = 1;
-val     RESULT_UNSUPPORTED_INPUT:      GateResultKind = 2;
-pub val RESULT_TOOL_UNAVAILABLE:       GateResultKind = 3;
-pub val RESULT_INFRASTRUCTURE_FAILURE: GateResultKind = 4;
-pub val RESULT_RESOURCE_EXHAUSTION:    GateResultKind = 5;
-val     RESULT_INVALID_INJECTION:      GateResultKind = 6;
-
-# what decided a result's kind
-pub def GateCause: u8;
-
-pub val CAUSE_PASS:                 GateCause = 0;
-#[testing]
-val     CAUSE_UNSUPPORTED:          GateCause = 1;
-#[testing]
-pub val CAUSE_TOOL_UNAVAILABLE:     GateCause = 2;
-#[testing]
-val     CAUSE_INVALID_INJECTOR:     GateCause = 3;
-pub val CAUSE_ORACLE_TIMEOUT:       GateCause = 4;
-#[testing]
-val     CAUSE_ORACLE_OUTPUT_LIMIT:  GateCause = 5;
-pub val CAUSE_ORACLE_SPAWN_FAILURE: GateCause = 6;
-pub val CAUSE_ORACLE_CAPTURE:       GateCause = 7;
-pub val CAUSE_ORACLE_SIGNAL:        GateCause = 8;
-pub val CAUSE_ORACLE_EXIT:          GateCause = 9;
-pub val CAUSE_INVALID_TERMINAL:     GateCause = 10;
-
-# one test's result; the tally owns a recorded result's detail
-pub rec GateResult {
-    kind:            GateResultKind;
-    cause:           GateCause;
-    detail_identity: str;
-}
-
-pub fun gate_result(kind: GateResultKind, cause: GateCause, detail_identity: str) GateResult {
-    ret GateResult{kind: kind, cause: cause, detail_identity: detail_identity};
-}
+# the build engine's bookkeeping: what a build produced and recorded. failures
+# are `fail.Fail`
 
 rec Artifact {
     kind: catalog_artifact.Kind;
     path: str;
-}
-
-# a collected test: its qualified name, where it is declared, the test object
-# that holds it, the dispatcher that runs it as `<exe> <idx>`, and the target and
-# profile that dispatcher was built for
-pub rec TestArtifact {
-    module:  *u8;
-    name:    *u8;
-    file:    *u8;
-    line:    u32;
-    object:  *u8;
-    exe:     *u8;
-    idx:     u32;
-    target:  *u8;
-    profile: *u8;
 }
 
 pub def BuildSeverity: u8;
@@ -103,7 +48,7 @@ pub val BUILD_INTERNAL:    BuildSeverity = 3;
 pub rec BuildOutcome {
     severity:  BuildSeverity;
     artifacts: Vector[Artifact];
-    tests:     Vector[TestArtifact];
+    tests:     Vector[testrun.TestArtifact];
 }
 
 # an empty outcome whose records `oa` will own
@@ -111,7 +56,7 @@ pub fun outcome_init(oa: *A.Allocator) BuildOutcome {
     var bo: BuildOutcome;
     bo.severity  = BUILD_OK;
     bo.artifacts = collections_vector.init[Artifact](oa);
-    bo.tests     = collections_vector.init[TestArtifact](oa);
+    bo.tests     = collections_vector.init[testrun.TestArtifact](oa);
     ret bo;
 }
 
@@ -119,7 +64,7 @@ fun free_artifact(a: *A.Allocator, art: *Artifact) {
     if (art.path != nil) { str_free(a, art.path); }
 }
 
-fun free_test_artifact(a: *A.Allocator, t: *TestArtifact) {
+fun free_test_artifact(a: *A.Allocator, t: *testrun.TestArtifact) {
     if (t.module != nil)  { str_free(a, t.module::str); }
     if (t.name != nil)    { str_free(a, t.name::str); }
     if (t.file != nil)    { str_free(a, t.file::str); }
@@ -145,7 +90,7 @@ pub fun outcome_dnit(bo: *BuildOutcome) {
         free_test_artifact(bo.tests.a, ?bo.tests.data[j]);
         j = j + 1;
     }
-    collections_vector.dnit[TestArtifact](?bo.tests);
+    collections_vector.dnit[testrun.TestArtifact](?bo.tests);
 
     bo.severity = BUILD_OK;
 }
@@ -171,22 +116,22 @@ pub fun record_artifact(bo: *BuildOutcome, kind: catalog_artifact.Kind, path: st
 }
 
 # t's text is borrowed; the outcome keeps its own copy. a nil text stays nil
-pub fun record_test(bo: *BuildOutcome, t: TestArtifact) err[A.Error] {
-    val a:     *A.Allocator = bo.tests.a;
-    var owned: TestArtifact = TestArtifact{line: t.line, idx: t.idx};
-    var moved: bool         = false;
+pub fun record_test(bo: *BuildOutcome, t: testrun.TestArtifact) err[A.Error] {
+    val a:     *A.Allocator         = bo.tests.a;
+    var owned: testrun.TestArtifact = testrun.TestArtifact{line: t.line, idx: t.idx};
+    var moved: bool                 = false;
     fin {
         if (!moved) { free_test_artifact(a, ?owned); }
     }
     val r: err[A.Error] = own_test(a, ?t, ?owned);
     if (sel r.err) { ret r; }
-    val push_r: res[usize, A.Error] = collections_vector.push[TestArtifact](?bo.tests, owned);
+    val push_r: res[usize, A.Error] = collections_vector.push[testrun.TestArtifact](?bo.tests, owned);
     if (sel push_r.err) { ret err[A.Error].err{push_r.err}; }
     moved = true;
     ret err[A.Error].ok{};
 }
 
-fun own_test(a: *A.Allocator, t: *TestArtifact, owned: *TestArtifact) err[A.Error] {
+fun own_test(a: *A.Allocator, t: *testrun.TestArtifact, owned: *testrun.TestArtifact) err[A.Error] {
     val module: err[A.Error] = dup_text(a, t.module, ?owned.module);
     if (sel module.err) { ret module; }
     val name: err[A.Error] = dup_text(a, t.name, ?owned.name);
@@ -228,7 +173,7 @@ pub fun fold_fail(bo: *BuildOutcome, f: *fail.Fail) {
 pub fun merge(agg: *BuildOutcome, unit: *BuildOutcome) err[A.Error] {
     val ar: res[usize, A.Error] = collections_vector.reserve[Artifact](?agg.artifacts, unit.artifacts.len);
     if (sel ar.err) { ret err[A.Error].err{ar.err}; }
-    val tr: res[usize, A.Error] = collections_vector.reserve[TestArtifact](?agg.tests, unit.tests.len);
+    val tr: res[usize, A.Error] = collections_vector.reserve[testrun.TestArtifact](?agg.tests, unit.tests.len);
     if (sel tr.err) { ret err[A.Error].err{tr.err}; }
 
     var i: usize = 0;
@@ -239,7 +184,7 @@ pub fun merge(agg: *BuildOutcome, unit: *BuildOutcome) err[A.Error] {
     }
     var j: usize = 0;
     for (j < unit.tests.len) {
-        val pr: res[usize, A.Error] = collections_vector.push[TestArtifact](?agg.tests, unit.tests.data[j]);
+        val pr: res[usize, A.Error] = collections_vector.push[testrun.TestArtifact](?agg.tests, unit.tests.data[j]);
         if (sel pr.err) { ret err[A.Error].err{pr.err}; }
         j = j + 1;
     }
@@ -247,82 +192,9 @@ pub fun merge(agg: *BuildOutcome, unit: *BuildOutcome) err[A.Error] {
     if (unit.severity > agg.severity) { agg.severity = unit.severity; }
 
     collections_vector.dnit[Artifact](?unit.artifacts);
-    collections_vector.dnit[TestArtifact](?unit.tests);
+    collections_vector.dnit[testrun.TestArtifact](?unit.tests);
     unit.severity = BUILD_OK;
     ret err[A.Error].ok{};
-}
-
-pub rec GateTally {
-    pass:                   u32;
-    semantic_mismatch:      u32;
-    unsupported_input:      u32;
-    tool_unavailable:       u32;
-    infrastructure_failure: u32;
-    resource_exhaustion:    u32;
-    invalid_injection:      u32;
-    results:                Vector[GateResult];
-}
-
-pub fun gate_tally_init(a: *A.Allocator) GateTally {
-    var gt: GateTally;
-    gt.pass                   = 0;
-    gt.semantic_mismatch      = 0;
-    gt.unsupported_input      = 0;
-    gt.tool_unavailable       = 0;
-    gt.infrastructure_failure = 0;
-    gt.resource_exhaustion    = 0;
-    gt.invalid_injection      = 0;
-    gt.results                = collections_vector.init[GateResult](a);
-    ret gt;
-}
-
-#[testing]
-pub fun gate_tally_dnit(gt: *GateTally) {
-    if (gt == nil) { ret; }
-    var i: usize = 0;
-    for (i < gt.results.len) {
-        val r: *GateResult = ?gt.results.data[i];
-        if (r.detail_identity != nil) { str_free(gt.results.a, r.detail_identity); }
-        i = i + 1;
-    }
-    collections_vector.dnit[GateResult](?gt.results);
-    gt.pass                   = 0;
-    gt.semantic_mismatch      = 0;
-    gt.unsupported_input      = 0;
-    gt.tool_unavailable       = 0;
-    gt.infrastructure_failure = 0;
-    gt.resource_exhaustion    = 0;
-    gt.invalid_injection      = 0;
-}
-
-pub fun record_gate(gt: *GateTally, a: *A.Allocator, r: GateResult) err[A.Error] {
-    var stored: GateResult = r;
-    if (r.detail_identity != nil) {
-        val dup_r: res[str, A.Error] = str_dup(a, r.detail_identity);
-        if (sel dup_r.err) { ret err[A.Error].err{dup_r.err}; }
-        stored.detail_identity = dup_r.ok;
-    }
-
-    val push_r: res[usize, A.Error] = collections_vector.push[GateResult](?gt.results, stored);
-    if (sel push_r.err) {
-        if (stored.detail_identity != nil) { str_free(a, stored.detail_identity); }
-        ret err[A.Error].err{push_r.err};
-    }
-
-    if (r.kind == RESULT_PASS)                   { gt.pass = gt.pass + 1; }
-    or (r.kind == RESULT_SEMANTIC_MISMATCH)      { gt.semantic_mismatch = gt.semantic_mismatch + 1; }
-    or (r.kind == RESULT_UNSUPPORTED_INPUT)      { gt.unsupported_input = gt.unsupported_input + 1; }
-    or (r.kind == RESULT_TOOL_UNAVAILABLE)       { gt.tool_unavailable = gt.tool_unavailable + 1; }
-    or (r.kind == RESULT_INFRASTRUCTURE_FAILURE) { gt.infrastructure_failure = gt.infrastructure_failure + 1; }
-    or (r.kind == RESULT_RESOURCE_EXHAUSTION)    { gt.resource_exhaustion = gt.resource_exhaustion + 1; }
-    or (r.kind == RESULT_INVALID_INJECTION)      { gt.invalid_injection = gt.invalid_injection + 1; }
-    ret err[A.Error].ok{};
-}
-
-#[testing]
-pub fun gate_tally_total(gt: *GateTally) u32 {
-    ret gt.pass + gt.semantic_mismatch + gt.unsupported_input + gt.tool_unavailable
-        + gt.infrastructure_failure + gt.resource_exhaustion + gt.invalid_injection;
 }
 
 #[testing]
@@ -366,7 +238,7 @@ test record_test__rolls_back_every_owned_string_on_failure {
         T.fail_at_ordinal(?failing, ordinal::usize);
 
         var bo: BuildOutcome = outcome_init(T.allocator_of(?failing));
-        val r:  err[A.Error] = record_test(?bo, TestArtifact{module: "mod", name: "mod#name", file: "file.mach", line: 7, object: "mod.test.o", exe: "exe", idx: 2});
+        val r:  err[A.Error] = record_test(?bo, testrun.TestArtifact{module: "mod", name: "mod#name", file: "file.mach", line: 7, object: "mod.test.o", exe: "exe", idx: 2});
         if (sel r.err && bo.tests.len == 0) { found = true; }
 
         outcome_dnit(?bo);
@@ -443,8 +315,8 @@ test merge__transfers_artifacts_and_tests_and_empties_the_source {
     if (t_refused(record_artifact(?agg, catalog_artifact.EXECUTABLE, "agg-existing"))) { ret 1; }
 
     var unit: BuildOutcome = outcome_init(?a);
-    if (t_refused(record_artifact(?unit, catalog_artifact.OBJECTS, "unit-object")))              { ret 2; }
-    if (t_refused(record_test(?unit, TestArtifact{module: "m", name: "l", file: "f", line: 1}))) { ret 3; }
+    if (t_refused(record_artifact(?unit, catalog_artifact.OBJECTS, "unit-object")))                      { ret 2; }
+    if (t_refused(record_test(?unit, testrun.TestArtifact{module: "m", name: "l", file: "f", line: 1}))) { ret 3; }
 
     if (t_refused(merge(?agg, ?unit))) { ret 4; }
 
@@ -478,55 +350,6 @@ test merge__reserve_failure_leaves_both_sides_untouched {
 
     outcome_dnit(?agg);
     outcome_dnit(?unit);
-    if (!t_owned_nothing(?failing)) { ret 1; }
-    ret 0;
-}
-
-test gate_tally__counts_and_retains_identity_for_every_kind {
-    var a: A.Allocator;
-    page.make(?a);
-    var gt: GateTally = gate_tally_init(?a);
-
-    if (t_refused(record_gate(?gt, ?a, gate_result(RESULT_PASS, CAUSE_PASS, nil))))                               { ret 1; }
-    if (t_refused(record_gate(?gt, ?a, gate_result(RESULT_SEMANTIC_MISMATCH, CAUSE_ORACLE_EXIT, "case-a"))))      { ret 2; }
-    if (t_refused(record_gate(?gt, ?a, gate_result(RESULT_UNSUPPORTED_INPUT, CAUSE_UNSUPPORTED, nil))))           { ret 3; }
-    if (t_refused(record_gate(?gt, ?a, gate_result(RESULT_TOOL_UNAVAILABLE, CAUSE_TOOL_UNAVAILABLE, nil))))       { ret 4; }
-    if (t_refused(record_gate(?gt, ?a, gate_result(RESULT_INFRASTRUCTURE_FAILURE, CAUSE_ORACLE_CAPTURE, nil))))   { ret 5; }
-    if (t_refused(record_gate(?gt, ?a, gate_result(RESULT_RESOURCE_EXHAUSTION, CAUSE_ORACLE_OUTPUT_LIMIT, nil)))) { ret 6; }
-    if (t_refused(record_gate(?gt, ?a, gate_result(RESULT_INVALID_INJECTION, CAUSE_INVALID_INJECTOR, nil))))      { ret 7; }
-
-    var bad: i32 = 0;
-    if (gt.pass != 1)                                              { bad = 1; }
-    or (gt.semantic_mismatch != 1)                                 { bad = 1; }
-    or (gt.unsupported_input != 1)                                 { bad = 1; }
-    or (gt.tool_unavailable != 1)                                  { bad = 1; }
-    or (gt.infrastructure_failure != 1)                            { bad = 1; }
-    or (gt.resource_exhaustion != 1)                               { bad = 1; }
-    or (gt.invalid_injection != 1)                                 { bad = 1; }
-    or (gate_tally_total(?gt) != 7)                                { bad = 1; }
-    or (gt.results.len != 7)                                       { bad = 1; }
-    or (!str_equals(gt.results.data[1].detail_identity, "case-a")) { bad = 1; }
-
-    gate_tally_dnit(?gt);
-    if (gate_tally_total(?gt) != 0 || gt.results.len != 0) { bad = 1; }
-
-    ret bad;
-}
-
-test record_gate__fails_closed_and_frees_the_duplicated_identity {
-    var failing: T.Testing;
-    val made:    err[A.Error] = T.make(?failing);
-    if (sel made.err) { ret 1; }
-    fin { T.dnit(?failing); }
-    T.fail_at_ordinal(?failing, 2::usize);
-
-    var gt: GateTally    = gate_tally_init(T.allocator_of(?failing));
-    val r:  err[A.Error] = record_gate(?gt, T.allocator_of(?failing),
-        gate_result(RESULT_SEMANTIC_MISMATCH, CAUSE_ORACLE_EXIT, "identity"));
-    if (sel r.ok)                                          { ret 1; }
-    if (gt.results.len != 0 || gate_tally_total(?gt) != 0) { ret 2; }
-
-    gate_tally_dnit(?gt);
     if (!t_owned_nothing(?failing)) { ret 1; }
     ret 0;
 }

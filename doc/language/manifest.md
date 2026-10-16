@@ -177,7 +177,7 @@ under the work directory when it is written from `{project.work}`.
 `dep/` along with every artifact output, for every cell `mach build --all` plans,
 dependency requirement cells included, so the build after it is a cold one that
 reuses nothing. It plans as that build does, so a manifest the build refuses is
-refused by `mach clean` too. A dependency not yet pulled was never built, so it
+refused by `mach clean` too. A dependency never pulled was never built, so it
 adds nothing to remove and `mach clean` does not refuse it. A step output may not
 name a path inside `obj/<project.id>/`, `.cache/` or `.stage/` (see
 [build steps](#stepname--build-steps)).

@@ -26,6 +26,7 @@ use std.types.result.res;
 use std.types.size.usize;
 use std.types.string.StrError;
 use std.types.string.str;
+use std.types.string.str_contains;
 use std.types.string.str_join;
 
 # one resolved module as far as typing took it
@@ -42,8 +43,9 @@ rec Typed {
     viewed:   bool;
 }
 
-# modules resolved by the resolve fixture, then typed and published in the same order unless
-# the load or a resolution rejected them, as a build stops there; it must not move once made
+# modules resolved by the resolve fixture, then typed in the same order unless the load
+# rejected them, as a build stops there, and published unless typing or the resolution
+# rejected one; it must not move once made
 #[testing]
 pub rec Checked {
     r:     resolve.Resolved;
@@ -186,7 +188,7 @@ fun type_one(c: *Checked, place: u32) err[fail.Fail] {
     t.sr    = sr.ok;
     t.typed = true;
     fail.merge(?c.typed, t.sr.status);
-    if (!sel t.sr.status.kind.accepted) { ret err[fail.Fail].ok{}; }
+    if (!sel t.sr.status.kind.accepted || !sel c.r.results[place].status.kind.accepted) { ret err[fail.Fail].ok{}; }
 
     var owner:   sema_surface.Owner                      = sema_surface.Owner{module: mid, stable: row.stable, path: row.name, ctx: ?m.ctx};
     var origins: sema_surface.Origins                    = sema_surface.Origins{ctx: c::ptr, read: origin_read};
@@ -208,7 +210,7 @@ pub fun checked_check(c: *Checked, src: *resolve.Sources) err[fail.Fail] {
     c.typed = fail.accepted();
     val front: err[fail.Fail] = resolve.resolved_check(?c.r, src);
     if (sel front.err)                 { ret front; }
-    if (!sel c.r.status.kind.accepted) { ret err[fail.Fail].ok{}; }
+    if (!sel c.r.loaded.kind.accepted) { ret err[fail.Fail].ok{}; }
     var i: u32 = 0;
     for (i < c.r.count) {
         c.mods[i].typed    = false;
@@ -315,6 +317,22 @@ fun probe_rejects_at(src: *resolve.Sources, needle: str, offset: usize, len: usi
     ret diagnostic.error_at(?c.r.s.diags, needle, offset, len);
 }
 
+# whether a diagnostic of any kind the front end reported over `src` says `needle`
+#[testing]
+pub fun probe_says(src: *resolve.Sources, needle: str) bool {
+    var c:    Checked;
+    val made: err[fail.Fail] = checked_check(?c, src);
+    fin { checked_dnit(?c); }
+    if (sel made.err) { ret false; }
+    var i: usize = 0;
+    for (i < diagnostic.len(?c.r.s.diags)) {
+        val d: opt[*diagnostic.Diagnostic] = diagnostic.get(?c.r.s.diags, i);
+        if (sel d.some && str_contains(d.some.message, needle)) { ret true; }
+        i = i + 1;
+    }
+    ret false;
+}
+
 # `head` followed by `tail`, for a source assembled from shared declarations; it is never
 # released, and a refused allocation ends the test
 #[testing]
@@ -371,6 +389,12 @@ pub fun sema_diag(text: str, needle: str) i32 {
 pub fun sema_note(text: str, needle: str) i32 {
     var src: resolve.Sources = resolve.sources("t.main", text);
     ret probe_diagnostic(?src, needle, true);
+}
+
+#[testing]
+pub fun sema_says(text: str, needle: str) bool {
+    var src: resolve.Sources = resolve.sources("t.main", text);
+    ret probe_says(?src, needle);
 }
 
 #[testing]

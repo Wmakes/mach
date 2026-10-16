@@ -1,4 +1,4 @@
-# tag transport against a C callee and a C caller (mach #3218)
+# tag transport against a C callee and a C caller
 #
 # Every function below is paired with one in probe.c of matching layout; see case.conf
 # for what the pairing proves. The observable is the value each side computed from the

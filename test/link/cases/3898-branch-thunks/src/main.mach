@@ -1,5 +1,5 @@
 # calls across 140 MB of code in both directions, through the thunks the link
-# places for them (#3898)
+# places for them
 
 use p: std.print;
 use std.runtime;

@@ -1,4 +1,4 @@
-# manifest-declared symbol claiming on PE (#2510). `Sleep` and `MessageBeep` carry
+# manifest-declared symbol claiming on PE. `Sleep` and `MessageBeep` carry
 # no #[library] decorator: they stand in for the Win32 references a vendored static
 # archive leaves undefined, which reach the link with no Mach declaration to
 # decorate. their providing DLL comes from the `symbols` key on each [link.X].

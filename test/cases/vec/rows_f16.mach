@@ -1,4 +1,4 @@
-# the vector rows at f16 lanes (#3802): one noinline probe per operation and
+# the vector rows at f16 lanes: one noinline probe per operation and
 # compare predicate of the retained vector vocabulary, so each cell runs through
 # its own body whether the target packs it, computes it in binary32 lanes or
 # expands it per lane. the operands reach ties, a subnormal, the largest finite

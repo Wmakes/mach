@@ -48,9 +48,7 @@ jobs:
           key: chain-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.github/bootstrap-chain') }}
       - run: bash .github/scripts/bootstrap.sh
       - name: unit suite
-        run: |
-          "$MACH" test .
-          "$MACH" test . -a tests
+        run: '"$MACH" test .'
 
   host-windows:
     name: host x86_64-windows
@@ -65,9 +63,7 @@ jobs:
           key: chain-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.github/bootstrap-chain') }}
       - run: bash .github/scripts/bootstrap.sh
       - name: unit suite
-        run: |
-          "$MACH" test .
-          "$MACH" test . -a tests
+        run: '"$MACH" test .'
 
   host-darwin:
     name: host ${{ matrix.target }}
@@ -88,9 +84,7 @@ jobs:
           key: chain-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.github/bootstrap-chain') }}
       - run: bash .github/scripts/bootstrap.sh
       - name: unit suite
-        run: |
-          "$MACH" test .
-          "$MACH" test . -a tests
+        run: '"$MACH" test .'
 
   release:
     name: release ${{ matrix.target }}
@@ -114,11 +108,7 @@ jobs:
           key: chain-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.github/bootstrap-chain') }}
       - run: bash .github/scripts/bootstrap.sh --profile release
       - name: unit suite
-        run: |
-          "$MACH" test .
-          "$MACH" test . --profile release
-          "$MACH" test . -a tests
-          "$MACH" test . -a tests --profile release
+        run: '"$MACH" test . --profile debug --profile release'
 
   gate:
     name: gate

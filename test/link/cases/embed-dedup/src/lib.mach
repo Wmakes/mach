@@ -1,5 +1,5 @@
 # a second module embedding byte-identical content. its declaration is the one
-# #2541 is about: within a module #2518 already shared a placement, but the object
+# this case is about: within a module they already share a placement, but the object
 # boundary lost the embed marker, so the final linker concatenated the bytes twice
 use case.libb;
 

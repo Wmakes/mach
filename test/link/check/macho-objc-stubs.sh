@@ -3,7 +3,7 @@
 
 # produce_macho_objc_stubs <engine> <leg> <binary>
 # A call of `_objc_msgSend$<selector>` is a selector stub the link synthesizes
-# (#4256), as ld64 does. Read the image back and follow the call the way the CPU
+#, as ld64 does. Read the image back and follow the call the way the CPU
 # would: the call must land on the first stub in __TEXT,__objc_stubs, the stub's
 # load must read a cell of __DATA,__objc_selrefs, that cell must hold the address
 # of the NUL-terminated selector in __RODATA,__objc_methname (the segment this linker gives read-only data), and the stub's jump

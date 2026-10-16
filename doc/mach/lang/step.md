@@ -15,12 +15,6 @@ run the declaring project's prerequisite steps for the configured cell, in its
 own directory. a dependency's cell runs them as a dependency step runs, homed
 in the root's output tree through an absolute `{project.work}`
 
-## fun dependency_out_home
-
-```mach
-pub fun dependency_out_home(alloc: *A.Allocator, project_root: str, root_out: str) res[str, fail.Fail];
-```
-
 ## rec Dependency
 
 ```mach

@@ -1,4 +1,4 @@
-# loops that shift, which the vectorizer widens by the count's form (#3853): a
+# loops that shift, which the vectorizer widens by the count's form: a
 # count the loop does not change is the uniform form, one scalar for every
 # lane, and a count read per element is the per-lane form. each loop runs over
 # counts inside the width, at it, past it and with a small low byte past it,

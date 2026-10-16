@@ -1,4 +1,4 @@
-# the 2-lane sibling of cast_lanes (#3493): every lane pair with a 64-bit side at two
+# the 2-lane sibling of cast_lanes: every lane pair with a 64-bit side at two
 # lanes, which fits one 128-bit register, so a target that packs a 64-bit conversion
 # runs it here. integer lanes run through each type's extremes, two lanes per probe.
 # float lanes the C mapping defines fold by value; NaN, the infinities and values

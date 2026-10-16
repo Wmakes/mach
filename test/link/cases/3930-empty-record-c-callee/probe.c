@@ -1,4 +1,4 @@
-/* C half of the empty record controls (mach #3930). Compiled at -O0 so every read
+/* C half of the empty record controls. Compiled at -O0 so every read
  * really happens. An empty struct is a GNU C extension of size 0, which is what
  * mach's `rec E { }` is. */
 #ifdef _WIN32

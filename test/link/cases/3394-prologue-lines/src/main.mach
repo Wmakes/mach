@@ -1,4 +1,4 @@
-# prologue line-attribution fixture (#3394)
+# prologue line-attribution fixture
 #
 # `main` calls one std function and nothing else, so at -O2 the inliner puts a
 # callee from another file at the top of its body. the check asserts that the

@@ -3,7 +3,7 @@
 # the debuginfo case verifies llvm-dwarfdump --verify over a MULTI-TU image: this
 # module plus main plus the std modules the program pulls give several compile units
 # in one .debug_info, exercising the cross-module .debug_abbrev / .debug_str dedup
-# (the #1708 / #2009 coverage) that a single-TU shape cannot reach.
+# (cross-unit coverage) that a single-TU shape cannot reach.
 
 use dbgcase.generic;
 

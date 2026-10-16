@@ -7,15 +7,31 @@ use diagnostic_kind: mach.lang.diagnostic.kind;
 #[testing]
 use mach.lang.fail;
 #[testing]
+use mach.lang.fe.ast;
+#[testing]
+use ast_decl: mach.lang.fe.ast.decl;
+#[testing]
+use ast_expr: mach.lang.fe.ast.expr;
+#[testing]
+use ast_id:   mach.lang.fe.ast.id;
+#[testing]
+use fe_load:  mach.lang.fe.load;
+#[testing]
 use mach.lang.fe.resolve;
 #[testing]
 use sema_checked: mach.lang.fe.sema.checked;
+#[testing]
+use mach.lang.fe.sema.infer;
 use sema_module:  mach.lang.fe.sema.module;
 use sema_product: mach.lang.fe.sema.product;
 #[testing]
 use mach.lang.fe.sema.recipe;
 #[testing]
+use mach.lang.fe.sema.variant;
+#[testing]
 use mach.lang.intern;
+#[testing]
+use mach.lang.layout;
 #[testing]
 use mach.lang.module;
 #[testing]
@@ -23,13 +39,29 @@ use mach.lang.session;
 #[testing]
 use lang_source: mach.lang.source;
 #[testing]
+use mach.lang.stack;
+#[testing]
 use mach.lang.type;
+#[testing]
+use mach.lang.type.query.deep;
+#[testing]
+use mach.lang.type.query.extent;
+#[testing]
+use mach.lang.type.query.subst;
 #[testing]
 use A: std.allocator;
 #[testing]
 use std.allocator.page;
 #[testing]
+use T: std.allocator.testing;
+#[testing]
+use std.collections.map;
+#[testing]
 use std_format: std.format;
+#[testing]
+use std.print;
+#[testing]
+use std.system.capability;
 #[testing]
 use std.text.string.str_free;
 #[testing]
@@ -1022,7 +1054,7 @@ fun t_chain_probe(n: u32, r0: str, tail: str, needle: str) i32 {
     ret sema_checked.sema_diag(text, needle);
 }
 
-test regression__uni_instance_walk_scales_with_the_type_graph {
+test uni_instance_walk__scales_with_the_type_graph {
     val n:    u32 = 320;
     val tail: str = "uni U[T] { a: T; b: u32; }\nfun e(p: *R319) u32 { ret 0; }\nfun main() i32 { ret 0; }\n";
     if (t_chain_probe(n, "a: ^u32;", tail, "") != 0)                                                 { ret 1; }
@@ -2092,7 +2124,7 @@ test secret_variadic__non_values_get_their_own_refusal {
     ret 0;
 }
 
-test regression__deep_secret_walk_scales_with_the_type_graph {
+test deep_secret_walk__scales_with_the_type_graph {
     val n:    u32 = 320;
     val tail: str = "fun e(p: *R319) ptr { ret p::ptr; }\nfun main() i32 { ret 0; }\n";
     if (t_chain_probe(n, "a: u32;", tail, "") != 0)                                        { ret 1; }
@@ -2155,7 +2187,7 @@ fun t_pair_probe(n: u32, a_last: str, b_last: str, tail: str, needle: str) i32 {
     ret sema_checked.sema_diag(text, needle);
 }
 
-test regression__secrecy_pair_walk_scales_with_the_type_graph {
+test secrecy_pair_walk__scales_with_the_type_graph {
     val n:     u32 = 200;
     val agree: str = "uni V { x: AP; y: BP; }\nfun main() i32 { var v: V; ret 0; }\n";
     val cast:  str = "fun f(p: *AP) *BP { ret p :~ *BP; }\nfun main() i32 { ret 0; }\n";
@@ -2315,9 +2347,1926 @@ test testing_mark__refuses_misplaced_or_malformed {
 
 # a gate the load decides on another module's constant, beside a positional case payload the
 # same ast resolves: the payload binds whatever decided the gate
-test regression__loaded_gate_leaves_a_case_payload_bound {
+test loaded_gate__leaves_a_case_payload_bound {
     val lib:  str = "pub def flag: u8;\npub val ON: flag = 1;\n";
     val main: str = "use t.lib;\n$if (lib.ON) { fun selected() i64 { ret 1; } }\ntag wrap[E]: u8 { err: E; ok; }\ntag Cause: u8 { missing; refused: i32; }\nfun check(key: i64) wrap[Cause] {\n    if (key == 0) { ret wrap[Cause].err{Cause.missing{}}; }\n    if (key < 0)  { ret wrap[Cause].err{Cause.refused{-1}}; }\n    ret wrap[Cause].ok{};\n}\nfun main() i64 { val r: wrap[Cause] = check(0); if (!sel r.err) { ret 1; } ret 0; }\n";
     if (!sema_checked.sema_clean2(main, lib)) { ret 1; }
+    ret 0;
+}
+
+test vector_sema__surface_typechecks {
+    if (!sema_checked.sema_clean("fun main() i32 {\n    val a: f32x4 = f32x4{1.0, 2.0, 3.0, 4.0};\n    val b: f32x4 = f32x4{5.0, 6.0, 7.0, 8.0};\n    val c: f32x4 = a + b;\n    val d: f32x4 = a * b;\n    val m: u32x4 = a == b;\n    val x: f32 = a[0];\n    var iv: i16x8 = i16x8{1, 2, 3, 4, 5, 6, 7, 8};\n    val iw: i16x8 = iv & iv;\n    val ip: i16x8 = iv * iv;\n    val iq: i16x8 = ~iv;\n    val im: u16x8 = iv == iv;\n    ret 0;\n}\n")) { ret 1; }
+    ret 0;
+}
+
+test vector_sema__diagnostics {
+    var bad: i32 = 0;
+
+    if (sema_checked.sema_diag("fun main() i32 { val v: f32x4 = f32x4{1.0, 2.0, 3.0}; ret 0; }\n",
+        "too few elements") != 0) { bad = 1; }
+    if (sema_checked.sema_diag("fun main() i32 { val v: f32x4 = f32x4{1.0, 2.0, 3.0, 4.0, 5.0}; ret 0; }\n",
+        "too many elements") != 0) { bad = 2; }
+    if (sema_checked.sema_diag("fun main(argc: i64, argv: **u8) i32 { val a: f32x4 = f32x4{1.0, 2.0, 3.0, 4.0}; val x: f32 = a[argc]; ret 0; }\n",
+        "dynamic lane index not supported") != 0) { bad = 3; }
+    if (sema_checked.sema_diag("fun main() i32 { val a: f32x4 = f32x4{1.0, 2.0, 3.0, 4.0}; val x: f32 = a[4]; ret 0; }\n",
+        "index 4 is out of bounds for `f32x4` of length 4") != 0) { bad = 4; }
+    if (sema_checked.sema_diag("fun main() i32 { val a: i32x4 = i32x4{1, 2, 3, 4}; val b: i32x4 = i32x4{1, 2, 3, 4}; val c: i32x4 = a % b; ret 0; }\n",
+        "vector `%` is not supported") != 0) { bad = 5; }
+    if (sema_checked.sema_diag("fun f(a: i32x4, b: u32x4) i32x4 { ret a / b; }\nfun main() i32 { ret 0; }\n",
+        "incompatible operand types") != 0) { bad = 6; }
+    if (sema_checked.sema_diag("fun main() i32 { val a: f32x4 = f32x4{1.0, 2.0, 3.0, 4.0}; val s: f32 = 1.0; val c: f32x4 = a + s; ret 0; }\n",
+        "mismatch") != 0) { bad = 7; }
+    if (sema_checked.sema_diag("fun main() i32 { val a: f32x4 = f32x4{1.0, 2.0, 3.0, 4.0}; val b: f32x4 = f32x4{1.0, 2.0, 3.0, 4.0}; if (a == b) { ret 1; } ret 0; }\n",
+        "vector is not a truth value") != 0) { bad = 8; }
+    if (sema_checked.sema_diag("rec Point { x: i64; y: i64; }\nfun main() i32 { val p: Point = Point{1, 2}; ret 0; }\n",
+        "positional-brace literal requires a vector type") != 0) { bad = 9; }
+    if (sema_checked.sema_diag("fun main() i32 { val a: f32x4 = f32x4{1.0, 2.0, 3.0, 4.0}; val x: f32 = a[-1]; ret 0; }\n",
+        "index -1 is out of bounds for `f32x4` of length 4") != 0) { bad = 10; }
+    if (sema_checked.sema_diag("fun main() i32 { val a: f32x4 = f32x4{1.0, 2.0, 3.0, 4.0}; val s: f32 = 1.0; val c: f32x4 = s + a; ret 0; }\n",
+        "mismatch") != 0) { bad = 11; }
+    ret bad;
+}
+
+# a vector shift is `vec << vec` or `vec >> vec` over one integer vector type,
+# each lane held to the scalar shift's constant count rule; a scalar count is
+# refused naming the literal that spells a uniform one
+test vector_sema__shift_diagnostics {
+    var bad: i32 = 0;
+    if (sema_checked.sema_diag("fun f(a: u32x4) u32x4 { ret a << 3; }\nfun main() i32 { ret 0; }\n",
+        "a vector shift count is a vector of the shifted type, never a scalar: write `u32x4{c, c, ...}` with the count in every lane for a uniform shift") != 0) { bad = 1; }
+    if (sema_checked.sema_diag("fun f(a: i16x8, n: i16) i16x8 { ret a >> n; }\nfun main() i32 { ret 0; }\n",
+        "write `i16x8{c, c, ...}`") != 0) { bad = 2; }
+    if (sema_checked.sema_diag("fun f(a: u8x16, n: u8) u8 { ret n << a; }\nfun main() i32 { ret 0; }\n",
+        "write `u8x16{c, c, ...}`") != 0) { bad = 3; }
+    if (sema_checked.sema_diag("fun f(a: i32x4, b: u32x4) i32x4 { ret a << b; }\nfun main() i32 { ret 0; }\n",
+        "incompatible operand types") != 0) { bad = 4; }
+    if (sema_checked.sema_diag("fun f(a: u32x4, b: u16x8) u32x4 { ret a >> b; }\nfun main() i32 { ret 0; }\n",
+        "incompatible operand types") != 0) { bad = 5; }
+    if (sema_checked.sema_diag("fun f(a: f32x4, b: f32x4) f32x4 { ret a << b; }\nfun main() i32 { ret 0; }\n",
+        "`f32x4` cannot be shifted: `<<` and `>>` apply to integer lanes") != 0) { bad = 6; }
+    if (sema_checked.sema_diag("fun f(a: u32x4) u32x4 { ret a << u32x4{1, 2, 32, 3}; }\nfun main() i32 { ret 0; }\n",
+        "shift count 32 is at least the width of `u32` (32 bits)") != 0) { bad = 7; }
+    if (sema_checked.sema_diag("fun f(a: i8x16) i8x16 { ret a >> i8x16{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -1}; }\nfun main() i32 { ret 0; }\n",
+        "shift count -1 is negative") != 0) { bad = 8; }
+    if (sema_checked.sema_diag("val K: u64 = 64;\nfun f(a: u64x2) u64x2 { ret a >> u64x2{K, K}; }\nfun main() i32 { ret 0; }\n",
+        "shift count 64 is at least the width of `u64` (64 bits)") != 0) { bad = 9; }
+    if (!sema_checked.sema_clean("fun f(a: i32x4, b: i32x4) i32x4 { ret a << b; }\nfun main() i32 { ret 0; }\n"))                                           { bad = 10; }
+    if (!sema_checked.sema_clean("fun f(a: u16x8, n: u16) u16x8 { ret a >> u16x8{n, n, n, n, n, n, n, n}; }\nfun main() i32 { ret 0; }\n"))                 { bad = 11; }
+    if (!sema_checked.sema_clean("fun f(a: i8x16) i8x16 { ret a >> i8x16{7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7}; }\nfun main() i32 { ret 0; }\n")) { bad = 12; }
+    if (!sema_checked.sema_clean("fun f(a: u64x2) u64x2 { ret a << u64x2{63, 0}; }\nfun main() i32 { ret 0; }\n"))                                          { bad = 13; }
+    ret bad;
+}
+
+# a type or generic parameter spelled as a vector type is refused whatever its kind or lane count;
+# a near-miss spelling and a value or function of that name are not
+test vector_type_name__declaration_rejected {
+    var bad:  i32 = 0;
+    val need: str = "cannot also name a type";
+
+    if (!sema_checked.sema_rejects_with("rec u8x16 { a: i64; }\nfun main() i64 { ret 0; }\n", need))               { bad = 1; }
+    if (!sema_checked.sema_rejects_with("uni i32x4 { a: i64; }\nfun main() i64 { ret 0; }\n", need))               { bad = 2; }
+    if (!sema_checked.sema_rejects_with("def f32x4: i64;\nfun main() i64 { ret 0; }\n", need))                     { bad = 3; }
+    if (!sema_checked.sema_rejects_with("rec f32x7 { a: i64; }\nfun main() i64 { ret 0; }\n", need))               { bad = 4; }
+    if (!sema_checked.sema_rejects_with("fun g[f32x4](x: i64) i64 { ret x; }\nfun main() i64 { ret 0; }\n", need)) { bad = 5; }
+    if (!sema_checked.sema_rejects_with("rec Box[u8x16] { a: i64; }\nfun main() i64 { ret 0; }\n", need))          { bad = 6; }
+
+    if (!sema_checked.sema_clean("rec f32x04 { a: i64; }\nfun main() i64 { ret 0; }\n")) { bad = 7; }
+    if (!sema_checked.sema_clean("def ptrx2: i64;\nfun main() i64 { ret 0; }\n"))        { bad = 8; }
+
+    if (!sema_checked.sema_clean("fun main() i64 { val f32x4: i64 = 7; ret f32x4; }\n"))           { bad = 9; }
+    if (!sema_checked.sema_clean("fun i32x4() i64 { ret 3; }\nfun main() i64 { ret i32x4(); }\n")) { bad = 10; }
+    if (!sema_checked.sema_clean("var u8x16: i64;\nfun main() i64 { ret u8x16; }\n"))              { bad = 11; }
+
+    ret bad;
+}
+
+# a declared type or generic parameter named after a primitive is refused; a value,
+# function or field of that name is not
+test builtin_type_name__declaration_rejected {
+    var bad:  i32 = 0;
+    val need: str = "is a built-in type";
+
+    if (!sema_checked.sema_rejects_with("rec f32 { a: i64; }\nfun main() i64 { ret 0; }\n", need))                 { bad = 1; }
+    if (!sema_checked.sema_rejects_with("uni u64 { a: i64; }\nfun main() i64 { ret 0; }\n", need))                 { bad = 2; }
+    if (!sema_checked.sema_rejects_with("def f16: u16;\nfun main() i64 { ret 0; }\n", need))                       { bad = 3; }
+    if (!sema_checked.sema_rejects_with("tag ptr: u8 { empty; }\nfun main() i64 { ret 0; }\n", need))              { bad = 4; }
+    if (!sema_checked.sema_rejects_with("fun id[i128](x: i64) i64 { ret x; }\nfun main() i64 { ret 0; }\n", need)) { bad = 5; }
+    if (!sema_checked.sema_rejects_with("rec Box[u8] { a: i64; }\nfun main() i64 { ret 0; }\n", need))             { bad = 6; }
+
+    if (!sema_checked.sema_clean("fun main() i64 { val f16: i64 = 7; ret f16; }\n"))                           { bad = 7; }
+    if (!sema_checked.sema_clean("fun u32() i64 { ret 3; }\nfun main() i64 { ret u32(); }\n"))                 { bad = 8; }
+    if (!sema_checked.sema_clean("rec P { f64: i64; }\nfun main() i64 { var p: P; p.f64 = 1; ret p.f64; }\n")) { bad = 9; }
+
+    ret bad;
+}
+
+# any lane count from 2 up is a vector form, odd or wider than the target, until it
+# cannot be represented; a near-miss spelling is an unresolved name
+test vector_type_form__bounds {
+    var bad: i32 = 0;
+
+    if (!sema_checked.sema_clean("fun main() i64 { var v: f32x7; ret 0; }\n"))  { bad = 1; }
+    if (!sema_checked.sema_clean("fun main() i64 { var v: f32x16; ret 0; }\n")) { bad = 2; }
+    if (!sema_checked.sema_clean("fun main() i64 { var v: f32x3; ret 0; }\n"))  { bad = 3; }
+    if (!sema_checked.sema_clean("fun main() i64 { var v: i8x9;  ret 0; }\n"))  { bad = 4; }
+    if (sema_checked.sema_rejects_with("fun main() i64 { var v: f32x8; ret 0; }\n",
+        "more than this target")) { bad = 5; }
+    if (sema_checked.sema_rejects_with("fun main() i64 { var v: f32x3; ret 0; }\n",
+        "narrower than this target")) { bad = 6; }
+
+    if (!sema_checked.sema_rejects_with("fun main() i64 { var v: u8x65536; ret 0; }\n",
+        "which the compiler cannot represent")) { bad = 7; }
+    if (!sema_checked.sema_rejects_with("fun main() i64 { var v: f32x1; ret 0; }\n",
+        "needs at least 2 lanes")) { bad = 8; }
+
+    if (!sema_checked.sema_rejects_with("fun main() i64 { var v: f32x04; ret 0; }\n",
+        "unresolved type name")) { bad = 9; }
+    if (!sema_checked.sema_rejects_with("fun main() i64 { var v: ptrx2; ret 0; }\n",
+        "unresolved type name")) { bad = 10; }
+
+    ret bad;
+}
+
+test packed__vector_field_rejected {
+    var bad:  i32 = 0;
+    val need: str = "a vector field is not allowed in a `#[packed]` record";
+
+    if (!sema_checked.sema_rejects_with("#[packed]\nrec P { a: u8; v: f32x4; }\nfun main() i64 { var r: P; ret 0; }\n", need))                    { bad = 1; }
+    if (!sema_checked.sema_rejects_with("#[packed]\nrec P { a: u8; v: [2]f32x4; }\nfun main() i64 { var r: P; ret 0; }\n", need))                 { bad = 2; }
+    if (!sema_checked.sema_rejects_with("rec In { v: f32x4; }\n#[packed]\nrec P { a: u8; i: In; }\nfun main() i64 { var r: P; ret 0; }\n", need)) { bad = 3; }
+
+    if (!sema_checked.sema_clean("rec In { v: f32x4; }\n#[packed]\nrec P { a: u8; i: *In; }\nfun main() i64 { var r: P; ret 0; }\n")) { bad = 4; }
+    if (!sema_checked.sema_clean("rec R { a: u8; v: f32x4; }\nfun main() i64 { var r: R; ret 0; }\n"))                                { bad = 5; }
+    if (!sema_checked.sema_clean("#[packed]\nrec P { a: u8; b: u32; c: f64; }\nfun main() i64 { var r: P; ret 0; }\n"))               { bad = 6; }
+    ret bad;
+}
+
+test volatile__decorator_rejections {
+    if (sema_checked.sema_diag("#[volatile(1)]\nrec V { reg: u32; }\nfun main() i64 { ret 0; }\n",
+        "`volatile` decorator takes no arguments") != 0) { ret 1; }
+    if (sema_checked.sema_diag("#[volatile]\nvar g: i64 = 0;\nfun main() i64 { ret 0; }\n",
+        "`volatile` decorator applies only to records, unions, and tags") != 0) { ret 2; }
+    if (sema_checked.sema_diag("#[volatile]\nfun f() {}\nfun main() i64 { ret 0; }\n",
+        "`volatile` decorator applies only to records, unions, and tags") != 0) { ret 3; }
+    if (!sema_checked.sema_clean("#[volatile]\nrec V { reg: u32; }\nfun main() i64 { var v: V; ret v.reg::i64; }\n"))     { ret 4; }
+    if (!sema_checked.sema_clean("#[volatile]\nuni U { a: u32; b: u32; }\nfun main() i64 { var u: U; ret u.a::i64; }\n")) { ret 5; }
+    ret 0;
+}
+
+# sema over the module `mid` of `r`, which imports nothing, reporting into `diags`
+#[testing]
+fun sema_resolved(r: *resolve.Resolved, mid: session.ModuleId, diags: *diagnostic.DiagnosticStore) res[sema_product.SemaResult, fail.Fail] {
+    var deps: sema_product.SemaDeps = sema_product.SemaDeps{};
+    deps.entries = nil;
+    deps.count   = 0;
+    val row: fe_load.Row = resolve.resolved_row(r, mid);
+    ret sema_module.sema(?r.s, row.syntax, ?r.results[resolve.resolved_place(r, mid)], ?deps, ?row.load.ctx, mid, diags);
+}
+
+# sema over the module `mid` of `r`, its result released
+#[testing]
+fun sema_released(r: *resolve.Resolved, mid: session.ModuleId, diags: *diagnostic.DiagnosticStore) res[bool, fail.Fail] {
+    val typed: res[sema_product.SemaResult, fail.Fail] = sema_resolved(r, mid, diags);
+    if (sel typed.err) { ret res[bool, fail.Fail].err{typed.err}; }
+    var result:   sema_product.SemaResult = typed.ok;
+    val accepted: bool                    = sel result.status.kind.accepted;
+    sema_product.result_dnit(?result);
+    ret res[bool, fail.Fail].ok{accepted};
+}
+
+# `src` loaded and resolved into `r`, released with resolve.resolved_dnit also when this fails;
+# false when the fixture failed or the resolution rejected the modules
+#[testing]
+fun resolved_ok(r: *resolve.Resolved, src: *resolve.Sources) bool {
+    val made: err[fail.Fail] = resolve.resolved_check(r, src);
+    ret sel made.ok && sel r.status.kind.accepted && r.count == src.count;
+}
+
+# refuse the `n`th request from now
+# ---
+# ret: the attempt count the ordinal counts from
+#[testing]
+fun refuse_after(t: *T.Testing, n: u32) usize {
+    val start: usize = T.attempt_count(t);
+    T.fail_at_ordinal(t, start + n::usize);
+    ret start;
+}
+
+# requests the backing itself refused: neither injected nor served
+#[testing]
+fun backing_refusals(t: *T.Testing) usize {
+    ret T.attempt_count(t) - T.refused_count(t) - T.total_count(t);
+}
+
+test alloc_failure__sema_neither_leaks_nor_half_commits_a_fix {
+    var t:      T.Testing;
+    val made_t: err[A.Error] = T.make(?t);
+    if (sel made_t.err) { ret 1; }
+    fin { T.dnit(?t); }
+    var r:   resolve.Resolved;
+    var src: resolve.Sources = resolve.sources("t.main", "fun main() i64 {\n    var x: i32 = 5;\n    var z: i32 = 3;\n    val y: i64 = x + z;\n    ret y;\n}\n");
+    val ok:  bool            = resolved_ok(?r, ?src);
+    fin { resolve.resolved_dnit(?r); }
+    if (!ok) { ret 2; }
+    val mid: session.ModuleId = r.order[0];
+
+    val real_alloc: *A.Allocator = r.s.alloc;
+    r.s.alloc = T.allocator_of(?t);
+    sema_released(?r, mid, ?r.s.diags);
+    r.s.alloc = real_alloc;
+    if (!T.clean(?t)) { ret 3; }
+    val total: u32 = T.attempt_count(?t)::u32;
+    if (total == 0)                         { ret 4; }
+    if (!diagnostic.has_errors(?r.s.diags)) { ret 5; }
+
+    var bad:     bool = false;
+    var fail_at: u32  = 1;
+    for (fail_at <= total) {
+        refuse_after(?t, fail_at);
+        val pre_len: usize = diagnostic.len(?r.s.diags);
+        r.s.alloc = T.allocator_of(?t);
+        sema_released(?r, mid, ?r.s.diags);
+        r.s.alloc = real_alloc;
+        T.clear_failure(?t);
+        if (!T.clean(?t)) {
+            bad = true;
+            print.print("LEAK at fail_at=");
+            print.u64(fail_at::u64);
+            print.print(" live_count=");
+            print.u64(T.live_count(?t)::u64);
+            print.print("\n");
+        }
+        val post_len: usize = diagnostic.len(?r.s.diags);
+        var di:       usize = pre_len;
+        for (di < post_len) {
+            val d_r: opt[*diagnostic.Diagnostic] = diagnostic.get(?r.s.diags, di);
+            if (sel d_r.some) {
+                val d: *diagnostic.Diagnostic = d_r.some;
+                if (d.fixes.len > 1) { bad = true; }
+                if (d.fixes.len == 1 && !diagnostic.fix_valid(?d.fixes.data[0])) {
+                    bad = true;
+                    print.print("HALF-COMMITTED FIX at fail_at=");
+                    print.u64(fail_at::u64);
+                    print.print("\n");
+                }
+            }
+            di = di + 1;
+        }
+        fail_at = fail_at + 1;
+    }
+
+    if (bad) { ret 6; }
+    ret 0;
+}
+
+test alloc_failure__report_marks_the_status_internal {
+    var backing: A.Allocator;
+    page.make(?backing);
+    var t:      T.Testing;
+    val made_t: err[A.Error] = T.make(?t);
+    if (sel made_t.err) { ret 1; }
+    fin { T.dnit(?t); }
+    var r:   resolve.Resolved;
+    var src: resolve.Sources = resolve.sources("t.main", "fun main() i64 { ret 0; }\n");
+    val ok:  bool            = resolved_ok(?r, ?src);
+    fin { resolve.resolved_dnit(?r); }
+    if (!ok)                               { ret 2; }
+    if (diagnostic.has_errors(?r.s.diags)) { ret 3; }
+
+    var view: sema_context.ModuleView = sema_context.ModuleView{};
+    view.a = resolve.resolved_row(?r, r.order[0]).syntax;
+    var sc: sema_context.SemaContext = sema_context.init(?r.s, ?r.s.diags, sema_context.Typing{}, view, sema_context.instance_none());
+
+    var span: lang_source.Span;
+    span.offset = 0;
+    span.len    = 0;
+
+    diagnostic.store_dnit(?r.s.diags);
+    r.s.diags = diagnostic.store_init(T.allocator_of(?t));
+    fin { r.s.diags = diagnostic.store_init(?backing); }
+    val base: usize = T.attempt_count(?t);
+    sema_context.report(?sc, diagnostic_kind.SECRET_NOT_OBLIVIOUS, span, "probe: allocator-starved diagnostic");
+    val total: u32 = (T.attempt_count(?t) - base)::u32;
+    diagnostic.store_dnit(?r.s.diags);
+    if (total == 0) { ret 4; }
+
+    var bad:     bool = false;
+    var fail_at: u32  = 1;
+    for (fail_at <= total) {
+        r.s.diags = diagnostic.store_init(T.allocator_of(?t));
+        refuse_after(?t, fail_at);
+        sc.status = fail.accepted();
+        sema_context.report(?sc, diagnostic_kind.SECRET_NOT_OBLIVIOUS, span, "probe: allocator-starved diagnostic");
+        T.clear_failure(?t);
+        if (!sel sc.status.kind.internal) { bad = true; }
+        diagnostic.store_dnit(?r.s.diags);
+        fail_at = fail_at + 1;
+    }
+
+    if (bad) { ret 5; }
+    ret 0;
+}
+
+test alloc_failure__real_error_still_rejects_the_module {
+    var backing: A.Allocator;
+    page.make(?backing);
+    var t:      T.Testing;
+    val made_t: err[A.Error] = T.make(?t);
+    if (sel made_t.err) { ret 1; }
+    fin { T.dnit(?t); }
+    var r:   resolve.Resolved;
+    var src: resolve.Sources = resolve.sources("t.main", "fun main() i64 { ret \"not an integer\"; }\n");
+    val ok:  bool            = resolved_ok(?r, ?src);
+    fin { resolve.resolved_dnit(?r); }
+    if (!ok) { ret 2; }
+    val mid: session.ModuleId = r.order[0];
+
+    diagnostic.store_dnit(?r.s.diags);
+    r.s.diags = diagnostic.store_init(T.allocator_of(?t));
+    fin { r.s.diags = diagnostic.store_init(?backing); }
+    val base: usize = T.attempt_count(?t);
+    sema_released(?r, mid, ?r.s.diags);
+    if (!diagnostic.has_errors(?r.s.diags)) { ret 3; }
+    val total: u32 = (T.attempt_count(?t) - base)::u32;
+    diagnostic.store_dnit(?r.s.diags);
+    if (total == 0) { ret 4; }
+
+    var bad:     bool = false;
+    var fail_at: u32  = 1;
+    for (fail_at <= total) {
+        r.s.diags = diagnostic.store_init(T.allocator_of(?t));
+        val start: usize                                   = refuse_after(?t, fail_at);
+        val typed: res[sema_product.SemaResult, fail.Fail] = sema_resolved(?r, mid, ?r.s.diags);
+        T.clear_failure(?t);
+        if (sel typed.ok) {
+            var result: sema_product.SemaResult = typed.ok;
+            if (sel result.status.kind.accepted || T.attempt_count(?t) - start >= fail_at::usize) { bad = true; }
+            sema_product.result_dnit(?result);
+        }
+        or (sel typed.err) {
+            if (!fail.is_message(typed.err)) { bad = true; }
+        }
+        diagnostic.store_dnit(?r.s.diags);
+        fail_at = fail_at + 1;
+    }
+
+    if (bad) { ret 5; }
+    ret 0;
+}
+
+# zero when sema over `text` rejects the module at every allocation the layout registry
+# refuses, and accepts it with none refused
+#[testing]
+fun registration_sweep(text: str) i32 {
+    var backing: A.Allocator;
+    page.make(?backing);
+    var r:   resolve.Resolved;
+    var src: resolve.Sources = resolve.sources("t.main", text);
+    val ok:  bool            = resolved_ok(?r, ?src);
+    fin { resolve.resolved_dnit(?r); }
+    if (!ok) { ret 1; }
+    val mid:    session.ModuleId                       = r.order[0];
+    val target: *map.Map[type.TypeId, type.Decoration] = ?r.s.types.fields.decorations;
+
+    map.dnit[type.TypeId, type.Decoration](target);
+    var t:      T.Testing;
+    val made_t: err[A.Error] = T.make(?t);
+    if (sel made_t.err) {
+        @target = map.init[type.TypeId, type.Decoration](?backing);
+        ret 2;
+    }
+    fin { T.dnit(?t); }
+    @target = map.init[type.TypeId, type.Decoration](T.allocator_of(?t));
+    fin {
+        map.dnit[type.TypeId, type.Decoration](target);
+        @target = map.init[type.TypeId, type.Decoration](?backing);
+    }
+    val base: usize = T.attempt_count(?t);
+    sema_released(?r, mid, ?r.s.diags);
+    val total: u32 = (T.attempt_count(?t) - base)::u32;
+    if (total == 0 || diagnostic.has_errors(?r.s.diags)) { ret 3; }
+
+    var bad:     i32 = 0;
+    var fail_at: u32 = 1;
+    for (fail_at <= total) {
+        diagnostic.store_dnit(?r.s.diags);
+        r.s.diags = diagnostic.store_init(?backing);
+        map.dnit[type.TypeId, type.Decoration](target);
+        @target = map.init[type.TypeId, type.Decoration](T.allocator_of(?t));
+        val start: usize                                   = refuse_after(?t, fail_at);
+        val typed: res[sema_product.SemaResult, fail.Fail] = sema_resolved(?r, mid, ?r.s.diags);
+        T.clear_failure(?t);
+        if (sel typed.ok) {
+            var result: sema_product.SemaResult = typed.ok;
+            if (sel result.status.kind.accepted || T.attempt_count(?t) - start >= fail_at::usize) { bad = 4; }
+            sema_product.result_dnit(?result);
+        }
+        fail_at = fail_at + 1;
+    }
+    ret bad;
+}
+
+test alloc_failure__layout_registration_rejects_the_module {
+    if (registration_sweep("#[volatile]\nrec V { reg: u32; }\nfun main() i64 {\n    var v: V;\n    ret v.reg::i64;\n}\n") != 0)  { ret 1; }
+    if (registration_sweep("#[packed]\nrec P { a: u8; b: u32; }\nfun main() i64 {\n    var p: P;\n    ret p.b::i64;\n}\n") != 0) { ret 2; }
+    if (registration_sweep("#[align(16)]\nrec Q { x: u32; }\nfun main() i64 {\n    var q: Q;\n    ret q.x::i64;\n}\n") != 0)     { ret 3; }
+    ret 0;
+}
+
+# a generic parameter of the same name and owner kind is a distinct type in each module declaring it
+test generic_param_type_for__respects_the_declaring_module {
+    var r:   resolve.Resolved;
+    var src: resolve.Sources = sema_checked.sema_pair("use t.lib;\nfun same[T](x: T) T { ret x; }\nfun main() i32 { ret 0; }\n", "pub fun same[T](x: T) T { ret x; }\n");
+    val ok:  bool            = resolved_ok(?r, ?src);
+    fin { resolve.resolved_dnit(?r); }
+    if (!ok) { ret 1; }
+    val name_r: res[intern.StrId, A.Error] = intern.add(?r.s.interner, "T");
+    if (sel name_r.err) { ret 2; }
+    var types: [2]type.TypeId;
+    var i:     u32 = 0;
+    for (i < 2) {
+        val mid:  session.ModuleId        = r.order[i];
+        val row:  fe_load.Row             = resolve.resolved_row(?r, mid);
+        var view: sema_context.ModuleView = sema_context.ModuleView{};
+        view.a          = row.syntax;
+        view.own_module = mid;
+        var sc:  sema_context.SemaContext = sema_context.init(?r.s, ?r.s.diags, sema_context.Typing{}, view, sema_context.instance_none());
+        var sym: resolve.Symbol;
+        sym.name   = name_r.ok;
+        sym.origin = row.stable;
+        sym.slot   = 0;
+        sym.decl   = ast_id.DECL_NIL;
+        var di: usize = 0;
+        for (di < row.syntax.decls.len) {
+            if (row.syntax.decls.data[di].kind == ast_decl.DECL_KIND_FUN && row.syntax.decls.data[di].data.fun_.generics_len == 1) {
+                sym.decl = ast_id.decl(di::u32);
+            }
+            di = di + 1;
+        }
+        if (ast_id.decl_is_nil(sym.decl)) { ret 3; }
+        types[i] = sema_context.generic_param_type_for(?sc, ?sym);
+        if (type.is_error(types[i]))                                              { ret 4; }
+        if (!sel sc.status.kind.accepted)                                         { ret 5; }
+        if (!type.same(sema_context.generic_param_type_for(?sc, ?sym), types[i])) { ret 6; }
+        i = i + 1;
+    }
+    if (type.same(types[0], types[1])) { ret 7; }
+    ret 0;
+}
+
+# whether a diagnostic of any kind over `text` as `t.main`, read for the logical spirv
+# target, says `needle`
+#[testing]
+fun spirv_says(text: str, needle: str) bool {
+    var src: resolve.Sources = resolve.sources("t.main", text);
+    resolve.sources_target(?src, "spirv", "freestanding", "spirv", nil, 0);
+    ret sema_checked.probe_says(?src, needle);
+}
+
+# zero when sema over `text` as `t.main` never accepts it silently at any allocation it
+# refuses, and never reports what says `forbidden` when that is not empty
+#[testing]
+fun alloc_sweep(text: str, forbidden: str) i32 {
+    var t:      T.Testing;
+    val made_t: err[A.Error] = T.make(?t);
+    if (sel made_t.err) { ret 1; }
+    fin { T.dnit(?t); }
+    var r:   resolve.Resolved;
+    var src: resolve.Sources = resolve.sources("t.main", text);
+    val ok:  bool            = resolved_ok(?r, ?src);
+    fin { resolve.resolved_dnit(?r); }
+    if (!ok) { ret 2; }
+    val mid: session.ModuleId = r.order[0];
+
+    val real_alloc: *A.Allocator = r.s.alloc;
+    r.s.alloc = T.allocator_of(?t);
+    val pre0: usize = diagnostic.len(?r.s.diags);
+    sema_released(?r, mid, ?r.s.diags);
+    r.s.alloc = real_alloc;
+    val total: u32 = T.attempt_count(?t)::u32;
+    if (backing_refusals(?t) != 0) {
+        print.print("APPARATUS: the backing allocator failed during the baseline run; the sweep cannot tell a real failure from the injected one\n");
+        ret 3;
+    }
+    if (total == 0) {
+        print.print("APPARATUS: the baseline run made no allocations\n");
+        ret 4;
+    }
+    if (diagnostic.len(?r.s.diags) == pre0) {
+        print.print("APPARATUS: the baseline run reported nothing, so the fixture proves nothing\n");
+        ret 5;
+    }
+
+    var bad:     i32 = 0;
+    var fail_at: u32 = 1;
+    for (fail_at <= total) {
+        refuse_after(?t, fail_at);
+        # each run reports into its own store: the session's store keeps one copy
+        # of a report, so a repeat run would add nothing to it
+        var run: diagnostic.DiagnosticStore = diagnostic.store_init(real_alloc);
+        r.s.alloc = T.allocator_of(?t);
+        val typed:    res[bool, fail.Fail] = sema_released(?r, mid, ?run);
+        val accepted: bool                 = sel typed.ok;
+        r.s.alloc = real_alloc;
+        T.clear_failure(?t);
+        if (backing_refusals(?t) != 0) {
+            bad = 6;
+            print.print("APPARATUS: the backing allocator failed at fail_at=");
+            print.u64(fail_at::u64);
+            print.print("; this is memory pressure, not a skipped check\n");
+        }
+        or (accepted && diagnostic.len(?run) == 0) {
+            bad = 7;
+            print.print("SKIPPED CHECK at fail_at=");
+            print.u64(fail_at::u64);
+            print.print("\n");
+        }
+        if (str_len(forbidden) > 0) {
+            var di: usize = 0;
+            for (di < diagnostic.len(?run)) {
+                val d_r: opt[*diagnostic.Diagnostic] = diagnostic.get(?run, di);
+                if (sel d_r.some && str_contains(d_r.some.message, forbidden)) {
+                    bad = 8;
+                    print.print("FORBIDDEN DIAGNOSTIC at fail_at=");
+                    print.u64(fail_at::u64);
+                    print.print("\n");
+                }
+                di = di + 1;
+            }
+        }
+        diagnostic.store_dnit(?run);
+        fail_at = fail_at + 1;
+    }
+    ret bad;
+}
+
+test alloc_failure__never_skips_a_type_check {
+    if (alloc_sweep("rec N { self: N; }\nfun main() i64 { ret 0; }\n", "") != 0)         { ret 1; }
+    if (alloc_sweep("uni U { a: ^u32; b: u32; }\nfun main() i64 { ret 0; }\n", "") != 0) { ret 2; }
+    ret 0;
+}
+
+test alloc_failure__uni_secrecy_scratch_never_degrades_the_walk {
+    ret alloc_sweep("rec V { u: U; }\nuni U { x: V; y: ^u32; }\nfun main() i64 { ret 0; }\n", "union variants must agree on secrecy");
+}
+
+test alloc_failure__diagnostic_store_is_internal {
+    var backing: A.Allocator;
+    page.make(?backing);
+    var r:   resolve.Resolved;
+    var src: resolve.Sources = resolve.sources("t.main", "rec N { self: N; }\nfun main() i64 { ret 0; }\n");
+    val ok:  bool            = resolved_ok(?r, ?src);
+    fin { resolve.resolved_dnit(?r); }
+    if (!ok) { ret 1; }
+    val mid: session.ModuleId = r.order[0];
+
+    var bad:          i32  = 0;
+    var saw_internal: bool = false;
+    var ordinal:      u64  = 1;
+    for (ordinal <= 6) {
+        var failing: T.Testing;
+        val make_2:  err[A.Error] = T.make(?failing);
+        if (sel make_2.err) { ret 2; }
+        T.fail_at_ordinal(?failing, ordinal::usize);
+
+        diagnostic.store_dnit(?r.s.diags);
+        r.s.diags = diagnostic.store_init(T.allocator_of(?failing));
+        val typed: res[bool, fail.Fail] = sema_released(?r, mid, ?r.s.diags);
+        if (sel typed.err) {
+            saw_internal = true;
+            val f: fail.Fail = typed.err;
+            if (!sel f.message)      { bad = 3; }
+            if (!fail.is_message(f)) { bad = 4; }
+        }
+        or (T.attempt_count(?failing) >= ordinal::usize) { bad = 100 + ordinal::i32; }
+
+        diagnostic.store_dnit(?r.s.diags);
+        r.s.diags = diagnostic.store_init(?backing);
+        if (T.tracking_exhausted(?failing))                           { bad = 5; }
+        if (T.leaked(?failing) || T.double_free_count(?failing) != 0) { bad = 6; }
+        T.dnit(?failing);
+        ordinal = ordinal + 1;
+    }
+
+    if (!saw_internal) { bad = 7; }
+    ret bad;
+}
+
+#[testing]
+fun substitution_internal_after_rejection(reject_first: bool, silent: bool) i32 {
+    var backing: A.Allocator;
+    page.make(?backing);
+    val sr: res[session.Session, fail.Fail] = session.init(?backing);
+    if (sel sr.err) { ret 2; }
+    var s: session.Session = sr.ok;
+    fin { session.dnit(?s); }
+    val gp: res[type.TypeId, fail.Fail] = type.intern_generic_param(?s.types, intern.STR_NIL,
+        type.TypeOwner{module: module.stable_id(0), file: lang_source.file_id(1)}, intern.str_id(0), type.TYPE_FUN, 0);
+    if (sel gp.err) { ret 3; }
+    var params: [1]type.TypeId;
+    params[0] = gp.ok;
+    val signature: res[type.TypeId, fail.Fail] = type.intern_function(?s.types, params[0], ?params[0], 1, false);
+    if (sel signature.err) { ret 4; }
+    val concrete: opt[type.TypeId] = type.prim(?s.types, type.TYPE_U32);
+    if (!sel concrete.some) { ret 5; }
+    var args: [1]type.TypeId;
+    args[0] = concrete.some;
+    var a: ast.Ast = ast.init(?backing, lang_source.FILE_NIL);
+    fin { ast.dnit(?a); }
+    var view: sema_context.ModuleView = sema_context.ModuleView{};
+    view.a = ?a;
+    var typing: sema_context.Typing = sema_context.Typing{};
+    typing.subst_fn = subst.substitute;
+    var instance: sema_context.Instance = sema_context.instance_none();
+    instance.subst       = ?args[0];
+    instance.subst_len   = 1;
+    instance.subst_owner = type.GenericOwner{owner: type.TypeOwner{module: module.stable_id(0), file: lang_source.file_id(1)}, name: intern.str_id(0), kind: type.TYPE_FUN};
+    var sc: sema_context.SemaContext = sema_context.init(?s, ?s.diags, typing, view, instance);
+    if (reject_first) {
+        var span: lang_source.Span;
+        span.offset = 0;
+        span.len    = 1;
+        sema_context.report(?sc, diagnostic_kind.SECRET_NOT_OBLIVIOUS, span, "invalid user expression before substitution");
+        if (!sel sc.status.kind.rejected) { ret 6; }
+    }
+    var refusing: T.Testing;
+    val make_2:   err[A.Error] = T.make(?refusing);
+    if (sel make_2.err) { ret 7; }
+    fin { T.dnit(?refusing); }
+    T.fail_at_ordinal(?refusing, 1);
+    sc.walk.silent = silent;
+    s.types.a      = T.allocator_of(?refusing);
+    val substituted: type.TypeId = sema_context.apply_subst(?sc, signature.ok);
+    s.types.a = ?backing;
+    if (!type.is_error(substituted))                                { ret 8; }
+    if (!sel sc.status.kind.internal)                               { ret 9; }
+    if (!fail.is_message(fail.phase_failure(sc.status)))            { ret 10; }
+    if (T.leaked(?refusing) || T.double_free_count(?refusing) != 0) { ret 11; }
+    if (!str_equals(fail.status_text(sc.status), "out of memory"))  { ret 12; }
+    if (T.attempt_count(?refusing) != 1)                            { ret 13; }
+    ret 0;
+}
+
+test alloc_failure__substitution_is_internal {
+    if (substitution_internal_after_rejection(true, false) != 0)  { ret 1; }
+    if (substitution_internal_after_rejection(false, false) != 0) { ret 2; }
+    if (substitution_internal_after_rejection(false, true) != 0)  { ret 3; }
+    ret 0;
+}
+
+# a chain of arrays each over the one before, over a secret, checked as an annotation at
+# every level: the shared walk visits each type once, not once per annotation reaching it
+test uni_secrecy__annotations_share_one_walk {
+    var backing: A.Allocator;
+    page.make(?backing);
+    val sr: res[session.Session, fail.Fail] = session.init(?backing);
+    if (sel sr.err) { ret 2; }
+    var s: session.Session = sr.ok;
+    fin { session.dnit(?s); }
+    val leaf: opt[type.TypeId] = type.prim(?s.types, type.TYPE_U32);
+    if (!sel leaf.some) { ret 3; }
+    val secret: res[type.TypeId, fail.Fail] = type.intern_secret(?s.types, leaf.some);
+    if (sel secret.err) { ret 4; }
+    var a: ast.Ast = ast.init(?backing, lang_source.FILE_NIL);
+    fin { ast.dnit(?a); }
+    var view: sema_context.ModuleView = sema_context.ModuleView{};
+    view.a = ?a;
+    var typing: sema_context.Typing = sema_context.Typing{};
+    typing.has_secret = true;
+    var sc:   sema_context.SemaContext = sema_context.init(?s, ?s.diags, typing, view, sema_context.instance_none());
+    var walk: sema_context.SecrecyWalk;
+    variant.walk_open(?sc, ?walk);
+    if (!walk.open) { ret 5; }
+    var span: lang_source.Span;
+    span.offset = 0;
+    span.len    = 1;
+    val depth: u32         = 2000;
+    var at:    type.TypeId = secret.ok;
+    var i:     u32         = 0;
+    for (i < depth) {
+        val next: res[type.TypeId, fail.Fail] = type.intern_array(?s.types, at, 1);
+        if (sel next.err) { ret 6; }
+        at = next.ok;
+        variant.check_type(?sc, ?walk, at, span);
+        i = i + 1;
+    }
+    variant.walk_close(?sc, ?walk);
+    if (!sel sc.status.kind.accepted) { ret 7; }
+    # every array, the secret and its base
+    if (walk.visits != depth + 2) { ret 8; }
+    ret 0;
+}
+
+test alloc_failure__primitive_type_scan_is_internal {
+    var backing: A.Allocator;
+    page.make(?backing);
+    val sr: res[session.Session, fail.Fail] = session.init(?backing);
+    if (sel sr.err) { ret 2; }
+    var s: session.Session = sr.ok;
+    fin { session.dnit(?s); }
+    val p: opt[type.TypeId] = type.prim(?s.types, type.TYPE_U32);
+    if (!sel p.some)                   { ret 3; }
+    if (s.types.scans.visits_cap != 0) { ret 4; }
+    var t:      T.Testing;
+    val make_2: err[A.Error] = T.make(?t);
+    if (sel make_2.err) { ret 5; }
+    fin { T.dnit(?t); }
+    T.fail_at_ordinal(?t, 1);
+    val original: *A.Allocator = s.types.a;
+    s.types.a = T.allocator_of(?t);
+    val r: res[bool, fail.Fail] = deep.contains_secret(?s, p.some);
+    s.types.a = original;
+    if (sel r.ok)                                                                 { ret 6; }
+    if (!str_equals(fail.describe(r.err), "out of memory"))                       { ret 7; }
+    if (T.attempt_count(?t) != 1 || T.leaked(?t) || T.double_free_count(?t) != 0) { ret 8; }
+    ret 0;
+}
+
+#[testing]
+fun binding_outcome(mode: u8) i32 {
+    var r:    resolve.Resolved;
+    var src:  resolve.Sources = resolve.sources("t.main", "fun main() i64 { val live: i64 = 1; ret missing + live; }\n");
+    val made: err[fail.Fail]  = resolve.resolved_check(?r, ?src);
+    fin { resolve.resolved_dnit(?r); }
+    if (sel made.err || r.count != 1) { ret 1; }
+    val rr: *resolve.ResolveResult = ?r.results[0];
+    if (!sel rr.status.kind.rejected) { ret 2; }
+    val syntax:   *ast.Ast      = resolve.resolved_row(?r, r.order[0]).syntax;
+    var rejected: ast_id.ExprId = ast_id.EXPR_NIL;
+    var bound:    ast_id.ExprId = ast_id.EXPR_NIL;
+    var i:        u32           = 0;
+    for (i < rr.expr_count) {
+        val eo: opt[*ast_expr.Expr] = ast.get_expr(syntax, i::ast_id.ExprId);
+        if (sel eo.some) {
+            if (eo.some.kind == ast_expr.EXPR_KIND_IDENT) {
+                if (resolve.symbol_is_rejected(rr.expr_resolved[i]))             { rejected = i::ast_id.ExprId; }
+                or (resolve.symbol_index(rr.expr_resolved[i]) < rr.symbol_count) { bound = i::ast_id.ExprId; }
+            }
+        }
+        i = i + 1;
+    }
+    if (ast_id.expr_is_nil(rejected) || ast_id.expr_is_nil(bound)) { ret 3; }
+    var view: sema_context.ModuleView = sema_context.ModuleView{};
+    view.a  = syntax;
+    view.rr = rr;
+    var sc: sema_context.SemaContext = sema_context.init(?r.s, ?r.s.diags, sema_context.Typing{}, view, sema_context.instance_none());
+    sc.walk.silent = mode == 2;
+    var selected: ast_id.ExprId = rejected;
+    if (mode != 0) {
+        rr.expr_resolved[ast_id.expr_index(bound)] = resolve.SYMBOL_NIL;
+        selected                                   = bound;
+        if (mode == 1) { fail.reject(?sc.status); }
+    }
+    if (!type.is_error(infer.infer_expr(?sc, selected))) { ret 4; }
+    if (mode == 0 && !sel sc.status.kind.rejected)       { ret 5; }
+    if (mode == 1 && (!sel sc.status.kind.internal
+        || !str_equals(fail.status_text(sc.status), "internal: this identifier reached type inference unbound; the name resolver neither bound it nor reported it"))) { ret 6; }
+    if (mode == 2 && !sel sc.status.kind.accepted) { ret 7; }
+    ret 0;
+}
+
+# a resolver-rejected identifier keeps its source outcome, an unvisited one is
+# internal after an unrelated rejection and deferred during a gate probe
+test unbound_identifier__outcome_by_cause {
+    if (binding_outcome(0) != 0) { ret 1; }
+    if (binding_outcome(1) != 0) { ret 2; }
+    if (binding_outcome(2) != 0) { ret 3; }
+    ret 0;
+}
+
+# the nominal type named `name` in `s`, an instance before its declaration
+#[testing]
+fun nominal_named(s: *session.Session, name: str) opt[type.TypeId] {
+    val ir: res[intern.StrId, A.Error] = intern.add(?s.interner, name);
+    if (sel ir.err) { ret opt[type.TypeId].none{}; }
+    val want:     intern.StrId = ir.ok;
+    val type_cap: u32          = type.type_count(?s.types);
+    var i:        u32          = 0;
+    for (i < type_cap) {
+        val tid: type.TypeId     = i::type.TypeId;
+        val ot:  opt[*type.Type] = type.get(?s.types, tid);
+        if (sel ot.some && ot.some.kind == type.TYPE_INSTANCE) {
+            val on: opt[*type.Type] = type.get(?s.types, type.aggregate_nominal(?s.types, tid));
+            if (sel on.some && intern.str_same(on.some.data.nominal.name, want)) { ret opt[type.TypeId].some{tid}; }
+        }
+        i = i + 1;
+    }
+    i = 0;
+    for (i < type_cap) {
+        val ot: opt[*type.Type] = type.get(?s.types, i::type.TypeId);
+        if (sel ot.some) {
+            val k: type.TypeKind = ot.some.kind;
+            if ((k == type.TYPE_REC || k == type.TYPE_UNI || k == type.TYPE_TAG) && intern.str_same(ot.some.data.nominal.name, want)) { ret opt[type.TypeId].some{i::type.TypeId}; }
+        }
+        i = i + 1;
+    }
+    ret opt[type.TypeId].none{};
+}
+
+# zero when typing `text` measures its nominal `name` at `size` bytes aligned to `align`
+#[testing]
+fun extent_is(text: str, name: str, size: u32, align: u32) i32 {
+    var c:    sema_checked.Checked;
+    val made: err[fail.Fail] = sema_checked.checked_init(?c, text);
+    fin { sema_checked.checked_dnit(?c); }
+    if (sel made.err || !sema_checked.checked_accepted(?c)) { ret 1; }
+    val tid: opt[type.TypeId] = nominal_named(?c.r.s, name);
+    if (sel tid.none) { ret 2; }
+    val er: res[layout.Extent, fail.Fail] = extent.of(?c.r.s, layout.machine(8, 128, 128), tid.some);
+    if (sel er.err)                                              { ret 3; }
+    if (!er.ok.ok || er.ok.size != size || er.ok.align != align) { ret 4; }
+    ret 0;
+}
+
+# a tag fixture: its declarations, read beneath the std tag prelude, and the verdict it
+# expects, accepted, rejected, or rejected with an error that says `needle` when there is one
+#[testing]
+pub rec TagFixture {
+    text:   str;
+    needle: str;
+    accept: bool;
+    code:   i32;
+}
+
+# the std failure tags exactly as std declares them: the compiler knows nothing about these
+# names, so a fixture that uses them declares them beneath this prelude
+#[testing]
+pub val TAG_STD_PRELUDE: str = "tag res[T, E]: u8 { err: E; ok: T; } tag opt[T]: u8 { none; some: T; } tag err[E]: u8 { err: E; ok; }\n";
+
+# zero when typing meets the verdict of each of the `count` fixtures at `rows`, else the
+# code of the first that misses it
+#[testing]
+fun tag_rows(rows: *TagFixture, count: usize) i32 {
+    var i: usize = 0;
+    for (i < count) {
+        val f:    TagFixture = rows[i];
+        val text: str        = sema_checked.joined(TAG_STD_PRELUDE, f.text);
+        var ok:   bool       = true;
+        if (f.accept)               { ok = sema_checked.sema_clean(text); }
+        or (str_len(f.needle) == 0) { ok = sema_checked.sema_rejects(text); }
+        or                          { ok = sema_checked.sema_rejects_with(text, f.needle); }
+        if (!ok)                    { ret f.code; }
+        i = i + 1;
+    }
+    ret 0;
+}
+
+# case recipes a tag declaration refuses
+#[testing]
+pub val TAG_CASE_RECIPES: [5]TagFixture = [5]TagFixture{
+    TagFixture{text: "tag Reply: u8 {}", needle: "at least one case", accept: false, code: 1},
+    TagFixture{text: "tag Reply: u8 { empty; empty: u64; }", needle: "duplicate tag case", accept: false, code: 2},
+    TagFixture{text: "tag Reply: u8 { value: Reply; }", needle: "recursive type", accept: false, code: 3},
+    TagFixture{text: "tag Reply[T]: u8 { value: T; } var reply: Reply;", needle: "type argument", accept: false, code: 4},
+    TagFixture{text: "tag Reply[T]: u8 { value: T; } var reply: Reply[u32, u64];", needle: "type argument", accept: false, code: 5}
+};
+
+# constructions that name the type and the case, and those that do not
+#[testing]
+pub val TAG_CONSTRUCTION_NAMES: [11]TagFixture = [11]TagFixture{
+    TagFixture{text: "tag Reply: u8 { empty; value: u64; } val a: Reply = Reply.empty{}; val b: Reply = Reply.value{42u64};", needle: "", accept: true, code: 1},
+    TagFixture{text: "tag Reply[T]: u8 { empty; value: T; } val a: Reply[u64] = Reply[u64].value{42u64};", needle: "", accept: true, code: 2},
+    TagFixture{text: "tag Reply: u8 { empty; value: u64; } val v: u64 = 7u64; val b: Reply = Reply.value{v};", needle: "", accept: true, code: 3},
+    TagFixture{text: "tag Reply: u8 { empty; value: u64; } fun f(r: Reply) Reply { ret Reply.value{1u64}; }", needle: "", accept: true, code: 4},
+    TagFixture{text: "tag Reply: u8 { empty; } val a: Reply = Reply.empty{1u64};", needle: "takes no payload", accept: false, code: 5},
+    TagFixture{text: "tag Reply: u8 { value: u64; } val a: Reply = Reply.value{};", needle: "requires a payload", accept: false, code: 6},
+    TagFixture{text: "tag Reply: u8 { empty; } val a: Reply = Reply.other{};", needle: "unknown tag case", accept: false, code: 7},
+    TagFixture{text: "tag Reply: u8 { value: u64; } val a: Reply = Reply.value{1u32};", needle: "type mismatch", accept: false, code: 8},
+    TagFixture{text: "rec Reply { value: u64; } val a: Reply = Reply.value{};", needle: "is not a tag", accept: false, code: 9},
+    TagFixture{text: "tag Reply: u8 { empty; value: u64; } val a: Reply = Reply.value{1u64, 2u64};", needle: "exactly one payload", accept: false, code: 10},
+    TagFixture{text: "tag Reply: u8 { empty; value: u64; } val a: Reply = Reply.value{value: 1u64};", needle: "positional", accept: false, code: 11}
+};
+
+# the record literal form a tag refuses
+#[testing]
+pub val TAG_RECORD_LITERAL_FORMS: [6]TagFixture = [6]TagFixture{
+    TagFixture{text: "tag Reply: u8 { empty; value: u64; } val a: Reply = Reply{value: 1u64};", needle: "constructed as `Type.case{payload}`", accept: false, code: 1},
+    TagFixture{text: "tag Reply: u8 { empty; value: u64; } val a: Reply = Reply{empty};", needle: "constructed as `Type.case{payload}`", accept: false, code: 2},
+    TagFixture{text: "tag Reply: u8 { empty; } val a: Reply = Reply{};", needle: "constructed as `Type.case{payload}`", accept: false, code: 3},
+    TagFixture{text: "tag Reply: u8 { empty; value: u64; } val a: Reply = Reply{empty, value: 1u64};", needle: "constructed as `Type.case{payload}`", accept: false, code: 4},
+    TagFixture{text: "val a: opt[i64] = opt[i64]{some: 1};", needle: "constructed as `Type.case{payload}`", accept: false, code: 5},
+    TagFixture{text: "tag Reply: u8 { empty; value: u64; } val a: Reply = Reply.value;", needle: "a case selector is not a value", accept: false, code: 6}
+};
+
+# casts that would forge a tag representation
+#[testing]
+pub val TAG_FORGED_CASTS: [7]TagFixture = [7]TagFixture{
+    TagFixture{text: "tag Reply: u8 { empty; } fun f(x: u8) Reply { ret x::Reply; }", needle: "representation of a tag", accept: false, code: 1},
+    TagFixture{text: "tag Reply: u8 { empty; } fun f(x: Reply) u8 { ret x:~u8; }", needle: "representation of a tag", accept: false, code: 2},
+    TagFixture{text: "tag Reply: u8 { empty; } rec Box { reply: Reply; } fun f(x: u8) Box { ret x::Box; }", needle: "representation of a tag", accept: false, code: 3},
+    TagFixture{text: "tag Reply: u8 { empty; } fun f(x: [1]Reply) u8 { ret x:~u8; }", needle: "representation of a tag", accept: false, code: 4},
+    TagFixture{text: "tag Reply: u8 { empty; } uni Box { reply: Reply; byte: u8; } fun f(x: u8) Box { ret x::Box; }", needle: "representation of a tag", accept: false, code: 5},
+    TagFixture{text: "tag Reply: u8 { empty; } fun f(x: Reply) Reply { ret x::Reply; } fun g(x: Reply) Reply { ret x:~Reply; }", needle: "", accept: true, code: 6},
+    TagFixture{text: "tag Reply: u8 { empty; } fun f(x: *u8) *Reply { ret x::*Reply; }", needle: "", accept: true, code: 7}
+};
+
+# `$is_tag` over nominal shapes
+#[testing]
+pub val TAG_IS_TAG_QUERIES: [3]TagFixture = [3]TagFixture{
+    TagFixture{text: "tag Reply[T]: u8 { empty; value: T; } $if ($is_tag(Reply[u64])) {} $or { $error(\"expected tag\"); }", needle: "", accept: true, code: 1},
+    TagFixture{text: "tag Reply: u8 { empty; } $if ($is_tag(^Reply)) { $error(\"secret shape\"); }", needle: "", accept: true, code: 2},
+    TagFixture{text: "rec Reply { value: u64; } $if ($is_tag(Reply)) { $error(\"record shape\"); }", needle: "", accept: true, code: 3}
+};
+
+# valid constructions of the std failure tags
+#[testing]
+pub val CANONICAL_CONSTRUCTION: [9]TagFixture = [9]TagFixture{
+    TagFixture{text: "val a: res[i64, u32] = res[i64, u32].ok{42};", needle: "", accept: true, code: 1},
+    TagFixture{text: "val b: res[i64, u32] = res[i64, u32].err{1u32};", needle: "", accept: true, code: 2},
+    TagFixture{text: "val c: opt[i64] = opt[i64].some{42};", needle: "", accept: true, code: 3},
+    TagFixture{text: "val d: opt[i64] = opt[i64].none{};", needle: "", accept: true, code: 4},
+    TagFixture{text: "val e: err[u32] = err[u32].ok{};", needle: "", accept: true, code: 5},
+    TagFixture{text: "val f: err[u32] = err[u32].err{7u32};", needle: "", accept: true, code: 6},
+    TagFixture{text: "fun make_opt[T](v: T) opt[T] { ret opt[T].some{v}; }", needle: "", accept: true, code: 7},
+    TagFixture{text: "fun make_res[T, E](v: T) res[T, E] { ret res[T, E].ok{v}; }", needle: "", accept: true, code: 8},
+    TagFixture{text: "fun make_err[E](e: E) err[E] { ret err[E].err{e}; }", needle: "", accept: true, code: 9}
+};
+
+# the std failure tags given the wrong number of type arguments
+#[testing]
+pub val CANONICAL_ARITY: [7]TagFixture = [7]TagFixture{
+    TagFixture{text: "val a: res = res[i64, u32].ok{1};", needle: "named without type arguments", accept: false, code: 1},
+    TagFixture{text: "val b: res[i64] = res[i64, u32].ok{1};", needle: "wrong number of type arguments", accept: false, code: 2},
+    TagFixture{text: "val c: res[i64, u32, u64] = res[i64, u32].ok{1};", needle: "wrong number of type arguments", accept: false, code: 3},
+    TagFixture{text: "val d: opt = opt[i64].none{};", needle: "named without type arguments", accept: false, code: 4},
+    TagFixture{text: "val e: opt[i64, u32] = opt[i64].none{};", needle: "wrong number of type arguments", accept: false, code: 5},
+    TagFixture{text: "val f: err = err[u32].ok{};", needle: "named without type arguments", accept: false, code: 6},
+    TagFixture{text: "val g: err[u32, i32] = err[u32].ok{};", needle: "wrong number of type arguments", accept: false, code: 7}
+};
+
+# payloads the std failure tags check
+#[testing]
+pub val CANONICAL_PAYLOADS: [7]TagFixture = [7]TagFixture{
+    TagFixture{text: "val a: opt[i64] = opt[i64].none{1};", needle: "this tag case takes no payload", accept: false, code: 1},
+    TagFixture{text: "val b: opt[i64] = opt[i64].some{};", needle: "this tag case requires a payload", accept: false, code: 2},
+    TagFixture{text: "val c: err[u32] = err[u32].ok{1};", needle: "this tag case takes no payload", accept: false, code: 3},
+    TagFixture{text: "val d: err[u32] = err[u32].err{};", needle: "this tag case requires a payload", accept: false, code: 4},
+    TagFixture{text: "val e: res[i64, u32] = res[i64, u32].ok{};", needle: "this tag case requires a payload", accept: false, code: 5},
+    TagFixture{text: "val f: res[i64, u32] = res[i64, u32].other{1};", needle: "unknown tag case", accept: false, code: 6},
+    TagFixture{text: "val g: res[i64, u32] = res[i64, u32].ok{1u32};", needle: "type mismatch", accept: false, code: 7}
+};
+
+# the std failure tags kept distinct, and queried
+#[testing]
+pub val CANONICAL_DISTINCTNESS: [9]TagFixture = [9]TagFixture{
+    TagFixture{text: "val o: opt[u64] = opt[u64].none{}; val e: err[u64] = o;", needle: "type mismatch", accept: false, code: 1},
+    TagFixture{text: "$if ($is_tag(res[i64, u32])) {} $or { $error(\"expected tag\"); }", needle: "", accept: true, code: 2},
+    TagFixture{text: "$if ($is_tag(^res[i64, u32])) { $error(\"secret shape\"); }", needle: "", accept: true, code: 3},
+    TagFixture{text: "$if ($is_tag(opt[i64])) {} $or { $error(\"expected tag\"); }", needle: "", accept: true, code: 4},
+    TagFixture{text: "$if ($is_tag(^opt[i64])) { $error(\"secret shape\"); }", needle: "", accept: true, code: 5},
+    TagFixture{text: "$if ($is_tag(err[u32])) {} $or { $error(\"expected tag\"); }", needle: "", accept: true, code: 6},
+    TagFixture{text: "$if ($is_tag(^err[u32])) { $error(\"secret shape\"); }", needle: "", accept: true, code: 7},
+    TagFixture{text: "$if ($size_of(opt[u64]) == 16) {} $or { $error(\"unexpected size\"); }", needle: "", accept: true, code: 8},
+    TagFixture{text: "$if ($align_of(opt[u64]) == 8) {} $or { $error(\"unexpected align\"); }", needle: "", accept: true, code: 9}
+};
+
+# casts of the std failure tags and names their context gives them
+#[testing]
+pub val CANONICAL_CASTS: [7]TagFixture = [7]TagFixture{
+    TagFixture{text: "fun f() res[i64, u32] { val err: i64 = 10; ret res[i64, u32].ok{err}; }", needle: "", accept: true, code: 1},
+    TagFixture{text: "val ok: u32 = 5; val r: res[i64, u32] = res[i64, u32].err{ok};", needle: "", accept: true, code: 2},
+    TagFixture{text: "val none: i64 = 7; val o: opt[i64] = opt[i64].some{none};", needle: "", accept: true, code: 3},
+    TagFixture{text: "val some: i32 = 0; val o: opt[i64] = opt[i64].none{};", needle: "", accept: true, code: 4},
+    TagFixture{text: "val r: res[i64, u32] = res[i64, u32].ok{42}; val u: u64 = r::u64;", needle: "a cast cannot change the representation of a tag", accept: false, code: 5},
+    TagFixture{text: "val r: res[i64, u32] = res[i64, u32].ok{42}; val r2: res[i64, u32] = r::res[i64, u32];", needle: "", accept: true, code: 6},
+    TagFixture{text: "fun f(s: ^res[i64, u32]) res[i64, u32] { ret s:>res[i64, u32]; }", needle: "", accept: true, code: 7}
+};
+
+# payload reads that need a `sel` guard
+#[testing]
+pub val SEL_PAYLOAD_GUARDS: [7]TagFixture = [7]TagFixture{
+    TagFixture{text: "tag Reply: u8 { empty; value: i64; } fun f(r: Reply) i64 { ret r.value; }", needle: "a tag payload requires a `sel` guard for its case", accept: false, code: 1},
+    TagFixture{text: "tag Reply: u8 { empty; value: i64; } fun f() i64 { val r: Reply = Reply.value{42}; ret r.value; }", needle: "a tag payload requires a `sel` guard for its case", accept: false, code: 2},
+    TagFixture{text: "tag Reply: u8 { empty; value: i64; } fun f(r: Reply) { val p: *i64 = ?r.value; }", needle: "a tag payload requires a `sel` guard for its case", accept: false, code: 3},
+    TagFixture{text: "tag Reply: u8 { empty; value: i64; } fun f(r: Reply, v: i64) { r.value = v; }", needle: "a tag payload requires a `sel` guard for its case", accept: false, code: 4},
+    TagFixture{text: "tag Reply: u8 { empty; value: i64; } fun f() { val r: Reply = Reply.empty{}; val x: i64 = r.empty; }", needle: "this tag case takes no payload", accept: false, code: 5},
+    TagFixture{text: "tag Reply: u8 { empty; value: i64; } fun f(r: Reply) i64 { ret r.missing; }", needle: "no such field", accept: false, code: 6},
+    TagFixture{text: "fun f() i64 { val r: res[i64, u32] = res[i64, u32].ok{100}; ret r.ok; }", needle: "a tag payload requires a `sel` guard for its case", accept: false, code: 7}
+};
+
+# where a case selector may appear
+#[testing]
+pub val SEL_SELECTOR_USAGE: [9]TagFixture = [9]TagFixture{
+    TagFixture{text: "tag Reply: u8 { empty; value: i64; } fun f() { val s: Reply = Reply.value; }", needle: "a case selector is not a value", accept: false, code: 1},
+    TagFixture{text: "tag Reply: u8 { empty; value: i64; } fun f() { var r: Reply = Reply.empty{}; r = Reply.value; }", needle: "a case selector is not a value", accept: false, code: 2},
+    TagFixture{text: "tag Reply: u8 { empty; value: i64; } fun f() { val x: u64 = Reply.value::u64; }", needle: "cannot be cast", accept: false, code: 3},
+    TagFixture{text: "tag Reply: u8 { empty; value: i64; } fun f(r: Reply) { val b: u8 = r < Reply.value; }", needle: "test a case with `sel place.case`", accept: false, code: 4},
+    TagFixture{text: "tag Reply: u8 { empty; value: i64; } fun f(r: Reply) { val b: Reply = r + Reply.value; }", needle: "test a case with `sel place.case`", accept: false, code: 5},
+    TagFixture{text: "tag A: u8 { c; } tag B: u8 { c; } fun f(a: A) u8 { ret a == B.c; }", needle: "test a case with `sel place.case`", accept: false, code: 6},
+    TagFixture{text: "fun f(r: res[i64, u32]) u8 { ret r == res[i64, i32].ok; }", needle: "test a case with `sel place.case`", accept: false, code: 7},
+    TagFixture{text: "tag Reply: u8 { empty; value: i64; } fun f(r: Reply) u8 { ret r == Reply.value; }", needle: "test a case with `sel place.case`", accept: false, code: 8},
+    TagFixture{text: "tag Reply: u8 { empty; value: i64; } fun f(r: Reply) u8 { ret r != Reply.value; }", needle: "test a case with `sel place.case`", accept: false, code: 9}
+};
+
+# `sel` testing one case of a place
+#[testing]
+pub val SEL_ONE_CASE: [10]TagFixture = [10]TagFixture{
+    TagFixture{text: "tag Reply: u8 { empty; value: i64; } fun f(r: Reply) u8 { ret sel r.value; }", needle: "", accept: true, code: 1},
+    TagFixture{text: "tag Reply: u8 { empty; value: i64; } fun f(r: Reply) { val b: u8 = sel r.empty; }", needle: "", accept: true, code: 2},
+    TagFixture{text: "tag Reply: u8 { empty; value: i64; } fun f(r: Reply) { if (!sel r.empty) { } }", needle: "", accept: true, code: 3},
+    TagFixture{text: "tag Reply: u8 { empty; value: i64; } fun f(a: Reply, b: Reply) { if (sel a.empty && sel b.value) { } }", needle: "", accept: true, code: 4},
+    TagFixture{text: "tag Reply: u8 { empty; value: i64; } fun f(a: Reply, b: Reply) { if (sel a.empty || sel b.value) { } }", needle: "", accept: true, code: 5},
+    TagFixture{text: "tag Reply: u8 { empty; value: i64; } rec Box { r: Reply; } fun f(b: Box) u8 { ret sel b.r.value; }", needle: "", accept: true, code: 6},
+    TagFixture{text: "tag Reply: u8 { empty; value: i64; } fun f(a: [2]Reply) u8 { ret sel a[0].value; }", needle: "", accept: true, code: 7},
+    TagFixture{text: "tag Reply: u8 { empty; value: i64; } fun f(p: *Reply) u8 { ret sel (@p).value; }", needle: "", accept: true, code: 8},
+    TagFixture{text: "fun f(r: res[i64, u32]) u8 { ret sel r.ok; }", needle: "", accept: true, code: 9},
+    TagFixture{text: "tag Reply: u8 { empty; value: i64; } def A: Reply; fun f(r: A) u8 { ret sel r.value; }", needle: "", accept: true, code: 10}
+};
+
+# `sel` over what is not a place, or a case the tag lacks
+#[testing]
+pub val SEL_NON_PLACES: [11]TagFixture = [11]TagFixture{
+    TagFixture{text: "tag Reply: u8 { empty; value: i64; } fun make() Reply { ret Reply.empty{}; } fun f() u8 { ret sel make().empty; }", needle: "`sel` tests a place", accept: false, code: 1},
+    TagFixture{text: "tag Reply: u8 { empty; value: i64; } fun f(r: Reply) u8 { ret sel r.missing; }", needle: "unknown tag case", accept: false, code: 2},
+    TagFixture{text: "rec Point { x: i64; } fun f(p: Point) u8 { ret sel p.x; }", needle: "`sel` expects a tag", accept: false, code: 3},
+    TagFixture{text: "fun f(v: i64) u8 { ret sel v.x; }", needle: "`sel` expects a tag", accept: false, code: 4},
+    TagFixture{text: "tag Reply: u8 { empty; value: i64; } fun f(r: ^Reply) u8 { ret sel r.empty; }", needle: "outer `^` secrecy protects the selected case", accept: false, code: 5},
+    TagFixture{text: "tag Reply: u8 { empty; value: i64; } fun f(r: Reply) u8 { ret sel r; }", needle: "`sel` tests one case of a place", accept: false, code: 6},
+    TagFixture{text: "tag Reply: u8 { empty; value: i64; } fun f(r: Reply) u8 { ret sel r.empty.value; }", needle: "this tag case takes no payload", accept: false, code: 7},
+    TagFixture{text: "tag Inner: u8 { a; b: i64; } tag Outer: u8 { x; y: Inner; } fun f(o: Outer) u8 { ret sel o.y.b; }", needle: "a tag payload requires a `sel` guard", accept: false, code: 8},
+    TagFixture{text: "tag Reply: u8 { empty; value: i64; } fun f(a: [2]Reply, i: i64) u8 { ret sel a[i + 1].value; }", needle: "so `i + 1` cannot appear in it", accept: false, code: 9},
+    TagFixture{text: "tag Reply: u8 { empty; value: i64; } rec Box { r: Reply; } fun make() Box { ret Box{r: Reply.empty{}}; } fun f() u8 { ret sel make().r.value; }", needle: "so `make()` cannot appear in it", accept: false, code: 10},
+    TagFixture{text: "fun f() u8 { ret sel $mach.build.arch.x86_64; }", needle: "", accept: false, code: 11}
+};
+
+# selectors used as values
+#[testing]
+pub val SEL_ESCAPES: [2]TagFixture = [2]TagFixture{
+    TagFixture{text: "tag Reply: u8 { empty; value: i64; } fun f() { Reply.value; }", needle: "a case selector is not a value", accept: false, code: 1},
+    TagFixture{text: "tag Reply: u8 { empty; value: i64; } val value: Reply = Reply.value;", needle: "a case selector is not a value", accept: false, code: 2}
+};
+
+# arms a `sel` guards
+#[testing]
+pub val SEL_ARMS: [10]TagFixture = [10]TagFixture{
+    TagFixture{text: "tag Reply: u8 { empty; value: i64; } tag ParseError: u8 { invalid; overflow; } tag Three: u8 { a; b: i64; c: u8; } fun parse(s: i64) res[i64, ParseError] { ret res[i64, ParseError].ok{s}; } fun log(e: ParseError) { } fun consume(v: i64) { } fun f(r: Reply) i64 { if (sel r.value) { ret r.value; } ret 0; }", needle: "", accept: true, code: 1},
+    TagFixture{text: "tag Reply: u8 { empty; value: i64; } tag ParseError: u8 { invalid; overflow; } tag Three: u8 { a; b: i64; c: u8; } fun parse(s: i64) res[i64, ParseError] { ret res[i64, ParseError].ok{s}; } fun log(e: ParseError) { } fun consume(v: i64) { } fun f(r: Reply) { if (sel r.value) { val p: *i64 = ?r.value; @p = 5; r.value = 6; } }", needle: "", accept: true, code: 2},
+    TagFixture{text: "tag Reply: u8 { empty; value: i64; } tag ParseError: u8 { invalid; overflow; } tag Three: u8 { a; b: i64; c: u8; } fun parse(s: i64) res[i64, ParseError] { ret res[i64, ParseError].ok{s}; } fun log(e: ParseError) { } fun consume(v: i64) { } fun f(r: Three) i64 { if (sel r.b) { ret r.b; } or (sel r.c) { ret r.c::i64; } ret 0; }", needle: "", accept: true, code: 3},
+    TagFixture{text: "tag Reply: u8 { empty; value: i64; } tag ParseError: u8 { invalid; overflow; } tag Three: u8 { a; b: i64; c: u8; } fun parse(s: i64) res[i64, ParseError] { ret res[i64, ParseError].ok{s}; } fun log(e: ParseError) { } fun consume(v: i64) { } tag Outer: u8 { x; y: Reply; } fun f(o: Outer) i64 { if (sel o.y) { if (sel o.y.value) { ret o.y.value; } } ret 0; }", needle: "", accept: true, code: 4},
+    TagFixture{text: "tag Reply: u8 { empty; value: i64; } tag ParseError: u8 { invalid; overflow; } tag Three: u8 { a; b: i64; c: u8; } fun parse(s: i64) res[i64, ParseError] { ret res[i64, ParseError].ok{s}; } fun log(e: ParseError) { } fun consume(v: i64) { } fun f(p: *Reply) i64 { if (sel (@p).value) { ret (@p).value; } ret 0; }", needle: "", accept: true, code: 5},
+    TagFixture{text: "tag Reply: u8 { empty; value: i64; } tag ParseError: u8 { invalid; overflow; } tag Three: u8 { a; b: i64; c: u8; } fun parse(s: i64) res[i64, ParseError] { ret res[i64, ParseError].ok{s}; } fun log(e: ParseError) { } fun consume(v: i64) { } fun f(a: [2]Reply) i64 { if (sel a[1].value) { ret a[1].value; } ret 0; }", needle: "", accept: true, code: 6},
+    TagFixture{text: "tag Reply: u8 { empty; value: i64; } tag ParseError: u8 { invalid; overflow; } tag Three: u8 { a; b: i64; c: u8; } fun parse(s: i64) res[i64, ParseError] { ret res[i64, ParseError].ok{s}; } fun log(e: ParseError) { } fun consume(v: i64) { } rec Box { r: Reply; } fun f(b: Box) i64 { if (sel b.r.value) { ret b.r.value; } ret 0; }", needle: "", accept: true, code: 7},
+    TagFixture{text: "tag Reply: u8 { empty; value: i64; } tag ParseError: u8 { invalid; overflow; } tag Three: u8 { a; b: i64; c: u8; } fun parse(s: i64) res[i64, ParseError] { ret res[i64, ParseError].ok{s}; } fun log(e: ParseError) { } fun consume(v: i64) { } fun f(n: i64) i64 { var t: i64 = 0; var i: i64 = 0; for (i < n) { i = i + 1; val r: Reply = Reply.value{i}; if (sel r.value) { t = t + r.value; } } ret t; }", needle: "", accept: true, code: 8},
+    TagFixture{text: "tag Reply: u8 { empty; value: i64; } tag ParseError: u8 { invalid; overflow; } tag Three: u8 { a; b: i64; c: u8; } fun parse(s: i64) res[i64, ParseError] { ret res[i64, ParseError].ok{s}; } fun log(e: ParseError) { } fun consume(v: i64) { } fun f(r: res[i64, ParseError]) i64 { if (sel r.ok) { ret r.ok; } ret 0; }", needle: "", accept: true, code: 9},
+    TagFixture{text: "tag Reply: u8 { empty; value: i64; } tag ParseError: u8 { invalid; overflow; } tag Three: u8 { a; b: i64; c: u8; } fun parse(s: i64) res[i64, ParseError] { ret res[i64, ParseError].ok{s}; } fun log(e: ParseError) { } fun consume(v: i64) { } fun f(a: [2]Reply, i: i64) i64 { if (sel a[i].value) { ret a[i].value; } ret 0; }", needle: "", accept: true, code: 10}
+};
+
+# payload reads outside the guard
+#[testing]
+pub val SEL_OUTSIDE_GUARDS: [10]TagFixture = [10]TagFixture{
+    TagFixture{text: "tag Reply: u8 { empty; value: i64; } tag ParseError: u8 { invalid; overflow; } tag Three: u8 { a; b: i64; c: u8; } fun parse(s: i64) res[i64, ParseError] { ret res[i64, ParseError].ok{s}; } fun log(e: ParseError) { } fun consume(v: i64) { } fun f(r: res[i64, ParseError]) i64 { val n: i64 = r.ok; ret n; }", needle: "a tag payload requires a `sel` guard for its case", accept: false, code: 1},
+    TagFixture{text: "tag Reply: u8 { empty; value: i64; } tag ParseError: u8 { invalid; overflow; } tag Three: u8 { a; b: i64; c: u8; } fun parse(s: i64) res[i64, ParseError] { ret res[i64, ParseError].ok{s}; } fun log(e: ParseError) { } fun consume(v: i64) { } fun f(r: Reply) i64 { if (sel r.empty) { ret r.value; } ret 0; }", needle: "a tag payload requires a `sel` guard for its case", accept: false, code: 2},
+    TagFixture{text: "tag Reply: u8 { empty; value: i64; } tag ParseError: u8 { invalid; overflow; } tag Three: u8 { a; b: i64; c: u8; } fun parse(s: i64) res[i64, ParseError] { ret res[i64, ParseError].ok{s}; } fun log(e: ParseError) { } fun consume(v: i64) { } fun f(r: Reply, q: Reply) i64 { if (sel r.value) { ret q.value; } ret 0; }", needle: "a tag payload requires a `sel` guard for its case", accept: false, code: 3},
+    TagFixture{text: "tag Reply: u8 { empty; value: i64; } tag ParseError: u8 { invalid; overflow; } tag Three: u8 { a; b: i64; c: u8; } fun parse(s: i64) res[i64, ParseError] { ret res[i64, ParseError].ok{s}; } fun log(e: ParseError) { } fun consume(v: i64) { } fun f(r: Reply) i64 { if (sel r.value) { } ret r.value; }", needle: "a tag payload requires a `sel` guard for its case", accept: false, code: 4},
+    TagFixture{text: "tag Reply: u8 { empty; value: i64; } tag ParseError: u8 { invalid; overflow; } tag Three: u8 { a; b: i64; c: u8; } fun parse(s: i64) res[i64, ParseError] { ret res[i64, ParseError].ok{s}; } fun log(e: ParseError) { } fun consume(v: i64) { } fun f(r: Three) i64 { if (sel r.a) { ret 0; } or { ret r.b; } }", needle: "a tag payload requires a `sel` guard for its case", accept: false, code: 5},
+    TagFixture{text: "tag Reply: u8 { empty; value: i64; } tag ParseError: u8 { invalid; overflow; } tag Three: u8 { a; b: i64; c: u8; } fun parse(s: i64) res[i64, ParseError] { ret res[i64, ParseError].ok{s}; } fun log(e: ParseError) { } fun consume(v: i64) { } fun f(r: Reply) i64 { for (sel r.value) { ret r.value; } ret 0; }", needle: "a tag payload requires a `sel` guard for its case", accept: false, code: 6},
+    TagFixture{text: "tag Reply: u8 { empty; value: i64; } tag ParseError: u8 { invalid; overflow; } tag Three: u8 { a; b: i64; c: u8; } fun parse(s: i64) res[i64, ParseError] { ret res[i64, ParseError].ok{s}; } fun log(e: ParseError) { } fun consume(v: i64) { } tag Outer: u8 { x; y: Reply; } fun f(o: Outer) i64 { if (sel o.y.value) { ret 1; } ret 0; }", needle: "a tag payload requires a `sel` guard for its case", accept: false, code: 7},
+    TagFixture{text: "tag Reply: u8 { empty; value: i64; } tag ParseError: u8 { invalid; overflow; } tag Three: u8 { a; b: i64; c: u8; } fun parse(s: i64) res[i64, ParseError] { ret res[i64, ParseError].ok{s}; } fun log(e: ParseError) { } fun consume(v: i64) { } fun f(r: Reply, k: u8) i64 { if (sel r.value && k == 1) { ret r.value; } ret 0; }", needle: "a tag payload requires a `sel` guard for its case", accept: false, code: 8},
+    TagFixture{text: "tag Reply: u8 { empty; value: i64; } tag ParseError: u8 { invalid; overflow; } tag Three: u8 { a; b: i64; c: u8; } fun parse(s: i64) res[i64, ParseError] { ret res[i64, ParseError].ok{s}; } fun log(e: ParseError) { } fun consume(v: i64) { } fun f(r: Reply) i64 { val same: Reply = r; if (sel r.value) { ret same.value; } ret 0; }", needle: "a tag payload requires a `sel` guard for its case", accept: false, code: 9},
+    TagFixture{text: "tag Reply: u8 { empty; value: i64; } tag ParseError: u8 { invalid; overflow; } tag Three: u8 { a; b: i64; c: u8; } fun parse(s: i64) res[i64, ParseError] { ret res[i64, ParseError].ok{s}; } fun log(e: ParseError) { } fun consume(v: i64) { } fun f(r: Reply) i64 { if (!sel r.empty) { ret r.value; } ret 0; }", needle: "a tag payload requires a `sel` guard for its case", accept: false, code: 10}
+};
+
+# `&&` guarding its right operand only
+#[testing]
+pub val SEL_AND_GUARDS: [7]TagFixture = [7]TagFixture{
+    TagFixture{text: "tag Reply: u8 { empty; value: i64; } tag ParseError: u8 { invalid; overflow; } tag Three: u8 { a; b: i64; c: u8; } fun parse(s: i64) res[i64, ParseError] { ret res[i64, ParseError].ok{s}; } fun log(e: ParseError) { } fun consume(v: i64) { } fun f(r: res[i64, ParseError]) u8 { if (sel r.ok && r.ok > 3) { ret 1; } ret 0; }", needle: "", accept: true, code: 1},
+    TagFixture{text: "tag Reply: u8 { empty; value: i64; } tag ParseError: u8 { invalid; overflow; } tag Three: u8 { a; b: i64; c: u8; } fun parse(s: i64) res[i64, ParseError] { ret res[i64, ParseError].ok{s}; } fun log(e: ParseError) { } fun consume(v: i64) { } fun f(r: res[i64, ParseError]) u8 { val b: u8 = sel r.ok && r.ok > 3; ret b; }", needle: "", accept: true, code: 2},
+    TagFixture{text: "tag Reply: u8 { empty; value: i64; } tag ParseError: u8 { invalid; overflow; } tag Three: u8 { a; b: i64; c: u8; } fun parse(s: i64) res[i64, ParseError] { ret res[i64, ParseError].ok{s}; } fun log(e: ParseError) { } fun consume(v: i64) { } fun f(r: res[i64, ParseError]) u8 { if (r.ok > 3 && sel r.ok) { ret 1; } ret 0; }", needle: "a tag payload requires a `sel` guard for its case", accept: false, code: 3},
+    TagFixture{text: "tag Reply: u8 { empty; value: i64; } tag ParseError: u8 { invalid; overflow; } tag Three: u8 { a; b: i64; c: u8; } fun parse(s: i64) res[i64, ParseError] { ret res[i64, ParseError].ok{s}; } fun log(e: ParseError) { } fun consume(v: i64) { } fun f(r: res[i64, ParseError]) u8 { if (sel r.ok || r.ok > 3) { ret 1; } ret 0; }", needle: "a tag payload requires a `sel` guard for its case", accept: false, code: 4},
+    TagFixture{text: "tag Reply: u8 { empty; value: i64; } tag ParseError: u8 { invalid; overflow; } tag Three: u8 { a; b: i64; c: u8; } fun parse(s: i64) res[i64, ParseError] { ret res[i64, ParseError].ok{s}; } fun log(e: ParseError) { } fun consume(v: i64) { } fun f(r: Reply) u8 { if (sel r.value && r.value > 1) { ret r.value::u8; } ret 0; }", needle: "a tag payload requires a `sel` guard for its case", accept: false, code: 5},
+    TagFixture{text: "tag Reply: u8 { empty; value: i64; } tag ParseError: u8 { invalid; overflow; } tag Three: u8 { a; b: i64; c: u8; } fun parse(s: i64) res[i64, ParseError] { ret res[i64, ParseError].ok{s}; } fun log(e: ParseError) { } fun consume(v: i64) { } fun f(r: Reply, q: Reply) u8 { if (sel r.value && sel q.value && r.value > 1) { ret 1; } ret 0; }", needle: "a tag payload requires a `sel` guard for its case", accept: false, code: 6},
+    TagFixture{text: "tag Reply: u8 { empty; value: i64; } tag ParseError: u8 { invalid; overflow; } tag Three: u8 { a; b: i64; c: u8; } fun parse(s: i64) res[i64, ParseError] { ret res[i64, ParseError].ok{s}; } fun log(e: ParseError) { } fun consume(v: i64) { } fun f(r: Reply) u8 { if (!sel r.empty && r.value > 1) { ret 1; } ret 0; }", needle: "a tag payload requires a `sel` guard for its case", accept: false, code: 7}
+};
+
+# exiting chains guarding the rest of the block
+#[testing]
+pub val SEL_EXITING_CHAINS: [20]TagFixture = [20]TagFixture{
+    TagFixture{text: "tag Reply: u8 { empty; value: i64; } tag ParseError: u8 { invalid; overflow; } tag Three: u8 { a; b: i64; c: u8; } fun parse(s: i64) res[i64, ParseError] { ret res[i64, ParseError].ok{s}; } fun log(e: ParseError) { } fun consume(v: i64) { } fun increment(input: i64) res[i64, ParseError] { val r: res[i64, ParseError] = parse(input); if (sel r.err) { ret res[i64, ParseError].err{r.err}; } ret res[i64, ParseError].ok{r.ok + 1}; }", needle: "", accept: true, code: 1},
+    TagFixture{text: "tag Reply: u8 { empty; value: i64; } tag ParseError: u8 { invalid; overflow; } tag Three: u8 { a; b: i64; c: u8; } fun parse(s: i64) res[i64, ParseError] { ret res[i64, ParseError].ok{s}; } fun log(e: ParseError) { } fun consume(v: i64) { } fun f(n: i64) { var i: i64 = 0; for (i < n) { i = i + 1; val item: opt[i64] = opt[i64].some{i}; if (!sel item.some) { cnt; } consume(item.some); } }", needle: "", accept: true, code: 2},
+    TagFixture{text: "tag Reply: u8 { empty; value: i64; } tag ParseError: u8 { invalid; overflow; } tag Three: u8 { a; b: i64; c: u8; } fun parse(s: i64) res[i64, ParseError] { ret res[i64, ParseError].ok{s}; } fun log(e: ParseError) { } fun consume(v: i64) { } fun f(n: i64) { var i: i64 = 0; for (i < n) { i = i + 1; val item: opt[i64] = opt[i64].some{i}; if (!sel item.some) { brk; } consume(item.some); } }", needle: "", accept: true, code: 3},
+    TagFixture{text: "tag Reply: u8 { empty; value: i64; } tag ParseError: u8 { invalid; overflow; } tag Three: u8 { a; b: i64; c: u8; } fun parse(s: i64) res[i64, ParseError] { ret res[i64, ParseError].ok{s}; } fun log(e: ParseError) { } fun consume(v: i64) { } fun f(r: Three) i64 { if (sel r.a) { ret 0; } or (sel r.b) { ret r.b; } ret r.c::i64; }", needle: "", accept: true, code: 4},
+    TagFixture{text: "tag Reply: u8 { empty; value: i64; } tag ParseError: u8 { invalid; overflow; } tag Three: u8 { a; b: i64; c: u8; } fun parse(s: i64) res[i64, ParseError] { ret res[i64, ParseError].ok{s}; } fun log(e: ParseError) { } fun consume(v: i64) { } fun f(r: Reply, k: u8) i64 { if (sel r.empty) { if (k == 1) { ret 1; } or { ret 2; } } ret r.value; }", needle: "", accept: true, code: 5},
+    TagFixture{text: "tag Reply: u8 { empty; value: i64; } tag ParseError: u8 { invalid; overflow; } tag Three: u8 { a; b: i64; c: u8; } fun parse(s: i64) res[i64, ParseError] { ret res[i64, ParseError].ok{s}; } fun log(e: ParseError) { } fun consume(v: i64) { } fun f(r: Reply) i64 { if (sel r.empty) { $if (1 == 1) { ret 0; } $or { ret 1; } } ret r.value; }", needle: "", accept: true, code: 6},
+    TagFixture{text: "tag Reply: u8 { empty; value: i64; } tag ParseError: u8 { invalid; overflow; } tag Three: u8 { a; b: i64; c: u8; } fun parse(s: i64) res[i64, ParseError] { ret res[i64, ParseError].ok{s}; } fun log(e: ParseError) { } fun consume(v: i64) { } fun f(r: Reply) i64 { if (!sel r.value) { ret 0; } ret r.value; }", needle: "", accept: true, code: 7},
+    TagFixture{text: "tag Reply: u8 { empty; value: i64; } tag ParseError: u8 { invalid; overflow; } tag Three: u8 { a; b: i64; c: u8; } fun parse(s: i64) res[i64, ParseError] { ret res[i64, ParseError].ok{s}; } fun log(e: ParseError) { } fun consume(v: i64) { } fun f(r: Reply) i64 { if (sel r.empty) { consume(1); ret 0; } ret r.value; }", needle: "", accept: true, code: 8},
+    TagFixture{text: "tag Reply: u8 { empty; value: i64; } tag ParseError: u8 { invalid; overflow; } tag Three: u8 { a; b: i64; c: u8; } fun parse(s: i64) res[i64, ParseError] { ret res[i64, ParseError].ok{s}; } fun log(e: ParseError) { } fun consume(v: i64) { } fun f(r: res[i64, ParseError]) i64 { if (sel r.err) { log(r.err); } val m: i64 = r.ok; ret m; }", needle: "a tag payload requires a `sel` guard for its case", accept: false, code: 9},
+    TagFixture{text: "tag Reply: u8 { empty; value: i64; } tag ParseError: u8 { invalid; overflow; } tag Three: u8 { a; b: i64; c: u8; } fun parse(s: i64) res[i64, ParseError] { ret res[i64, ParseError].ok{s}; } fun log(e: ParseError) { } fun consume(v: i64) { } fun f(r: Three) i64 { if (sel r.a) { ret 0; } ret r.b; }", needle: "a tag payload requires a `sel` guard for its case", accept: false, code: 10},
+    TagFixture{text: "tag Reply: u8 { empty; value: i64; } tag ParseError: u8 { invalid; overflow; } tag Three: u8 { a; b: i64; c: u8; } fun parse(s: i64) res[i64, ParseError] { ret res[i64, ParseError].ok{s}; } fun log(e: ParseError) { } fun consume(v: i64) { } fun f(r: Reply) i64 { if (sel r.empty) { for (1 == 1) { brk; } } ret r.value; }", needle: "a tag payload requires a `sel` guard for its case", accept: false, code: 11},
+    TagFixture{text: "tag Reply: u8 { empty; value: i64; } tag ParseError: u8 { invalid; overflow; } tag Three: u8 { a; b: i64; c: u8; } fun parse(s: i64) res[i64, ParseError] { ret res[i64, ParseError].ok{s}; } fun log(e: ParseError) { } fun consume(v: i64) { } fun f(r: Reply) i64 { if (sel r.empty) { ret 0; } or { ret 1; } ret r.value; }", needle: "a tag payload requires a `sel` guard for its case", accept: false, code: 12},
+    TagFixture{text: "tag Reply: u8 { empty; value: i64; } tag ParseError: u8 { invalid; overflow; } tag Three: u8 { a; b: i64; c: u8; } fun parse(s: i64) res[i64, ParseError] { ret res[i64, ParseError].ok{s}; } fun log(e: ParseError) { } fun consume(v: i64) { } fun f(r: Reply) i64 { { if (sel r.empty) { ret 0; } } ret r.value; }", needle: "a tag payload requires a `sel` guard for its case", accept: false, code: 13},
+    TagFixture{text: "tag Reply: u8 { empty; value: i64; } tag ParseError: u8 { invalid; overflow; } tag Three: u8 { a; b: i64; c: u8; } fun parse(s: i64) res[i64, ParseError] { ret res[i64, ParseError].ok{s}; } fun log(e: ParseError) { } fun consume(v: i64) { } fun f(r: Reply, q: Reply) i64 { if (sel r.empty) { ret 0; } or (sel q.empty) { ret 1; } ret r.value; }", needle: "a tag payload requires a `sel` guard for its case", accept: false, code: 14},
+    TagFixture{text: "tag Reply: u8 { empty; value: i64; } tag ParseError: u8 { invalid; overflow; } tag Three: u8 { a; b: i64; c: u8; } fun parse(s: i64) res[i64, ParseError] { ret res[i64, ParseError].ok{s}; } fun log(e: ParseError) { } fun consume(v: i64) { } fun f(r: Reply, k: u8) i64 { if (sel r.empty) { if (k == 1) { ret 1; } } ret r.value; }", needle: "a tag payload requires a `sel` guard for its case", accept: false, code: 15},
+    TagFixture{text: "tag Reply: u8 { empty; value: i64; } tag ParseError: u8 { invalid; overflow; } tag Three: u8 { a; b: i64; c: u8; } fun parse(s: i64) res[i64, ParseError] { ret res[i64, ParseError].ok{s}; } fun log(e: ParseError) { } fun consume(v: i64) { } fun f(r: Reply, k: u8) i64 { if (sel r.empty && k == 1) { ret 0; } ret r.value; }", needle: "a tag payload requires a `sel` guard for its case", accept: false, code: 16},
+    TagFixture{text: "tag Reply: u8 { empty; value: i64; } tag ParseError: u8 { invalid; overflow; } tag Three: u8 { a; b: i64; c: u8; } fun parse(s: i64) res[i64, ParseError] { ret res[i64, ParseError].ok{s}; } fun log(e: ParseError) { } fun consume(v: i64) { } fun f(r: Reply) i64 { if (sel r.empty) { for { ret 0; } } ret r.value; }", needle: "", accept: true, code: 17},
+    TagFixture{text: "tag Reply: u8 { empty; value: i64; } tag ParseError: u8 { invalid; overflow; } tag Three: u8 { a; b: i64; c: u8; } fun parse(s: i64) res[i64, ParseError] { ret res[i64, ParseError].ok{s}; } fun log(e: ParseError) { } fun consume(v: i64) { } fun f(r: Reply) i64 { if (sel r.empty) { for { brk; } } ret r.value; }", needle: "a tag payload requires a `sel` guard for its case", accept: false, code: 18},
+    TagFixture{text: "tag Reply: u8 { empty; value: i64; } tag ParseError: u8 { invalid; overflow; } tag Three: u8 { a; b: i64; c: u8; } fun parse(s: i64) res[i64, ParseError] { ret res[i64, ParseError].ok{s}; } fun log(e: ParseError) { } fun consume(v: i64) { } fun f(r: Reply) i64 { if (sel r.empty) { for { cnt; } } ret r.value; }", needle: "a tag payload requires a `sel` guard for its case", accept: false, code: 19},
+    TagFixture{text: "tag Reply: u8 { empty; value: i64; } tag ParseError: u8 { invalid; overflow; } tag Three: u8 { a; b: i64; c: u8; } fun parse(s: i64) res[i64, ParseError] { ret res[i64, ParseError].ok{s}; } fun log(e: ParseError) { } fun consume(v: i64) { } fun f(r: Reply, n: i64) i64 { var i: i64 = 0; for (i < n) { i = i + 1; if (sel r.empty) { for { brk; } cnt; } ret r.value; } ret 0; }", needle: "", accept: true, code: 20}
+};
+
+# whole-value assignments to a guarded place
+#[testing]
+pub val SEL_WHOLE_ASSIGNMENT: [5]TagFixture = [5]TagFixture{
+    TagFixture{text: "tag Reply: u8 { empty; value: i64; } tag ParseError: u8 { invalid; overflow; } tag Three: u8 { a; b: i64; c: u8; } fun parse(s: i64) res[i64, ParseError] { ret res[i64, ParseError].ok{s}; } fun log(e: ParseError) { } fun consume(v: i64) { } fun f() { var r: res[i64, ParseError] = parse(1); if (sel r.ok) { r = res[i64, ParseError].err{ParseError.invalid{}}; } }", needle: "rebind the new value to a new name", accept: false, code: 1},
+    TagFixture{text: "tag Reply: u8 { empty; value: i64; } tag ParseError: u8 { invalid; overflow; } tag Three: u8 { a; b: i64; c: u8; } fun parse(s: i64) res[i64, ParseError] { ret res[i64, ParseError].ok{s}; } fun log(e: ParseError) { } fun consume(v: i64) { } rec Box { r: Reply; } fun f(b: Box) { if (sel b.r.value) { b = Box{r: Reply.empty{}}; } }", needle: "rebind the new value to a new name", accept: false, code: 2},
+    TagFixture{text: "tag Reply: u8 { empty; value: i64; } tag ParseError: u8 { invalid; overflow; } tag Three: u8 { a; b: i64; c: u8; } fun parse(s: i64) res[i64, ParseError] { ret res[i64, ParseError].ok{s}; } fun log(e: ParseError) { } fun consume(v: i64) { } fun f(r: Reply) { if (sel r.empty) { ret; } r = Reply.empty{}; }", needle: "rebind the new value to a new name", accept: false, code: 3},
+    TagFixture{text: "tag Reply: u8 { empty; value: i64; } tag ParseError: u8 { invalid; overflow; } tag Three: u8 { a; b: i64; c: u8; } fun parse(s: i64) res[i64, ParseError] { ret res[i64, ParseError].ok{s}; } fun log(e: ParseError) { } fun consume(v: i64) { } fun f(r: Reply, q: Reply) { if (sel r.value) { q = Reply.empty{}; r.value = 1; } r = Reply.empty{}; }", needle: "", accept: true, code: 4},
+    TagFixture{text: "tag Reply: u8 { empty; value: i64; } tag ParseError: u8 { invalid; overflow; } tag Three: u8 { a; b: i64; c: u8; } fun parse(s: i64) res[i64, ParseError] { ret res[i64, ParseError].ok{s}; } fun log(e: ParseError) { } fun consume(v: i64) { } fun f(p: *Reply, q: *Reply) { if (sel (@p).value) { p = q; } }", needle: "", accept: true, code: 5}
+};
+
+# returns from `fin` through a guard
+#[testing]
+pub val SEL_FIN_RETURNS: [2]TagFixture = [2]TagFixture{
+    TagFixture{text: "tag Reply: u8 { empty; value: i64; } tag ParseError: u8 { invalid; overflow; } tag Three: u8 { a; b: i64; c: u8; } fun parse(s: i64) res[i64, ParseError] { ret res[i64, ParseError].ok{s}; } fun log(e: ParseError) { } fun consume(v: i64) { } fun flush() err[ParseError] { var w: err[ParseError] = err[ParseError].ok{}; fin { if (sel w.err) { ret err[ParseError].err{w.err}; } } ret err[ParseError].ok{}; }", needle: "`ret` cannot appear inside a `fin` body", accept: false, code: 1},
+    TagFixture{text: "tag Reply: u8 { empty; value: i64; } tag ParseError: u8 { invalid; overflow; } tag Three: u8 { a; b: i64; c: u8; } fun parse(s: i64) res[i64, ParseError] { ret res[i64, ParseError].ok{s}; } fun log(e: ParseError) { } fun consume(v: i64) { } fun flush(w: err[ParseError]) { fin { if (sel w.err) { log(w.err); } } }", needle: "", accept: true, code: 2}
+};
+
+# `sel` through a pointer place
+#[testing]
+pub val SEL_AUTO_DEREF: [10]TagFixture = [10]TagFixture{
+    TagFixture{text: "tag Reply: u8 { empty; value: i64; } fun f(p: *Reply) i64 { if (sel p.value) { p.value = p.value + 1; val q: *i64 = ?p.value; ret @q; } ret 0; }", needle: "", accept: true, code: 1},
+    TagFixture{text: "tag Reply: u8 { empty; value: i64; } fun f(p: *Reply) i64 { if (!sel p.value) { ret 0; } ret p.value; }", needle: "", accept: true, code: 2},
+    TagFixture{text: "tag Reply: u8 { empty; value: i64; } fun f(p: *Reply) u8 { if (sel p.value && p.value > 3) { ret 1; } ret 0; }", needle: "", accept: true, code: 3},
+    TagFixture{text: "tag Reply: u8 { empty; value: i64; } rec Box { r: Reply; } fun f(b: *Box) i64 { if (sel b.r.value) { ret b.r.value; } ret 0; }", needle: "", accept: true, code: 4},
+    TagFixture{text: "tag Reply: u8 { empty; value: i64; } fun f(p: *Reply, q: *Reply) { if (sel p.value) { p = q; } }", needle: "", accept: true, code: 5},
+    TagFixture{text: "tag Reply: u8 { empty; value: i64; } rec Box { r: Reply; } fun f(b: *Box, c: *Box) { if (sel b.r.value) { b = c; } }", needle: "", accept: true, code: 6},
+    TagFixture{text: "tag Reply: u8 { empty; value: i64; } rec Box { r: Reply; } fun f(b: *Box) { if (sel b.r.value) { b.r = Reply.empty{}; } }", needle: "rebind the new value to a new name", accept: false, code: 7},
+    TagFixture{text: "tag Reply: u8 { empty; value: i64; } fun f(p: *^Reply) u8 { ret sel p.empty; }", needle: "outer `^` secrecy protects the selected case", accept: false, code: 8},
+    TagFixture{text: "tag Reply: u8 { empty; value: i64; } fun f(p: **Reply) u8 { ret sel p.empty; }", needle: "`sel` expects a tag", accept: false, code: 9},
+    TagFixture{text: "tag Reply: u8 { empty; value: i64; } fun f(p: *Reply, q: *Reply) i64 { if (sel p.value) { ret q.value; } ret 0; }", needle: "a tag payload requires a `sel` guard for its case", accept: false, code: 10}
+};
+
+# comptime `sel` over constant tags
+#[testing]
+pub val SEL_COMPTIME: [13]TagFixture = [13]TagFixture{
+    TagFixture{text: "tag Reply: u8 { empty; value: i64; } val C: Reply = Reply.value{42}; fun f() i64 { $if (sel C.value) { ret 1; } ret 0; }", needle: "", accept: true, code: 1},
+    TagFixture{text: "tag Reply: u8 { empty; value: i64; } val C: Reply = Reply.value{42}; fun f() i64 { $if (sel C.value && C.value == 42) { ret 1; } ret 0; }", needle: "", accept: true, code: 2},
+    TagFixture{text: "tag Reply: u8 { empty; value: i64; } val C: Reply = Reply.value{42}; fun f() i64 { $if (sel C.value) { ret C.value; } ret 0; }", needle: "", accept: true, code: 3},
+    TagFixture{text: "tag Reply: u8 { empty; value: i64; } val TAGS: [2]Reply = [2]Reply{Reply.value{1}, Reply.empty{}}; fun f() i64 { var s: i64 = 0; $each t in TAGS { $if (sel t.value) { s = s + t.value; } } ret s; }", needle: "", accept: true, code: 4},
+    TagFixture{text: "tag Reply: u8 { empty; value: i64; } val C: Reply = Reply.value{42}; fun f() i64 { $each c in $cases(Reply) { $if (sel C.[c]) { ret c.code::i64; } } ret -1; }", needle: "", accept: true, code: 5},
+    TagFixture{text: "tag Reply: u8 { empty; value: i64; } tag Outer: u8 { none; inner: Reply; } val O: Outer = Outer.inner{Reply.value{7}}; fun f() i64 { $if (sel O.inner && (sel O.inner.value && O.inner.value == 7)) { ret 1; } ret 0; }", needle: "", accept: true, code: 6},
+    TagFixture{text: "tag Reply: u8 { empty; value: i64; } fun f() i64 { $if (sel LATE.value) { ret 1; } ret 0; } val LATE: Reply = Reply.value{42};", needle: "", accept: true, code: 7},
+    TagFixture{text: "tag Reply: u8 { empty; value: i64; } val C: Reply = Reply.value{42}; $if (sel C.value) { fun pick() i64 { ret 0; } } $or { fun pick() i64 { ret 1; } }", needle: "", accept: true, code: 8},
+    TagFixture{text: "tag Reply: u8 { empty; value: i64; } fun f(r: Reply) i64 { $if (sel r.value) { ret 1; } ret 0; }", needle: "`sel` at compile time tests a constant tag", accept: false, code: 9},
+    TagFixture{text: "tag Reply: u8 { empty; value: i64; } fun f() i64 { var r: Reply = Reply.value{1}; $if (sel r.value) { ret 1; } ret 0; }", needle: "`sel` at compile time tests a constant tag", accept: false, code: 10},
+    TagFixture{text: "tag Reply: u8 { empty; value: i64; } val E: Reply = Reply.empty{}; fun f() i64 { if (!sel E.value) { ret 0; } $if (E.value == 3) { ret 1; } ret 2; }", needle: "never selected", accept: false, code: 11},
+    TagFixture{text: "tag Reply: u8 { empty; value: i64; } val C: Reply = Reply.value{42}; val D: Reply = Reply.value{1}; fun f() i64 { $if (sel C.value) { ret D.value; } ret 0; }", needle: "a tag payload requires a `sel` guard for its case", accept: false, code: 12},
+    TagFixture{text: "tag Reply: u8 { empty; value: i64; } val C: Reply = Reply.value{42}; fun f() i64 { $if (C.value == 42) { ret 1; } ret 0; }", needle: "a tag payload requires a `sel` guard for its case", accept: false, code: 13}
+};
+
+#[testing]
+fun nested_array_src(alloc: *A.Allocator, n: u32) str {
+    val head:  str   = "rec K { f: ";
+    val tail:  str   = "u8; }\nfun main() i64 { ret 0; }\n";
+    val hl:    usize = str_len(head);
+    val tl:    usize = str_len(tail);
+    val total: usize = hl + (n::usize * 3) + tl + 1;
+
+    val r: res[*u8, A.Error] = A.allocate[u8](alloc, total);
+    if (sel r.err) { ret ""; }
+    val buf: *u8 = r.ok;
+
+    var k: usize = 0;
+    var j: usize = 0;
+    for (j < hl) {
+        buf[k] = head[j];
+        k      = k + 1;
+        j      = j + 1;
+    }
+    var i: u32 = 0;
+    for (i < n) {
+        buf[k] = '[';
+        k      = k + 1;
+        buf[k] = '1';
+        k      = k + 1;
+        buf[k] = ']';
+        k      = k + 1;
+        i      = i + 1;
+    }
+    j = 0;
+    for (j < tl) {
+        buf[k] = tail[j];
+        k      = k + 1;
+        j      = j + 1;
+    }
+    buf[k] = 0;
+    ret buf::str;
+}
+
+# sema gives every gate its verdict, so a gate no constant decides is refused at check
+# rather than left for lowering
+test gate__sema_refuses_what_no_constant_decides {
+    var bad: i32 = 0;
+    if (!sema_checked.sema_says("var G: u32 = 3;\nfun f() u32 { $if (G == 3) { ret 1; } ret 0; }\n", "constant"))                          { bad = 1; }
+    if (!sema_checked.sema_says("rec R { a: u32; }\nvar C: R = R{a: 3};\nfun f() u32 { $if (C.a == 3) { ret 1; } ret 0; }\n", "constant")) { bad = 2; }
+    if (sema_checked.sema_says("val G: u32 = 3;\nfun f() u32 { $if (G == 3) { ret 1; } ret 0; }\n", "constant"))                           { bad = 3; }
+    ret bad;
+}
+
+# resolve binds an asm block's `{name}`s to locals and refuses the rest where the block is
+# written, comments aside
+test asm__names_bind_where_the_block_is_resolved {
+    var bad: i32 = 0;
+    if (!sema_checked.sema_says("fun f() u64 { var x: u64 = 1; asm x86_64 { mov rax, {nope} } ret x; }\n", "unknown local 'nope'"))          { bad = 1; }
+    if (!sema_checked.sema_says("fun g($n: u64) u64 { asm x86_64 { mov rax, {n} } ret n; }\n", "'n' is not stack-allocated"))                { bad = 2; }
+    if (!sema_checked.sema_says("fun f() u64 { var x: u64 = 1; asm x86_64 { mov rax, {} } ret x; }\n", "empty '{}'"))                        { bad = 3; }
+    if (sema_checked.sema_says("fun f(p: u64) u64 { var x: u64 = 1; asm x86_64 { mov rax, {x} # {nope}\n add rax, {p} } ret x; }\n", "asm")) { bad = 4; }
+    ret bad;
+}
+
+# sema decides a function's and a global's `align` as it does a type's, and refuses two
+# tests of one name, rules lowering once checked alone
+test sema__decides_declaration_align_and_test_names {
+    var bad: i32 = 0;
+    if (!sema_checked.sema_says("#[align(3)]\nvar g: u32 = 0;\n", "non-zero power of two"))               { bad = 1; }
+    if (!sema_checked.sema_says("#[align(6)]\nfun f() u32 { ret 0; }\n", "non-zero power of two"))        { bad = 2; }
+    if (sema_checked.sema_says("#[align(8)]\nvar g: u32 = 0;\n", "align"))                                { bad = 3; }
+    if (!sema_checked.sema_says("test same { ret 0; }\ntest same { ret 0; }\n", "duplicate test `same`")) { bad = 4; }
+    if (sema_checked.sema_says("test one { ret 0; }\ntest two { ret 0; }\n", "duplicate test"))           { bad = 5; }
+    ret bad;
+}
+
+# a type a logical-addressing target cannot declare is refused by sema where the code
+# needs it; a pointer member that names its record closes a cycle such a target declares
+test logical__sema_refuses_what_a_logical_target_cannot_declare {
+    var bad:   i32 = 0;
+    val stage: str = "#[stage(\"compute\")]\n#[workgroup(1, 1, 1)]\nfun main() {}\n";
+    if (!spirv_says(sema_checked.joined("tag List: u8 { cons: *List; none; }\nfun f(l: *List) u32 { ret 0; }\n", stage), "recursive reference types"))    { bad = 1; }
+    if (!spirv_says(sema_checked.joined("rec Box[T] { p: *Box[*T]; v: u32; }\nfun f(b: *Box[u32]) u32 { ret b.v; }\n", stage), "unboundedly many types")) { bad = 2; }
+    if (spirv_says(sema_checked.joined("rec Node { next: *Node; v: u32; }\nfun f(l: *Node) u32 { ret l.v; }\n", stage), "Logical Shader"))                { bad = 3; }
+    if (sema_checked.sema_says("tag List: u8 { cons: *List; none; }\nfun f(l: *List) u32 { ret 0; }\n", "Logical Shader"))                                { bad = 4; }
+    ret bad;
+}
+
+# an instance that names no tag for `$cases`, or measures more than its destination holds,
+# is refused by sema in the instance's frame, which lowering no longer checks again
+test comptime__instance_rechecks_are_sema_s {
+    var bad: i32 = 0;
+    if (!sema_checked.sema_says("fun c[T]() u32 { var n: u32 = 0; $each k in $cases(T) { n = n + 1; } ret n; }\nfun g() u32 { ret c[u32](); }\n", "requires a tag type")) { bad = 1; }
+    if (!sema_checked.sema_says("fun s[T]() u8 { val x: u8 = $size_of(T); ret x; }\nfun g() u8 { ret s[[300]u8](); }\n", "out of range"))                                 { bad = 2; }
+    ret bad;
+}
+
+#[testing]
+rec WalkRun {
+    short: bool;
+    code:  i32;
+}
+
+#[testing]
+fun walk_bound_worker(arg: *u8) {
+    val r:      *WalkRun     = arg::*WalkRun;
+    var alloc:  A.Allocator;
+    val make_1: err[A.Error] = page.make(?alloc);
+    if (sel make_1.err) { ret; }
+
+    val nested:  str = nested_array_src(?alloc, 1100);
+    val shallow: str = nested_array_src(?alloc, 1000);
+    if (str_len(nested) == 0 || str_len(shallow) == 0) { ret; }
+
+    r.code = 0;
+    if (r.short) {
+        # the parse fits, and name resolution runs short before the walk is reached
+        if (!sema_checked.sema_rejects_with(nested, "name resolution descends")) { r.code = 3; }
+        ret;
+    }
+    if (!sema_checked.sema_says(nested, "recursive-type checker")) { r.code = 1; }
+    if (sema_checked.sema_says(shallow, "nests deeper than"))      { r.code = 2; }
+}
+
+# the walk runs on the stack the compiler sizes for itself, as in the compiler, so
+# its fixed bound is what refuses the nesting. on a stack too short for the
+# nesting a margin check refuses it instead of a reader running off the stack
+test recursive_type__walk_is_depth_bounded {
+    var r: WalkRun = WalkRun{short: false, code: 99};
+    stack.run(walk_bound_worker, (?r)::*u8);
+    if (r.code != 0) { ret r.code; }
+    $if (capability.HAS_THREADS) {
+        var short: WalkRun = WalkRun{short: true, code: 99};
+        stack.run_reserved(walk_bound_worker, (?short)::*u8, 4194304);
+        if (short.code != 0) { ret short.code; }
+    }
+    ret 0;
+}
+
+test constant__a_measured_constant_is_a_compile_time_constant {
+    val head: str = "rec P { a: u64; b: u64; }\nval S: u64 = $size_of(P);\n";
+    # an array length, in a field and in a body, before and after the declaration
+    if (!sema_checked.sema_clean(sema_checked.joined(head, "rec H { buf: [S]u8; }\nfun main() i64 {\n    var b: [S]u8;\n    ret 0;\n}\n")))       { ret 1; }
+    if (!sema_checked.sema_clean("rec H { buf: [S]u8; }\nval S: u64 = $size_of(P) * 2;\nrec P { a: u64; b: u64; }\nfun main() i64 { ret 0; }\n")) { ret 2; }
+    # a gate in a body takes the arm the measurement selects, so only that arm is typed
+    if (!sema_checked.sema_rejects_with(sema_checked.joined(head, "fun main() i64 {\n    $if (S == 16) { val bad: u8 = \"text\"; }\n    ret 0;\n}\n"), "type mismatch")) { ret 3; }
+    if (!sema_checked.sema_clean(sema_checked.joined(head, "fun main() i64 {\n    $if (S == 17) { val bad: u8 = \"text\"; }\n    ret 0;\n}\n")))                         { ret 4; }
+    ret 0;
+}
+
+test constant__an_imported_measured_constant_is_a_compile_time_constant {
+    val lib: str = "pub rec P { a: u64; b: u64; }\npub val S: u64 = $size_of(P);\n";
+    if (!sema_checked.sema_clean2("use t.lib;\nfun main() i32 {\n    var b: [lib.S]u8;\n    $if (lib.S != 16) { $error(\"wrong\"); }\n    ret 0;\n}\n", lib)) { ret 1; }
+    if (!sema_checked.sema_clean2("use t.lib.S;\nfun main() i32 {\n    var b: [S]u8;\n    $if (S != 16) { $error(\"wrong\"); }\n    ret 0;\n}\n", lib))       { ret 2; }
+    ret 0;
+}
+
+# `n` records each holding the one before by value, `Da` the innermost and its name
+# growing one `a` per level, followed by `tail`
+#[testing]
+fun deep_record_src(alloc: *A.Allocator, n: u32, tail: str) str {
+    val tl:    usize             = str_len(tail);
+    val total: usize             = 64 + (n::usize * (24 + n::usize * 2)) + tl;
+    val r:     res[*u8, A.Error] = A.allocate[u8](alloc, total);
+    if (sel r.err) { ret ""; }
+    var w: SourceWriter = SourceWriter{buf: r.ok, len: 0};
+    put(?w, "rec Da { x: u8; }\n");
+    var i: u32 = 1;
+    for (i < n) {
+        put(?w, "rec D");
+        put_as(?w, i + 1);
+        put(?w, " { x: D");
+        put_as(?w, i);
+        put(?w, "; }\n");
+        i = i + 1;
+    }
+    put(?w, tail);
+    w.buf[w.len] = 0;
+    ret w.buf::str;
+}
+
+#[testing]
+rec SourceWriter {
+    buf: *u8;
+    len: usize;
+}
+
+#[testing]
+fun put(w: *SourceWriter, text: str) {
+    val n: usize = str_len(text);
+    var j: usize = 0;
+    for (j < n) {
+        w.buf[w.len] = text[j];
+        w.len        = w.len + 1;
+        j            = j + 1;
+    }
+}
+
+#[testing]
+fun put_as(w: *SourceWriter, count: u32) {
+    var j: u32 = 0;
+    for (j < count) {
+        w.buf[w.len] = 'a';
+        w.len        = w.len + 1;
+        j            = j + 1;
+    }
+}
+
+test layout__a_deep_record_is_measured_in_an_array_length {
+    var alloc:  A.Allocator;
+    val make_1: err[A.Error] = page.make(?alloc);
+    if (sel make_1.err) { ret 1; }
+    val src: str = deep_record_src(?alloc, 71, "fun main() i64 {\n    var b: [$size_of(Daaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa)]u8;\n    ret 0;\n}\n");
+    if (str_len(src) == 0)             { ret 1; }
+    if (!sema_checked.sema_clean(src)) { ret 2; }
+    ret 0;
+}
+
+test layout__a_type_holding_itself_by_value_is_refused_when_measured {
+    if (!sema_checked.sema_says("rec N { self: N; }\nfun main() i64 {\n    var b: [$size_of(N)]u8;\n    ret 0;\n}\n", "contains itself by value")) { ret 1; }
+    ret 0;
+}
+
+test recursive_type__uni_secrecy_walk_memoizes_mutual_cycles {
+    val src: str = "rec A { b: B; }\nrec B { a: A; }\nuni U { x: A; y: u32; }\nfun main() i64 { ret 0; }\n";
+    if (sema_checked.sema_says(src, "nests deeper than"))                 { ret 1; }
+    if (!sema_checked.sema_says(src, "recursive type has infinite size")) { ret 2; }
+    ret 0;
+}
+
+test literal_range__secret_target_is_checked {
+    if (!sema_checked.sema_says("pub val x: ^u8 = 300;\n", "out of range")) { ret 1; }
+    if (sema_checked.sema_says("pub val y: ^u8 = 200;\n", "out of range"))  { ret 2; }
+    ret 0;
+}
+
+test address_of__refuses_each_rvalue_kind_by_name {
+    var bad:  i32 = 0;
+    val head: str = "rec P { x: i64; }\nfun f() i64 { ret 1; }\nfun g() P { var p: P; p.x = 1; ret p; }\nfun h() [2]i64 { var a: [2]i64; ret a; }\n";
+    if (!sema_checked.sema_says(sema_checked.joined(head, "fun main() i64 { val p: *i64 = ?f(); ret 0; }\n"), "cannot take the address of a call result"))                          { bad = 1; }
+    if (!sema_checked.sema_says(sema_checked.joined(head, "fun main() i64 { val p: *i64 = ?1; ret 0; }\n"), "cannot take the address of a literal"))                                { bad = 2; }
+    if (!sema_checked.sema_says(sema_checked.joined(head, "fun main() i64 { val x: i32 = 1; val p: *i64 = ?(x::i64); ret 0; }\n"), "cannot take the address of a cast result"))     { bad = 4; }
+    if (!sema_checked.sema_says(sema_checked.joined(head, "fun main() i64 { val x: i64 = 1; val p: *i64 = ?(x + 1); ret 0; }\n"), "cannot take the address of an operator result")) { bad = 5; }
+    if (!sema_checked.sema_says(sema_checked.joined(head, "fun main() i64 { val p: *[2]i64 = ?[2]i64{1, 2}; ret 0; }\n"), "cannot take the address of an array literal"))           { bad = 6; }
+    if (!sema_checked.sema_says(sema_checked.joined(head, "fun main() i64 { val p: *P = ?P{ x: 1 }; ret 0; }\n"), "cannot take the address of a record literal"))                   { bad = 7; }
+    if (!sema_checked.sema_says(sema_checked.joined(head, "fun main() i64 { val p: *i64 = ?g().x; ret 0; }\n"), "cannot take the address of a field of a call result"))             { bad = 8; }
+    if (!sema_checked.sema_says(sema_checked.joined(head, "fun main() i64 { val p: *i64 = ?h()[0]; ret 0; }\n"), "cannot take the address of an element of a call result"))         { bad = 9; }
+    if (!sema_checked.sema_says(sema_checked.joined(head, "fun main() i64 { val p: *i64 = ?f(); ret 0; }\n"), "`?` applies to a place"))                                            { bad = 10; }
+    ret bad;
+}
+
+test address_of__accepts_every_place_kind {
+    var bad:  i32 = 0;
+    val head: str = "rec P { x: i64; }\nfun pp(q: *P) *P { ret q; }\n";
+    if (!sema_checked.sema_clean(sema_checked.joined(head, "fun main() i64 { var x: i64 = 1; val p: *i64 = ?x; ret @p; }\n")))             { bad = 1; }
+    if (!sema_checked.sema_clean(sema_checked.joined(head, "fun main() i64 { var r: P; val p: *i64 = ?r.x; ret @p; }\n")))                 { bad = 2; }
+    if (!sema_checked.sema_clean(sema_checked.joined(head, "fun main() i64 { var a: [2]i64; val p: *i64 = ?a[0]; ret @p; }\n")))           { bad = 3; }
+    if (!sema_checked.sema_clean(sema_checked.joined(head, "fun main() i64 { var r: P; val q: *P = ?r; val p: *i64 = ?q.x; ret @p; }\n"))) { bad = 4; }
+    if (!sema_checked.sema_clean(sema_checked.joined(head, "fun main() i64 { var r: P; val q: *P = ?r; val p: *P = ?@q; ret 0; }\n")))     { bad = 5; }
+    if (!sema_checked.sema_clean(sema_checked.joined(head, "fun main() i64 { var r: P; val p: *i64 = ?pp(?r).x; ret @p; }\n")))            { bad = 6; }
+    ret bad;
+}
+
+# a literal no context types takes the i64 default and is range-checked there,
+# once; one its context types is refused at that type alone
+test literal_range__i64_default_is_checked {
+    if (!sema_checked.sema_says("pub val a: f64 = 10000000000000000000::f64;\n",
+        "literal 10000000000000000000 is out of range for i64 (-9223372036854775808..9223372036854775807)")) { ret 1; }
+    if (!sema_checked.sema_says("fun f() u8 { if (10000000000000000000 == 0) { ret 1; } ret 0; }\n",
+        "literal 10000000000000000000 is out of range for i64")) { ret 2; }
+    if (!sema_checked.sema_clean("pub val b: f64 = 9223372036854775807::f64;\npub val c: i64 = -9223372036854775808;\n")) { ret 3; }
+    if (sema_checked.sema_says("pub val d: u8 = 10000000000000000000;\n", "out of range for i64"))                        { ret 4; }
+    ret 0;
+}
+
+# an untyped literal coerces to u128/i128 when it fits and is refused, quoting
+# all of its digits and the 128-bit bounds, when it does not
+test literal_range__128_bit_bounds {
+    if (!sema_checked.sema_clean("pub val a: u128 = 340282366920938463463374607431768211455;\n"))   { ret 1; }
+    if (!sema_checked.sema_clean("pub val b: i128 = 170141183460469231731687303715884105727;\n"))   { ret 2; }
+    if (!sema_checked.sema_clean("pub val c: i128 = -170141183460469231731687303715884105728;\n"))  { ret 3; }
+    if (!sema_checked.sema_clean("pub val d: u128 = 0xFFFF_FFFF_FFFF_FFFF_FFFF_FFFF_FFFF_FFFF;\n")) { ret 4; }
+    if (!sema_checked.sema_says("pub val f: i128 = 170141183460469231731687303715884105728;\n",
+        "literal 170141183460469231731687303715884105728 is out of range for i128 (-170141183460469231731687303715884105728..170141183460469231731687303715884105727)")) { ret 6; }
+    if (!sema_checked.sema_says("pub val g: i128 = -170141183460469231731687303715884105729;\n",
+        "literal -170141183460469231731687303715884105729 is out of range for i128")) { ret 7; }
+    if (!sema_checked.sema_says("pub val i: u128 = -1;\n", "out of range for u128 (0..340282366920938463463374607431768211455)"))           { ret 9; }
+    if (!sema_checked.sema_says("pub val j: u8 = 18446744073709551616;\n", "literal 18446744073709551616 is out of range for u8 (0..255)")) { ret 10; }
+    # under `::` the exact value is refused only when no integer type holds it
+    if (!sema_checked.sema_clean("pub val k: u8 = 18446744073709551616::u8;\n")) { ret 11; }
+    if (!sema_checked.sema_says("pub val l: i128 = (-170141183460469231731687303715884105729)::i128;\n",
+        "literal -170141183460469231731687303715884105729 is out of range for i128")) { ret 12; }
+    ret 0;
+}
+
+# a constant shift count at or above the operand's width is refused with the
+# count and the width, at every width, through a literal, a `val` and an
+# expression of them; one below the width and a runtime count are accepted
+test shift_count__constant_at_or_above_the_width_is_refused {
+    if (!sema_checked.sema_says("fun f(x: u8) u8 { ret x << 8; }\n", "shift count 8 is at least the width of `u8` (8 bits)"))                   { ret 1; }
+    if (!sema_checked.sema_says("fun f(x: u32) u32 { ret x >> 40; }\n", "shift count 40 is at least the width of `u32` (32 bits)"))             { ret 4; }
+    if (!sema_checked.sema_says("fun f(x: u128) u128 { ret x << 128; }\n", "shift count 128 is at least the width of `u128` (128 bits)"))       { ret 6; }
+    if (!sema_checked.sema_says("val N: u8 = 32;\nfun f(x: u32) u32 { ret x << N; }\n", "shift count 32 is at least the width of `u32`"))       { ret 8; }
+    if (!sema_checked.sema_says("val N: u8 = 30;\nfun f(x: u32) u32 { ret x << (N + 2); }\n", "shift count 32 is at least the width of `u32`")) { ret 9; }
+    if (!sema_checked.sema_says("val N: i8 = -1;\nfun f(x: u32) u32 { ret x << N; }\n", "shift count -1 is negative"))                          { ret 10; }
+    if (!sema_checked.sema_clean("fun f(x: u8) u8 { ret x << 7; }\n"))                                                                          { ret 11; }
+    if (!sema_checked.sema_clean("val N: u8 = 31;\nfun f(x: u32) u32 { ret x << N; }\n"))                                                       { ret 16; }
+    if (!sema_checked.sema_clean("fun f(x: u32, n: u8) u32 { ret x << n; }\n"))                                                                 { ret 17; }
+    # a literal's shift is checked at the type its context gives it, not the i64 default
+    if (!sema_checked.sema_clean("pub val a: u128 = 1 << 100;\npub val b: u128 = (1 << 100)::u128;\n"))                            { ret 18; }
+    if (!sema_checked.sema_says("pub val c: u64 = (1 << 70) >> 10;\n", "shift count 70 is at least the width of `u64` (64 bits)")) { ret 19; }
+    if (!sema_checked.sema_says("pub val d: u8 = 1 << 8;\n", "shift count 8 is at least the width of `u8` (8 bits)"))              { ret 20; }
+    ret 0;
+}
+
+# a `u8`-discriminated tag with `count` cases, to probe the width check
+#[testing]
+fun tag_with_cases(alloc: *A.Allocator, count: u32) str {
+    val header: str               = "tag Wide: u8 { ";
+    val bytes:  usize             = str_len(header) + (count::usize * 8::usize) + 3::usize;
+    val r:      res[*u8, A.Error] = A.allocate[u8](alloc, bytes);
+    if (sel r.err) { ret header; }
+    val buf: *u8   = r.ok;
+    var w:   usize = 0;
+    var h:   usize = 0;
+    for (h < str_len(header)) {
+        buf[w] = header[h];
+        w      = w + 1;
+        h      = h + 1;
+    }
+    var i: u32 = 0;
+    for (i < count) {
+        buf[w] = 'c';
+        w      = w + 1;
+        var digits: u32 = i;
+        var scale:  u32 = 100;
+        for (scale > 0) {
+            buf[w] = (48 + ((digits / scale) % 10))::u8;
+            w      = w + 1;
+            scale  = scale / 10;
+        }
+        buf[w] = ';';
+        w      = w + 1;
+        i      = i + 1;
+    }
+    buf[w] = '}';
+    w      = w + 1;
+    buf[w] = 0;
+    ret buf::str;
+}
+
+test layout_intrinsic__adopts_the_binding_width {
+    var bad: i32 = 0;
+    val pre: str = "rec P { x: i64; y: i64; }\n";
+
+    if (!sema_checked.sema_clean(sema_checked.joined(pre, "val A: u8  = $size_of(P);\nfun main() i32 { ret 0; }\n"))) { bad = 1; }
+    if (!sema_checked.sema_clean(sema_checked.joined(pre, "val A: i32 = $size_of(P);\nfun main() i32 { ret 0; }\n"))) { bad = 5; }
+
+    if (!sema_checked.sema_clean(sema_checked.joined(pre, "val A: u8  = $align_of(P);\nfun main() i32 { ret 0; }\n"))) { bad = 7; }
+    if (!sema_checked.sema_clean("val A: u16 = $length_of([4]i32);\nfun main() i32 { ret 0; }\n"))                     { bad = 8; }
+
+    if (!sema_checked.sema_clean(sema_checked.joined(pre, "val N: u32 = 3;\nval A: u32 = N * $size_of(P);\nfun main() i32 { ret 0; }\n"))) { bad = 9; }
+
+    if (!sema_checked.sema_clean(sema_checked.joined(pre, "fun sz[T]() u32 { var n: u32 = $size_of(T); ret n; }\nfun use_it() u32 { ret sz[P](); }\nfun main() i32 { ret 0; }\n"))) { bad = 10; }
+    ret bad;
+}
+
+test layout_intrinsic__refuses_a_binding_it_does_not_fit {
+    var bad: i32 = 0;
+    if (sema_checked.sema_diag("rec Huge { a: [300]u8; }\nval A: u8 = $size_of(Huge);\nfun main() i32 { ret 0; }\n",
+        "value 300 is out of range for u8") != 0) { bad = 1; }
+    if (sema_checked.sema_diag("rec Big { a: [200]u8; }\nval A: i8 = $size_of(Big);\nfun main() i32 { ret 0; }\n",
+        "is out of range for i8") != 0) { bad = 2; }
+    if (sema_checked.sema_diag("rec P { x: i64; }\nval A: f64 = $size_of(P);\nfun main() i32 { ret 0; }\n",
+        "type mismatch") != 0) { bad = 3; }
+    # the offset folds during type checking from the checked layout, so the width check is the same one `$size_of` meets
+    if (!sema_checked.sema_rejects_with("rec Wide { pad: [300]u8; tail: i32; }\nval A: u8 = $offset_of(Wide, tail);\nfun main() i32 { ret 0; }\n",
+        "value 300 is out of range for u8")) { bad = 4; }
+    if (!sema_checked.sema_clean("rec Wide { pad: [300]u8; tail: i32; }\nval A: u32 = $offset_of(Wide, tail);\nfun main() i32 { ret 0; }\n")) { bad = 5; }
+    ret bad;
+}
+
+test literal_range__operand_order_does_not_matter {
+    var bad: i32 = 0;
+    if (sema_checked.sema_diag("fun f(x: u8) u8 { ret x + 300; }\nfun main() i32 { ret 0; }\n",
+        "literal 300 is out of range for u8") != 0) { bad = 1; }
+    if (sema_checked.sema_diag("fun f(x: u8) u8 { ret 300 + x; }\nfun main() i32 { ret 0; }\n",
+        "literal 300 is out of range for u8") != 0) { bad = 2; }
+    if (!sema_checked.sema_clean("fun f(x: u8) u8 { ret x + 5; }\nfun g(x: u8) u8 { ret 5 + x; }\nfun main() i32 { ret 0; }\n")) { bad = 3; }
+    # the refusal points at the literal operand, not the whole expression
+    if (!sema_checked.sema_rejects_at("fun f(x: u8) u8 { ret x + 300; }\nfun main() i32 { ret 0; }\n", "out of range for u8", 26, 3))                   { bad = 4; }
+    if (!sema_checked.sema_rejects_at("fun f(x: u8) u8 { ret 300 + x; }\nfun main() i32 { ret 0; }\n", "out of range for u8", 22, 3))                   { bad = 5; }
+    if (!sema_checked.sema_rejects_at("fun f(x: u8) u8 { if (x == -1) { ret 1; } ret 0; }\nfun main() i32 { ret 0; }\n", "out of range for u8", 27, 2)) { bad = 6; }
+    ret bad;
+}
+
+test pack__refused_on_a_body_less_fun {
+    var bad: i32 = 0;
+
+    if (sema_checked.sema_diag("#[library(\"raylib\")]\next fun TextFormat(text: *u8, va: ...) *u8;\nfun main() i32 { ret 0; }\n",
+        "cannot appear on a body-less `fun`") != 0) { bad = 1; }
+
+    if (sema_checked.sema_note("#[library(\"raylib\")]\next fun TextFormat(text: *u8, va: ...) *u8;\nfun main() i32 { ret 0; }\n",
+        "ext fun f(a: T, ...)") != 0) { bad = 2; }
+
+    if (!sema_checked.sema_clean("ext fun printf(fmt: *u8, ...) i32;\nfun main() i32 { ret 0; }\n"))       { bad = 4; }
+    if (!sema_checked.sema_clean("fun fold(h: u64, va: ...) u64 { ret h; }\nfun main() i32 { ret 0; }\n")) { bad = 5; }
+    ret bad;
+}
+
+test pack__forwards_into_a_c_variadic_tail {
+    val decls: str = "ext fun printf(fmt: *u8, ...) i32;\npub fun logf(fmt: *u8, va: ...) i32 { ret printf(fmt, va...); }\n";
+    var bad:   i32 = 0;
+
+    if (!sema_checked.sema_clean(sema_checked.joined(decls, "fun use_it() i32 { ret logf(\"%d %f\\n\", 1::i32, 2.5); }\nfun main() i32 { ret 0; }\n"))) { bad = 1; }
+    if (!sema_checked.sema_clean(sema_checked.joined(decls, "fun use_it() i32 { ret logf(\"hi\\n\"); }\nfun main() i32 { ret 0; }\n")))                 { bad = 2; }
+
+    if (sema_checked.sema_diag(sema_checked.joined(decls, "fun use_it() i32 { var c: u8 = 65; ret logf(\"%d\\n\", c); }\nfun main() i32 { ret 0; }\n"),
+        "is promoted to a 32-bit integer in a C-variadic argument") != 0) { bad = 3; }
+    if (sema_checked.sema_diag(sema_checked.joined(decls, "fun use_it() i32 { ret logf(\"%f\\n\", 1.5::f32); }\nfun main() i32 { ret 0; }\n"),
+        "is promoted to `f64` in a C-variadic argument") != 0) { bad = 4; }
+
+    if (!sema_checked.sema_clean("fun plain(h: u64, va: ...) u64 { ret h; }\n#[symbol(\"main\")]\nfun main(argc: i64, argv: **u8) i32 { var c: u8 = 65; plain(1, c); ret 0; }\n")) { bad = 6; }
+
+    if (sema_checked.sema_diag("fun fixed(a: i32) i32 { ret a; }\nfun fwd(va: ...) i32 { ret fixed(va...); }\n#[symbol(\"main\")]\nfun main(argc: i64, argv: **u8) i32 { fwd(1::i32); ret 0; }\n",
+        "cannot spread `...` into fixed parameters") != 0) { bad = 7; }
+
+    if (sema_checked.sema_diag(sema_checked.joined(decls, "fun use_it() i32 { var s: ^i32 = 1; ret logf(\"%d\\n\", s); }\nfun main() i32 { ret 0; }\n"),
+        "secret value cannot be passed to a") != 0) { bad = 8; }
+    ret bad;
+}
+
+# a case literal carries its payload only in positional elements, which the reach scan visits
+test pack__forwards_into_a_c_variadic_tail_through_a_case_literal {
+    val decls: str = "ext fun printf(fmt: *u8, ...) i32;\ntag Reply: u8 { empty; value: i32; }\npub fun logf(fmt: *u8, va: ...) Reply { ret Reply.value{printf(fmt, va...)}; }\n";
+    if (sema_checked.sema_diag(sema_checked.joined(decls, "fun use_it() Reply { var c: u8 = 65; ret logf(\"%d\\n\", c); }\nfun main() i32 { ret 0; }\n"),
+        "is promoted to a 32-bit integer in a C-variadic argument") != 0) { ret 1; }
+    ret 0;
+}
+
+test tag__payload_layouts {
+    if (extent_is("tag Reply: u8 { empty; value: u64; }", "Reply", 16, 8) != 0)                             { ret 1; }
+    if (extent_is("tag Reply: u8 { empty; }", "Reply", 1, 1) != 0)                                          { ret 2; }
+    if (extent_is("#[packed] tag Reply: u8 { empty; value: u64; }", "Reply", 9, 1) != 0)                    { ret 3; }
+    if (extent_is("#[packed] #[align(16)] tag Reply: u8 { empty; value: u64; }", "Reply", 16, 16) != 0)     { ret 4; }
+    if (extent_is("tag Reply[T]: u8 { empty; value: T; } var reply: Reply[u64];", "Reply", 16, 8) != 0)     { ret 5; }
+    if (!sema_checked.sema_clean("tag Reply[T]: u8 { next: *Reply[T]; value: T; } var reply: Reply[u64];")) { ret 6; }
+    if (!sema_checked.sema_clean("tag Reply: u8 { secret: ^u64; public: u64; }"))                           { ret 7; }
+    ret 0;
+}
+
+test tag_discriminator__declared_and_checked {
+    if (extent_is("tag Reply: u32 { empty; }", "Reply", 4, 4) != 0)                                                                                                                         { ret 2; }
+    if (extent_is("tag Reply: u64 { empty; value: u16; }", "Reply", 16, 8) != 0)                                                                                                            { ret 3; }
+    if (extent_is("#[packed] tag Reply: u32 { empty; value: u64; }", "Reply", 12, 1) != 0)                                                                                                  { ret 4; }
+    if (!sema_checked.sema_clean("tag Reply: u32 { empty; value: i64; } fun f() $discriminant_of(Reply) { ret 1u32; }"))                                                                    { ret 6; }
+    if (!sema_checked.sema_clean("tag res[T, E]: u8 { err: E; ok: T; } tag opt[T]: u8 { none; some: T; } tag err[E]: u8 { err: E; ok; }\nfun f() $discriminant_of(opt[i64]) { ret 1u8; }")) { ret 7; }
+    if (!sema_checked.sema_rejects_with("tag Reply: u32 { empty; } fun f() u8 { ret 1u8::$discriminant_of(Reply); }", "type mismatch"))                                                     { ret 8; }
+    ret 0;
+}
+
+test tag_discriminator__rejected_when_unusable {
+    if (!sema_checked.sema_rejects_with("tag Reply { empty; value: i64; }", "requires a discriminator type"))                     { ret 1; }
+    if (!sema_checked.sema_rejects_with("tag Reply: i8 { empty; }", "must be `u8`, `u16`, `u32` or `u64`"))                       { ret 2; }
+    if (!sema_checked.sema_rejects_with("rec Word { a: u8; } tag Reply: Word { empty; }", "must be `u8`, `u16`, `u32` or `u64`")) { ret 10; }
+    if (!sema_checked.sema_rejects_with("tag Reply: ^u8 { empty; }", "must be `u8`, `u16`, `u32` or `u64`"))                      { ret 4; }
+    if (!sema_checked.sema_rejects_with("tag Reply: *u8 { empty; }", "must be `u8`, `u16`, `u32` or `u64`"))                      { ret 5; }
+    var alloc:  A.Allocator;
+    val make_r: err[A.Error] = page.make(?alloc);
+    if (sel make_r.err) { ret 11; }
+    val wide:   str  = tag_with_cases(?alloc, 257);
+    val narrow: bool = sema_checked.sema_rejects_with(wide, "too narrow for the case count");
+    val exact:  str  = tag_with_cases(?alloc, 256);
+    val fits:   bool = sema_checked.sema_clean(exact);
+    if (!narrow)                                                                                                                                       { ret 6; }
+    if (!fits)                                                                                                                                         { ret 9; }
+    if (!sema_checked.sema_rejects_with("tag Reply: u8 { empty; } fun f() $discriminant_of(i64) { ret 1u8; }", "`$discriminant_of` expects a tag"))    { ret 7; }
+    if (!sema_checked.sema_rejects_with("rec Reply { value: u64; } fun f() $discriminant_of(Reply) { ret 1u8; }", "`$discriminant_of` expects a tag")) { ret 8; }
+    ret 0;
+}
+
+test tag__rejects_invalid_case_recipes {
+    ret tag_rows(?TAG_CASE_RECIPES[0], $length_of(TAG_CASE_RECIPES));
+}
+
+test tag_construction__names_the_type_and_the_case {
+    ret tag_rows(?TAG_CONSTRUCTION_NAMES[0], $length_of(TAG_CONSTRUCTION_NAMES));
+}
+
+test tag_construction__qualified_and_aliased_heads {
+    if (!sema_checked.sema_clean2("use t.lib; fun f() lib.Reply { ret lib.Reply.value{42}; }",
+        "pub tag Reply: u8 { empty; value: i64; }")) { ret 1; }
+    if (!sema_checked.sema_clean2("use t.lib; fun f() lib.Reply { ret lib.Reply.empty{}; }",
+        "pub tag Reply: u8 { empty; value: i64; }")) { ret 2; }
+    if (!sema_checked.sema_clean2("use t.lib; fun f() lib.Point { ret lib.Point{x: 1, y: 2}; }",
+        "pub rec Point { x: i64; y: i64; }")) { ret 3; }
+    if (!sema_checked.sema_clean2("use t.lib.Reply; fun f() Reply { ret Reply.value{42}; }",
+        "pub tag Reply: u8 { empty; value: i64; }")) { ret 4; }
+    if (!sema_checked.sema_clean("tag Reply: u8 { empty; value: i64; } def A: Reply; fun f(v: i64) A { ret A.value{v}; }"))                                                                                                                    { ret 5; }
+    if (!sema_checked.sema_clean("tag res[T, E]: u8 { err: E; ok: T; } tag opt[T]: u8 { none; some: T; } tag err[E]: u8 { err: E; ok; }\nfun f[E](e: E) res[i64, E] { ret res[i64, E].err{e}; } fun g() res[i64, u32] { ret f[u32](1u32); }")) { ret 6; }
+    if (!sema_checked.sema_rejects_with("rec Point { x: i64; } fun f() Point { ret Point.x{1}; }", "is not a tag"))                                                                                                                            { ret 7; }
+    ret 0;
+}
+
+test tag_construction__record_literal_form_is_refused {
+    ret tag_rows(?TAG_RECORD_LITERAL_FORMS[0], $length_of(TAG_RECORD_LITERAL_FORMS));
+}
+
+test tag__representation_cannot_be_forged_through_casts {
+    ret tag_rows(?TAG_FORGED_CASTS[0], $length_of(TAG_FORGED_CASTS));
+}
+
+test tag_construction__distinct_from_vector_literals {
+    if (!sema_checked.sema_clean("tag Reply: u8 { empty; } def Alias: Reply; val r: Alias = Alias.empty{};"))                                          { ret 1; }
+    if (!sema_checked.sema_clean("tag Reply: u8 { empty; } fun make[T]() T { ret T.empty{}; } fun f() Reply { ret make[Reply](); }"))                  { ret 2; }
+    if (!sema_checked.sema_clean("def V: u32x4; fun f(x: u32) V { ret V{x, 2u32, x, 4u32}; }"))                                                        { ret 3; }
+    if (!sema_checked.sema_rejects_with("def V: u32x4; fun f() V { ret V{missing, 2u32, 3u32, 4u32}; }", "unresolved identifier"))                     { ret 4; }
+    if (!sema_checked.sema_rejects_with("tag Reply: u8 { empty; } fun f(a: Reply, b: Reply) u8 { ret a == b; }", "aggregate"))                         { ret 5; }
+    if (sema_checked.sema_ok("def V: u32x4; fun f(x: u32) V { ret V{x, 2u32, x, 4u32}; } fun main() i32 { val v: V = f(1u32); ret v[0]::i32; }") != 0) { ret 6; }
+    ret 0;
+}
+
+test tag__is_tag_queries_nominal_shapes {
+    ret tag_rows(?TAG_IS_TAG_QUERIES[0], $length_of(TAG_IS_TAG_QUERIES));
+}
+
+test case_descriptor__enumeration {
+    # `$cases(T)` walks declaration order; a descriptor answers name, has_payload, type, offset and code, and refuses storage questions about a payloadless case
+    if (!sema_checked.sema_clean("tag Reply: u8 { empty; value: i64; }\ntag Other: u8 { empty; value: i64; }\ntag Box[T]: u8 { none; some: T; }\nfun f(v: Reply) u64 { $each c in $cases(Reply) { if (sel v.[c]) { ret c.code; } } ret 99; }"))                                                                                                                            { ret 1; }
+    if (!sema_checked.sema_clean("tag Reply: u8 { empty; value: i64; }\ntag Other: u8 { empty; value: i64; }\ntag Box[T]: u8 { none; some: T; }\nfun f() u64 { var n: u64 = 0; $each c in $cases(Reply) { $if (c.has_payload) { n = n + c.offset; } $or { n = n + 1; } } ret n; }"))                                                                                       { ret 2; }
+    if (!sema_checked.sema_clean("tag Reply: u8 { empty; value: i64; }\ntag Other: u8 { empty; value: i64; }\ntag Box[T]: u8 { none; some: T; }\nfun f() u64 { $each c in $cases(Reply) { $if (c.has_payload) { $if (c.type == i64) {} $or { $error(\"type\"); } } } ret 0; }"))                                                                                           { ret 4; }
+    if (!sema_checked.sema_clean("tag Reply: u8 { empty; value: i64; }\ntag Other: u8 { empty; value: i64; }\ntag Box[T]: u8 { none; some: T; }\nfun f() u64 { $each c in $cases(Reply) { $if (c.has_payload) { $if (c.code == 1) {} $or { $error(\"code\"); } } $or { $if (c.code == 0) {} $or { $error(\"code0\"); } } } ret 0; }"))                                     { ret 5; }
+    if (!sema_checked.sema_clean("tag Reply: u8 { empty; value: i64; }\ntag Other: u8 { empty; value: i64; }\ntag Box[T]: u8 { none; some: T; }\nfun f() u64 { $each c in $cases(Box[Reply]) { $if (c.has_payload) { $if (c.type == Reply) {} $or { $error(\"specialized\"); } $if (c.offset == 8) {} $or { $error(\"offset\"); } } } ret 0; }"))                          { ret 7; }
+    if (!sema_checked.sema_clean("tag Reply: u8 { empty; value: i64; }\ntag Other: u8 { empty; value: i64; }\ntag Box[T]: u8 { none; some: T; }\ndef R: Box[u32];\nfun f() u64 { $each c in $cases(R) { $if (c.has_payload) { $if (c.type == u32) {} $or { $error(\"alias\"); } } } ret 0; }"))                                                                            { ret 8; }
+    if (!sema_checked.sema_clean("tag Reply: u8 { empty; value: i64; }\ntag Other: u8 { empty; value: i64; }\ntag Box[T]: u8 { none; some: T; }\nfun f(p: *u8) u64 { var n: u64 = 0; $each c in $cases(Reply) { val s: *u8 = c.name; if (s[0] != 0) { n = n + 1; } } ret n; }"))                                                                                           { ret 9; }
+    if (!sema_checked.sema_clean("tag Secretive: u8 { failed: i32; value: ^u64; }\nfun f() u64 { var n: u64 = 0; $each c in $cases(Secretive) { $if (c.has_payload) { $if ($is_secret(c.type)) { n = n + 1; } $or (c.type == i32) { n = n + 1; } $or { $error(\"qualifier\"); } } } ret n; }"))                                                                            { ret 10; }
+    if (!sema_checked.sema_clean("tag Secretive: u8 { failed: i32; value: ^u64; }\nfun f() u64 { var n: u64 = 0; $each c in $cases(Secretive) { $if (c.has_payload) { $if (c.type == u64) { $error(\"stripped\"); } $or { n = n + 1; } } } ret n; }"))                                                                                                                     { ret 17; }
+    if (!sema_checked.sema_rejects_with("tag Reply: u8 { empty; value: i64; }\nfun take[T](v: T) u64 { ret 1; }\nfun f(v: Reply) u64 { $each c in $cases(Reply) { if (sel v.[c]) { ret take[c.type](0); } } ret 0; }", "this case has no payload, so it has no `.type` or `.offset`"))                                                                                     { ret 18; }
+    if (!sema_checked.sema_clean("tag Reply: u8 { empty; value: i64; }\ntag Other: u8 { empty; value: i64; }\ntag Box[T]: u8 { none; some: T; }\nfun count[T]() u64 { var n: u64 = 0; $each c in $cases(T) { n = n + 1; } ret n; }\nfun g() u64 { ret count[Reply]() + count[Box[u8]](); }"))                                                                              { ret 11; }
+    if (!sema_checked.sema_clean("tag Reply: u8 { empty; value: i64; }\ntag Other: u8 { empty; value: i64; }\ntag Box[T]: u8 { none; some: T; }\nrec Holder { r: Reply; n: u8; }\nfun f(h: Holder) i64 { $each f in $fields(Holder) { $if ($is_tag(f.type)) { $each c in $cases(f.type) { $if (c.has_payload) { if (sel h.[f].[c]) { ret h.[f].[c]; } } } } } ret -1; }")) { ret 12; }
+    if (!sema_checked.sema_clean("tag res[T, E]: u8 { err: E; ok: T; } tag opt[T]: u8 { none; some: T; } tag err[E]: u8 { err: E; ok; }\nfun f() u64 { $each c in $cases(res[i64, u32]) { $if (c.has_payload) { $if (c.type == i64) { $if (c.code == 1) {} $or { $error(\"ok code\"); } } } } ret 0; }"))                                                                  { ret 13; }
+    if (!sema_checked.sema_clean("tag Reply: u8 { empty; value: i64; }\ntag Other: u8 { empty; value: i64; }\ntag Box[T]: u8 { none; some: T; }\n$if ($is_tag(Reply)) {} $or { $error(\"tag\"); }\n$if ($is_tag(^Reply)) { $error(\"secret shape\"); }"))                                                                                                                  { ret 16; }
+    if (!sema_checked.sema_rejects_with("tag Reply: u8 { empty; value: i64; }\ntag Other: u8 { empty; value: i64; }\ntag Box[T]: u8 { none; some: T; }\nfun f() u64 { var n: u64 = 0; $each c in $cases(^Reply) { n = n + 1; } ret n; }", "`$cases` refuses `^Reply`"))                                                                                                    { ret 17; }
+    if (!sema_checked.sema_rejects_with("tag Reply: u8 { empty; value: i64; }\ntag Other: u8 { empty; value: i64; }\ntag Box[T]: u8 { none; some: T; }\nrec P { a: u8; }\nfun f() u64 { var n: u64 = 0; $each c in $cases(P) { n = n + 1; } ret n; }", "`$cases` requires a tag type"))                                                                                    { ret 18; }
+    if (!sema_checked.sema_rejects_with("tag Reply: u8 { empty; value: i64; }\ntag Other: u8 { empty; value: i64; }\ntag Box[T]: u8 { none; some: T; }\nfun f() u64 { var n: u64 = 0; $each c in $fields(Reply) { n = n + 1; } ret n; }", "$fields requires a record type"))                                                                                               { ret 19; }
+    if (!sema_checked.sema_rejects_with("tag Reply: u8 { empty; value: i64; }\ntag Other: u8 { empty; value: i64; }\ntag Box[T]: u8 { none; some: T; }\nfun f() u64 { $each c in $cases(Reply) { ret c.offset; } ret 0; }", "this case has no payload, so it has no `.type` or `.offset`"))                                                                                { ret 21; }
+    if (!sema_checked.sema_rejects_with("tag Reply: u8 { empty; value: i64; }\ntag Other: u8 { empty; value: i64; }\ntag Box[T]: u8 { none; some: T; }\nfun f() u64 { $each c in $cases(Reply) { ret c.size; } ret 0; }", "a case descriptor has only `.name`, `.has_payload`, `.type`, `.offset`, and `.code`"))                                                          { ret 23; }
+    if (!sema_checked.sema_rejects_with("tag Reply: u8 { empty; value: i64; }\ntag Other: u8 { empty; value: i64; }\ntag Box[T]: u8 { none; some: T; }\nfun f() u8 { $each c in $cases(Reply) { ret c.has_payload; } ret 0; }", "`case.has_payload` is a comptime predicate"))                                                                                             { ret 24; }
+    if (!sema_checked.sema_rejects_with("tag Reply: u8 { empty; value: i64; }\ntag Other: u8 { empty; value: i64; }\ntag Box[T]: u8 { none; some: T; }\nrec P { a: u8; }\nfun f() u64 { $each f in $fields(P) { ret f.code; } ret 0; }", "a field descriptor has only `.name`, `.type`, and `.offset`"))                                                                   { ret 25; }
+    ret 0;
+}
+
+test case_descriptor__projection_obeys_guard_rules {
+    # `sel v.[c]` opens the same guard as `sel v.c`, and `v.[c]` is the same payload place
+    if (!sema_checked.sema_clean("tag Reply: u8 { empty; value: i64; }\ntag Other: u8 { empty; value: i64; }\ntag Box[T]: u8 { none; some: T; }\nfun f(v: Reply) i64 { $each c in $cases(Reply) { $if (c.has_payload) { if (sel v.[c]) { ret v.[c]; } } } ret -1; }"))                                                                                                                      { ret 1; }
+    if (!sema_checked.sema_clean("tag Reply: u8 { empty; value: i64; }\ntag Other: u8 { empty; value: i64; }\ntag Box[T]: u8 { none; some: T; }\nfun f(v: Reply) i64 { $each c in $cases(Reply) { $if (c.has_payload) { if (sel v.[c] && v.[c] > 3) { ret 1; } } } ret -1; }"))                                                                                                             { ret 2; }
+    if (!sema_checked.sema_clean("tag Reply: u8 { empty; value: i64; }\ntag Other: u8 { empty; value: i64; }\ntag Box[T]: u8 { none; some: T; }\nfun f(v: Reply) i64 { $each c in $cases(Reply) { $if (c.has_payload) { if (!sel v.[c]) { ret -1; } ret v.[c]; } } ret -2; }"))                                                                                                             { ret 3; }
+    if (!sema_checked.sema_clean("tag Reply: u8 { empty; value: i64; }\ntag Other: u8 { empty; value: i64; }\ntag Box[T]: u8 { none; some: T; }\nfun f(v: Reply) i64 { $each c in $cases(Reply) { if (sel v.[c]) { $if (c.has_payload) { ret v.[c]; } } } ret -1; }"))                                                                                                                      { ret 4; }
+    if (!sema_checked.sema_clean("tag Reply: u8 { empty; value: i64; }\ntag Other: u8 { empty; value: i64; }\ntag Box[T]: u8 { none; some: T; }\nfun f(v: *Reply) i64 { $each c in $cases(Reply) { $if (c.has_payload) { if (sel (@v).[c]) { (@v).[c] = 2; val q: *i64 = ?(@v).[c]; ret @q; } } } ret -1; }"))                                                                              { ret 5; }
+    if (!sema_checked.sema_clean("tag Reply: u8 { empty; value: i64; }\ntag Other: u8 { empty; value: i64; }\ntag Box[T]: u8 { none; some: T; }\ntag Outer: u8 { none; inner: Reply; }\nfun f(o: Outer) i64 { $each c in $cases(Outer) { $if (c.has_payload) { if (sel o.[c]) { if (sel o.[c].value) { ret o.[c].value; } } } } ret -1; }"))                                                { ret 6; }
+    if (!sema_checked.sema_clean("tag Reply: u8 { empty; value: i64; }\ntag Other: u8 { empty; value: i64; }\ntag Box[T]: u8 { none; some: T; }\nfun f(v: Reply) i64 { $each c in $cases(Reply) { $if (c.has_payload) { if (sel v.[c]) { if (sel v.value) { ret v.value + v.[c]; } } } } ret -1; }"))                                                                                       { ret 7; }
+    if (!sema_checked.sema_clean("tag res[T, E]: u8 { err: E; ok: T; } tag opt[T]: u8 { none; some: T; } tag err[E]: u8 { err: E; ok; }\nfun f(r: res[i64, u32]) i64 { $each c in $cases(res[i64, u32]) { $if (c.has_payload) { $if (c.type == i64) { if (sel r.[c]) { ret r.[c]; } } } } ret -1; }"))                                                                                      { ret 9; }
+    if (!sema_checked.sema_rejects_with("tag Reply: u8 { empty; value: i64; }\ntag Other: u8 { empty; value: i64; }\ntag Box[T]: u8 { none; some: T; }\nfun f(v: Reply) i64 { $each c in $cases(Reply) { $if (c.has_payload) { ret v.[c]; } } ret 0; }", "a tag payload requires a `sel` guard for its case"))                                                                              { ret 10; }
+    if (!sema_checked.sema_rejects_with("tag Reply: u8 { empty; value: i64; }\ntag Other: u8 { empty; value: i64; }\ntag Box[T]: u8 { none; some: T; }\nfun f(v: Reply) i64 { $each c in $cases(Reply) { if (sel v.[c]) { ret v.[c]; } } ret 0; }", "this tag case takes no payload"))                                                                                                      { ret 11; }
+    if (!sema_checked.sema_rejects_with("tag Reply: u8 { empty; value: i64; }\ntag Other: u8 { empty; value: i64; }\ntag Box[T]: u8 { none; some: T; }\nfun f(v: Reply) i64 { $each c in $cases(Reply) { $if (c.has_payload) { if (sel v.[c] && v.[c] > 3) { ret v.[c]; } } } ret 0; }", "a tag payload requires a `sel` guard for its case"))                                              { ret 12; }
+    if (!sema_checked.sema_rejects_with("tag Reply: u8 { empty; value: i64; }\ntag Other: u8 { empty; value: i64; }\ntag Box[T]: u8 { none; some: T; }\nfun f(v: Reply) i64 { $each c in $cases(Reply) { $if (c.has_payload) { if (sel v.[c] || v.[c] > 3) { ret 1; } } } ret 0; }", "a tag payload requires a `sel` guard for its case"))                                                  { ret 13; }
+    if (!sema_checked.sema_rejects_with("tag Reply: u8 { empty; value: i64; }\ntag Other: u8 { empty; value: i64; }\ntag Box[T]: u8 { none; some: T; }\nfun f(v: Reply) i64 { $each c in $cases(Reply) { if (sel v.[c]) { v = Reply.empty{}; } } ret 0; }", "cannot assign to this place inside a guard"))                                                                                  { ret 14; }
+    if (!sema_checked.sema_rejects_with("tag Reply: u8 { empty; value: i64; }\ntag Other: u8 { empty; value: i64; }\ntag Box[T]: u8 { none; some: T; }\nfun f(v: ^Reply) u8 { $each c in $cases(Reply) { if (sel v.[c]) { ret 1; } } ret 0; }", "`sel` cannot test `^Reply`"))                                                                                                              { ret 15; }
+    if (!sema_checked.sema_rejects_with("tag Reply: u8 { empty; value: i64; }\ntag Other: u8 { empty; value: i64; }\ntag Box[T]: u8 { none; some: T; }\n#[packed] tag Pk: u8 { a; b: u32; }\nfun f(v: Pk) u32 { $each c in $cases(Pk) { $if (c.has_payload) { if (sel v.[c]) { val q: *u32 = ?v.[c]; ret @q; } } } ret 0; }", "cannot take the address of a payload of a `#[packed]` tag")) { ret 16; }
+    if (!sema_checked.sema_rejects_with("tag Reply: u8 { empty; value: i64; }\ntag Other: u8 { empty; value: i64; }\ntag Box[T]: u8 { none; some: T; }\nfun f() i64 { $each c in $cases(Reply) { if (sel make().[c]) { ret 1; } } ret 0; }\nfun make() Reply { ret Reply.empty{}; }", "`sel` tests a place"))                                                                               { ret 17; }
+    ret 0;
+}
+
+test case_descriptor__construction_and_foreign_owners {
+    # `T.[c]{...}` constructs through the single-case rule; a descriptor from another nominal type or generic instantiation is refused in every position
+    if (!sema_checked.sema_clean("tag Reply: u8 { empty; value: i64; }\ntag Other: u8 { empty; value: i64; }\ntag Box[T]: u8 { none; some: T; }\nfun f() Reply { $each c in $cases(Reply) { $if (c.has_payload) { ret Reply.[c]{1}; } } ret Reply.empty{}; }"))                                                                                     { ret 1; }
+    if (!sema_checked.sema_clean("tag Reply: u8 { empty; value: i64; }\ntag Other: u8 { empty; value: i64; }\ntag Box[T]: u8 { none; some: T; }\nfun f() Reply { $each c in $cases(Reply) { $if (c.has_payload) {} $or { ret Reply.[c]{}; } } ret Reply.empty{}; }"))                                                                               { ret 2; }
+    if (!sema_checked.sema_clean("tag Reply: u8 { empty; value: i64; }\ntag Other: u8 { empty; value: i64; }\ntag Box[T]: u8 { none; some: T; }\nfun build[T](x: T) Box[T] { $each c in $cases(Box[T]) { $if (c.has_payload) { ret Box[T].[c]{x}; } } ret Box[T].none{}; }\nfun g() Box[u32] { ret build[u32](7); }"))                              { ret 3; }
+    if (!sema_checked.sema_clean("tag Reply: u8 { empty; value: i64; }\ntag Other: u8 { empty; value: i64; }\ntag Box[T]: u8 { none; some: T; }\ndef R: Box[u32];\nfun f() R { $each c in $cases(R) { $if (c.has_payload) { ret R.[c]{7}; } } ret R.none{}; }"))                                                                                    { ret 4; }
+    if (!sema_checked.sema_clean("tag Reply: u8 { empty; value: i64; }\ntag Other: u8 { empty; value: i64; }\ntag Box[T]: u8 { none; some: T; }\nval g: Reply = Reply.value{42};\nfun f() i64 { $each c in $cases(Reply) { $if (c.has_payload) { if (sel g.[c]) { ret g.[c]; } } } ret 0; }"))                                                      { ret 6; }
+    if (!sema_checked.sema_rejects_with("tag Reply: u8 { empty; value: i64; }\ntag Other: u8 { empty; value: i64; }\ntag Box[T]: u8 { none; some: T; }\nfun f() Reply { $each c in $cases(Reply) { ret Reply.[c]{1}; } ret Reply.empty{}; }", "this tag case takes no payload"))                                                                    { ret 7; }
+    if (!sema_checked.sema_rejects_with("tag Reply: u8 { empty; value: i64; }\ntag Other: u8 { empty; value: i64; }\ntag Box[T]: u8 { none; some: T; }\nfun f() Reply { $each c in $cases(Reply) { $if (c.has_payload) { ret Reply.[c]{}; } } ret Reply.empty{}; }", "this tag case requires a payload"))                                           { ret 8; }
+    if (!sema_checked.sema_rejects_with("tag Reply: u8 { empty; value: i64; }\ntag Other: u8 { empty; value: i64; }\ntag Box[T]: u8 { none; some: T; }\nfun f() Reply { $each c in $cases(Reply) { $if (c.has_payload) { ret Reply.[c]{1, 2}; } } ret Reply.empty{}; }", "a tag case carries exactly one payload"))                                 { ret 9; }
+    if (!sema_checked.sema_rejects_with("tag Reply: u8 { empty; value: i64; }\ntag Other: u8 { empty; value: i64; }\ntag Box[T]: u8 { none; some: T; }\nfun f() Reply { $each c in $cases(Reply) { $if (c.has_payload) { ret Reply.[c]{1u32}; } } ret Reply.empty{}; }", "type mismatch"))                                                          { ret 10; }
+    if (!sema_checked.sema_rejects_with("tag Reply: u8 { empty; value: i64; }\ntag Other: u8 { empty; value: i64; }\ntag Box[T]: u8 { none; some: T; }\nfun f() Other { $each c in $cases(Reply) { $if (c.has_payload) { ret Other.[c]{1}; } } ret Other.empty{}; }", "this case descriptor belongs to `Reply`"))                                   { ret 11; }
+    if (!sema_checked.sema_rejects_with("tag Reply: u8 { empty; value: i64; }\ntag Other: u8 { empty; value: i64; }\ntag Box[T]: u8 { none; some: T; }\nfun f() Box[u64] { $each c in $cases(Box[u32]) { $if (c.has_payload) { ret Box[u64].[c]{1}; } } ret Box[u64].none{}; }", "this case descriptor belongs to `Box[u32]`"))                     { ret 12; }
+    if (!sema_checked.sema_rejects_with("tag Reply: u8 { empty; value: i64; }\ntag Other: u8 { empty; value: i64; }\ntag Box[T]: u8 { none; some: T; }\nfun f(v: Other) i64 { $each c in $cases(Reply) { if (sel v.[c]) { ret 1; } } ret 0; }", "this case descriptor belongs to `Reply`"))                                                         { ret 13; }
+    if (!sema_checked.sema_rejects_with("tag Reply: u8 { empty; value: i64; }\ntag Other: u8 { empty; value: i64; }\ntag Box[T]: u8 { none; some: T; }\nfun f(v: Box[u64]) u64 { $each c in $cases(Box[u32]) { if (sel v.[c]) { ret 1; } } ret 0; }", "this case descriptor belongs to `Box[u32]`"))                                                { ret 14; }
+    if (!sema_checked.sema_rejects_with("tag Reply: u8 { empty; value: i64; }\ntag Other: u8 { empty; value: i64; }\ntag Box[T]: u8 { none; some: T; }\nfun f(v: Other) i64 { $each c in $cases(Reply) { $if (c.has_payload) { if (sel v.value) { ret v.[c]; } } } ret 0; }", "the instance type does not match the case descriptor's owning tag")) { ret 15; }
+    if (!sema_checked.sema_rejects_with("tag Reply: u8 { empty; value: i64; }\ntag Other: u8 { empty; value: i64; }\ntag Box[T]: u8 { none; some: T; }\nrec P { a: u8; }\nfun f(v: Reply) u8 { $each c in $fields(P) { if (sel v.[c]) { ret 1; } } ret 0; }", "must be a comptime case descriptor"))                                                { ret 16; }
+    if (!sema_checked.sema_rejects_with("tag Reply: u8 { empty; value: i64; }\ntag Other: u8 { empty; value: i64; }\ntag Box[T]: u8 { none; some: T; }\nrec P { a: u8; }\nfun f() Reply { $each c in $fields(P) { ret Reply.[c]{1}; } ret Reply.empty{}; }", "must be a comptime case descriptor"))                                                 { ret 17; }
+    if (!sema_checked.sema_rejects_with("tag Reply: u8 { empty; value: i64; }\ntag Other: u8 { empty; value: i64; }\ntag Box[T]: u8 { none; some: T; }\nrec P { a: u8; }\nfun f(p: P) u8 { $each c in $cases(Reply) { $if (c.has_payload) { ret p.[c]; } } ret 0; }", "the instance type does not match the case descriptor's owning tag"))         { ret 18; }
+    ret 0;
+}
+
+test offset_of__folds_from_the_checked_layout {
+    # `$offset_of(T, payload_case)` and record offsets fold in gates and type positions from the one checked layout
+    if (!sema_checked.sema_clean("tag Reply: u8 { empty; value: i64; }\ntag Other: u8 { empty; value: i64; }\ntag Box[T]: u8 { none; some: T; }\n$if ($offset_of(Reply, value) == 8) {} $or { $error(\"offset\"); }"))                                                                                                                    { ret 1; }
+    if (!sema_checked.sema_clean("tag Reply: u8 { empty; value: i64; }\ntag Other: u8 { empty; value: i64; }\ntag Box[T]: u8 { none; some: T; }\n#[packed] tag Pk: u8 { a; b: u32; }\n$if ($offset_of(Pk, b) == 1) {} $or { $error(\"packed\"); }"))                                                                                      { ret 2; }
+    if (!sema_checked.sema_clean("tag Reply: u8 { empty; value: i64; }\ntag Other: u8 { empty; value: i64; }\ntag Box[T]: u8 { none; some: T; }\n$if ($offset_of(Box[u8], some) == 1) {} $or { $error(\"generic\"); }\n$if ($offset_of(Box[u64], some) == 8) {} $or { $error(\"generic\"); }"))                                           { ret 3; }
+    if (!sema_checked.sema_clean("tag Reply: u8 { empty; value: i64; }\ntag Other: u8 { empty; value: i64; }\ntag Box[T]: u8 { none; some: T; }\nrec Pair { a: u8; b: u64; }\n$if ($offset_of(Pair, b) == 8) {} $or { $error(\"record\"); }"))                                                                                            { ret 4; }
+    if (!sema_checked.sema_clean("tag Reply: u8 { empty; value: i64; }\ntag Other: u8 { empty; value: i64; }\ntag Box[T]: u8 { none; some: T; }\nrec Holder { buf: [$offset_of(Reply, value)]u8; }\n$if ($size_of(Holder) == 8) {} $or { $error(\"type position\"); }"))                                                                  { ret 6; }
+    if (!sema_checked.sema_clean("tag Reply: u8 { empty; value: i64; }\ntag Other: u8 { empty; value: i64; }\ntag Box[T]: u8 { none; some: T; }\n$if ($size_of(Reply) == 16) {} $or { $error(\"size\"); }\n$if ($align_of(Reply) == 8) {} $or { $error(\"align\"); }\n$if ($size_of(^Reply) == 16) {} $or { $error(\"secret size\"); }")) { ret 7; }
+    if (!sema_checked.sema_clean("tag res[T, E]: u8 { err: E; ok: T; } tag opt[T]: u8 { none; some: T; } tag err[E]: u8 { err: E; ok; }\n$if ($offset_of(res[i64, u32], ok) == 8) {} $or { $error(\"res\"); }\n$if ($offset_of(opt[u8], some) == 1) {} $or { $error(\"opt\"); }"))                                                        { ret 8; }
+    if (!sema_checked.sema_clean("tag Reply: u8 { empty; value: i64; }\ntag Other: u8 { empty; value: i64; }\ntag Box[T]: u8 { none; some: T; }\nfun of[T]() u64 { ret $offset_of(Box[T], some); }\nfun g() u64 { ret of[u64](); }"))                                                                                                     { ret 9; }
+    if (!sema_checked.sema_rejects_with("tag Reply: u8 { empty; value: i64; }\ntag Other: u8 { empty; value: i64; }\ntag Box[T]: u8 { none; some: T; }\nfun f() u64 { ret $offset_of(Reply, empty); }", "has no payload, so it has no offset"))                                                                                           { ret 10; }
+    if (!sema_checked.sema_rejects_with("tag Reply: u8 { empty; value: i64; }\ntag Other: u8 { empty; value: i64; }\ntag Box[T]: u8 { none; some: T; }\n$if ($offset_of(Reply, empty) == 0) {}", "has no payload, so it has no offset"))                                                                                                  { ret 11; }
+    if (!sema_checked.sema_rejects_with("tag Reply: u8 { empty; value: i64; }\ntag Other: u8 { empty; value: i64; }\ntag Box[T]: u8 { none; some: T; }\nfun f() u64 { ret $offset_of(Reply, nope); }", "unknown tag case `nope`"))                                                                                                        { ret 12; }
+    if (!sema_checked.sema_rejects_with("tag Reply: u8 { empty; value: i64; }\ntag Other: u8 { empty; value: i64; }\ntag Box[T]: u8 { none; some: T; }\nrec Pair { a: u8; }\nfun f() u64 { ret $offset_of(Pair, nope); }", "no such field `nope`"))                                                                                       { ret 13; }
+    if (!sema_checked.sema_rejects_with("tag Reply: u8 { empty; value: i64; }\ntag Other: u8 { empty; value: i64; }\ntag Box[T]: u8 { none; some: T; }\nfun f() u64 { ret $offset_of(Reply, 1); }", "`$offset_of` names its member by a bare identifier"))                                                                                { ret 14; }
+    ret 0;
+}
+
+test canonical_tags__valid_construction {
+    ret tag_rows(?CANONICAL_CONSTRUCTION[0], $length_of(CANONICAL_CONSTRUCTION));
+}
+
+test canonical_tags__arity_rejection {
+    ret tag_rows(?CANONICAL_ARITY[0], $length_of(CANONICAL_ARITY));
+}
+
+test canonical_tags__payload_validation {
+    ret tag_rows(?CANONICAL_PAYLOADS[0], $length_of(CANONICAL_PAYLOADS));
+}
+
+test canonical_tags__distinctness_and_queries {
+    ret tag_rows(?CANONICAL_DISTINCTNESS[0], $length_of(CANONICAL_DISTINCTNESS));
+}
+
+test canonical_tags__casts_and_contextual_names {
+    ret tag_rows(?CANONICAL_CASTS[0], $length_of(CANONICAL_CASTS));
+}
+
+test canonical_tags__specialize_across_modules {
+    if (!sema_checked.sema_clean2("use t.lib; use t.lib.res; use t.lib.opt; fun f() res[i64, u32] { val a: opt[i64] = lib.wrap[i64](42); val b: opt[i64] = lib.wrap[i64](7); ret lib.result[i64, u32](42); }", "pub tag res[T, E]: u8 { err: E; ok: T; } pub tag opt[T]: u8 { none; some: T; } pub fun wrap[T](v: T) opt[T] { ret opt[T].some{v}; } pub fun result[T, E](v: T) res[T, E] { ret res[T, E].ok{v}; }")) { ret 1; }
+    if (!sema_checked.sema_clean("tag res[T, E]: u8 { err: E; ok: T; } tag opt[T]: u8 { none; some: T; } tag err[E]: u8 { err: E; ok; }\nfun wrap[T](v: T) opt[T] { ret opt[T].some{v}; } fun f() opt[err[u32]] { ret wrap[err[u32]](err[u32].ok{}); }"))                                                                                                                                                            { ret 2; }
+    ret 0;
+}
+
+test canonical_tags__are_ordinary_declarations {
+    # the compiler knows nothing about these names: a module declares them as std does, or as anything else
+    if (!sema_checked.sema_clean("tag res[T, E]: u8 { err: E; ok: T; } val a: res[i64, u32] = res[i64, u32].ok{1};")) { ret 1; }
+    if (!sema_checked.sema_clean("tag opt[T]: u8 { none; some: T; }"))                                                { ret 2; }
+    if (!sema_checked.sema_clean("rec res { field: i64; }"))                                                          { ret 3; }
+    # declaring one twice in a module is the ordinary duplicate definition
+    if (!sema_checked.sema_rejects_with("tag res[T, E]: u8 { err: E; ok: T; } tag res[T, E]: u8 { err: E; ok: T; }", "duplicate definition: `res` is already bound in this scope")) { ret 6; }
+    ret 0;
+}
+
+test sel__payload_access_requires_a_guard {
+    ret tag_rows(?SEL_PAYLOAD_GUARDS[0], $length_of(SEL_PAYLOAD_GUARDS));
+}
+
+test sel__case_selector_usage_restrictions {
+    ret tag_rows(?SEL_SELECTOR_USAGE[0], $length_of(SEL_SELECTOR_USAGE));
+}
+
+test sel__qualified_imports_distinguish_values_from_selectors {
+    if (!sema_checked.sema_clean2("use t.lib; fun f() i64 { if (sel lib.reply.value) { ret 1; } ret 0; }",
+        "pub tag Reply: u8 { empty; value: i64; } pub var reply: Reply;")) { ret 1; }
+    if (!sema_checked.sema_clean2("use t.lib.Reply; use t.lib.reply; fun f() i64 { if (sel reply.value) { ret 1; } ret 0; }",
+        "pub tag Reply: u8 { empty; value: i64; } pub var reply: Reply;")) { ret 2; }
+    ret 0;
+}
+
+test sel__tests_one_case_of_a_place {
+    ret tag_rows(?SEL_ONE_CASE[0], $length_of(SEL_ONE_CASE));
+}
+
+test sel__rejects_non_places_and_unknown_cases {
+    ret tag_rows(?SEL_NON_PLACES[0], $length_of(SEL_NON_PLACES));
+}
+
+test sel__selectors_never_escape_as_values {
+    ret tag_rows(?SEL_ESCAPES[0], $length_of(SEL_ESCAPES));
+}
+
+test sel__arms_guard_their_block {
+    ret tag_rows(?SEL_ARMS[0], $length_of(SEL_ARMS));
+}
+
+test sel__payload_access_outside_a_guard_is_rejected {
+    ret tag_rows(?SEL_OUTSIDE_GUARDS[0], $length_of(SEL_OUTSIDE_GUARDS));
+}
+
+test sel__and_guards_only_its_right_operand {
+    ret tag_rows(?SEL_AND_GUARDS[0], $length_of(SEL_AND_GUARDS));
+}
+
+test sel__exiting_chains_guard_the_rest_of_the_block {
+    ret tag_rows(?SEL_EXITING_CHAINS[0], $length_of(SEL_EXITING_CHAINS));
+}
+
+# a chain's final bare `or` guards the one case its arms leave untested, as the rest of the
+# block does after a chain whose arms all exit
+test sel__final_or_guards_the_untested_case {
+    if (!sema_checked.sema_clean("tag Three: u8 { a: i64; b: i64; c: i64; }\nfun f(e: Three) i64 { if (sel e.a) { ret e.a; } or (sel e.b) { ret e.b; } ret e.c; }\n"))                               { ret 1; }
+    if (!sema_checked.sema_clean("tag Three: u8 { a: i64; b: i64; c: i64; }\nfun f(e: Three) i64 { if (sel e.a) { ret e.a; } or (sel e.b) { ret e.b; } or { ret e.c; } }\n"))                        { ret 2; }
+    if (!sema_checked.sema_clean("tag Three: u8 { a: i64; b: i64; c: i64; }\nfun f(e: Three) i64 { var n: i64 = 0; if (sel e.a) { n = e.a; } or (sel e.b) { n = e.b; } or { n = e.c; } ret n; }\n")) { ret 3; }
+    if (!sema_checked.sema_clean("tag Three: u8 { a: i64; b: i64; c: i64; }\nfun f(e: Three) i64 { if (!sel e.c) { ret 0; } or { ret e.c; } }\n"))                                                   { ret 4; }
+    val unguarded: str = "a tag payload requires a `sel` guard for its case";
+    if (!sema_checked.sema_rejects_with("tag Three: u8 { a: i64; b: i64; c: i64; }\nfun f(e: Three) i64 { if (sel e.a) { ret 0; } or { ret e.c; } }\n", unguarded))                                   { ret 5; }
+    if (!sema_checked.sema_rejects_with("tag Three: u8 { a: i64; b: i64; c: i64; }\nfun f(e: Three, g: Three) i64 { if (sel e.a) { ret 0; } or (sel e.b) { ret 0; } or { ret g.c; } }\n", unguarded)) { ret 6; }
+    if (!sema_checked.sema_rejects_with("tag Three: u8 { a: i64; b: i64; c: i64; }\nfun f(e: Three, k: u8) i64 { if (sel e.a) { ret 0; } or (k == 1) { ret 0; } or { ret e.c; } }\n", unguarded))     { ret 7; }
+    ret 0;
+}
+
+test sel__guarded_place_rejects_whole_value_assignment {
+    ret tag_rows(?SEL_WHOLE_ASSIGNMENT[0], $length_of(SEL_WHOLE_ASSIGNMENT));
+}
+
+test sel__fin_cannot_return_through_a_guard {
+    ret tag_rows(?SEL_FIN_RETURNS[0], $length_of(SEL_FIN_RETURNS));
+}
+
+test sel__auto_derefs_a_pointer_place {
+    ret tag_rows(?SEL_AUTO_DEREF[0], $length_of(SEL_AUTO_DEREF));
+}
+
+test sel__comptime_tests_constant_tags {
+    ret tag_rows(?SEL_COMPTIME[0], $length_of(SEL_COMPTIME));
+}
+
+# a literal gives `[_]` its element count, on its own spelling and on the `val` or `var` it
+# initializes, and a `[_]` with no literal to count is refused
+test inferred_length__comes_from_the_literal {
+    if (sema_checked.sema_ok("val A: [_]u8 = [3]u8{1, 2, 3};\nval B: [_]u8 = [_]u8{1, 2};\nfun main() i32 { val a: [3]u8 = A; val b: [2]u8 = B; var c: [_]u8 = [_]u8{4}; val d: [1]u8 = c; ret 0; }\n") != 0) { ret 1; }
+    if (sema_checked.sema_ok("val A: [_]u8 = [_]u8{1, 2};\nfun main() i32 { val a: [3]u8 = A; ret 0; }\n") == 0)                                                                                              { ret 2; }
+    if (sema_checked.sema_diag("fun main() i32 { var q: [_]u8; ret 0; }\n", "needs an array literal initializer") != 0)                                                                                       { ret 3; }
+    if (sema_checked.sema_diag("fun f(a: [_]u8) i32 { ret 0; }\nfun main() i32 { ret 0; }\n", "only valid as the type of an array literal") != 0)                                                             { ret 4; }
+    if (sema_checked.sema_diag("val A: [_][_]u8 = [_][_]u8{[_]u8{1}};\nfun main() i32 { ret 0; }\n", "not nested in another type") != 0)                                                                      { ret 5; }
+    if (sema_checked.sema_ok("val K: ^[_]u8 = [2]u8{1, 2};\nfun main() i32 { ret 0; }\n") != 0)                                                                                                               { ret 6; }
+    if (sema_checked.sema_ok("val K: ^[_]u8 = [2]u8{1, 2};\nfun main() i32 { val a: ^[3]u8 = K; ret 0; }\n") == 0)                                                                                            { ret 7; }
+    ret 0;
+}
+
+# a body gate the load cannot decide is deferred to typing, which refuses a comptime `sel`
+# over another module's `var` as a place it cannot test
+test comptime_sel__refuses_a_foreign_place {
+    if (sema_checked.sema_diag2("use t.lib; fun f() i64 { $if (sel lib.C.value) { ret 1; } ret 0; }", "tag Reply: u8 { empty; value: i64; } pub var C: Reply = Reply.value{42};", "does not name a module-level constant") != 0) { ret 1; }
+    ret 0;
+}
+
+# a test body's literal `ret` is refused at the ret when it is outside 0..255, with
+# the value in the message; an ordinary function returning the same value is not
+test test_result__literal_outside_the_status_range_is_refused_at_the_ret {
+    val src: str = "fun main() i32 { ret 0; }\nfun wide() i32 { ret 256; }\ntest a { ret 256; }\ntest b { ret 300; }\ntest c { ret -1; }\n";
+    if (!sema_checked.sema_rejects_at(src, "test result 256 is outside the status range 0..255", 63, 8)) { ret 1; }
+    if (!sema_checked.sema_rejects_at(src, "test result 300 is outside the status range 0..255", 83, 8)) { ret 2; }
+    if (!sema_checked.sema_rejects_at(src, "test result -1 is outside the status range 0..255", 103, 7)) { ret 3; }
+    var c:    sema_checked.Checked;
+    val made: err[fail.Fail] = sema_checked.checked_init(?c, src);
+    fin { sema_checked.checked_dnit(?c); }
+    if (sel made.err) { ret 4; }
+    # exactly the three test rets, not `wide`
+    if (diagnostic.errors_saying(?c.r.s.diags, "outside the status range 0..255") != 3) { ret 5; }
+    if (!diagnostic.note_says(?c.r.s.diags, "eight bits on every host"))                { ret 6; }
+    # the range itself, and a run-time value, are the dispatcher's business
+    if (!sema_checked.sema_clean("fun main() i32 { ret 0; }\nfun wide() i32 { ret 256; }\ntest d { ret 255; }\ntest e { ret 0; }\ntest f { ret wide(); }\ntest g { ret 200 + 55; }\n")) { ret 7; }
     ret 0;
 }

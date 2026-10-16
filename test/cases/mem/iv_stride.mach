@@ -1,5 +1,5 @@
 # addresses and products stepped with the induction variable instead of
-# recomputed from it (#3347), at the edges where the stepped value could drift
+# recomputed from it, at the edges where the stepped value could drift
 # from the recomputed one: records of a stride no scale covers, an index that
 # is an affine function of the iv, a downward index, a row base under a nested
 # loop, an iv that wraps through zero on its way to the index, a product read

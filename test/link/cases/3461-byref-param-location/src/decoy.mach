@@ -1,4 +1,4 @@
-# a second `probe` with a parameter `w`, declared outside src/main.mach (#3815)
+# a second `probe` with a parameter `w`, declared outside src/main.mach
 #
 # the byref-param-location check must not take this for the case's function. `w` is
 # a scalar the optimizer keeps in a register, so were it read its location would not

@@ -2,7 +2,7 @@
 . "$(dirname "$0")/../../check/common.sh"
 
 # produce_gdb_session <engine> <leg> <nog_binary> <g_binary> <profile>
-# the BEHAVIOURAL debugger observable (#2756): test/link/cases/debuginfo proves the `-g`
+# the BEHAVIOURAL debugger observable: test/link/cases/debuginfo proves the `-g`
 # image is structurally valid; it cannot prove gdb reports the right thing when a
 # user actually breaks into it. this producer drives one real `gdb --batch` session
 # over the `-g` artifact and normalizes its transcript into stop/frame/value facts -
@@ -23,12 +23,12 @@
 # on - the caller frame's OWN argument list, which this compiler currently populates
 # from unrelated inlined locals rather than `main`'s real parameters (found while
 # building this case; tracked separately, not asserted here because it is not what
-# #2756 asks this case to prove). the gdb script below prints a `SENTINEL:<name>`
+# this case proves). the gdb script below prints a `SENTINEL:<name>`
 # echo ahead of each fact so the normalizer below can key off it instead of gdb's own
 # formatting, and extracts only the function name and source line from a frame
 # line, never its argument list.
 #
-# THE #2779 PROBES ARE DEBUG-ONLY. Both bugs #2779 fixed are specific to opt0's own
+# THE OPT0 PROBES ARE DEBUG-ONLY. Both defects they pin are specific to opt0's own
 # location and line-table construction and do not reproduce at opt2 (verified by
 # hand: `dies`/`staysalive` auto-inline at release exactly like `addone` does, and a
 # breakpoint's `next` there steps clean out to the caller frame - a same-frame
@@ -36,7 +36,7 @@
 # `addone` itself never carried this probe). So the golden this run compares against
 # is now PER-PROFILE (`expect.$profile.txt`, see run.sh), and only a debug-profile
 # session sets the extra breakpoints / walks the extra steps below - a release
-# session's transcript, and its golden, are exactly what they were before #2779.
+# session's transcript, and its golden, are exactly what they were without the probes.
 produce_gdb_session() {
     g=$4
     profile=${5:-}
@@ -66,7 +66,7 @@ break main.mach:50
 GDBEOF
         fi
         # line 121 is pinned's `ret`, where remat_mark is a constant the
-        # allocator builds at its read rather than keeps anywhere (#4185)
+        # allocator builds at its read rather than keeps anywhere
         cat <<'GDBEOF'
 break main.mach:121
 run
@@ -153,7 +153,7 @@ continue
 GDBEOF
         fi
         # both profiles end in pinned, whose remat_mark reads the constant it
-        # holds (#4185)
+        # holds
         cat <<'GDBEOF'
 echo SENTINEL:remat_stop\n
 frame 0

@@ -7,7 +7,7 @@
 use corpus.lib.fold;
 use corpus.lib.fold128;
 
-# untyped literals under `::` keep their exact value, then extend or truncate (#4179)
+# untyped literals under `::` keep their exact value, then extend or truncate
 val LIT_2P64:     u128 = 18446744073709551616::u128;
 val LIT_1E19:     u128 = 10000000000000000000::u128;
 val LIT_NEG_2P64: i128 = (-18446744073709551616)::i128;

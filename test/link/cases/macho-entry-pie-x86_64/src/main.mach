@@ -1,4 +1,4 @@
-# the LC_MAIN half of the darwin x86_64 entry contract (#2576): a `--pie` image is
+# the LC_MAIN half of the darwin x86_64 entry contract: a `--pie` image is
 # entered by dyld like a C `main`, with argc/argv/envp in rdi/rsi/rdx. reading all
 # three is the point - the abs-bind case builds the same configuration and touches
 # none of them, so it passed while the entry captured dyld's return address as argc.

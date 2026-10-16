@@ -411,7 +411,7 @@ fun shape_refused(alloc: *A.Allocator, kind: diagnostic_kind.Kind, at: TableName
 }
 
 # what a value of `shape` is, as a refusal names it
-pub fun shape_text(shape: Shape) str {
+fun shape_text(shape: Shape) str {
     if (shape == SHAPE_STRING)  { ret "a non-empty string"; }
     if (shape == SHAPE_INTEGER) { ret "an integer"; }
     if (shape == SHAPE_BOOL)    { ret "a boolean"; }

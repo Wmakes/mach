@@ -739,38 +739,39 @@ fun fs_failed(r: err[fs.FsError]) bool {
     ret sel r.err;
 }
 
-test run__a_symlink_source_is_refused_without_rewriting_its_target {
-    $if ($mach.build.os == $mach.os.windows) { ret 0; }
-    var a:      A.Allocator;
-    val make_r: err[A.Error] = page.make(?a);
-    if (sel make_r.err) { ret 1; }
-    val created: res[output_testing.Output, fail.Fail] = output_testing.create(?a, "mach-fmt-link");
-    if (sel created.err) { ret 2; }
-    var owner: output_testing.Output = created.ok;
-    fin { output_testing.dnit(?owner); }
-    val joined: res[str, A.Error] = types_path.join(?a, owner.directory, "src");
-    if (sel joined.err) { ret 3; }
-    val src: str = joined.ok;
-    fin { str_free(?a, src); }
-    val made: err[io_error.Error] = fs.create_dir(src, 0o700);
-    if (sel made.err || !fixture.write_mode(?a, owner.directory, "mach.toml", T_MANIFEST, 0o600)
-        || !fixture.write_mode(?a, owner.directory, "outside.mach", "fun main()i32{ret 0;}", 0o600)) { ret 4; }
-    val link_r: res[str, A.Error] = types_path.join(?a, src, "main.mach");
-    if (sel link_r.err) { ret 5; }
-    val link: str = link_r.ok;
-    fin { str_free(?a, link); }
-    val linked: err[io_error.Error] = fs.symlink("../outside.mach", link);
-    if (sel linked.err)                                                                  { ret 6; }
-    if (t_run(?a, owner.directory, true) != 3 || t_run(?a, owner.directory, false) != 3) { ret 7; }
-    if (!t_same(?a, owner.directory, "outside.mach", "fun main()i32{ret 0;}"))           { ret 8; }
-    val unlinked: err[io_error.Error] = fs.remove_file(link);
-    if (sel unlinked.err) { ret 9; }
-    val removed: err[fs.FsError] = fs.remove_all(?a, src);
-    if (sel removed.err) { ret 9; }
-    val aliased: err[io_error.Error] = fs.symlink(".", src);
-    if (sel aliased.err)                       { ret 10; }
-    if (t_run(?a, owner.directory, true) != 3) { ret 11; }
-    ret 0;
+$if ($mach.build.os != $mach.os.windows) {
+    test run__a_symlink_source_is_refused_without_rewriting_its_target {
+        var a:      A.Allocator;
+        val make_r: err[A.Error] = page.make(?a);
+        if (sel make_r.err) { ret 1; }
+        val created: res[output_testing.Output, fail.Fail] = output_testing.create(?a, "mach-fmt-link");
+        if (sel created.err) { ret 2; }
+        var owner: output_testing.Output = created.ok;
+        fin { output_testing.dnit(?owner); }
+        val joined: res[str, A.Error] = types_path.join(?a, owner.directory, "src");
+        if (sel joined.err) { ret 3; }
+        val src: str = joined.ok;
+        fin { str_free(?a, src); }
+        val made: err[io_error.Error] = fs.create_dir(src, 0o700);
+        if (sel made.err || !fixture.write_mode(?a, owner.directory, "mach.toml", T_MANIFEST, 0o600)
+            || !fixture.write_mode(?a, owner.directory, "outside.mach", "fun main()i32{ret 0;}", 0o600)) { ret 4; }
+        val link_r: res[str, A.Error] = types_path.join(?a, src, "main.mach");
+        if (sel link_r.err) { ret 5; }
+        val link: str = link_r.ok;
+        fin { str_free(?a, link); }
+        val linked: err[io_error.Error] = fs.symlink("../outside.mach", link);
+        if (sel linked.err)                                                                  { ret 6; }
+        if (t_run(?a, owner.directory, true) != 3 || t_run(?a, owner.directory, false) != 3) { ret 7; }
+        if (!t_same(?a, owner.directory, "outside.mach", "fun main()i32{ret 0;}"))           { ret 8; }
+        val unlinked: err[io_error.Error] = fs.remove_file(link);
+        if (sel unlinked.err) { ret 9; }
+        val removed: err[fs.FsError] = fs.remove_all(?a, src);
+        if (sel removed.err) { ret 9; }
+        val aliased: err[io_error.Error] = fs.symlink(".", src);
+        if (sel aliased.err)                       { ret 10; }
+        if (t_run(?a, owner.directory, true) != 3) { ret 11; }
+        ret 0;
+    }
 }
 
 test run__a_source_alias_cannot_select_the_dependency_directory {

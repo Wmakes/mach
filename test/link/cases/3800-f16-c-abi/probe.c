@@ -1,4 +1,4 @@
-/* C half of the f16 transport controls (mach #3800). Compiled at -O0 so every
+/* C half of the f16 transport controls. Compiled at -O0 so every
  * read really happens. No _Float16 arithmetic happens here, since that would
  * call a runtime helper mach does not link: every value is read and built as
  * its bits. */

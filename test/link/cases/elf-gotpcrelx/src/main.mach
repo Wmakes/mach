@@ -1,4 +1,4 @@
-# R_X86_64_GOTPCRELX / R_X86_64_REX_GOTPCRELX surface case (mach #2534)
+# R_X86_64_GOTPCRELX / R_X86_64_REX_GOTPCRELX surface case
 #
 # The C half reaches `shared_counter` and `shared_bump` through the GOT. mach
 # honours that indirection rather than relaxing it away, so each reference reads

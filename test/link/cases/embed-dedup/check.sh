@@ -9,7 +9,7 @@
 # on failure run.sh discards this producer's stdout and shows only its stderr, so a
 # failing run reports the status and the program's own stdout there instead - without
 # it a crashed exec case says only "producer exit 139" and throws away how far the
-# program got (#2593).
+# program got.
 produce_exec() {
     engine=$1
     target=$2
@@ -33,8 +33,8 @@ produce_exec() {
 # program.
 #
 # The observable has to be the emitted bytes. Three modules embed byte-identical
-# content, and #2518 already made their addresses compare equal WITHIN a module,
-# so an in-program address comparison cannot see the defect #2541 is about: the
+# content, and the module already makes their addresses compare equal WITHIN a module,
+# so an in-program address comparison cannot see the defect this case is about: the
 # object boundary lost the embed marker and the linker concatenated the same bytes
 # once per module, leaving copies nobody references. Counting occurrences in the
 # file is what distinguishes one placement from several.

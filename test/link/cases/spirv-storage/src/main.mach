@@ -20,10 +20,10 @@
 # block cannot carry, and the spirv-interface case keeps the uniform-side refusal.
 #
 # Reading and writing these buffers IS here now. MIR keeps a GEP's index list on a
-# logical-addressing target (#2649), so a member walk reaches the back end as
+# logical-addressing target, so a member walk reaches the back end as
 # ordinals and becomes an `OpAccessChain`. A compute stage can therefore read its
-# input buffer and write its output one, which is what #2658 said no compute shader
-# could do.
+# input buffer and write its output one, which no compute shader was thought to
+# be able to do.
 #
 # The nested cases matter more than the flat ones: `out.rows[i]` lowers to TWO
 # chained GEPs, the second based on the first's result, so the emitter has to accept
@@ -33,8 +33,8 @@
 # THE COMPUTE BUILT-INS ARE HERE, and they are what makes the buffers above
 # reachable per invocation rather than only at constant indices. `global_invocation`,
 # `local_invocation` and `workgroup_id` are `uvec3` by the specification. They were
-# refused outright while every mach vector was exactly 128 bits, and #2687 deleted
-# that rule (#2745). A dispatched stage that can only ever address element 0 is not
+# refused outright while every mach vector was exactly 128 bits, and that limit is gone.
+# A dispatched stage that can only ever address element 0 is not
 # a compute shader, so the lanes are read and used as INDICES here rather than
 # copied about - which also puts a `u32x3` lane read on the interface-variable path.
 
@@ -97,7 +97,7 @@ rec Scratch {
 var scratch: Scratch;
 
 # a compute stage that actually moves data: reads one storage buffer, writes
-# another, and indexes an array member on the way. This is the shape #2658 named as
+# another, and indexes an array member on the way. This is a shape once thought
 # impossible - a stage that can be dispatched and can read or write nothing.
 #[stage("compute")]
 #[workgroup(64, 1, 1)]
@@ -121,7 +121,7 @@ var local_id:  u32x3;
 #[builtin("workgroup_id")]
 var group_id:  u32x3;
 
-# the shape #2658 recorded as impossible: a dispatch whose invocation addresses its
+# a shape once thought impossible: a dispatch whose invocation addresses its
 # own element. every one of the three is read, and each contributes an index, so a
 # built-in wired to the wrong decoration or dropped from the entry point's interface
 # list is a validator error rather than a silently constant address.

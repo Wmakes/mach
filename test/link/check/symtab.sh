@@ -2,7 +2,7 @@
 . "$(dirname "$0")/common.sh"
 
 # produce_symtab <engine> <leg> <binary>
-# the ELF `.symtab` observable (#2772): a PLAIN build (no `-g`, no special flag -
+# the ELF `.symtab` observable: a PLAIN build (no `-g`, no special flag -
 # the shape a shipped release binary actually has) now carries a real function
 # symbol table, which test/link/cases/debuginfo cannot speak to at all (DWARF is a
 # `-g`-only concern). requires nm, readelf, and addr2line; a missing tool is a
@@ -37,7 +37,7 @@ produce_symtab() {
     # `#[symbol("main")]`, unmangled) and `burn` (mangled - matched by substring,
     # not exact name, since the mangling scheme is not this case's concern).
     #
-    # either binding counts (T or t): #3412 made a definition that no image
+    # either binding counts (T or t): link GC makes a definition that no image
     # exports hidden, and a hidden definition binds locally in the image it lands
     # in, so a non-`pub` function is `t` here. that this case asserts nothing
     # about binding is the point - the fact under test is that the table exists
@@ -59,7 +59,7 @@ produce_symtab() {
     # present, and the one most likely to be skipped (a symbol table with entries
     # and no real sizes looks fine under `nm` and only fails a profiler later).
     # readelf -sW dumps EVERY symbol table in the file, and a shared object's
-    # `.dynsym` (#2807) carries the same global function with `st_size` always 0
+    # `.dynsym` carries the same global function with `st_size` always 0
     # (that table has never had a size writer - out of this case's scope) ahead
     # of `.symtab` in the listing; matching the first hit anywhere would silently
     # grab the wrong table's zero-size entry and read as "no symbol" rather than
@@ -110,7 +110,7 @@ PHDRS
     fi
 }
 
-# the unwind observable (#4013): the image maps a PT_GNU_EH_FRAME search table,
+# the unwind observable: the image maps a PT_GNU_EH_FRAME search table,
 # every function mach compiled has a frame description starting at it, and the
 # rules read right. only `_start` goes without one: a frameless function whose
 # body is inline assembly states no frame the compiler can vouch for. the rules are

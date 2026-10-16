@@ -108,6 +108,14 @@ pub fun syntax(p: *project.Project, m: *project.ModuleEntry) *ast.Ast {
     ret shown.some.a;
 }
 
+# the syntax tree of the module loaded under `fqn`, nil when none is loaded or it has none
+#[testing]
+pub fun syntax_named(p: *project.Project, fqn: str) *ast.Ast {
+    val mid: session.ModuleId = project.module_named(p, fqn);
+    if (module.is_nil(mid)) { ret nil; }
+    ret syntax(p, project.module_at(p, mid::u32));
+}
+
 # a module's parse as this project's operations last published it
 pub fun parsed(p: *project.Project, m: *project.ModuleEntry) opt[ParsedModule] {
     if (lang_source.file_is_nil(m.file_id)) { ret opt[ParsedModule].none{}; }

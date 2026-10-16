@@ -318,7 +318,7 @@ pub fun t_spells(a: *A.Allocator, units: *Unit, text: str) bool {
     ret true;
 }
 
-test owned_overlays_use_host_name_identity {
+test overlays__owned_ones_use_host_name_identity {
     var a:      A.Allocator;
     val make_r: err[A.Error] = page.make(?a);
     if (sel make_r.err) { ret 1; }
@@ -381,7 +381,7 @@ fun t_env_attempt(a: *A.Allocator) bool {
     ret true;
 }
 
-test allocation_failures_release_exact_owned_extents {
+test overlays__allocation_failures_release_exact_owned_extents {
     var fail_at: usize = 1;
     for (fail_at < 128) {
         var t:      T.Testing;

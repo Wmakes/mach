@@ -1,7 +1,7 @@
 # imported by the entry. the gate below is one only layout can decide and it
-# declares nothing, so the load walk has nothing to take from it. before #3523
-# the walk stopped at such a gate and never reached the `ext` after it, which
-# then kept its module-qualified name and the link asked the probe object for
+# declares nothing, so the load walk has nothing to take from it. a walk
+# that stopped at such a gate would never reach the `ext` after it, which
+# would keep its module-qualified name and the link asked the probe object for
 # `case.sys.probe_answer`.
 
 use p: std.print;

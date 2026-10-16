@@ -1,4 +1,4 @@
-# .symtab presence/correctness fixture (#2772).
+# .symtab presence/correctness fixture.
 #
 # unlike test/link/cases/debuginfo, this case needs no `-g`: the fact under test is
 # that a PLAIN build - the shape every shipped release binary actually has -

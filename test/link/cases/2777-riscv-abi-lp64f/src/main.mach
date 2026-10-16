@@ -1,4 +1,4 @@
-# exec pin for #2777: the RISC-V ABI family places float arguments correctly and the
+# an exec pin: the RISC-V ABI family places float arguments correctly and the
 # caller and callee agree, end to end, across a real call boundary.
 #
 # THIS CASE IS ONE OF TWO. Its sibling `2777-riscv-abi-lp64` holds the SAME source
@@ -7,8 +7,8 @@
 # member's caller and callee disagree the values come back wrong, and if a member
 # were silently aliased onto another the differences would still have to produce
 # identical observable output. A single case on the default member would have
-# reported green for exactly the defect #2777 was opened about, since the previous
-# convention named "lp64" and emitted lp64d. lp64d itself is the corpus's
+# reported green for exactly the defect this pins: a convention that named "lp64"
+# and emitted lp64d. lp64d itself is the corpus's
 # riscv64-linux column, checked against the C reference.
 #
 # WHAT IS ASSERTED, and why each part is here rather than a build-succeeds check.
@@ -84,7 +84,7 @@ fun spill_doubles(a0: f64, a1: f64, a2: f64, a3: f64, a4: f64, a5: f64,
 # the first shape here, but it drags an INTEGER-TO-FLOAT CONVERSION into an ABI case
 # that is not testing conversions. At -O2 the all-ones argument list constant-folds
 # that sum, and a folded integer reaching `MIR_SI_TO_FP` as an immediate is refused
-# by the riscv64 and arm64 encoders (#2812) -- so the release legs failed for a
+# by the riscv64 and arm64 encoders -- so the release legs failed for a
 # reason that had nothing to do with argument placement. An ABI case should fail for
 # ABI reasons.
 fun spill_mixed_i(i0: i64, d0: f64, i1: i64, d1: f64, i2: i64, d2: f64,

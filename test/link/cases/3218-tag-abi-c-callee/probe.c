@@ -1,4 +1,4 @@
-/* C half of the tag transport controls (mach #3218, roadmap L5). Each struct is the C
+/* C half of the tag transport controls. Each struct is the C
  * spelling of a mach tag of matching layout: the discriminator first, then a union of
  * the payloads at the tag's common payload offset. A tag's payload area is a union even
  * with one payload case, which is what keeps every convention from flattening a float
@@ -111,7 +111,7 @@ long long c_drives_mach(void) {
     return 0;
 }
 
-/* unit-case tags (mach #3400): unit cases have no payload, so the union holds only the
+/* unit-case tags: unit cases have no payload, so the union holds only the
  * payload cases and each struct is the spelling a tag without the unit cases would have */
 struct u16 { unsigned char d; union { long long p; } u; };
 struct u16f { unsigned char d; union { double p; } u; };

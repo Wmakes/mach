@@ -1,7 +1,7 @@
 # a whole-record assignment between places that overlap reads every source byte
 # before it is overwritten, whichever way they overlap and whatever the size. the
 # statement's value is unused, so the copy runs source to destination with no
-# snapshot between them (#4235): below, above and onto its own source, for a
+# snapshot between them: below, above and onto its own source, for a
 # record copied by a loop, one copied piecewise and a byte-aligned one whose
 # length leaves a tail.
 

@@ -1,4 +1,4 @@
-# a backtrace through two mach frames, entered from C (#4013); see case.conf
+# a backtrace through two mach frames, entered from C; see case.conf
 use p: std.print;
 use std.runtime;
 use std.types.size.usize;

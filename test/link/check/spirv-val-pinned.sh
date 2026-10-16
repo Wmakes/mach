@@ -10,7 +10,7 @@
 # a storage class 1.0 forbids, so the environment is read from the module rather than
 # assumed. the forms are printed as well as validated: an entry point that lists no
 # descriptors and a storage buffer spelled either way are both valid in some version,
-# so only the listing shows the emitter chose the one this version requires (#3399).
+# so only the listing shows the emitter chose the one this version requires.
 produce_spirv_val_pinned() {
     out_dir=$(dirname "$3")
     if ! command -v spirv-val >/dev/null 2>&1 || ! command -v spirv-dis >/dev/null 2>&1; then

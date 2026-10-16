@@ -1,4 +1,4 @@
-/* the C half of the `va_list` parameter case (mach #3004).
+/* the C half of the `va_list` parameter case.
  *
  * Compiled by the RUNNER'S OWN C toolchain, so both the list this originates and
  * the `va_arg` that reads it are the platform's real ABI rather than mach's model

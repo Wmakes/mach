@@ -1,4 +1,4 @@
-/* the C half of the by-value aggregate case (mach #3063).
+/* the C half of the by-value aggregate case.
  *
  * Compiled by the RUNNER'S OWN C toolchain, so the callee's treatment of its
  * parameter is the platform's real calling convention rather than mach's model of

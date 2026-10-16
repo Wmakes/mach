@@ -1,4 +1,4 @@
-/* C half of the stack-passed record controls (mach #3950). Compiled at -O0 so
+/* C half of the stack-passed record controls. Compiled at -O0 so
  * every read really happens. */
 struct r3 { unsigned char a, b, c; };
 struct m { unsigned char a; unsigned int b; };

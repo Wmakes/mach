@@ -9,7 +9,7 @@
 # aarch64 runner is required.
 #
 # the body also divides and adds the sum in f16, which is inlined integer and binary64
-# code, so the image links it with no runtime helper to provide (#3799).
+# code, so the image links it with no runtime helper to provide.
 
 #[symbol("_start")]
 fun start() i64 {

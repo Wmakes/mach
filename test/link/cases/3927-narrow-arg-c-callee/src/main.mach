@@ -1,4 +1,4 @@
-# narrow integer arguments against a C callee and a C caller (mach #3927)
+# narrow integer arguments against a C callee and a C caller
 #
 # Every function below is paired with one in probe.c; see case.conf for what each
 # proves. Each argument is computed from a runtime value whose bits 8 to 31 are not

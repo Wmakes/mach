@@ -31,7 +31,7 @@ those the run's own machinery failed rather than the test
 ## fun run
 
 ```mach
-pub fun run(a: *A.Allocator, sink: *readout.Sink, arts: *outcome.TestArtifact, n: u32, config: *Config) res[Counts, fail.Fail];
+pub fun run(a: *A.Allocator, sink: *readout.Sink, arts: *testrun.TestArtifact, n: u32, config: *Config) res[Counts, fail.Fail];
 ```
 
 run one set of tests, each reported to sink as it finishes, and close the run

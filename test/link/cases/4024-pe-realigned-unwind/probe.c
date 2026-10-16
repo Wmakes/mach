@@ -1,4 +1,4 @@
-/* the C half of the realigned-unwind case (mach #4024).
+/* the C half of the realigned-unwind case.
  *
  * No <windows.h>: the three unwinder entry points and the CONTEXT offsets they
  * fill are declared here, so the probe builds with any C compiler for the

@@ -1,4 +1,4 @@
-/* the C half of the backtrace case (mach #4013): the caller that enters mach and
+/* the C half of the backtrace case: the caller that enters mach and
  * the callback libSystem's unwinder reports each frame to. compiled by the
  * runner's own toolchain, and -O0 so every frame is the one the source says. */
 

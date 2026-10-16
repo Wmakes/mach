@@ -1,4 +1,4 @@
-# f16 lanes against a C `float16x8_t` callee and a C caller (mach #3802)
+# f16 lanes against a C `float16x8_t` callee and a C caller
 #
 # Every function below is paired with one in probe.c of matching signature; see
 # case.conf for what each position proves. The observable is a small integer each

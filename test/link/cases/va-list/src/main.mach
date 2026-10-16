@@ -1,4 +1,4 @@
-# `va_list` parameter surface case (mach #3004)
+# `va_list` parameter surface case
 #
 # A C caller originates a `va_list` and hands it to a mach function, which forwards
 # it to a C consumer. mach never reads the token and never builds one: the whole

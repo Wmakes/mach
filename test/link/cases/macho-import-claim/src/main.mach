@@ -1,4 +1,4 @@
-# manifest-declared symbol claiming on Mach-O (#2636). `Sleep` and `Beep` carry no
+# manifest-declared symbol claiming on Mach-O. `Sleep` and `Beep` carry no
 # #[library] decorator: they stand in for the system references a vendored static
 # archive leaves undefined, which reach the link with no Mach declaration to
 # decorate. Their providing dylib comes from the `symbols` key on each [link.X].

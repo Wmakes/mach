@@ -1,9 +1,9 @@
-/* the C half of the mach-callee case (mach #3416).
+/* the C half of the mach-callee case.
  *
  * Compiled by the RUNNER'S OWN C toolchain, so the copy the caller makes before the
  * call is the platform's real calling convention rather than mach's model of it. The
  * mach callee overwrites every field of its by-value parameter; C says the caller
- * cannot observe that, and after #3416 the caller's copy is the only reason it
+ * cannot observe that, and the caller's copy is the only reason it
  * cannot.
  *
  * The observed fields are handed back for mach to print: a bare pass/fail code would

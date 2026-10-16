@@ -1,4 +1,4 @@
-# an empty record argument against a C callee and a C caller (mach #3930)
+# an empty record argument against a C callee and a C caller
 #
 # Every function below is paired with one in probe.c of matching signature; see
 # case.conf for what each shape proves. The observable is the integer each side

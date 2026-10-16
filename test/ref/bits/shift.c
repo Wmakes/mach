@@ -1,9 +1,9 @@
 /* shifts at every width and signedness: << and >> at counts 0, 1 and w-1, then counts
- * at and past the width, which saturate (#3756). one noinline part per type. */
+ * at and past the width, which saturate. one noinline part per type. */
 #include "corpus.h"
 
 /* mach saturates a shift count at or above the operand width: << and a
- * logical >> answer 0, an arithmetic >> the sign fill (#3756). a plain C shift
+ * logical >> answer 0, an arithmetic >> the sign fill. a plain C shift
  * by such a count is UB, and a C >> of a negative signed value is
  * implementation-defined, so every op runs on the unsigned identity. */
 static inline uint8_t shl8_shift_u8(uint8_t v, uint64_t n) { return n >= 8u ? (uint8_t)0 : (uint8_t)(v << n); }
@@ -85,7 +85,7 @@ static uint64_t shift_u8(uint64_t seed) {
 }
 
 /* mach saturates a shift count at or above the operand width: << and a
- * logical >> answer 0, an arithmetic >> the sign fill (#3756). a plain C shift
+ * logical >> answer 0, an arithmetic >> the sign fill. a plain C shift
  * by such a count is UB, and a C >> of a negative signed value is
  * implementation-defined, so every op runs on the unsigned identity. */
 static inline uint8_t shl8_shift_i8(uint8_t v, uint64_t n) { return n >= 8u ? (uint8_t)0 : (uint8_t)(v << n); }
@@ -172,7 +172,7 @@ static uint64_t shift_i8(uint64_t seed) {
 }
 
 /* mach saturates a shift count at or above the operand width: << and a
- * logical >> answer 0, an arithmetic >> the sign fill (#3756). a plain C shift
+ * logical >> answer 0, an arithmetic >> the sign fill. a plain C shift
  * by such a count is UB, and a C >> of a negative signed value is
  * implementation-defined, so every op runs on the unsigned identity. */
 static inline uint16_t shl16_shift_u16(uint16_t v, uint64_t n) { return n >= 16u ? (uint16_t)0 : (uint16_t)(v << n); }
@@ -254,7 +254,7 @@ static uint64_t shift_u16(uint64_t seed) {
 }
 
 /* mach saturates a shift count at or above the operand width: << and a
- * logical >> answer 0, an arithmetic >> the sign fill (#3756). a plain C shift
+ * logical >> answer 0, an arithmetic >> the sign fill. a plain C shift
  * by such a count is UB, and a C >> of a negative signed value is
  * implementation-defined, so every op runs on the unsigned identity. */
 static inline uint16_t shl16_shift_i16(uint16_t v, uint64_t n) { return n >= 16u ? (uint16_t)0 : (uint16_t)(v << n); }
@@ -341,7 +341,7 @@ static uint64_t shift_i16(uint64_t seed) {
 }
 
 /* mach saturates a shift count at or above the operand width: << and a
- * logical >> answer 0, an arithmetic >> the sign fill (#3756). a plain C shift
+ * logical >> answer 0, an arithmetic >> the sign fill. a plain C shift
  * by such a count is UB, and a C >> of a negative signed value is
  * implementation-defined, so every op runs on the unsigned identity. */
 static inline uint32_t shl32_shift_u32(uint32_t v, uint64_t n) { return n >= 32u ? (uint32_t)0 : (uint32_t)(v << n); }
@@ -422,7 +422,7 @@ static uint64_t shift_u32(uint64_t seed) {
 }
 
 /* mach saturates a shift count at or above the operand width: << and a
- * logical >> answer 0, an arithmetic >> the sign fill (#3756). a plain C shift
+ * logical >> answer 0, an arithmetic >> the sign fill. a plain C shift
  * by such a count is UB, and a C >> of a negative signed value is
  * implementation-defined, so every op runs on the unsigned identity. */
 static inline uint32_t shl32_shift_i32(uint32_t v, uint64_t n) { return n >= 32u ? (uint32_t)0 : (uint32_t)(v << n); }
@@ -505,7 +505,7 @@ static uint64_t shift_i32(uint64_t seed) {
 }
 
 /* mach saturates a shift count at or above the operand width: << and a
- * logical >> answer 0, an arithmetic >> the sign fill (#3756). a plain C shift
+ * logical >> answer 0, an arithmetic >> the sign fill. a plain C shift
  * by such a count is UB, and a C >> of a negative signed value is
  * implementation-defined, so every op runs on the unsigned identity. */
 static inline uint64_t shl64_shift_u64(uint64_t v, uint64_t n) { return n >= 64u ? (uint64_t)0 : (uint64_t)(v << n); }
@@ -583,7 +583,7 @@ static uint64_t shift_u64(uint64_t seed) {
 }
 
 /* mach saturates a shift count at or above the operand width: << and a
- * logical >> answer 0, an arithmetic >> the sign fill (#3756). a plain C shift
+ * logical >> answer 0, an arithmetic >> the sign fill. a plain C shift
  * by such a count is UB, and a C >> of a negative signed value is
  * implementation-defined, so every op runs on the unsigned identity. */
 static inline uint64_t shl64_shift_i64(uint64_t v, uint64_t n) { return n >= 64u ? (uint64_t)0 : (uint64_t)(v << n); }

@@ -3,19 +3,19 @@
 ## fun classify_subprocess
 
 ```mach
-pub fun classify_subprocess(term: *subprocess.SubprocessTerminal, expired: bool, cap_ok: bool, cap: *subprocess.CaptureIoResult) outcome.GateResult;
+pub fun classify_subprocess(term: *subprocess.SubprocessTerminal, expired: bool, cap_ok: bool, cap: *subprocess.CaptureIoResult) testrun.GateResult;
 ```
 
 ## fun classify_setup_failure
 
 ```mach
-pub fun classify_setup_failure() outcome.GateResult;
+pub fun classify_setup_failure() testrun.GateResult;
 ```
 
 ## fun classify_wait_failure
 
 ```mach
-pub fun classify_wait_failure() outcome.GateResult;
+pub fun classify_wait_failure() testrun.GateResult;
 ```
 
 ## rec TestScope

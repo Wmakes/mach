@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """check that every sentence in the language reference that marks something unshipped cites an open issue,
-and that no comment in the compiler source cites a closed issue, narrates history or is a separator.
+and that no comment in the compiler source or its test tree cites a closed issue, narrates history or is a separator.
 
 a marker is one of: `phase N`, `not yet`, `later/future/upcoming release`, `planned` (not after
 "not"), matched whole-word in prose outside fenced code and inline code spans, so a quoted
@@ -14,8 +14,11 @@ citation), carries a history marker (`used to take`, `previously`, `formerly`, `
 `ruling`), or is a separator rule or titled rule (`# ---- name ----`, `# ====`). the
 bare `# ---` that opens a docstring's component block is not one.
 
-usage: doc-markers.py [root ...]   (doc/language and src by default; a root holding .md files is checked
-as documentation and one holding .mach files as source; GH_REPO names the repository; gh reads GH_TOKEN)
+the test tree's shell scripts, manifests, harness configuration and C and assembly fixtures are held to
+the same rule: a `#` comment in each, and a `//` or `/* */` comment in C.
+
+usage: doc-markers.py [root ...]   (doc/language, src and test by default; a root holding .md files only is
+checked as documentation and any other as source; GH_REPO names the repository; gh reads GH_TOKEN)
 """
 import os
 import re
@@ -82,15 +85,55 @@ def src_comments(path):
             i += 1
 
 
+def c_comments(path):
+    """(line, column, text) for each `//` or `/* */` comment outside a string or char literal"""
+    with open(path, encoding="utf-8") as f:
+        lines = f.read().split("\n")
+    block = False
+    for n, raw in enumerate(lines, 1):
+        i = 0
+        while i < len(raw):
+            if block:
+                end = raw.find("*/", i)
+                yield n, i, raw[i:end if end >= 0 else len(raw)]
+                if end < 0:
+                    break
+                block, i = False, end + 2
+                continue
+            c = raw[i]
+            if c in "\"'":
+                i += 1
+                while i < len(raw) and raw[i] != c:
+                    i += 2 if raw[i] == "\\" else 1
+            elif raw.startswith("//", i):
+                yield n, i, raw[i:]
+                break
+            elif raw.startswith("/*", i):
+                block, i = True, i + 2
+                continue
+            i += 1
+
+
+# fuzz inputs are data a boundary reads, never commented source
+DATA = os.path.join("fuzz", "corpus")
+
+# the comment syntax of each checked source kind
+COMMENTS = {".mach": src_comments, ".sh": src_comments, ".toml": src_comments, ".conf": src_comments,
+            ".py": src_comments, ".asm": src_comments, ".c": c_comments, ".h": c_comments}
+
+
 def check_src(root, repo, cache):
     """number of comments under root that cite a closed issue, narrate history or separate sections"""
     failed = checked = 0
     for dirpath, _, names in os.walk(root):
+        if DATA in dirpath:
+            continue
         for name in sorted(names):
-            if not name.endswith(".mach"):
+            comments = COMMENTS.get(os.path.splitext(name)[1])
+            if comments is None:
                 continue
             path = os.path.join(dirpath, name)
-            for line, col, text in src_comments(path):
+            for line, col, text in comments(path):
                 checked += 1
                 where = f"file={path},line={line}"
                 if SEPARATOR.match(text):
@@ -100,8 +143,10 @@ def check_src(root, repo, cache):
                 if m:
                     failed += 1
                     print(f"::error {where}::'{m.group(0)}' narrates history; a comment says what is")
-                for c in SRC_CITE.finditer(text):
-                    if ASM_IMMEDIATE.search(text[:c.start()]) or c.group(1) not in ("", "mach", "briar-systems/mach"):
+                # an inline code span quotes, so a `#1/<name>` in one is not a citation
+                spoken = re.sub(r"`[^`]*`", lambda m: " " * len(m.group(0)), text)
+                for c in SRC_CITE.finditer(spoken):
+                    if ASM_IMMEDIATE.search(spoken[:c.start()]) or c.group(1) not in ("", "mach", "briar-systems/mach"):
                         continue
                     if issue_state(repo, c.group(2), cache) != "open":
                         failed += 1
@@ -124,11 +169,11 @@ def issue_state(repo, number, cache):
 
 
 def main():
-    roots = sys.argv[1:] or ["doc/language", "src"]
+    roots = sys.argv[1:] or ["doc/language", "src", "test"]
     repo = os.environ.get("GH_REPO", "briar-systems/mach")
     cache, failed = {}, 0
     for root in roots:
-        if any(n.endswith(".mach") for _, _, names in os.walk(root) for n in names):
+        if any(os.path.splitext(n)[1] in COMMENTS for _, _, names in os.walk(root) for n in names):
             failed += check_src(root, repo, cache)
         else:
             failed += check_docs(root, repo, cache)

@@ -1,5 +1,5 @@
-# .symtab presence/correctness fixture (#2772), built `kind = "shared"` here
-# (#2807 - test/link/cases/symtab/src/main.mach is the identical static-executable
+# .symtab presence/correctness fixture, built `kind = "shared"` here
+# (test/link/cases/symtab/src/main.mach is the identical static-executable
 # twin). neither function is `pub`, so the shared writer's own export table
 # (.dynsym) never claims either one - both live only in `.symtab`, keeping
 # this case about the same table the static twin tests, not a second one.
@@ -10,7 +10,7 @@
 # speak to at all (DWARF is a `-g`-only concern; `.symtab` is not).
 #
 # `main` is `pub` because a shared library exports the root project's `pub`
-# declarations and nothing else (#3412): with no export at all the link has no
+# declarations and nothing else: with no export at all the link has no
 # GC root, and the image comes out empty rather than carrying the symbol table
 # this case is about. `burn` stays private, so the case covers both bindings.
 #
@@ -24,7 +24,7 @@ use std.types.size.usize;
 
 # `#[noinline]` because this case needs `burn` to exist as a function in the
 # image: at `opt = 2` it is small enough to inline into its only caller, and with
-# #3412 a private definition nothing references is dead and link GC drops it, so
+# a private definition nothing references is dead and link GC drops it, so
 # the release leg would have no mid-function address to resolve
 #[noinline]
 fun burn(n: i64) i64 {

@@ -1,4 +1,4 @@
-# the LC_UNIXTHREAD half of the darwin x86_64 entry contract (#2576): a non-PIE
+# the LC_UNIXTHREAD half of the darwin x86_64 entry contract: a non-PIE
 # image is entered at the thread state's pc with the argument block on the stack.
 # the same observable as the `--pie` sibling, so the pair proves one entrypoint
 # satisfies both contracts rather than trading one for the other.

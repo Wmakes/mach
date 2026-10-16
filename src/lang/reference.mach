@@ -18,42 +18,21 @@ use std.types.string.str_region_equals;
 use A:                  std.allocator;
 use collections_vector: std.collections.vector;
 use std.collections.vector.Vector;
-use fs:       std.filesystem;
-use io_error: std.io.error;
+use fs: std.filesystem;
 use std.print;
 use types_path: std.types.path;
 
+use mach.lang.checkout;
 use lang_source: mach.lang.source;
 
 # the language reference, relative to the project root
 #[testing]
 val LANGUAGE: str = "doc/language";
 
-# the project root, found by walking up from the working directory; none when no
-# directory above it holds the reference
-#[testing]
-fun root(alloc: *A.Allocator) opt[str] {
-    var prefix: str   = ".";
-    var depth:  usize = 0;
-    for (depth < 8) {
-        val probe: res[str, A.Error] = types_path.join(alloc, prefix, "doc/language/README.md");
-        if (sel probe.err) { ret opt[str].none{}; }
-        val is: res[bool, io_error.Error] = fs.is_file(probe.ok);
-        if (sel is.ok) {
-            if (is.ok) { ret opt[str].some{prefix}; }
-        }
-        val up: res[str, A.Error] = types_path.join(alloc, prefix, "..");
-        if (sel up.err) { ret opt[str].none{}; }
-        prefix = up.ok;
-        depth  = depth + 1;
-    }
-    ret opt[str].none{};
-}
-
 # the page at `path`, relative to the project root, read whole; none when it cannot be read
 #[testing]
 pub fun page(alloc: *A.Allocator, path: str) opt[str] {
-    val at: opt[str] = root(alloc);
+    val at: opt[str] = checkout.root(alloc);
     if (sel at.none) { ret opt[str].none{}; }
     val full: res[str, A.Error] = types_path.join(alloc, at.some, path);
     if (sel full.err) { ret opt[str].none{}; }
@@ -66,7 +45,7 @@ pub fun page(alloc: *A.Allocator, path: str) opt[str] {
 # page of the language reference, the readme and the authoring skill
 #[testing]
 pub fun pages(alloc: *A.Allocator) opt[Vector[str]] {
-    val at: opt[str] = root(alloc);
+    val at: opt[str] = checkout.root(alloc);
     if (sel at.none) { ret opt[Vector[str]].none{}; }
     val dir: res[str, A.Error] = types_path.join(alloc, at.some, LANGUAGE);
     if (sel dir.err) { ret opt[Vector[str]].none{}; }

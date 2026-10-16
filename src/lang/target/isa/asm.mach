@@ -28,6 +28,13 @@ use mach.lang.target.extension;
 use isa_encode:   mach.lang.target.isa.encode;
 use isa_inst:     mach.lang.target.isa.inst;
 use target_model: mach.lang.target.model;
+# the host suites: each runs the rows it checks on the host processor
+#[testing]
+use mach.lang.target.isa.asm.crypto;
+#[testing]
+use mach.lang.target.isa.asm.extensions;
+#[testing]
+use mach.lang.target.isa.asm.host;
 
 val MAX_OPS: usize = 4;
 

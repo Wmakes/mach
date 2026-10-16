@@ -1,7 +1,7 @@
 /* the foreign C object the case links, compiled by clang for Mach-O with debug
    info and unwind tables left on - the shape of every normally-compiled clang
    object, whose __compact_unwind and __debug_* references into __text are
-   section-based relocations (briar-systems/mach#2521).
+   section-based relocations.
 
    regenerate (from this directory, any host clang):
      clang -target arm64-apple-macos11 -c shim.c -o shim.o -g -O1 \

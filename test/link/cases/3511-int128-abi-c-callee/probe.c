@@ -1,4 +1,4 @@
-/* C half of the 128-bit integer transport controls (mach #3511). Compiled at -O0 so
+/* C half of the 128-bit integer transport controls. Compiled at -O0 so
  * every read really happens. */
 #ifdef _WIN32
 int _fltused = 0;

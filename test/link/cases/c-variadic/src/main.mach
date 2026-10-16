@@ -1,4 +1,4 @@
-# C-variadic `ext fun` surface case (mach #2575)
+# C-variadic `ext fun` surface case
 #
 # Calls a real clang/gcc-built C variadic function and asserts every argument
 # round-trips. The C half reads its arguments with `va_arg` under the RUNNER'S own
@@ -21,7 +21,7 @@ rec Wide { a: i64; b: i64; c: i64; d: i64; }
 # `spec` names one character per variadic argument; `out` receives the folded values.
 ext fun va_probe(spec: *u8, out: *i64, ...) i64;
 
-# THE SAME CALLEE NAMED AS A TYPE (mach #3003). An indirect call has no declaration in
+# THE SAME CALLEE NAMED AS A TYPE. An indirect call has no declaration in
 # view, so the tail rule has to come off the TYPE - and it must be the variadic one.
 # A call placed by the ordinary rule links and runs; it just hands `va_arg` the wrong
 # bytes, which is why this has to execute against real C rather than diff an object.
@@ -57,7 +57,7 @@ fun main(argc: usize, argv: **u8) i64 {
     # and SysV's XMM bank, so the tail crosses the register/stack boundary on the
     # legs that have one - and never touches a register at all on Apple arm64.
     #
-    # WHICH INDICES CARRY THE WIN64 SIGNAL (mach#3043). win64 gives only the first four
+    # WHICH INDICES CARRY THE WIN64 SIGNAL. win64 gives only the first four
     # POSITIONAL slots registers, and the two fixed parameters (`spec`, `out`) occupy
     # two of them - so of these eight doubles only out[0] and out[1] ride a register and
     # can expose a broken `float_dup_gp`, the rule that duplicates a tail float into the

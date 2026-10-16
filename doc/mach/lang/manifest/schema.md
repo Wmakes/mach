@@ -69,14 +69,6 @@ doc: the document root
 key: a key of the document root, such as "project"
 ret: ok when the section has the schema's shape
 
-## fun shape_text
-
-```mach
-pub fun shape_text(shape: Shape) str;
-```
-
-what a value of `shape` is, as a refusal names it
-
 ## fun key_text
 
 ```mach

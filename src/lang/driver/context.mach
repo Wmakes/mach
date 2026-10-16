@@ -573,7 +573,7 @@ test capture_build_identity__excludes_the_planner_environment {
     ret 0;
 }
 
-test planner_environment_cache_input_tracks_values_and_ignores_entry_order {
+test planner_environment__cache_input_tracks_values_and_ignores_entry_order {
     var a:      A.Allocator;
     val make_r: err[A.Error] = page.make(?a);
     if (sel make_r.err) { ret 1; }

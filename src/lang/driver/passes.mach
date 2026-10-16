@@ -372,7 +372,7 @@ fun lower_reusable(p: *project.Project, mid: session.ModuleId) res[bool, fail.Fa
     ret query.reusable[project.Project](?p.queries, p, ?LOWER, back_half_key_for(p, m));
 }
 
-test internal_failure_is_not_hidden_by_a_user_error {
+test phase_failure__an_internal_one_is_not_hidden_by_a_user_error {
     var alloc:  A.Allocator;
     val make_r: err[A.Error] = page.make(?alloc);
     if (sel make_r.err) { ret 1; }
@@ -391,7 +391,7 @@ test internal_failure_is_not_hidden_by_a_user_error {
     ret 0;
 }
 
-test message_only_internal_failure_stays_internal {
+test phase_failure__a_message_only_internal_one_stays_internal {
     val f: fail.Fail = fail.message("internal failure without a diagnostic");
     if (!sel f.message)                                                         { ret 1; }
     if (!str_equals(fail.describe(f), "internal failure without a diagnostic")) { ret 2; }

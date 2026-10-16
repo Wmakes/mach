@@ -1,11 +1,11 @@
-/* u128 and i128 shifts across the limb boundary and at and past the width (#3756).
+/* u128 and i128 shifts across the limb boundary and at and past the width.
  * one noinline part per type. */
 #include "corpus.h"
 
 #define U128(hi, lo) (((corpus_u128)UINT64_C(hi) << 64) | (corpus_u128)UINT64_C(lo))
 
 /* mach saturates a shift count at or above the operand width: << and a
- * logical >> answer 0, an arithmetic >> the sign fill (#3756). a C shift by
+ * logical >> answer 0, an arithmetic >> the sign fill. a C shift by
  * 128 or more is UB, so the reference tests the count first and runs on the
  * unsigned identity. */
 static inline corpus_u128 shl128_shift_u128(corpus_u128 v, uint64_t n) { return n >= 128u ? (corpus_u128)0 : (corpus_u128)(v << n); }
@@ -55,7 +55,7 @@ static uint64_t shift_u128(uint64_t seed) {
 #define U128(hi, lo) (((corpus_u128)UINT64_C(hi) << 64) | (corpus_u128)UINT64_C(lo))
 
 /* mach saturates a shift count at or above the operand width: << and a
- * logical >> answer 0, an arithmetic >> the sign fill (#3756). a C shift by
+ * logical >> answer 0, an arithmetic >> the sign fill. a C shift by
  * 128 or more is UB, so the reference tests the count first and runs on the
  * unsigned identity. */
 static inline corpus_u128 shl128_shift_i128(corpus_u128 v, uint64_t n) { return n >= 128u ? (corpus_u128)0 : (corpus_u128)(v << n); }

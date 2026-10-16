@@ -1,12 +1,12 @@
 # shifts at every width and signedness: << and >> at counts 0, 1 and w-1, then counts
-# at and past the width, which saturate (#3756). one noinline part per type.
+# at and past the width, which saturate. one noinline part per type.
 
 use corpus.lib.fold;
 
 # u8 shifts: << and >> (logical, zero-filling) at counts 0, 1 and w-1, then
 # counts at and past the width, which saturate: a count at or above 8
 # answers 0 for << and a logical >>, and the sign fill for an arithmetic >>
-# (#3756). a constant count at or above the width is a compile error, so every
+#. a constant count at or above the width is a compile error, so every
 # saturating count here is opaque: it comes through a noinline call.
 #[noinline]
 fun opaque_shift_u8(n: u8) u8 {
@@ -101,7 +101,7 @@ fun shift_u8(seed: u64) u64 {
 # i8 shifts: << and >> (arithmetic, sign-filling) at counts 0, 1 and w-1, then
 # counts at and past the width, which saturate: a count at or above 8
 # answers 0 for << and a logical >>, and the sign fill for an arithmetic >>
-# (#3756). a constant count at or above the width is a compile error, so every
+#. a constant count at or above the width is a compile error, so every
 # saturating count here is opaque: it comes through a noinline call.
 #[noinline]
 fun opaque_shift_i8(n: u8) u8 {
@@ -196,7 +196,7 @@ fun shift_i8(seed: u64) u64 {
 # u16 shifts: << and >> (logical, zero-filling) at counts 0, 1 and w-1, then
 # counts at and past the width, which saturate: a count at or above 16
 # answers 0 for << and a logical >>, and the sign fill for an arithmetic >>
-# (#3756). a constant count at or above the width is a compile error, so every
+#. a constant count at or above the width is a compile error, so every
 # saturating count here is opaque: it comes through a noinline call.
 #[noinline]
 fun opaque_shift_u16(n: u8) u8 {
@@ -291,7 +291,7 @@ fun shift_u16(seed: u64) u64 {
 # i16 shifts: << and >> (arithmetic, sign-filling) at counts 0, 1 and w-1, then
 # counts at and past the width, which saturate: a count at or above 16
 # answers 0 for << and a logical >>, and the sign fill for an arithmetic >>
-# (#3756). a constant count at or above the width is a compile error, so every
+#. a constant count at or above the width is a compile error, so every
 # saturating count here is opaque: it comes through a noinline call.
 #[noinline]
 fun opaque_shift_i16(n: u8) u8 {
@@ -386,7 +386,7 @@ fun shift_i16(seed: u64) u64 {
 # u32 shifts: << and >> (logical, zero-filling) at counts 0, 1 and w-1, then
 # counts at and past the width, which saturate: a count at or above 32
 # answers 0 for << and a logical >>, and the sign fill for an arithmetic >>
-# (#3756). a constant count at or above the width is a compile error, so every
+#. a constant count at or above the width is a compile error, so every
 # saturating count here is opaque: it comes through a noinline call.
 #[noinline]
 fun opaque_shift_u32(n: u8) u8 {
@@ -479,7 +479,7 @@ fun shift_u32(seed: u64) u64 {
 # i32 shifts: << and >> (arithmetic, sign-filling) at counts 0, 1 and w-1, then
 # counts at and past the width, which saturate: a count at or above 32
 # answers 0 for << and a logical >>, and the sign fill for an arithmetic >>
-# (#3756). a constant count at or above the width is a compile error, so every
+#. a constant count at or above the width is a compile error, so every
 # saturating count here is opaque: it comes through a noinline call.
 #[noinline]
 fun opaque_shift_i32(n: u8) u8 {
@@ -567,7 +567,7 @@ fun shift_i32(seed: u64) u64 {
 # u64 shifts: << and >> (logical, zero-filling) at counts 0, 1 and w-1, then
 # counts at and past the width, which saturate: a count at or above 64
 # answers 0 for << and a logical >>, and the sign fill for an arithmetic >>
-# (#3756). a constant count at or above the width is a compile error, so every
+#. a constant count at or above the width is a compile error, so every
 # saturating count here is opaque: it comes through a noinline call.
 #[noinline]
 fun opaque_shift_u64(n: u8) u8 {
@@ -655,7 +655,7 @@ fun shift_u64(seed: u64) u64 {
 # i64 shifts: << and >> (arithmetic, sign-filling) at counts 0, 1 and w-1, then
 # counts at and past the width, which saturate: a count at or above 64
 # answers 0 for << and a logical >>, and the sign fill for an arithmetic >>
-# (#3756). a constant count at or above the width is a compile error, so every
+#. a constant count at or above the width is a compile error, so every
 # saturating count here is opaque: it comes through a noinline call.
 #[noinline]
 fun opaque_shift_i64(n: u8) u8 {

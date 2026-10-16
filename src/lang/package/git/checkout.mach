@@ -41,7 +41,6 @@ use manifest_version: mach.lang.manifest.version;
 use mach.lang.session;
 
 use driver_closure: mach.lang.driver.closure;
-use mach.lang.driver.toolchain;
 use mach.lang.package;
 use mach.lang.package.git;
 use git_gitlink: mach.lang.package.git.gitlink;
@@ -968,7 +967,7 @@ test realize_git_dependency__succeeds_and_stages_gitlink {
     var alloc:  A.Allocator;
     val make_r: err[A.Error] = page.make(?alloc);
     if (sel make_r.err) { ret 1; }
-    val gi_r: res[git.Inspector, fail.Fail] = git.inspector_init(?alloc, exec.Environment.inherit{});
+    val gi_r: res[git.Inspector, fail.Fail] = git.inspector_init(?alloc, git.scratch_environ());
     if (sel gi_r.err) { ret 1; }
     var gi: git.Inspector = gi_r.ok;
     fin { git.inspector_dnit(?alloc, ?gi); }
@@ -989,7 +988,7 @@ test realize_git_dependency__succeeds_and_stages_gitlink {
         str_free(?alloc, root);
     }
 
-    val sr: res[session.Session, fail.Fail] = toolchain.session_init(?alloc);
+    val sr: res[session.Session, fail.Fail] = git.scratch_session(?alloc);
     if (sel sr.err) { ret 1; }
     var s: session.Session = sr.ok;
     fin { session.dnit(?s); }
@@ -1054,7 +1053,7 @@ test realize_git_dependency__alias_key_is_refused_after_checkout {
     var alloc:  A.Allocator;
     val make_r: err[A.Error] = page.make(?alloc);
     if (sel make_r.err) { ret 1; }
-    val gi_r: res[git.Inspector, fail.Fail] = git.inspector_init(?alloc, exec.Environment.inherit{});
+    val gi_r: res[git.Inspector, fail.Fail] = git.inspector_init(?alloc, git.scratch_environ());
     if (sel gi_r.err) { ret 1; }
     var gi: git.Inspector = gi_r.ok;
     fin { git.inspector_dnit(?alloc, ?gi); }
@@ -1075,7 +1074,7 @@ test realize_git_dependency__alias_key_is_refused_after_checkout {
         str_free(?alloc, root);
     }
 
-    val sr: res[session.Session, fail.Fail] = toolchain.session_init(?alloc);
+    val sr: res[session.Session, fail.Fail] = git.scratch_session(?alloc);
     if (sel sr.err) { ret 1; }
     var s: session.Session = sr.ok;
     fin { session.dnit(?s); }
@@ -1114,7 +1113,7 @@ test realize_git_dependency__failing_clone_leaves_scaffold_intact_and_dep_clean 
     var alloc:  A.Allocator;
     val make_r: err[A.Error] = page.make(?alloc);
     if (sel make_r.err) { ret 1; }
-    val gi_r: res[git.Inspector, fail.Fail] = git.inspector_init(?alloc, exec.Environment.inherit{});
+    val gi_r: res[git.Inspector, fail.Fail] = git.inspector_init(?alloc, git.scratch_environ());
     if (sel gi_r.err) { ret 1; }
     var gi: git.Inspector = gi_r.ok;
     fin { git.inspector_dnit(?alloc, ?gi); }
@@ -1137,7 +1136,7 @@ test realize_git_dependency__failing_clone_leaves_scaffold_intact_and_dep_clean 
     val bogus: str = bogus_r.ok;
     fin { str_free(?alloc, bogus); }
 
-    val sr: res[session.Session, fail.Fail] = toolchain.session_init(?alloc);
+    val sr: res[session.Session, fail.Fail] = git.scratch_session(?alloc);
     if (sel sr.err) { ret 1; }
     var s: session.Session = sr.ok;
     fin { session.dnit(?s); }
@@ -1183,11 +1182,11 @@ test metadata__registration_refuses_unstaged_edits_and_pin_staging_leaves_them_u
     var a:      A.Allocator;
     val make_r: err[A.Error] = page.make(?a);
     if (sel make_r.err) { ret 1; }
-    val sr: res[session.Session, fail.Fail] = toolchain.session_init(?a);
+    val sr: res[session.Session, fail.Fail] = git.scratch_session(?a);
     if (sel sr.err) { ret 2; }
     var s: session.Session = sr.ok;
     fin { session.dnit(?s); }
-    val gr: res[git.Inspector, fail.Fail] = git.inspector_init(?a, exec.Environment.inherit{});
+    val gr: res[git.Inspector, fail.Fail] = git.inspector_init(?a, git.scratch_environ());
     if (sel gr.err) { ret 3; }
     var gi: git.Inspector = gr.ok;
     fin { git.inspector_dnit(?a, ?gi); }

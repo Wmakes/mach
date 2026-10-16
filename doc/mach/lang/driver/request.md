@@ -214,14 +214,6 @@ pub fun work_apply(itn: *intern.Interner, work: str, m: *manifest.Manifest) err[
 `work`, a `-w` value, in place of the root manifest `m`'s `[project].work`: a
 canonical path inside the project root, taken as written
 
-## fun request_work_apply
-
-```mach
-pub fun request_work_apply(itn: *intern.Interner, r: *BuildRequest, m: *manifest.Manifest) err[fail.Fail];
-```
-
-`r`'s `-w` over the root manifest `m` it is built from, nothing when it names none
-
 ## fun for_cell
 
 ```mach

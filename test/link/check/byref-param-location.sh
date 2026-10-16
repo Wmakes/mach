@@ -2,7 +2,7 @@
 . "$(dirname "$0")/common.sh"
 
 # produce_byref_param_location <engine> <leg> <nog_binary> <g_binary>
-# the BY-REFERENCE PARAMETER LOCATION observable (#3461): the aggregate parameter `w`
+# the BY-REFERENCE PARAMETER LOCATION observable: the aggregate parameter `w`
 # of `probe` has a DW_AT_location, and every expression in it is a memory location
 # reached through the incoming pointer.
 #
@@ -31,7 +31,7 @@ produce_byref_param_location() {
     # the expressions of `w` under the case's own `probe`, one per line. the linked
     # image also carries std DIEs named `probe` (a function and a variable), so the
     # subprogram is chosen by name and declaring file, and only its direct children
-    # are read as its parameters (#3815). depth is the indentation after the offset.
+    # are read as its parameters. depth is the indentation after the offset.
     exprs=$("$dd_tool" --debug-info "$g" 2>/dev/null | awk '
         function settle() {
             if (!pending) return

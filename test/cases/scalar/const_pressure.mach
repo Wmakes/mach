@@ -1,6 +1,6 @@
 # loops that read more constants than the registers hold, so constants built
 # once ahead of each loop are built again where they are read rather than
-# spilled (#3807): more float constants than float registers, more wide
+# spilled: more float constants than float registers, more wide
 # integer constants than general registers, constants read across a call, an
 # inner loop's constants beside its outer loop's, and the literals that stay
 # in place (a low-bit mask and a power-of-two multiplier).

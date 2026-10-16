@@ -1,6 +1,6 @@
 /* Two objects each contribute to the same named sections, so the linked image
  * must CONCATENATE them in order rather than emit two sections sharing a name:
- * libobjc walks __objc_classlist as one contiguous pointer array (#2606).
+ * libobjc walks __objc_classlist as one contiguous pointer array.
  *
  * Rebuild (checked in so the case needs no macOS SDK or clang on the runner):
  *   clang -target x86_64-apple-macos11 -fno-common -fno-unwind-tables -fno-asynchronous-unwind-tables -c probe-a.c -o probe-a.o

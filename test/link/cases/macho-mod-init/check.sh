@@ -9,7 +9,7 @@
 # initializers by scanning for sections whose TYPE is S_MOD_INIT_FUNC_POINTERS, so
 # a section carrying the right name, the right alignment, and a correctly rebased
 # pointer at the right address is still never called if the link emitted the
-# default S_REGULAR type - which is exactly what #2637 was. Every structural fact
+# default S_REGULAR type - which is exactly the defect. Every structural fact
 # below held while the initializer silently did not run, so the structural half
 # constrains the image and the darwin run is what settles it.
 produce_macho_mod_init() {

@@ -2,7 +2,7 @@
 # name, so the producer can read the section identity back out of the image.
 #
 # this program is never RUN: the fixture's objc metadata is synthetic, and libobjc
-# dereferences every __objc_classlist entry for real on darwin (#2637). the call
+# dereferences every __objc_classlist entry for real on darwin. the call
 # below exists so the linked object is reachable, not to report anything - the
 # executing initializer case is `macho-mod-init`.
 use std.runtime;

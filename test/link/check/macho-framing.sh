@@ -9,7 +9,7 @@
 #
 # The framing is what a static (LC_UNIXTHREAD) and a dyld-loaded (LC_MAIN) image
 # must have IN COMMON - the entry command is the only line that may differ between
-# the two goldens (#2599, where the non-PIE image was based a page below
+# the two goldens (where the non-PIE image was based a page below
 # DARWIN_BASE_ADDR, carried a __PAGEZERO one page short of 4 GiB, and emitted no
 # section commands at all, leaving `llvm-objdump -d` with nothing to disassemble).
 # Addresses other than the base are deliberately left out: they move with the

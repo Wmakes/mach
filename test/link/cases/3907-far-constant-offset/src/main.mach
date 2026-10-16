@@ -1,4 +1,4 @@
-# the #3907 repro and its neighbours: constant offsets around and past 2^31
+# far constant offsets and their neighbours: constant offsets around and past 2^31
 # into a 2.2 GB static array, each read back through a runtime index
 
 use p: std.print;

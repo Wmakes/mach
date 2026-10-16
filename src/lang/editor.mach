@@ -73,7 +73,6 @@ use mach.lang.retention;
 use mach.lang.session;
 use lang_source: mach.lang.source;
 use mach.lang.stack;
-use mach.lang.step;
 use lang_target:       mach.lang.target;
 use catalog_subsystem: mach.lang.target.catalog.subsystem;
 use mach.lang.type;
@@ -3823,7 +3822,7 @@ fun t_driver_parse_outcome(alloc: *A.Allocator, root: str, diags_out: *diagnosti
     if (sel sr.err) { ret opt[fail.Fail].some{fail.message("session")}; }
     var s:       session.Session                 = sr.ok;
     var pick:    manifest.Selectors              = manifest.t_selectors("", "", "");
-    val pr:      res[project.Project, fail.Fail] = step.project_build(?s, root, ?pick);
+    val pr:      res[project.Project, fail.Fail] = driver.build_project(?s, root, ?pick);
     var failure: opt[fail.Fail]                  = opt[fail.Fail].none{};
     if (sel pr.err) {
         var f:       fail.Fail = pr.err;

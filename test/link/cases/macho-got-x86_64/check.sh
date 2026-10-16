@@ -12,7 +12,7 @@
 #
 # The two non-relaxable local signatures (GOT32 / GOT64) carry a `movq (%rax), %rax`
 # the import ones do not: X86_64_RELOC_GOT resolves to the slot address, so reading
-# the local int takes two loads where testing the imported pointer takes one (#2586).
+# the local int takes two loads where testing the imported pointer takes one.
 produce_macho_got() {
     target=$2
     bin=$3
@@ -110,7 +110,7 @@ produce_macho_got() {
     }
 
     # the linker reserves the import slots in the same __DATA_CONST,__got, after
-    # the local ones and ahead of the zero-fill (#3903)
+    # the local ones and ahead of the zero-fill
     got_fields=$(macho_section_fields "$bin" __DATA_CONST __got) || return 2
     set -- $got_fields
     got_addr=$1; got_size=$2

@@ -1,4 +1,4 @@
-# by-value aggregate at an `ext` boundary (mach #3063)
+# by-value aggregate at an `ext` boundary
 #
 # A C function overwrites every field of a by-value aggregate parameter, and the
 # mach caller's own object must be untouched. AAPCS64, the RISC-V psABI and the
@@ -17,7 +17,7 @@
 # already exists there. A change that fixed the by-reference conventions by breaking
 # the by-value one would fail them.
 #
-# `va_list` (mach #3004) is the parameter that made this visible - every consumer of
+# `va_list` is the parameter that made this visible - every consumer of
 # one ADVANCES it, so a forwarded list came back spent - but it is not what the
 # defect is about, and this case deliberately does not mention it. A guard living
 # inside the `va_list` case would disappear with that feature.

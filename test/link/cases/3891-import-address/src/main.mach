@@ -1,5 +1,5 @@
-# a function import's address taken, not called (mach #3891), and equal to the
-# library's own pointer to it (mach #3942)
+# a function import's address taken, not called, and equal to the
+# library's own pointer to it
 
 use p: std.print;
 use std.runtime;

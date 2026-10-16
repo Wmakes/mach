@@ -9,9 +9,8 @@ basename is arbitrary.
 
 An artifact's build is rooted at its entry module and follows `use` and `fwd`
 edges from there; a file under `src` that no entry reaches is not part of that
-artifact, under `mach build`, `mach check` and `mach test` alike. Tests that
-live in modules no artifact reaches belong to a test artifact of their own (see
-[test.md](test.md#which-tests-run)).
+artifact, under `mach build`, `mach check` and `mach test` alike, so a test
+runs only in a module an entry reaches (see [test.md](test.md#which-tests-run)).
 
 ## Executable entry
 

@@ -593,6 +593,61 @@ pub fun id_is(itn: *intern.Interner, id: intern.StrId, text: str) bool {
     ret !intern.str_is_nil(id) && str_equals(intern.text(itn, id), text);
 }
 
+# the module loaded under `fqn`, nil when none is
+#[testing]
+pub fun module_named(p: *Project, fqn: str) session.ModuleId {
+    val id: res[intern.StrId, A.Error] = intern.add(?p.s.interner, fqn);
+    if (sel id.err) { ret session.MODULE_NIL; }
+    val found: opt[session.ModuleId] = fe_load.module_find(?p.loader, id.ok);
+    if (sel found.none) { ret session.MODULE_NIL; }
+    ret found.some;
+}
+
+# whether a module is loaded under `fqn`
+#[testing]
+pub fun loads(p: *Project, fqn: str) bool {
+    ret !module.is_nil(module_named(p, fqn));
+}
+
+# the stable id of the module loaded under `fqn`, nil when none is
+#[testing]
+pub fun stable_named(p: *Project, fqn: str) session.StableModuleId {
+    val mid: session.ModuleId = module_named(p, fqn);
+    if (module.is_nil(mid)) { ret session.STABLE_MODULE_NIL; }
+    ret module_at(p, mid::u32).stable_id;
+}
+
+# where `mid` stands in the load order, the order's length when it is not in it
+#[testing]
+pub fun topo_index(p: *Project, mid: session.ModuleId) u32 {
+    var i: u32 = 0;
+    for (i < p.topo_len) {
+        if (module.same(p.topo[i], mid)) { ret i; }
+        i = i + 1;
+    }
+    ret p.topo_len;
+}
+
+# whether the module loaded under `fqn` is in the load order
+#[testing]
+pub fun in_topo(p: *Project, fqn: str) bool {
+    val mid: session.ModuleId = module_named(p, fqn);
+    ret !module.is_nil(mid) && topo_index(p, mid) < p.topo_len;
+}
+
+# the artifact the module loaded under `fqn` is attributed to, as its comptime context reads
+# `$bin.name`; empty when none is loaded or the two disagree
+#[testing]
+pub fun artifact_named(p: *Project, fqn: str) str {
+    val mid: session.ModuleId = module_named(p, fqn);
+    if (module.is_nil(mid)) { ret ""; }
+    val m: *ModuleEntry = module_at(p, mid::u32);
+    if (!intern.str_same(m.load.artifact, m.load.ctx.env.build.bin_name)) { ret ""; }
+    val text: opt[str] = intern.get(?p.s.interner, m.load.artifact);
+    if (sel text.none) { ret ""; }
+    ret text.some;
+}
+
 # the loaded module count; the next ModuleId to be issued
 pub fun module_count(p: *Project) u32 {
     ret handle.chunk_count[ModuleEntry](?p.modules)::u32;

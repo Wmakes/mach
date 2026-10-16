@@ -1,4 +1,4 @@
-# a backtrace through C frames linked into a mach image (#4048); see case.conf
+# a backtrace through C frames linked into a mach image; see case.conf
 use p: std.print;
 use std.runtime;
 use std.types.size.usize;

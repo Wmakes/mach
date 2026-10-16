@@ -1228,7 +1228,7 @@ fun dep_resolve_relative_root(alloc: *A.Allocator, cwd: str, rel: str) res[str, 
     ret res[str, fail.Fail].ok{out_r.ok};
 }
 
-pub fun dependency_out_home(alloc: *A.Allocator, project_root: str, root_out: str) res[str, fail.Fail] {
+fun dependency_out_home(alloc: *A.Allocator, project_root: str, root_out: str) res[str, fail.Fail] {
     if (types_path.is_abs(project_root)) {
         val resolve_r: res[types_path.Path, A.Error] = types_path.resolve(alloc, project_root, root_out);
         if (sel resolve_r.err) { ret res[str, fail.Fail].err{fail.refused(resolve_r.err)}; }
@@ -1340,271 +1340,274 @@ pub fun dependency_run(p: *project.Project, isa: intern.StrId, os: intern.StrId,
     ret err[fail.Fail].ok{};
 }
 
-test execute_step_invocation__exact_argv_and_environment {
-    $if ($mach.build.os == $mach.os.windows) { ret 0; }
-    var alloc:  A.Allocator;
-    val make_r: err[A.Error] = page.make(?alloc);
-    if (sel make_r.err) { ret 1; }
+$if ($mach.build.os != $mach.os.windows) {
+    test execute_step_invocation__exact_argv_and_environment {
+        var alloc:  A.Allocator;
+        val make_r: err[A.Error] = page.make(?alloc);
+        if (sel make_r.err) { ret 1; }
 
-    var argv: [6]*u8;
-    argv[0] = "sh";
-    argv[1] = "-c";
-    argv[2] = "test \"$1\" = \"$LITERAL\" && test -z \"${HOME+x}\" && test -z \"${MACH_TARGET_ISA+x}\"";
-    argv[3] = "mach-step";
-    argv[4] = "literal \"';$&|<>*?[]";
-    argv[5] = nil;
-    var envp: [2]*u8;
-    envp[0] = "LITERAL=literal \"';$&|<>*?[]";
-    envp[1] = nil;
-    val literal_r: res[driver_environment.Strings, fail.Fail] = driver_environment.t_strings(?alloc, ?envp[0]);
-    if (sel literal_r.err) { ret 1; }
-    var literal:    driver_environment.Strings = literal_r.ok;
-    var invocation: StepInvocation;
-    invocation.argv = StepStrings{items: ?argv[0], count: 5};
-    invocation.env  = literal;
-    val shell_r: res[str, fail.Fail] = resolve_step_program(?alloc, "/", ?invocation);
-    if (sel shell_r.err) { ret 1; }
-    val shell:     str            = shell_r.ok;
-    val shell_run: err[fail.Fail] = execute_step_invocation(?alloc, "/", shell, ?invocation, "probe", 0);
-    str_free(?alloc, shell);
-    driver_environment.strings_free(?alloc, ?literal);
-    if (sel shell_run.err) { ret 1; }
+        var argv: [6]*u8;
+        argv[0] = "sh";
+        argv[1] = "-c";
+        argv[2] = "test \"$1\" = \"$LITERAL\" && test -z \"${HOME+x}\" && test -z \"${MACH_TARGET_ISA+x}\"";
+        argv[3] = "mach-step";
+        argv[4] = "literal \"';$&|<>*?[]";
+        argv[5] = nil;
+        var envp: [2]*u8;
+        envp[0] = "LITERAL=literal \"';$&|<>*?[]";
+        envp[1] = nil;
+        val literal_r: res[driver_environment.Strings, fail.Fail] = driver_environment.t_strings(?alloc, ?envp[0]);
+        if (sel literal_r.err) { ret 1; }
+        var literal:    driver_environment.Strings = literal_r.ok;
+        var invocation: StepInvocation;
+        invocation.argv = StepStrings{items: ?argv[0], count: 5};
+        invocation.env  = literal;
+        val shell_r: res[str, fail.Fail] = resolve_step_program(?alloc, "/", ?invocation);
+        if (sel shell_r.err) { ret 1; }
+        val shell:     str            = shell_r.ok;
+        val shell_run: err[fail.Fail] = execute_step_invocation(?alloc, "/", shell, ?invocation, "probe", 0);
+        str_free(?alloc, shell);
+        driver_environment.strings_free(?alloc, ?literal);
+        if (sel shell_run.err) { ret 1; }
 
-    var empty_env: [1]*u8;
-    empty_env[0] = nil;
-    var empty_native: [1]*Unit;
-    empty_native[0] = nil;
-    var env_argv: [2]*u8;
-    env_argv[0]     = "env";
-    env_argv[1]     = nil;
-    invocation.argv = StepStrings{items: ?env_argv[0], count: 1};
-    invocation.env  = driver_environment.Strings{items: ?empty_native[0], count: 0};
-    val env_program_r: res[str, fail.Fail] = resolve_step_program(?alloc, "/", ?invocation);
-    if (sel env_program_r.err) { ret 1; }
-    val env_program: str = env_program_r.ok;
-    fin { str_free(?alloc, env_program); }
-    val temp_r: res[fs.TempFile, fs.FsError] = fs.temp_create(?alloc, "mach_step_env");
-    if (sel temp_r.err) { ret 1; }
-    var temp:         fs.TempFile         = temp_r.ok;
-    val temp_close_r: err[io_error.Error] = fs.temp_close(?temp);
-    if (sel temp_close_r.err) { ret 1; }
-    fin { fs.temp_remove(?temp); }
-    var child: subprocess.OwnedSubprocess;
-    subprocess.init(?child);
-    var options: subprocess.SpawnOptions = subprocess.spawn_options();
-    options.capture        = fs.temp_path(?temp);
-    options.capture_stderr = true;
-    options.capture_limit  = 64;
-    val spawn_r: err[subprocess.Error] = subprocess.spawn(?alloc, ?child, env_program, ?env_argv[0], exec.Environment.given{?empty_env[0]}, options);
-    if (sel spawn_r.err) { ret 1; }
-    val wait_r: res[subprocess.SubprocessTerminal, subprocess.Error] = subprocess.wait(?alloc, ?child);
-    if (sel wait_r.err) { ret 1; }
-    val terminal:  subprocess.SubprocessTerminal                     = wait_r.ok;
-    val capture_r: res[subprocess.CaptureIoResult, subprocess.Error] = subprocess.finish_capture(?alloc, ?child, true);
-    if (sel capture_r.err) { ret 1; }
-    val capture:  subprocess.CaptureIoResult = capture_r.ok;
-    var captured: usize                      = 0;
-    subprocess.capture_bytes(?child, ?captured);
-    val released: err[subprocess.Error] = subprocess.release_capture(?alloc, ?child);
-    if (terminal.kind != subprocess.STATE_EXITED) { ret 1; }
-    if (terminal.code != 0)                       { ret 1; }
-    if (capture.read_failed)                      { ret 1; }
-    if (captured != 0)                            { ret 1; }
-    if (sel released.err)                         { ret 1; }
-    ret 0;
+        var empty_env: [1]*u8;
+        empty_env[0] = nil;
+        var empty_native: [1]*Unit;
+        empty_native[0] = nil;
+        var env_argv: [2]*u8;
+        env_argv[0]     = "env";
+        env_argv[1]     = nil;
+        invocation.argv = StepStrings{items: ?env_argv[0], count: 1};
+        invocation.env  = driver_environment.Strings{items: ?empty_native[0], count: 0};
+        val env_program_r: res[str, fail.Fail] = resolve_step_program(?alloc, "/", ?invocation);
+        if (sel env_program_r.err) { ret 1; }
+        val env_program: str = env_program_r.ok;
+        fin { str_free(?alloc, env_program); }
+        val temp_r: res[fs.TempFile, fs.FsError] = fs.temp_create(?alloc, "mach_step_env");
+        if (sel temp_r.err) { ret 1; }
+        var temp:         fs.TempFile         = temp_r.ok;
+        val temp_close_r: err[io_error.Error] = fs.temp_close(?temp);
+        if (sel temp_close_r.err) { ret 1; }
+        fin { fs.temp_remove(?temp); }
+        var child: subprocess.OwnedSubprocess;
+        subprocess.init(?child);
+        var options: subprocess.SpawnOptions = subprocess.spawn_options();
+        options.capture        = fs.temp_path(?temp);
+        options.capture_stderr = true;
+        options.capture_limit  = 64;
+        val spawn_r: err[subprocess.Error] = subprocess.spawn(?alloc, ?child, env_program, ?env_argv[0], exec.Environment.given{?empty_env[0]}, options);
+        if (sel spawn_r.err) { ret 1; }
+        val wait_r: res[subprocess.SubprocessTerminal, subprocess.Error] = subprocess.wait(?alloc, ?child);
+        if (sel wait_r.err) { ret 1; }
+        val terminal:  subprocess.SubprocessTerminal                     = wait_r.ok;
+        val capture_r: res[subprocess.CaptureIoResult, subprocess.Error] = subprocess.finish_capture(?alloc, ?child, true);
+        if (sel capture_r.err) { ret 1; }
+        val capture:  subprocess.CaptureIoResult = capture_r.ok;
+        var captured: usize                      = 0;
+        subprocess.capture_bytes(?child, ?captured);
+        val released: err[subprocess.Error] = subprocess.release_capture(?alloc, ?child);
+        if (terminal.kind != subprocess.STATE_EXITED) { ret 1; }
+        if (terminal.code != 0)                       { ret 1; }
+        if (capture.read_failed)                      { ret 1; }
+        if (captured != 0)                            { ret 1; }
+        if (sel released.err)                         { ret 1; }
+        ret 0;
+    }
 }
 
-test execute_step_invocation__failure_states {
-    $if ($mach.build.os == $mach.os.windows) { ret 0; }
-    var alloc:  A.Allocator;
-    val make_r: err[A.Error] = page.make(?alloc);
-    if (sel make_r.err) { ret 1; }
-    var empty_env: [1]*Unit;
-    empty_env[0] = nil;
-    var invocation: StepInvocation;
-    invocation.env = driver_environment.Strings{items: ?empty_env[0], count: 0};
+$if ($mach.build.os != $mach.os.windows) {
+    test execute_step_invocation__failure_states {
+        var alloc:  A.Allocator;
+        val make_r: err[A.Error] = page.make(?alloc);
+        if (sel make_r.err) { ret 1; }
+        var empty_env: [1]*Unit;
+        empty_env[0] = nil;
+        var invocation: StepInvocation;
+        invocation.env = driver_environment.Strings{items: ?empty_env[0], count: 0};
 
-    var missing_argv: [2]*u8;
-    missing_argv[0] = "definitely-not-a-mach-step-executable";
-    missing_argv[1] = nil;
-    invocation.argv = StepStrings{items: ?missing_argv[0], count: 1};
-    val missing: res[str, fail.Fail] = resolve_step_program(?alloc, "/", ?invocation);
-    if (sel missing.ok)                                            { ret 1; }
-    if (!str_contains(fail.describe(missing.err), "planner PATH")) { ret 1; }
+        var missing_argv: [2]*u8;
+        missing_argv[0] = "definitely-not-a-mach-step-executable";
+        missing_argv[1] = nil;
+        invocation.argv = StepStrings{items: ?missing_argv[0], count: 1};
+        val missing: res[str, fail.Fail] = resolve_step_program(?alloc, "/", ?invocation);
+        if (sel missing.ok)                                            { ret 1; }
+        if (!str_contains(fail.describe(missing.err), "planner PATH")) { ret 1; }
 
-    var spawn_argv: [2]*u8;
-    spawn_argv[0]   = "/definitely/not/a/mach-step-executable";
-    spawn_argv[1]   = nil;
-    invocation.argv = StepStrings{items: ?spawn_argv[0], count: 1};
-    val spawn_program_r: res[str, fail.Fail] = resolve_step_program(?alloc, "/", ?invocation);
-    if (sel spawn_program_r.err) { ret 1; }
-    val spawn_program: str            = spawn_program_r.ok;
-    val spawn_failed:  err[fail.Fail] = execute_step_invocation(?alloc, "/", spawn_program, ?invocation, "probe", 0);
-    str_free(?alloc, spawn_program);
-    if (sel spawn_failed.ok)                                        { ret 1; }
-    if (!str_contains(fail.describe(spawn_failed.err), "code 127")) { ret 1; }
+        var spawn_argv: [2]*u8;
+        spawn_argv[0]   = "/definitely/not/a/mach-step-executable";
+        spawn_argv[1]   = nil;
+        invocation.argv = StepStrings{items: ?spawn_argv[0], count: 1};
+        val spawn_program_r: res[str, fail.Fail] = resolve_step_program(?alloc, "/", ?invocation);
+        if (sel spawn_program_r.err) { ret 1; }
+        val spawn_program: str            = spawn_program_r.ok;
+        val spawn_failed:  err[fail.Fail] = execute_step_invocation(?alloc, "/", spawn_program, ?invocation, "probe", 0);
+        str_free(?alloc, spawn_program);
+        if (sel spawn_failed.ok)                                        { ret 1; }
+        if (!str_contains(fail.describe(spawn_failed.err), "code 127")) { ret 1; }
 
-    var exit_argv: [4]*u8;
-    exit_argv[0]    = "sh";
-    exit_argv[1]    = "-c";
-    exit_argv[2]    = "exit 7";
-    exit_argv[3]    = nil;
-    invocation.argv = StepStrings{items: ?exit_argv[0], count: 3};
-    val exit_program_r: res[str, fail.Fail] = resolve_step_program(?alloc, "/", ?invocation);
-    if (sel exit_program_r.err) { ret 1; }
-    val exit_program: str            = exit_program_r.ok;
-    val exited:       err[fail.Fail] = execute_step_invocation(?alloc, "/", exit_program, ?invocation, "probe", 0);
-    str_free(?alloc, exit_program);
-    if (sel exited.ok)                                      { ret 1; }
-    if (!str_contains(fail.describe(exited.err), "code 7")) { ret 1; }
+        var exit_argv: [4]*u8;
+        exit_argv[0]    = "sh";
+        exit_argv[1]    = "-c";
+        exit_argv[2]    = "exit 7";
+        exit_argv[3]    = nil;
+        invocation.argv = StepStrings{items: ?exit_argv[0], count: 3};
+        val exit_program_r: res[str, fail.Fail] = resolve_step_program(?alloc, "/", ?invocation);
+        if (sel exit_program_r.err) { ret 1; }
+        val exit_program: str            = exit_program_r.ok;
+        val exited:       err[fail.Fail] = execute_step_invocation(?alloc, "/", exit_program, ?invocation, "probe", 0);
+        str_free(?alloc, exit_program);
+        if (sel exited.ok)                                      { ret 1; }
+        if (!str_contains(fail.describe(exited.err), "code 7")) { ret 1; }
 
-    var signal_argv: [4]*u8;
-    signal_argv[0]  = "sh";
-    signal_argv[1]  = "-c";
-    signal_argv[2]  = "kill -TERM $$";
-    signal_argv[3]  = nil;
-    invocation.argv = StepStrings{items: ?signal_argv[0], count: 3};
-    val signal_program_r: res[str, fail.Fail] = resolve_step_program(?alloc, "/", ?invocation);
-    if (sel signal_program_r.err) { ret 1; }
-    val signal_program: str            = signal_program_r.ok;
-    val signaled:       err[fail.Fail] = execute_step_invocation(?alloc, "/", signal_program, ?invocation, "probe", 0);
-    str_free(?alloc, signal_program);
-    if (sel signaled.ok)                                                    { ret 1; }
-    if (!str_contains(fail.describe(signaled.err), "terminated by signal")) { ret 1; }
-    ret 0;
+        var signal_argv: [4]*u8;
+        signal_argv[0]  = "sh";
+        signal_argv[1]  = "-c";
+        signal_argv[2]  = "kill -TERM $$";
+        signal_argv[3]  = nil;
+        invocation.argv = StepStrings{items: ?signal_argv[0], count: 3};
+        val signal_program_r: res[str, fail.Fail] = resolve_step_program(?alloc, "/", ?invocation);
+        if (sel signal_program_r.err) { ret 1; }
+        val signal_program: str            = signal_program_r.ok;
+        val signaled:       err[fail.Fail] = execute_step_invocation(?alloc, "/", signal_program, ?invocation, "probe", 0);
+        str_free(?alloc, signal_program);
+        if (sel signaled.ok)                                                    { ret 1; }
+        if (!str_contains(fail.describe(signaled.err), "terminated by signal")) { ret 1; }
+        ret 0;
+    }
 }
 
-test step_outputs__physical_and_declared_effects {
-    $if ($mach.build.os == $mach.os.windows) { ret 0; }
-    var alloc:  A.Allocator;
-    val make_r: err[A.Error] = page.make(?alloc);
-    if (sel make_r.err) { ret 1; }
-    val tf_r: res[fs.TempFile, fs.FsError] = fs.temp_create(?alloc, "mach_step_outputs");
-    if (sel tf_r.err) { ret 1; }
-    var tf:     fs.TempFile       = tf_r.ok;
-    val root_r: res[str, A.Error] = str_dup(?alloc, fs.temp_path(?tf));
-    fs.temp_close_and_remove(?tf);
-    if (sel root_r.err) { ret 1; }
-    val root: str = root_r.ok;
-    fin { str_free(?alloc, root); }
-    val create_dir_r: err[io_error.Error] = fs.create_dir(root, 0o700);
-    if (sel create_dir_r.err) { ret 1; }
-    fin { fs.remove_all(?alloc, root); }
-    var bad: bool = false;
+$if ($mach.build.os != $mach.os.windows) {
+    test step_outputs__physical_and_declared_effects {
+        var alloc:  A.Allocator;
+        val make_r: err[A.Error] = page.make(?alloc);
+        if (sel make_r.err) { ret 1; }
+        val tf_r: res[fs.TempFile, fs.FsError] = fs.temp_create(?alloc, "mach_step_outputs");
+        if (sel tf_r.err) { ret 1; }
+        var tf:     fs.TempFile       = tf_r.ok;
+        val root_r: res[str, A.Error] = str_dup(?alloc, fs.temp_path(?tf));
+        fs.temp_close_and_remove(?tf);
+        if (sel root_r.err) { ret 1; }
+        val root: str = root_r.ok;
+        fin { str_free(?alloc, root); }
+        val create_dir_r: err[io_error.Error] = fs.create_dir(root, 0o700);
+        if (sel create_dir_r.err) { ret 1; }
+        fin { fs.remove_all(?alloc, root); }
+        var bad: bool = false;
 
-    val made: err[fail.Fail] = step_walk.directory_ensure(?alloc, root, "out/declared", "build step output directory");
-    if (sel made.err) { bad = true; }
-    val result_file:   str             = step_walk.sfmt(?alloc, "{}/out/result", root);
-    val write_bytes_r: err[fs.FsError] = fs.write_bytes(result_file, "ok", 2, 0o600);
-    if (sel write_bytes_r.err) { bad = true; }
-    var declared_rel: Vector[str]         = collections_vector.init[str](?alloc);
-    val push_r:       res[usize, A.Error] = collections_vector.push[str](?declared_rel, "out/result");
-    if (sel push_r.err) { bad = true; }
-    val valid_file: err[fail.Fail] = validate_declared_step_outputs(?alloc, root, ?declared_rel, "generate");
-    if (sel valid_file.err) { bad = true; }
-    collections_vector.dnit[str](?declared_rel);
-
-    declared_rel = collections_vector.init[str](?alloc);
-    val push_r2: res[usize, A.Error] = collections_vector.push[str](?declared_rel, "out/missing");
-    if (sel push_r2.err) { bad = true; }
-    val missing: err[fail.Fail] = validate_declared_step_outputs(?alloc, root, ?declared_rel, "generate");
-    if (!(sel missing.err && str_contains(fail.describe(missing.err), "did not publish"))) { bad = true; }
-    collections_vector.dnit[str](?declared_rel);
-
-    val linked_output: str                 = step_walk.sfmt(?alloc, "{}/out/linked", root);
-    val symlink_r:     err[io_error.Error] = fs.symlink(result_file, linked_output);
-    if (sel symlink_r.err) { bad = true; }
-    if (sel symlink_r.ok) {
-        declared_rel = collections_vector.init[str](?alloc);
-        val push_r3: res[usize, A.Error] = collections_vector.push[str](?declared_rel, "out/linked");
-        if (sel push_r3.err) { bad = true; }
-        val linked: err[fail.Fail] = validate_declared_step_outputs(?alloc, root, ?declared_rel, "generate");
-        if (!(sel linked.err && str_contains(fail.describe(linked.err), "symlink"))) { bad = true; }
+        val made: err[fail.Fail] = step_walk.directory_ensure(?alloc, root, "out/declared", "build step output directory");
+        if (sel made.err) { bad = true; }
+        val result_file:   str             = step_walk.sfmt(?alloc, "{}/out/result", root);
+        val write_bytes_r: err[fs.FsError] = fs.write_bytes(result_file, "ok", 2, 0o600);
+        if (sel write_bytes_r.err) { bad = true; }
+        var declared_rel: Vector[str]         = collections_vector.init[str](?alloc);
+        val push_r:       res[usize, A.Error] = collections_vector.push[str](?declared_rel, "out/result");
+        if (sel push_r.err) { bad = true; }
+        val valid_file: err[fail.Fail] = validate_declared_step_outputs(?alloc, root, ?declared_rel, "generate");
+        if (sel valid_file.err) { bad = true; }
         collections_vector.dnit[str](?declared_rel);
-        fs.remove_file(linked_output);
-    }
 
-    val outside:       str                 = step_walk.sfmt(?alloc, "{}/outside", root);
-    val bridge:        str                 = step_walk.sfmt(?alloc, "{}/out/bridge", root);
-    val create_dir_r2: err[io_error.Error] = fs.create_dir(outside, 0o700);
-    val symlink_r2:    err[io_error.Error] = fs.symlink(outside, bridge);
-    if (sel create_dir_r2.ok) {
-        if (sel symlink_r2.ok) {
-            val escaped: err[fail.Fail] = step_walk.directory_ensure(?alloc, root, "out/bridge/nested", "build step output directory");
-            if (!(sel escaped.err && str_contains(fail.describe(escaped.err), "symlink"))) { bad = true; }
-            fs.remove_file(bridge);
+        declared_rel = collections_vector.init[str](?alloc);
+        val push_r2: res[usize, A.Error] = collections_vector.push[str](?declared_rel, "out/missing");
+        if (sel push_r2.err) { bad = true; }
+        val missing: err[fail.Fail] = validate_declared_step_outputs(?alloc, root, ?declared_rel, "generate");
+        if (!(sel missing.err && str_contains(fail.describe(missing.err), "did not publish"))) { bad = true; }
+        collections_vector.dnit[str](?declared_rel);
+
+        val linked_output: str                 = step_walk.sfmt(?alloc, "{}/out/linked", root);
+        val symlink_r:     err[io_error.Error] = fs.symlink(result_file, linked_output);
+        if (sel symlink_r.err) { bad = true; }
+        if (sel symlink_r.ok) {
+            declared_rel = collections_vector.init[str](?alloc);
+            val push_r3: res[usize, A.Error] = collections_vector.push[str](?declared_rel, "out/linked");
+            if (sel push_r3.err) { bad = true; }
+            val linked: err[fail.Fail] = validate_declared_step_outputs(?alloc, root, ?declared_rel, "generate");
+            if (!(sel linked.err && str_contains(fail.describe(linked.err), "symlink"))) { bad = true; }
+            collections_vector.dnit[str](?declared_rel);
+            fs.remove_file(linked_output);
         }
-        if (sel symlink_r2.err) { bad = true; }
+
+        val outside:       str                 = step_walk.sfmt(?alloc, "{}/outside", root);
+        val bridge:        str                 = step_walk.sfmt(?alloc, "{}/out/bridge", root);
+        val create_dir_r2: err[io_error.Error] = fs.create_dir(outside, 0o700);
+        val symlink_r2:    err[io_error.Error] = fs.symlink(outside, bridge);
+        if (sel create_dir_r2.ok) {
+            if (sel symlink_r2.ok) {
+                val escaped: err[fail.Fail] = step_walk.directory_ensure(?alloc, root, "out/bridge/nested", "build step output directory");
+                if (!(sel escaped.err && str_contains(fail.describe(escaped.err), "symlink"))) { bad = true; }
+                fs.remove_file(bridge);
+            }
+            if (sel symlink_r2.err) { bad = true; }
+        }
+        if (sel create_dir_r2.err) { bad = true; }
+
+        val output_root:          str              = step_walk.sfmt(?alloc, "{}/out", root);
+        var before:               Vector[TreeFile] = collections_vector.init[TreeFile](?alloc);
+        val collect_tree_files_r: err[fail.Fail]   = collect_tree_files(?alloc, output_root, ?before);
+        if (sel collect_tree_files_r.err) { bad = true; }
+        val declared_file:  str             = step_walk.sfmt(?alloc, "{}/out/declared/result", root);
+        val rogue_file:     str             = step_walk.sfmt(?alloc, "{}/out/rogue", root);
+        val write_bytes_r3: err[fs.FsError] = fs.write_bytes(declared_file, "yes", 3, 0o600);
+        val write_bytes_r2: err[fs.FsError] = fs.write_bytes(rogue_file, "no", 2, 0o600);
+        if (sel write_bytes_r3.err || sel write_bytes_r2.err) { bad = true; }
+        var declared_abs: Vector[str]         = collections_vector.init[str](?alloc);
+        val declared_dir: str                 = step_walk.sfmt(?alloc, "{}/out/declared", root);
+        val push_r4:      res[usize, A.Error] = collections_vector.push[str](?declared_abs, declared_dir);
+        if (sel push_r4.err) { bad = true; }
+        val effects: err[fail.Fail] = check_step_output_effects(?alloc, ?before, output_root, ?declared_abs, "generate");
+        if (!(sel effects.err && str_contains(fail.describe(effects.err), "rogue"))) { bad = true; }
+        val failed_combined: err[fail.Fail] = combine_step_terminal_results(?alloc, err[fail.Fail].ok{}, effects, err[fail.Fail].err{fail.user(diagnostic_kind.STEP_EXIT, "build step exited with code 9")});
+        if (!(sel failed_combined.err && (str_starts_with(fail.describe(failed_combined.err), "build step 'generate' created or modified undeclared output") && str_contains(fail.describe(failed_combined.err), "execution outcome: build step exited with code 9")))) { bad = true; }
+        fs.remove_file(rogue_file);
+        val allowed: err[fail.Fail] = check_step_output_effects(?alloc, ?before, output_root, ?declared_abs, "generate");
+        if (sel allowed.err) { bad = true; }
+
+        val empty_added:   str                 = step_walk.sfmt(?alloc, "{}/out/empty-added", root);
+        val create_dir_r3: err[io_error.Error] = fs.create_dir(empty_added, 0o700);
+        if (sel create_dir_r3.err) { bad = true; }
+        val added_dir_effect: err[fail.Fail] = check_step_output_effects(?alloc, ?before, output_root, ?declared_abs, "generate");
+        if (!(sel added_dir_effect.err && str_contains(fail.describe(added_dir_effect.err), "empty-added"))) { bad = true; }
+        fs.remove_all(?alloc, empty_added);
+
+        val empty_removed: str                 = step_walk.sfmt(?alloc, "{}/out/empty-removed", root);
+        val create_dir_r4: err[io_error.Error] = fs.create_dir(empty_removed, 0o700);
+        if (sel create_dir_r4.err) { bad = true; }
+        var before_removed:        Vector[TreeFile] = collections_vector.init[TreeFile](?alloc);
+        val collect_tree_files_r2: err[fail.Fail]   = collect_tree_files(?alloc, output_root, ?before_removed);
+        if (sel collect_tree_files_r2.err) { bad = true; }
+        fs.remove_all(?alloc, empty_removed);
+        val removed_dir_effect: err[fail.Fail] = check_step_output_effects(?alloc, ?before_removed, output_root, ?declared_abs, "generate");
+        if (!(sel removed_dir_effect.err && str_contains(fail.describe(removed_dir_effect.err), "empty-removed"))) { bad = true; }
+        free_tree_files(?alloc, ?before_removed);
+
+        val empty_old:     str                 = step_walk.sfmt(?alloc, "{}/out/empty-old", root);
+        val empty_new:     str                 = step_walk.sfmt(?alloc, "{}/out/empty-new", root);
+        val create_dir_r5: err[io_error.Error] = fs.create_dir(empty_old, 0o700);
+        if (sel create_dir_r5.err) { bad = true; }
+        var before_renamed:        Vector[TreeFile] = collections_vector.init[TreeFile](?alloc);
+        val collect_tree_files_r3: err[fail.Fail]   = collect_tree_files(?alloc, output_root, ?before_renamed);
+        if (sel collect_tree_files_r3.err) { bad = true; }
+        val rename_r: err[io_error.Error] = fs.rename(empty_old, empty_new);
+        if (sel rename_r.err) { bad = true; }
+        val renamed_dir_effect: err[fail.Fail] = check_step_output_effects(?alloc, ?before_renamed, output_root, ?declared_abs, "generate");
+        if (!(sel renamed_dir_effect.err && str_contains(fail.describe(renamed_dir_effect.err), "empty-new"))) { bad = true; }
+        free_tree_files(?alloc, ?before_renamed);
+
+        free_tree_files(?alloc, ?before);
+        step_free_inputs(?alloc, ?declared_abs);
+        str_free(?alloc, empty_new);
+        str_free(?alloc, empty_old);
+        str_free(?alloc, empty_removed);
+        str_free(?alloc, empty_added);
+        str_free(?alloc, rogue_file);
+        str_free(?alloc, declared_file);
+        str_free(?alloc, output_root);
+        str_free(?alloc, bridge);
+        str_free(?alloc, outside);
+        str_free(?alloc, linked_output);
+        str_free(?alloc, result_file);
+        if (bad) { ret 1; }
+        ret 0;
     }
-    if (sel create_dir_r2.err) { bad = true; }
-
-    val output_root:          str              = step_walk.sfmt(?alloc, "{}/out", root);
-    var before:               Vector[TreeFile] = collections_vector.init[TreeFile](?alloc);
-    val collect_tree_files_r: err[fail.Fail]   = collect_tree_files(?alloc, output_root, ?before);
-    if (sel collect_tree_files_r.err) { bad = true; }
-    val declared_file:  str             = step_walk.sfmt(?alloc, "{}/out/declared/result", root);
-    val rogue_file:     str             = step_walk.sfmt(?alloc, "{}/out/rogue", root);
-    val write_bytes_r3: err[fs.FsError] = fs.write_bytes(declared_file, "yes", 3, 0o600);
-    val write_bytes_r2: err[fs.FsError] = fs.write_bytes(rogue_file, "no", 2, 0o600);
-    if (sel write_bytes_r3.err || sel write_bytes_r2.err) { bad = true; }
-    var declared_abs: Vector[str]         = collections_vector.init[str](?alloc);
-    val declared_dir: str                 = step_walk.sfmt(?alloc, "{}/out/declared", root);
-    val push_r4:      res[usize, A.Error] = collections_vector.push[str](?declared_abs, declared_dir);
-    if (sel push_r4.err) { bad = true; }
-    val effects: err[fail.Fail] = check_step_output_effects(?alloc, ?before, output_root, ?declared_abs, "generate");
-    if (!(sel effects.err && str_contains(fail.describe(effects.err), "rogue"))) { bad = true; }
-    val failed_combined: err[fail.Fail] = combine_step_terminal_results(?alloc, err[fail.Fail].ok{}, effects, err[fail.Fail].err{fail.user(diagnostic_kind.STEP_EXIT, "build step exited with code 9")});
-    if (!(sel failed_combined.err && (str_starts_with(fail.describe(failed_combined.err), "build step 'generate' created or modified undeclared output") && str_contains(fail.describe(failed_combined.err), "execution outcome: build step exited with code 9")))) { bad = true; }
-    fs.remove_file(rogue_file);
-    val allowed: err[fail.Fail] = check_step_output_effects(?alloc, ?before, output_root, ?declared_abs, "generate");
-    if (sel allowed.err) { bad = true; }
-
-    val empty_added:   str                 = step_walk.sfmt(?alloc, "{}/out/empty-added", root);
-    val create_dir_r3: err[io_error.Error] = fs.create_dir(empty_added, 0o700);
-    if (sel create_dir_r3.err) { bad = true; }
-    val added_dir_effect: err[fail.Fail] = check_step_output_effects(?alloc, ?before, output_root, ?declared_abs, "generate");
-    if (!(sel added_dir_effect.err && str_contains(fail.describe(added_dir_effect.err), "empty-added"))) { bad = true; }
-    fs.remove_all(?alloc, empty_added);
-
-    val empty_removed: str                 = step_walk.sfmt(?alloc, "{}/out/empty-removed", root);
-    val create_dir_r4: err[io_error.Error] = fs.create_dir(empty_removed, 0o700);
-    if (sel create_dir_r4.err) { bad = true; }
-    var before_removed:        Vector[TreeFile] = collections_vector.init[TreeFile](?alloc);
-    val collect_tree_files_r2: err[fail.Fail]   = collect_tree_files(?alloc, output_root, ?before_removed);
-    if (sel collect_tree_files_r2.err) { bad = true; }
-    fs.remove_all(?alloc, empty_removed);
-    val removed_dir_effect: err[fail.Fail] = check_step_output_effects(?alloc, ?before_removed, output_root, ?declared_abs, "generate");
-    if (!(sel removed_dir_effect.err && str_contains(fail.describe(removed_dir_effect.err), "empty-removed"))) { bad = true; }
-    free_tree_files(?alloc, ?before_removed);
-
-    val empty_old:     str                 = step_walk.sfmt(?alloc, "{}/out/empty-old", root);
-    val empty_new:     str                 = step_walk.sfmt(?alloc, "{}/out/empty-new", root);
-    val create_dir_r5: err[io_error.Error] = fs.create_dir(empty_old, 0o700);
-    if (sel create_dir_r5.err) { bad = true; }
-    var before_renamed:        Vector[TreeFile] = collections_vector.init[TreeFile](?alloc);
-    val collect_tree_files_r3: err[fail.Fail]   = collect_tree_files(?alloc, output_root, ?before_renamed);
-    if (sel collect_tree_files_r3.err) { bad = true; }
-    val rename_r: err[io_error.Error] = fs.rename(empty_old, empty_new);
-    if (sel rename_r.err) { bad = true; }
-    val renamed_dir_effect: err[fail.Fail] = check_step_output_effects(?alloc, ?before_renamed, output_root, ?declared_abs, "generate");
-    if (!(sel renamed_dir_effect.err && str_contains(fail.describe(renamed_dir_effect.err), "empty-new"))) { bad = true; }
-    free_tree_files(?alloc, ?before_renamed);
-
-    free_tree_files(?alloc, ?before);
-    step_free_inputs(?alloc, ?declared_abs);
-    str_free(?alloc, empty_new);
-    str_free(?alloc, empty_old);
-    str_free(?alloc, empty_removed);
-    str_free(?alloc, empty_added);
-    str_free(?alloc, rogue_file);
-    str_free(?alloc, declared_file);
-    str_free(?alloc, output_root);
-    str_free(?alloc, bridge);
-    str_free(?alloc, outside);
-    str_free(?alloc, linked_output);
-    str_free(?alloc, result_file);
-    if (bad) { ret 1; }
-    ret 0;
 }
 
 test check_step_left_obj_tree__new_file_only {
@@ -1802,89 +1805,91 @@ test absolute_execution_root__relative_becomes_cwd_anchored {
     ret 0;
 }
 
-test resolve_step_path__root_and_dep_two_root {
-    $if ($mach.build.os == $mach.os.windows) { ret 0; }
-    var alloc:  A.Allocator;
-    val make_r: err[A.Error] = page.make(?alloc);
-    if (sel make_r.err) { ret 1; }
-    var bad: bool            = false;
-    var v:   template.Values = template.Values{target: "t", isa: "x86_64", os: "linux", abi: "gnu", profile: "debug", format: "", artifact_suffix: nil, reqs: nil, req_count: 0, dependency: ""};
+$if ($mach.build.os != $mach.os.windows) {
+    test resolve_step_path__root_and_dep_two_root {
+        var alloc:  A.Allocator;
+        val make_r: err[A.Error] = page.make(?alloc);
+        if (sel make_r.err) { ret 1; }
+        var bad: bool            = false;
+        var v:   template.Values = template.Values{target: "t", isa: "x86_64", os: "linux", abi: "gnu", profile: "debug", format: "", artifact_suffix: nil, reqs: nil, req_count: 0, dependency: ""};
 
-    val root_exec:  str                      = "/proj";
-    val root_out:   str                      = "/proj/out";
-    val ordinary_r: res[StepPath, fail.Fail] = resolve_step_path(?alloc, "src/gen.c", root_out, ?v, root_exec, root_out, "a build step input", true);
-    if (sel ordinary_r.err) { bad = true; }
-    if (sel ordinary_r.ok) {
-        var sp: StepPath = ordinary_r.ok;
-        if (!str_equals(sp.root, root_exec) || !str_equals(sp.rel, "src/gen.c") || !str_equals(sp.abs, "/proj/src/gen.c")) { bad = true; }
-        step_path_free(?alloc, ?sp);
+        val root_exec:  str                      = "/proj";
+        val root_out:   str                      = "/proj/out";
+        val ordinary_r: res[StepPath, fail.Fail] = resolve_step_path(?alloc, "src/gen.c", root_out, ?v, root_exec, root_out, "a build step input", true);
+        if (sel ordinary_r.err) { bad = true; }
+        if (sel ordinary_r.ok) {
+            var sp: StepPath = ordinary_r.ok;
+            if (!str_equals(sp.root, root_exec) || !str_equals(sp.rel, "src/gen.c") || !str_equals(sp.abs, "/proj/src/gen.c")) { bad = true; }
+            step_path_free(?alloc, ?sp);
+        }
+
+        val marker_r: res[StepPath, fail.Fail] = resolve_step_path(?alloc, "{project.work}/gen.c", root_out, ?v, root_exec, root_out, "a build step output", false);
+        if (sel marker_r.err) { bad = true; }
+        if (sel marker_r.ok) {
+            var sp2: StepPath = marker_r.ok;
+            if (!str_equals(sp2.root, root_out) || !str_equals(sp2.rel, "gen.c") || !str_equals(sp2.abs, "/proj/out/gen.c")) { bad = true; }
+            step_path_free(?alloc, ?sp2);
+        }
+
+        val dep_exec: str                      = "/vendor/dep";
+        val dep_out:  str                      = "/home/user/proj/out";
+        val dep_in_r: res[StepPath, fail.Fail] = resolve_step_path(?alloc, "build.sh", dep_out, ?v, dep_exec, dep_out, "a build step input", true);
+        if (sel dep_in_r.err) { bad = true; }
+        if (sel dep_in_r.ok) {
+            var sp3: StepPath = dep_in_r.ok;
+            if (!str_equals(sp3.root, dep_exec) || !str_equals(sp3.rel, "build.sh") || !str_equals(sp3.abs, "/vendor/dep/build.sh")) { bad = true; }
+            step_path_free(?alloc, ?sp3);
+        }
+
+        val dep_out_r: res[StepPath, fail.Fail] = resolve_step_path(?alloc, "{project.work}/vendor/dep/out.o", dep_out, ?v, dep_exec, dep_out, "a build step output", false);
+        if (sel dep_out_r.err) { bad = true; }
+        if (sel dep_out_r.ok) {
+            var sp4: StepPath = dep_out_r.ok;
+            if (!str_equals(sp4.root, dep_out) || !str_equals(sp4.rel, "vendor/dep/out.o") || !str_equals(sp4.abs, "/home/user/proj/out/vendor/dep/out.o")) { bad = true; }
+            step_path_free(?alloc, ?sp4);
+        }
+
+        if (bad) { ret 1; }
+        ret 0;
     }
-
-    val marker_r: res[StepPath, fail.Fail] = resolve_step_path(?alloc, "{project.work}/gen.c", root_out, ?v, root_exec, root_out, "a build step output", false);
-    if (sel marker_r.err) { bad = true; }
-    if (sel marker_r.ok) {
-        var sp2: StepPath = marker_r.ok;
-        if (!str_equals(sp2.root, root_out) || !str_equals(sp2.rel, "gen.c") || !str_equals(sp2.abs, "/proj/out/gen.c")) { bad = true; }
-        step_path_free(?alloc, ?sp2);
-    }
-
-    val dep_exec: str                      = "/vendor/dep";
-    val dep_out:  str                      = "/home/user/proj/out";
-    val dep_in_r: res[StepPath, fail.Fail] = resolve_step_path(?alloc, "build.sh", dep_out, ?v, dep_exec, dep_out, "a build step input", true);
-    if (sel dep_in_r.err) { bad = true; }
-    if (sel dep_in_r.ok) {
-        var sp3: StepPath = dep_in_r.ok;
-        if (!str_equals(sp3.root, dep_exec) || !str_equals(sp3.rel, "build.sh") || !str_equals(sp3.abs, "/vendor/dep/build.sh")) { bad = true; }
-        step_path_free(?alloc, ?sp3);
-    }
-
-    val dep_out_r: res[StepPath, fail.Fail] = resolve_step_path(?alloc, "{project.work}/vendor/dep/out.o", dep_out, ?v, dep_exec, dep_out, "a build step output", false);
-    if (sel dep_out_r.err) { bad = true; }
-    if (sel dep_out_r.ok) {
-        var sp4: StepPath = dep_out_r.ok;
-        if (!str_equals(sp4.root, dep_out) || !str_equals(sp4.rel, "vendor/dep/out.o") || !str_equals(sp4.abs, "/home/user/proj/out/vendor/dep/out.o")) { bad = true; }
-        step_path_free(?alloc, ?sp4);
-    }
-
-    if (bad) { ret 1; }
-    ret 0;
 }
 
-test resolve_step_path__escapes_and_malformed_markers {
-    $if ($mach.build.os == $mach.os.windows) { ret 0; }
-    var alloc:  A.Allocator;
-    val make_r: err[A.Error] = page.make(?alloc);
-    if (sel make_r.err) { ret 1; }
-    var bad:       bool            = false;
-    var v:         template.Values = template.Values{target: "t", isa: "x86_64", os: "linux", abi: "gnu", profile: "debug", format: "", artifact_suffix: nil, reqs: nil, req_count: 0, dependency: ""};
-    val exec_root: str             = "/proj";
-    val out_root:  str             = "/proj/out";
+$if ($mach.build.os != $mach.os.windows) {
+    test resolve_step_path__escapes_and_malformed_markers {
+        var alloc:  A.Allocator;
+        val make_r: err[A.Error] = page.make(?alloc);
+        if (sel make_r.err) { ret 1; }
+        var bad:       bool            = false;
+        var v:         template.Values = template.Values{target: "t", isa: "x86_64", os: "linux", abi: "gnu", profile: "debug", format: "", artifact_suffix: nil, reqs: nil, req_count: 0, dependency: ""};
+        val exec_root: str             = "/proj";
+        val out_root:  str             = "/proj/out";
 
-    val parent_r: res[StepPath, fail.Fail] = resolve_step_path(?alloc, "../../etc/passwd", out_root, ?v, exec_root, out_root, "a build step input", true);
-    if (sel parent_r.ok) { bad = true; }
+        val parent_r: res[StepPath, fail.Fail] = resolve_step_path(?alloc, "../../etc/passwd", out_root, ?v, exec_root, out_root, "a build step input", true);
+        if (sel parent_r.ok) { bad = true; }
 
-    val marker_parent_r: res[StepPath, fail.Fail] = resolve_step_path(?alloc, "{project.work}/../../escape", out_root, ?v, exec_root, out_root, "a build step input", true);
-    if (sel marker_parent_r.ok) { bad = true; }
+        val marker_parent_r: res[StepPath, fail.Fail] = resolve_step_path(?alloc, "{project.work}/../../escape", out_root, ?v, exec_root, out_root, "a build step input", true);
+        if (sel marker_parent_r.ok) { bad = true; }
 
-    val no_sep_r: res[StepPath, fail.Fail] = resolve_step_path(?alloc, "{project.work}x", out_root, ?v, exec_root, out_root, "a build step input", true);
-    if (sel no_sep_r.ok) { bad = true; }
+        val no_sep_r: res[StepPath, fail.Fail] = resolve_step_path(?alloc, "{project.work}x", out_root, ?v, exec_root, out_root, "a build step input", true);
+        if (sel no_sep_r.ok) { bad = true; }
 
-    val mid_string_r: res[StepPath, fail.Fail] = resolve_step_path(?alloc, "foo/{project.work}/bar", out_root, ?v, exec_root, out_root, "a build step input", true);
-    if (sel mid_string_r.ok) { bad = true; }
+        val mid_string_r: res[StepPath, fail.Fail] = resolve_step_path(?alloc, "foo/{project.work}/bar", out_root, ?v, exec_root, out_root, "a build step input", true);
+        if (sel mid_string_r.ok) { bad = true; }
 
-    val root_disallowed_r: res[StepPath, fail.Fail] = resolve_step_path(?alloc, "{project.work}", out_root, ?v, exec_root, out_root, "a build step output", false);
-    if (sel root_disallowed_r.ok) { bad = true; }
+        val root_disallowed_r: res[StepPath, fail.Fail] = resolve_step_path(?alloc, "{project.work}", out_root, ?v, exec_root, out_root, "a build step output", false);
+        if (sel root_disallowed_r.ok) { bad = true; }
 
-    val root_allowed_r: res[StepPath, fail.Fail] = resolve_step_path(?alloc, "{project.work}", out_root, ?v, exec_root, out_root, "a build step input", true);
-    if (sel root_allowed_r.err) { bad = true; }
-    if (sel root_allowed_r.ok) {
-        var sp: StepPath = root_allowed_r.ok;
-        if (!str_equals(sp.root, out_root) || !str_equals(sp.rel, ".") || !str_equals(sp.abs, out_root)) { bad = true; }
-        step_path_free(?alloc, ?sp);
+        val root_allowed_r: res[StepPath, fail.Fail] = resolve_step_path(?alloc, "{project.work}", out_root, ?v, exec_root, out_root, "a build step input", true);
+        if (sel root_allowed_r.err) { bad = true; }
+        if (sel root_allowed_r.ok) {
+            var sp: StepPath = root_allowed_r.ok;
+            if (!str_equals(sp.root, out_root) || !str_equals(sp.rel, ".") || !str_equals(sp.abs, out_root)) { bad = true; }
+            step_path_free(?alloc, ?sp);
+        }
+
+        if (bad) { ret 1; }
+        ret 0;
     }
-
-    if (bad) { ret 1; }
-    ret 0;
 }
 
 test absolute_path_in_root__sibling_prefix_and_equal_root {
@@ -1899,60 +1904,61 @@ test absolute_path_in_root__sibling_prefix_and_equal_root {
     ret 0;
 }
 
-test resolve_step_path__prior_output_consumed_as_input {
-    $if ($mach.build.os == $mach.os.windows) { ret 0; }
-    var alloc:  A.Allocator;
-    val make_r: err[A.Error] = page.make(?alloc);
-    if (sel make_r.err) { ret 1; }
-    var bad: bool = false;
+$if ($mach.build.os != $mach.os.windows) {
+    test resolve_step_path__prior_output_consumed_as_input {
+        var alloc:  A.Allocator;
+        val make_r: err[A.Error] = page.make(?alloc);
+        if (sel make_r.err) { ret 1; }
+        var bad: bool = false;
 
-    val tf_r: res[fs.TempFile, fs.FsError] = fs.temp_create(?alloc, "mach_step_two_root");
-    if (sel tf_r.err) { ret 1; }
-    var tf:     fs.TempFile       = tf_r.ok;
-    val root_r: res[str, A.Error] = str_dup(?alloc, fs.temp_path(?tf));
-    fs.temp_close_and_remove(?tf);
-    if (sel root_r.err) { ret 1; }
-    val root: str = root_r.ok;
-    fin { str_free(?alloc, root); }
-    val create_dir_r: err[io_error.Error] = fs.create_dir(root, 0o700);
-    if (sel create_dir_r.err) { ret 1; }
-    fin { fs.remove_all(?alloc, root); }
+        val tf_r: res[fs.TempFile, fs.FsError] = fs.temp_create(?alloc, "mach_step_two_root");
+        if (sel tf_r.err) { ret 1; }
+        var tf:     fs.TempFile       = tf_r.ok;
+        val root_r: res[str, A.Error] = str_dup(?alloc, fs.temp_path(?tf));
+        fs.temp_close_and_remove(?tf);
+        if (sel root_r.err) { ret 1; }
+        val root: str = root_r.ok;
+        fin { str_free(?alloc, root); }
+        val create_dir_r: err[io_error.Error] = fs.create_dir(root, 0o700);
+        if (sel create_dir_r.err) { ret 1; }
+        fin { fs.remove_all(?alloc, root); }
 
-    val exec_root:     str                 = step_walk.sfmt(?alloc, "{}/dep", root);
-    val out_root:      str                 = step_walk.sfmt(?alloc, "{}/out", root);
-    val create_dir_r3: err[io_error.Error] = fs.create_dir(exec_root, 0o700);
-    val create_dir_r2: err[io_error.Error] = fs.create_dir(out_root, 0o700);
-    if (sel create_dir_r3.err || sel create_dir_r2.err) { bad = true; }
+        val exec_root:     str                 = step_walk.sfmt(?alloc, "{}/dep", root);
+        val out_root:      str                 = step_walk.sfmt(?alloc, "{}/out", root);
+        val create_dir_r3: err[io_error.Error] = fs.create_dir(exec_root, 0o700);
+        val create_dir_r2: err[io_error.Error] = fs.create_dir(out_root, 0o700);
+        if (sel create_dir_r3.err || sel create_dir_r2.err) { bad = true; }
 
-    val generated:     str             = step_walk.sfmt(?alloc, "{}/generated.txt", out_root);
-    val write_bytes_r: err[fs.FsError] = fs.write_bytes(generated, "ok", 2, 0o600);
-    if (sel write_bytes_r.err) { bad = true; }
+        val generated:     str             = step_walk.sfmt(?alloc, "{}/generated.txt", out_root);
+        val write_bytes_r: err[fs.FsError] = fs.write_bytes(generated, "ok", 2, 0o600);
+        if (sel write_bytes_r.err) { bad = true; }
 
-    var v:    template.Values          = template.Values{target: "t", isa: "x86_64", os: "linux", abi: "gnu", profile: "debug", format: "", artifact_suffix: nil, reqs: nil, req_count: 0, dependency: ""};
-    val sp_r: res[StepPath, fail.Fail] = resolve_step_path(?alloc, "{project.work}/generated.txt", out_root, ?v, exec_root, out_root, "a build step input", true);
-    if (sel sp_r.err) { bad = true; }
-    if (sel sp_r.ok) {
-        var sp: StepPath = sp_r.ok;
-        if (!str_equals(sp.abs, generated)) { bad = true; }
-        val physical_r: err[fail.Fail] = step_walk.path_check(?alloc, sp.root, sp.rel, step_walk.PHYSICAL_REGULAR, "build step input");
-        if (sel physical_r.err) { bad = true; }
-        step_path_free(?alloc, ?sp);
+        var v:    template.Values          = template.Values{target: "t", isa: "x86_64", os: "linux", abi: "gnu", profile: "debug", format: "", artifact_suffix: nil, reqs: nil, req_count: 0, dependency: ""};
+        val sp_r: res[StepPath, fail.Fail] = resolve_step_path(?alloc, "{project.work}/generated.txt", out_root, ?v, exec_root, out_root, "a build step input", true);
+        if (sel sp_r.err) { bad = true; }
+        if (sel sp_r.ok) {
+            var sp: StepPath = sp_r.ok;
+            if (!str_equals(sp.abs, generated)) { bad = true; }
+            val physical_r: err[fail.Fail] = step_walk.path_check(?alloc, sp.root, sp.rel, step_walk.PHYSICAL_REGULAR, "build step input");
+            if (sel physical_r.err) { bad = true; }
+            step_path_free(?alloc, ?sp);
+        }
+
+        val missing_r: res[StepPath, fail.Fail] = resolve_step_path(?alloc, "{project.work}/missing.txt", out_root, ?v, exec_root, out_root, "a build step input", true);
+        if (sel missing_r.err) { bad = true; }
+        if (sel missing_r.ok) {
+            var sp2:                StepPath       = missing_r.ok;
+            val missing_physical_r: err[fail.Fail] = step_walk.path_check(?alloc, sp2.root, sp2.rel, step_walk.PHYSICAL_REGULAR, "build step input");
+            if (sel missing_physical_r.ok) { bad = true; }
+            step_path_free(?alloc, ?sp2);
+        }
+
+        str_free(?alloc, generated);
+        str_free(?alloc, out_root);
+        str_free(?alloc, exec_root);
+        if (bad) { ret 1; }
+        ret 0;
     }
-
-    val missing_r: res[StepPath, fail.Fail] = resolve_step_path(?alloc, "{project.work}/missing.txt", out_root, ?v, exec_root, out_root, "a build step input", true);
-    if (sel missing_r.err) { bad = true; }
-    if (sel missing_r.ok) {
-        var sp2:                StepPath       = missing_r.ok;
-        val missing_physical_r: err[fail.Fail] = step_walk.path_check(?alloc, sp2.root, sp2.rel, step_walk.PHYSICAL_REGULAR, "build step input");
-        if (sel missing_physical_r.ok) { bad = true; }
-        step_path_free(?alloc, ?sp2);
-    }
-
-    str_free(?alloc, generated);
-    str_free(?alloc, out_root);
-    str_free(?alloc, exec_root);
-    if (bad) { ret 1; }
-    ret 0;
 }
 
 #[testing]
@@ -2045,62 +2051,64 @@ test check_step_left_obj_tree__rejects_a_timestamp_preserving_rewrite {
     ret bad;
 }
 
-test execute_step_invocation__a_step_past_its_bound_fails_naming_the_step_and_bound {
-    $if ($mach.build.os == $mach.os.windows) { ret 0; }
-    var alloc:  A.Allocator;
-    val make_r: err[A.Error] = page.make(?alloc);
-    if (sel make_r.err) { ret 1; }
+$if ($mach.build.os != $mach.os.windows) {
+    test execute_step_invocation__a_step_past_its_bound_fails_naming_the_step_and_bound {
+        var alloc:  A.Allocator;
+        val make_r: err[A.Error] = page.make(?alloc);
+        if (sel make_r.err) { ret 1; }
 
-    var empty_env: [1]*Unit;
-    empty_env[0] = nil;
-    var argv: [4]*u8;
-    argv[0] = "sh";
-    argv[1] = "-c";
-    argv[2] = "sleep 30";
-    argv[3] = nil;
-    var invocation: StepInvocation;
-    invocation.argv = StepStrings{items: ?argv[0], count: 3};
-    invocation.env  = driver_environment.Strings{items: ?empty_env[0], count: 0};
+        var empty_env: [1]*Unit;
+        empty_env[0] = nil;
+        var argv: [4]*u8;
+        argv[0] = "sh";
+        argv[1] = "-c";
+        argv[2] = "sleep 30";
+        argv[3] = nil;
+        var invocation: StepInvocation;
+        invocation.argv = StepStrings{items: ?argv[0], count: 3};
+        invocation.env  = driver_environment.Strings{items: ?empty_env[0], count: 0};
 
-    val program_r: res[str, fail.Fail] = resolve_step_program(?alloc, "/", ?invocation);
-    if (sel program_r.err) { ret 1; }
-    val program: str            = program_r.ok;
-    val bounded: err[fail.Fail] = execute_step_invocation(?alloc, "/", program, ?invocation, "slow-step", chrono_duration.SECOND);
-    str_free(?alloc, program);
-    if (sel bounded.ok) { ret 2; }
-    val msg: str = fail.describe(bounded.err);
-    if (!str_contains(msg, "slow-step"))     { ret 3; }
-    if (!str_contains(msg, "timeout of 1s")) { ret 4; }
-    ret 0;
+        val program_r: res[str, fail.Fail] = resolve_step_program(?alloc, "/", ?invocation);
+        if (sel program_r.err) { ret 1; }
+        val program: str            = program_r.ok;
+        val bounded: err[fail.Fail] = execute_step_invocation(?alloc, "/", program, ?invocation, "slow-step", chrono_duration.SECOND);
+        str_free(?alloc, program);
+        if (sel bounded.ok) { ret 2; }
+        val msg: str = fail.describe(bounded.err);
+        if (!str_contains(msg, "slow-step"))     { ret 3; }
+        if (!str_contains(msg, "timeout of 1s")) { ret 4; }
+        ret 0;
+    }
 }
 
-test execute_step_invocation__an_unbounded_step_is_never_cut_short {
-    $if ($mach.build.os == $mach.os.windows) { ret 0; }
-    var alloc:  A.Allocator;
-    val make_r: err[A.Error] = page.make(?alloc);
-    if (sel make_r.err) { ret 1; }
+$if ($mach.build.os != $mach.os.windows) {
+    test execute_step_invocation__an_unbounded_step_is_never_cut_short {
+        var alloc:  A.Allocator;
+        val make_r: err[A.Error] = page.make(?alloc);
+        if (sel make_r.err) { ret 1; }
 
-    var empty_env: [1]*Unit;
-    empty_env[0] = nil;
-    var argv: [4]*u8;
-    argv[0] = "sh";
-    argv[1] = "-c";
-    argv[2] = "sleep 1; exit 0";
-    argv[3] = nil;
-    var invocation: StepInvocation;
-    invocation.argv = StepStrings{items: ?argv[0], count: 3};
-    invocation.env  = driver_environment.Strings{items: ?empty_env[0], count: 0};
+        var empty_env: [1]*Unit;
+        empty_env[0] = nil;
+        var argv: [4]*u8;
+        argv[0] = "sh";
+        argv[1] = "-c";
+        argv[2] = "sleep 1; exit 0";
+        argv[3] = nil;
+        var invocation: StepInvocation;
+        invocation.argv = StepStrings{items: ?argv[0], count: 3};
+        invocation.env  = driver_environment.Strings{items: ?empty_env[0], count: 0};
 
-    val program_r: res[str, fail.Fail] = resolve_step_program(?alloc, "/", ?invocation);
-    if (sel program_r.err) { ret 1; }
-    val program:   str            = program_r.ok;
-    val unbounded: err[fail.Fail] = execute_step_invocation(?alloc, "/", program, ?invocation, "slow-step", 0);
-    str_free(?alloc, program);
-    if (sel unbounded.err) { ret 2; }
-    ret 0;
+        val program_r: res[str, fail.Fail] = resolve_step_program(?alloc, "/", ?invocation);
+        if (sel program_r.err) { ret 1; }
+        val program:   str            = program_r.ok;
+        val unbounded: err[fail.Fail] = execute_step_invocation(?alloc, "/", program, ?invocation, "slow-step", 0);
+        str_free(?alloc, program);
+        if (sel unbounded.err) { ret 2; }
+        ret 0;
+    }
 }
 
-test expanded_step_environment_inherits_overlays_and_owns_target_identity {
+test step_environment__inherits_overlays_and_owns_target_identity {
     var a:      A.Allocator;
     val make_r: err[A.Error] = page.make(?a);
     if (sel make_r.err) { ret 1; }
@@ -2407,25 +2415,31 @@ test step_outputs__native_snapshot_and_declarations_share_canonical_paths {
     ret 0;
 }
 
-# a project built for the selected cell as a build does through its load: the
-# dependencies' steps and the project's own run before the load phase
-#[testing]
-pub fun project_build(s: *session.Session, project_root: str, selectors: *manifest.Selectors) res[project.Project, fail.Fail] {
-    ret project_build_req(s, project_root, selectors, nil);
-}
+# the dependency output home is absolute and one path however the root is spelled
+test dep_out_home__relative_absolute_and_folded_roots_agree {
+    var alloc:  A.Allocator;
+    val make_r: err[A.Error] = page.make(?alloc);
+    if (sel make_r.err) { ret 1; }
+    var code: i32 = 0;
 
-# as `project_build`, with the caller's request standing in for the composed one
-#[testing]
-pub fun project_build_req(s: *session.Session, project_root: str, selectors: *manifest.Selectors, req: *request.BuildRequest) res[project.Project, fail.Fail] {
-    val begun: res[project.Project, fail.Fail] = driver.project_begin(s, project_root, selectors, req);
-    if (sel begun.err) { ret begun; }
-    var p:       project.Project      = begun.ok;
-    val te:      *project.TargetEntry = p.target_entry;
-    val dep_ran: err[fail.Fail]       = driver.phase_finish(?p, dependency_run(?p, te.isa_name, te.os_name, te.abi_name));
-    if (sel dep_ran.err) { ret driver.project_failure(?p, dep_ran.err); }
-    val ran: err[fail.Fail] = driver.phase_finish(?p, run(p.alloc, ?p));
-    if (sel ran.err) { ret driver.project_failure(?p, ran.err); }
-    val loaded: err[fail.Fail] = driver.run_load_phase(?p);
-    if (sel loaded.err) { ret driver.project_failure(?p, loaded.err); }
-    ret res[project.Project, fail.Fail].ok{p};
+    val rel: res[str, fail.Fail] = dependency_out_home(?alloc, ".", "out/linux/debug");
+    if (!(sel rel.ok && types_path.is_abs(rel.ok))) { code = 1; }
+    val cwd_r: res[types_string.OwnedString, env.EnvError] = env.current_dir(?alloc);
+    if (sel cwd_r.err) { ret 1; }
+    var cwd: types_string.OwnedString = cwd_r.ok;
+    val abs: res[str, fail.Fail]      = dependency_out_home(?alloc, cwd.data, "out/linux/debug");
+    if (!(sel abs.ok && types_path.is_abs(abs.ok)))                  { code = 1; }
+    if (sel rel.ok && (sel abs.ok && (!str_equals(rel.ok, abs.ok)))) { code = 1; }
+
+    val abs_sub_r: res[str, A.Error] = types_path.resolve(?alloc, cwd.data, "subdir");
+    if (sel abs_sub_r.err) { ret 1; }
+    val rel_sub: res[str, fail.Fail] = dependency_out_home(?alloc, "./subdir", "out/linux/debug");
+    val abs_sub: res[str, fail.Fail] = dependency_out_home(?alloc, abs_sub_r.ok, "out/linux/debug");
+    val folded:  res[str, fail.Fail] = dependency_out_home(?alloc, "./subdir/../subdir", "out/linux/debug");
+    if (sel rel_sub.err)                     { ret 1; }
+    if (sel abs_sub.err)                     { ret 1; }
+    if (sel folded.err)                      { ret 1; }
+    if (!str_equals(rel_sub.ok, abs_sub.ok)) { code = 1; }
+    if (!str_equals(folded.ok, abs_sub.ok))  { code = 1; }
+    ret code;
 }

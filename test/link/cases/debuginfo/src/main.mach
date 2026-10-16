@@ -19,7 +19,7 @@ fun square(v: i64) i64 {
     ret helper.mul(v, v);
 }
 
-# a `#[naked]` subprogram (#2198), whose DIE declares no DW_AT_frame_base at all -
+# a `#[naked]` subprogram, whose DIE declares no DW_AT_frame_base at all -
 # there is no frame base the compiler established to name. it is here so the standard
 # validator has to accept the attribute's absence, and so `-g` additivity is asserted
 # over a function whose `.text` the decorator, not the frame pass, decides.
@@ -68,7 +68,7 @@ fun addr(q: *u64) i64 {
 # `remat_mark` is one constant move, made while more values than the
 # callee-saved registers hold stay live across calls, so the allocator builds
 # it again where it is read rather than spill it and the variable's location
-# is the constant it holds (#4185)
+# is the constant it holds
 #[noinline]
 fun pinned(seed: i64) i64 {
     var a:          i64  = bump(seed);
