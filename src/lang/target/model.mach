@@ -17,7 +17,6 @@ use std.types.result.res;
 use std.types.size.usize;
 use std.types.string.str;
 use std.types.string.str_len;
-use std.types.string.str_region_equals;
 
 pub def Endian: u8;
 pub val ENDIAN_LITTLE: Endian = 0;
@@ -418,14 +417,10 @@ pub rec Machine {
     direct_extend_ext: u64;
 
     # the selected extensions, as bits of this isa's vocabulary; the table is
-    # the isa module's own and names every bit the isa models
+    # the isa module's own, names every bit the isa models and reads the names
+    # and levels from the isa's masc catalog
     extensions:      u64;
-    extension_table: *extension.Extension;
-    extension_count: u32;
-    # the published levels the manifest may spell over the same vocabulary,
-    # none on an isa without them
-    level_table: *extension.Level;
-    level_count: u32;
+    extension_table: *extension.Table;
 
     index_width:          u32;
     vector_op_bytes:      u32;
@@ -664,7 +659,7 @@ pub fun vector_width_rows_valid(m: *Machine) bool {
         if (row.lanes == 0 || (row.lanes & ~(1 + 2 + 4 + 8)::u32) != 0)    { ret false; }
         if (row.bits <= m.vector_bits || (row.bits & (row.bits - 1)) != 0) { ret false; }
         var held: Machine = @m;
-        held.extensions = extension.close(m.extension_table, m.extension_count, row.ext);
+        held.extensions = extension.close(m.extension_table, row.ext);
         if (vector_register_bytes(?held) * 8 < row.bits) { ret false; }
         i = i + 1;
     }
@@ -896,34 +891,32 @@ pub fun ct_mul_rows_under(m: *Machine, cond: ct.CtMulCond) ct.CtMulMask {
 # vocabulary that names them
 pub rec ExtensionView {
     selected: u64;
-    table:    *extension.Extension;
-    count:    u32;
+    table:    *extension.Table;
 }
 
 pub fun extension_view(m: *Machine) ExtensionView {
-    ret ExtensionView{selected: m.extensions, table: m.extension_table, count: m.extension_count};
+    ret ExtensionView{selected: m.extensions, table: m.extension_table};
 }
 
 # every extension bit the model's vocabulary names
 pub fun extension_domain(m: *Machine) u64 {
     if (m.extension_table == nil) { ret 0; }
-    ret extension.domain(m.extension_table, m.extension_count);
+    ret extension.domain(m.extension_table);
 }
 
 # the bit the model's vocabulary gives `name[0..len]`, 0 when it names no such extension
 pub fun extension_bit(m: *Machine, name: str, len: usize) u64 {
     if (m.extension_table == nil) { ret 0; }
-    ret extension.bit_of(m.extension_table, m.extension_count, name, len);
+    ret extension.bit_of(m.extension_table, name, len);
 }
 
 # what a manifest's `extensions` entry `name[0..len]` selects: a level's
 # members when the model publishes one by that spelling, else the row's bit,
 # 0 when the vocabulary has neither
 pub fun extension_bundle(m: *Machine, name: str, len: usize) u64 {
-    if (m.level_table != nil) {
-        val members: u64 = extension.level_of(m.level_table, m.level_count, name, len);
-        if (members != 0) { ret members; }
-    }
+    if (m.extension_table == nil) { ret 0; }
+    val members: u64 = extension.level_of(m.extension_table, name, len);
+    if (members != 0) { ret members; }
     ret extension_bit(m, name, len);
 }
 
@@ -948,28 +941,29 @@ pub fun spelling_finish(b: *textbuild.TextBuilder, r: err[textbuild.Error]) res[
 # the model's levels, `, `-separated, empty when it publishes none; owned by `a`
 pub fun level_names(a: *A.Allocator, m: *Machine) res[str, fail.Fail] {
     var b: textbuild.TextBuilder = textbuild.tb_init(a);
-    if (m.level_table == nil || m.level_count == 0) { ret spelling_finish(?b, err[textbuild.Error].ok{}); }
-    ret spelling_finish(?b, extension.levels_append(?b, m.level_table, m.level_count));
+    if (m.extension_table == nil) { ret spelling_finish(?b, err[textbuild.Error].ok{}); }
+    ret spelling_finish(?b, extension.levels_append(?b, m.extension_table));
 }
 
 # `bits` closed over the model's vocabulary: every extension a selected one implies
 pub fun extension_close(m: *Machine, bits: u64) u64 {
     if (m.extension_table == nil) { ret bits; }
-    ret extension.close(m.extension_table, m.extension_count, bits);
+    ret extension.close(m.extension_table, bits);
 }
 
 # the model's vocabulary, `, `-separated, or `none`; owned by `a`
 pub fun extension_names(a: *A.Allocator, m: *Machine) res[str, fail.Fail] {
-    if (m.extension_table == nil || m.extension_count == 0) { ret table_names(a, ?NO_EXTENSIONS[0], 1); }
-    ret table_names(a, m.extension_table, m.extension_count);
+    if (m.extension_table == nil || m.extension_table.count == 0) { ret table_names(a, ?NO_EXTENSIONS); }
+    ret table_names(a, m.extension_table);
 }
 
-val NO_EXTENSIONS: [1]extension.Extension = [1]extension.Extension{extension.Extension{name: "none", bit: 0}};
+val NO_EXTENSION_ROWS: [1]extension.Extension = [1]extension.Extension{extension.Extension{name: "none", bit: 0}};
+val NO_EXTENSIONS:     extension.Table        = extension.Table{source: "none", catalog: nil, rows: ?NO_EXTENSION_ROWS[0], count: 1};
 
 # the names of an extension table, `, `-separated; owned by `a`
-pub fun table_names(a: *A.Allocator, table: *extension.Extension, count: u32) res[str, fail.Fail] {
+pub fun table_names(a: *A.Allocator, table: *extension.Table) res[str, fail.Fail] {
     var b: textbuild.TextBuilder = textbuild.tb_init(a);
-    ret spelling_finish(?b, extension.names_append(?b, table, count));
+    ret spelling_finish(?b, extension.names_append(?b, table));
 }
 
 # what `#[extensions(name)]` may mean: the selected isa's row when it has one,
@@ -982,36 +976,35 @@ pub rec DecoratorExtension {
 }
 
 pub fun decorator_extension(vocabulary: *extension.Vocabulary, selected: ExtensionView, name: str, len: usize) DecoratorExtension {
-    var out: DecoratorExtension   = DecoratorExtension{known: false, bit: 0, target_only: nil};
-    val own: *extension.Extension = table_row(selected.table, selected.count, name, len);
-    if (own != nil) {
-        out.known       = true;
-        out.bit         = own.bit;
-        out.target_only = own.target_only;
-        ret out;
+    var out: DecoratorExtension = DecoratorExtension{known: false, bit: 0, target_only: nil};
+    if (selected.table != nil) {
+        val own: *extension.Extension = extension.row_of(selected.table, name, len);
+        if (own != nil) {
+            out.known       = true;
+            out.bit         = own.bit;
+            out.target_only = own.target_only;
+            ret out;
+        }
+        out.known = extension.known(selected.table, name, len);
     }
     if (vocabulary == nil) { ret out; }
     var i: u32 = 0;
     for (i < vocabulary.len) {
-        val row: *extension.Extension = table_row(vocabulary.tables[i], vocabulary.counts[i], name, len);
+        val row: *extension.Extension = extension.row_of(vocabulary.tables[i], name, len);
         if (row != nil) {
             if (!out.known || row.target_only == nil) { out.target_only = row.target_only; }
             out.known = true;
         }
+        or (extension.known(vocabulary.tables[i], name, len)) { out.known = true; }
         i = i + 1;
     }
     ret out;
 }
 
-fun table_row(table: *extension.Extension, count: u32, name: str, len: usize) *extension.Extension {
-    if (table == nil) { ret nil; }
-    var i: u32 = 0;
-    for (i < count) {
-        val row: *extension.Extension = ?table[i];
-        if (str_len(row.name) == len && str_region_equals(name, 0, len, row.name)) { ret row; }
-        i = i + 1;
-    }
-    ret nil;
+# where every name of `vocabulary` is read from, `, `-separated; owned by `a`
+pub fun vocabulary_sources(a: *A.Allocator, vocabulary: *extension.Vocabulary) res[str, fail.Fail] {
+    var b: textbuild.TextBuilder = textbuild.tb_init(a);
+    ret spelling_finish(?b, extension.sources_append(?b, vocabulary));
 }
 
 # every name of `vocabulary`, `, `-separated; owned by `a`
@@ -1348,8 +1341,7 @@ pub fun t_model(width: u32) Machine {
     model.scalar_form_len    = 0;
     model.ct_mul_forms       = nil;
     model.ct_mul_form_len    = 0;
-    model.extension_table    = ?extension_riscv.NAMES[0];
-    model.extension_count    = extension_riscv.NAME_COUNT;
+    model.extension_table    = ?extension_riscv.TABLE;
     model.nan_rule           = float.NAN_PRESERVE;
     model.nan_first_operand  = false;
     model.text_section_align = 16;

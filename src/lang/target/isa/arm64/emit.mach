@@ -871,7 +871,7 @@ pub fun machine() *target_model.Machine {
 #[testing]
 pub fun select_extensions(bits: u64) {
     val m: *target_model.Machine = machine();
-    m.extensions = extension.close(?extension_arm64.NAMES[0], extension_arm64.NAME_COUNT, bits);
+    m.extensions = extension.close(?extension_arm64.TABLE, bits);
 }
 
 #[testing]

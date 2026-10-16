@@ -812,9 +812,12 @@ illegal-instruction trap. The compiler neither inserts the check nor verifies
 that one precedes the call, because only the program knows how it detects the
 processor's features and when that answer holds.
 
-- **Names come from every instruction set.** A name no instruction set declares
-  is refused, and the refusal lists the known names. A name another instruction
-  set declares admits nothing on this target and is not an error, so one
+- **Names come from every instruction set.** A name no extension catalog names
+  is refused, and the refusal names the catalogs it was read against (masc's x86
+  and riscv catalogs, and mach's own aarch64 and spirv vocabularies) and lists
+  the names the compiler emits against. A name a catalog holds that the compiler
+  emits nothing against, or that another instruction set declares, admits
+  nothing on this target and is not an error, so one
   declaration serves a multi-arch source: `#[extensions(sse41, sha2)]` admits
   `sse41` on x86_64 and `sha2` on aarch64, and an `asm aarch64 {}` block in an
   x86_64 build still refuses `sha256h` because the tag, not the decorator, picks

@@ -1081,8 +1081,8 @@ test extensions__no_environment_grants_a_type_feature {
     }
     if (types != (extension_spirv.INT8 | extension_spirv.INT16 | extension_spirv.INT64 | extension_spirv.FLOAT16 | extension_spirv.FLOAT64)) { ret 1; }
     i = 0;
-    for (i < extension_spirv.NAME_COUNT) {
-        if ((extension_spirv.OPEN & extension_spirv.NAMES[i].bit) == 0) { ret 2; }
+    for (i < extension_spirv.TABLE.count) {
+        if ((extension_spirv.OPEN & extension_spirv.TABLE.rows[i].bit) == 0) { ret 2; }
         i = i + 1;
     }
     i = 0;

@@ -307,7 +307,7 @@ fun vocabulary(reg: *TargetRegistry) res[extension.Vocabulary, fail.Fail] {
     var i: u32                  = 0;
     for (i < reg.isa.count) {
         val m: *target_model.Machine = reg.isa.members[i].model;
-        if (!extension.vocabulary_add(?v, m.extension_table, m.extension_count)) {
+        if (!extension.vocabulary_add(?v, m.extension_table)) {
             ret res[extension.Vocabulary, fail.Fail].err{fail.message(
                 "target: the registry declares more extension vocabularies than a description carries; raise extension.VOCABULARY_CAP")};
         }

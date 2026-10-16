@@ -156,7 +156,7 @@ pub fun facts_none() Facts {
     ret Facts{
         os_id:        0, arch_id: 0, abi_id: 0, pointer_width: 8, vector_bits: 128, register_bits: 128, has_float: true,
         va_list_size: 0, va_list_align: 0, defs: nil, ct_mul: ct.mul_mask_none(),
-        extensions:   target_model.ExtensionView{selected: 0, table: nil, count: 0},
+        extensions:   target_model.ExtensionView{selected: 0, table: nil},
         vocabulary:   extension.vocabulary_empty(), nan_rule: float.NAN_RULE_NONE, has_assembly: true, flat_addressing: true,
         scalars:      layout.scalars_none()
     };
@@ -186,7 +186,7 @@ pub fun described(model: *target_model.Machine, arch_id: u32) Target {
     t.page_size     = 4096;
     t.vocabulary    = extension.vocabulary_empty();
     t.scalars       = layout.scalars_none();
-    if (!extension.vocabulary_add(?t.vocabulary, model.extension_table, model.extension_count)) {
+    if (!extension.vocabulary_add(?t.vocabulary, model.extension_table)) {
         panic("target.resolved: a described model's vocabulary does not fit\n");
     }
     ret t;

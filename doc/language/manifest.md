@@ -319,11 +319,15 @@ x86-64-v2, x86-64-v3, x86-64-v4
 The array must hold strings, each an identifier (`sse41`, not `sse4.1`) or a level
 spelling (`x86-64-v2`), listed once.
 
-A level is a bundle, never an axis of its own: each name may imply others, and the
-selection is closed over that once, when the target resolves. `sse41` brings `ssse3`
-(the chain stops there; SSE3 is not modelled), `sse42` brings `sse41`, `avx` brings
-`sse42`, `avx2`, `fma` and `f16c` bring `avx`, and every `avx512*` set brings
-`avx512f`, which brings `avx2`. On aarch64 `pmull` brings `aes`. On riscv `d` brings
+The x86_64 and riscv names, what each implies and the x86-64 levels are read from
+masc's extension catalog for the instruction set, and mach adds only which of its
+rows the compiler emits against. The aarch64 and spirv names are mach's own until a
+catalog names them one to one. A level is a bundle, never an axis of its own: each
+name may imply others, and the selection is closed over that once, when the target
+resolves. `sse41` brings `ssse3` (the chain stops there; SSE3 is not a name),
+`sse42` brings `sse41`, `avx` brings `sse42`, `avx2`, `fma` and `f16c` bring `avx`,
+and every `avx512*` set brings `avx512f`, which brings `avx2`, `fma` and `f16c`. On
+aarch64 `pmull` brings `aes`. On riscv `d` brings
 `f`, `zfh` brings `zfhmin`, `zfhmin` brings `f`, and `f` brings `zicsr`, as the isa string's own grammar has it, so `extensions = ["d"]` on `rv64i` selects
 `rv64ifd` with Zicsr. The isa string and the list feed one set: `isa = "rv64i"` with
 `extensions = ["m"]` selects the same machine as `isa = "rv64im"`. A name nothing in
@@ -338,8 +342,8 @@ spelling that expands to its member names, so it may stand alone or beside names
 (`["x86-64-v2", "sha"]`), and it includes every lower level. It has no bit of its own:
 `$mach.build.extensions.x86-64-v2` and `#[extensions("x86-64-v2")]` do not exist,
 programs ask about the members (`.avx2`). `sse2`, `cmpxchg8b` and `lahf-sahf` are the
-`x86_64` baseline and are not names. The table here is the compiler's, held together by
-a test:
+`x86_64` baseline and are not names. The levels are masc's x86 catalog's, and a test
+holds this table to them:
 
 | Level | Members beyond the level before |
 |-------|----------------------------------|

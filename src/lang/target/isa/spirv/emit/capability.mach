@@ -68,7 +68,7 @@ fun check_type_features(e: *emitter.Emit, profile: *isa_spirv.EnvProfile) err[fa
     for (i < isa_spirv.CAPABILITY_COUNT) {
         val c: *isa_spirv.Capability = ?isa_spirv.CAPABILITIES[i];
         if ((e.b.caps_needed & c.need) != 0 && (c.feature & ~e.tgt.model.extensions) != 0) {
-            val name: str                              = extension.first_name(e.tgt.model.extension_table, e.tgt.model.extension_count, c.feature);
+            val name: str                              = extension.first_name(e.tgt.model.extension_table, c.feature);
             val msg:  res[str, std_format.FormatError] = std_format.sprint(e.alloc,
                 "this module needs the {} capability, which the `{}` environment admits but leaves to a device feature: name `{}` in the target's `extensions` once the consumer enables the feature, or avoid the type that needs it",
                 c.name, profile.name, name);
@@ -104,7 +104,7 @@ pub fun require_at_made(e: *emitter.Emit, loc: lang_source.Location, stages: u8,
 pub fun require_at(e: *emitter.Emit, loc: lang_source.Location, stages: u8, capability: u32, requires: u64, what: str) err[fail.Fail] {
     val missing: u64 = requires & ~e.tgt.model.extensions;
     if (missing != 0) {
-        val name: str                              = extension.first_name(e.tgt.model.extension_table, e.tgt.model.extension_count, missing);
+        val name: str                              = extension.first_name(e.tgt.model.extension_table, missing);
         val r:    res[str, std_format.FormatError] = std_format.sprint(e.alloc,
             "{} needs the `{}` extension, a device feature the target does not select: name it in the target's `extensions` once the consumer enables the feature",
             what, name);
@@ -125,7 +125,7 @@ pub fun require_at(e: *emitter.Emit, loc: lang_source.Location, stages: u8, capa
     }
     val graphics: u8 = stages & emit_builtin.STAGES_GRAPHICS;
     if (c.graphics != 0 && graphics != 0 && (c.graphics & ~e.tgt.model.extensions) != 0) {
-        val name:  str                 = extension.first_name(e.tgt.model.extension_table, e.tgt.model.extension_count, c.graphics);
+        val name:  str                 = extension.first_name(e.tgt.model.extension_table, c.graphics);
         val reach: res[str, fail.Fail] = emit_builtin.stages_spelling(e, graphics);
         if (sel reach.err) { ret err[fail.Fail].err{reach.err}; }
         ret err[fail.Fail].err{emitter.reject_made_at(e, diagnostic_kind.SPIRV_CAPABILITY, loc, fail.format(e.alloc,

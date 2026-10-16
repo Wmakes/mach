@@ -1,41 +1,67 @@
 # the extension vocabulary of an instruction set
 #
-# each isa module declares one table of named bits, and that table is the
-# authority for every surface that spells an extension: the manifest's
-# `[target.X].extensions`, `$mach.build.extensions.<name>`, `#[extensions(...)]` and the
-# inline-asm refusals. a name is an identifier, so it can be a comptime member
-# and a field of a runtime feature record. a bit is the isa's own: the same
-# bit means different things on different instruction sets, and only a name
-# crosses between them
+# an instruction set's extensions are masc's: its catalog names every extension
+# and level and says what each implies, and mach states only which rows of it the
+# code generator emits against and the selection bit each carries. every surface
+# that spells an extension reads the catalog: the manifest's `[target.X].extensions`,
+# `$mach.build.extensions.<name>`, `#[extensions(...)]` and the inline-asm refusals.
+# a name is a key of the catalog's name index, an identifier, so it can be a comptime
+# member and a field of a runtime feature record. a bit is the isa's own: the same bit
+# means different things on different instruction sets, and only a name crosses
+# between them. spir-v's vocabulary names vulkan device features, which no masc
+# catalog states, so its table states its names itself until one does
 use std.types.bool.bool;
 use std.types.bool.false;
 use std.types.bool.true;
 use std.types.error.err;
+use std.types.option.opt;
 use std.types.result.res;
 use std.types.size.usize;
 use std.types.string.str;
 use std.types.string.str_equals;
 use std.types.string.str_len;
 use std.types.string.str_region_equals;
+use std.types.view.View;
 
 use A: std.allocator;
 use std.allocator.page;
 use std.text.string.str_free;
 
+use masc_extension: masc.core.extension;
+use masc.core.requirement;
+
 use mach.lang.fail;
 use mach.lang.lexis;
 use mach.lang.textbuild;
 
+# one extension the code generator emits against
+# ---
+# handle:      its row of the table's masc catalog
+# name:        in a table with no catalog, the name it is spelled by, nil otherwise
+# bit:         the bit it carries in a selection
+# implies:     in a table with no catalog, the bits it brings, 0 otherwise
+# target_only: nil when a function may admit the extension alone with
+#              `#[extensions]`; otherwise why only a target selects it
 pub rec Extension {
-    name: str;
-    bit:  u64;
-    # the extensions this one brings with it: a selection is closed over
-    # `implies` once, at target resolution, so a level is a bundle of bits and
-    # never an axis of its own
-    implies: u64;
-    # nil when a function may admit the extension alone with `#[extensions]`;
-    # otherwise why only a target selects it
+    handle:      requirement.Id;
+    name:        str;
+    bit:         u64;
+    implies:     u64;
     target_only: str;
+}
+
+# the extensions an instruction set's code generator emits against
+# ---
+# source:  where its names are read from, for a diagnostic
+# catalog: masc's catalog of the instruction set's extensions, nil for a vocabulary
+#          no masc catalog states
+# rows:    the extensions, each a row of the catalog
+# count:   how many
+pub rec Table {
+    source:  str;
+    catalog: *masc_extension.Catalog;
+    rows:    *Extension;
+    count:   u32;
 }
 
 # the token a refusal of a selection is about: its offset and length in the
@@ -71,48 +97,142 @@ pub rec SelectionSyntax {
     float_absence: fun(u64) str;
 }
 
-# the most names a selection can hold: one per bit
+# the most rows a table holds: one per bit
 pub val MAX_SELECTED: u32 = 64;
 
-# a level is a published bundle of an isa's extensions under one manifest
-# spelling (`x86-64-v3`). it is not a row: it has no bit, so it is never a
-# comptime member, a decorator argument or a feature-record field, and only
-# the manifest and a target request spell it. its members are closed over
-# `implies` with the rest of the selection, so a level is exactly the union
-# of its rows and whatever they bring
-pub rec Level {
-    name:    str;
-    members: u64;
+# the name of row `i` of `t`
+pub fun row_name(t: *Table, i: u32) str {
+    if (t.catalog != nil) { ret t.catalog.extensions[t.rows[i].handle].name; }
+    ret t.rows[i].name;
 }
 
-# the bit `table` gives the name at `name[0..len]`, 0 when the table does not name it
-pub fun bit_of(table: *Extension, count: u32, name: str, len: usize) u64 {
+# the bit `t` gives the catalog row `handle`, 0 when the code generator emits against none
+fun bit_of_handle(t: *Table, handle: requirement.Id) u64 {
     var i: u32 = 0;
-    for (i < count) {
-        if (str_len(table[i].name) == len && str_region_equals(name, 0, len, table[i].name)) { ret table[i].bit; }
+    for (i < t.count) {
+        if (t.rows[i].handle == handle) { ret t.rows[i].bit; }
         i = i + 1;
     }
     ret 0;
 }
 
-# the members of the level `table` names at `name[0..len]`, 0 when it names none
-pub fun level_of(table: *Level, count: u32, name: str, len: usize) u64 {
-    var i: u32 = 0;
-    for (i < count) {
-        if (str_len(table[i].name) == len && str_region_equals(name, 0, len, table[i].name)) { ret table[i].members; }
-        i = i + 1;
+# the bits of the rows of `ids` the code generator emits against
+fun bits_of_ids(t: *Table, ids: requirement.Ids) u64 {
+    var out: u64 = 0;
+    var i:   u32 = 0;
+    for (i < ids.len) {
+        out = out | bit_of_handle(t, ids.at[i]);
+        i   = i + 1;
     }
-    ret 0;
+    ret out;
 }
 
-# `bits` closed over `implies`: every extension a selected one brings, to a fixpoint
-pub fun close(table: *Extension, count: u32, bits: u64) u64 {
+# the catalog's name index entry for `name[0..len]`, none when the catalog has no such key
+fun entry_of(t: *Table, name: str, len: usize) opt[*masc_extension.NameEntry] {
+    if (t.catalog == nil || len == 0) { ret opt[*masc_extension.NameEntry].none{}; }
+    ret masc_extension.entry(t.catalog, View{data: name, len: len}, false);
+}
+
+# the row of `t` the name `name[0..len]` names alone, nil when it names none of them
+pub fun row_of(t: *Table, name: str, len: usize) *Extension {
+    var i: u32 = 0;
+    if (t.catalog == nil) {
+        for (i < t.count) {
+            if (str_len(t.rows[i].name) == len && str_region_equals(name, 0, len, t.rows[i].name)) { ret ?t.rows[i]; }
+            i = i + 1;
+        }
+        ret nil;
+    }
+    val e: opt[*masc_extension.NameEntry] = entry_of(t, name, len);
+    if (sel e.none) { ret nil; }
+    val only: opt[requirement.Id] = masc_extension.only(t.catalog, e.some);
+    if (sel only.none) { ret nil; }
+    for (i < t.count) {
+        if (t.rows[i].handle == only.some) { ret ?t.rows[i]; }
+        i = i + 1;
+    }
+    ret nil;
+}
+
+# whether `name[0..len]` is a key of the table's catalog, or in a table with no catalog
+# the name of a row
+pub fun known(t: *Table, name: str, len: usize) bool {
+    if (t.catalog != nil) {
+        val e: opt[*masc_extension.NameEntry] = entry_of(t, name, len);
+        ret sel e.some;
+    }
+    var i: u32 = 0;
+    for (i < t.count) {
+        if (str_len(t.rows[i].name) == len && str_region_equals(name, 0, len, t.rows[i].name)) { ret true; }
+        i = i + 1;
+    }
+    ret false;
+}
+
+# the bits `t` gives the extension `name[0..len]` names, 0 when it names none the code
+# generator emits against or names a level
+pub fun bit_of(t: *Table, name: str, len: usize) u64 {
+    if (t.catalog == nil) {
+        var i: u32 = 0;
+        for (i < t.count) {
+            if (str_len(t.rows[i].name) == len && str_region_equals(name, 0, len, t.rows[i].name)) { ret t.rows[i].bit; }
+            i = i + 1;
+        }
+        ret 0;
+    }
+    val e: opt[*masc_extension.NameEntry] = entry_of(t, name, len);
+    if (sel e.none) { ret 0; }
+    var out: u64 = 0;
+    var i:   u32 = 0;
+    for (i < e.some.rows.len) {
+        val id: requirement.Id = e.some.rows.at[i];
+        if (id < t.catalog.count) { out = out | bit_of_handle(t, id); }
+        i = i + 1;
+    }
+    ret out;
+}
+
+# the bits of the members of the level the catalog names `name[0..len]`, 0 when it
+# names none
+pub fun level_of(t: *Table, name: str, len: usize) u64 {
+    val e: opt[*masc_extension.NameEntry] = entry_of(t, name, len);
+    if (sel e.none) { ret 0; }
+    val level: opt[*masc_extension.Level] = masc_extension.only_level(t.catalog, e.some);
+    if (sel level.none) { ret 0; }
+    ret bits_of_ids(t, level.some.members);
+}
+
+# the bits the catalog row `handle` brings, through every extension it implies, of the
+# rows the code generator emits against. a catalog's implications are acyclic, so
+# `depth` only bounds a malformed one
+fun implied(t: *Table, handle: requirement.Id, depth: u32) u64 {
+    if (depth > MAX_SELECTED || handle >= t.catalog.count) { ret 0; }
+    val ids: requirement.Ids = t.catalog.extensions[handle].implies;
+    var out: u64             = 0;
+    var i:   u32             = 0;
+    for (i < ids.len) {
+        out = out | bit_of_handle(t, ids.at[i]) | implied(t, ids.at[i], depth + 1);
+        i   = i + 1;
+    }
+    ret out;
+}
+
+# the bits row `i` brings with it
+fun implies_of(t: *Table, i: u32) u64 {
+    if (t.catalog == nil) { ret t.rows[i].implies; }
+    ret implied(t, t.rows[i].handle, 0);
+}
+
+# `bits` closed over what each selected extension implies: every extension a selected
+# one brings, to a fixpoint. a selection is closed once, at target resolution, so a
+# level is a bundle of bits and never an axis of its own
+pub fun close(t: *Table, bits: u64) u64 {
     var out: u64 = bits;
     for (true) {
         var next: u64 = out;
         var i:    u32 = 0;
-        for (i < count) {
-            if ((out & table[i].bit) != 0) { next = next | table[i].implies; }
+        for (i < t.count) {
+            if ((out & t.rows[i].bit) != 0) { next = next | implies_of(t, i); }
             i = i + 1;
         }
         if (next == out) { ret out; }
@@ -124,12 +244,12 @@ pub fun close(table: *Extension, count: u32, bits: u64) u64 {
 # the members of `bits` whose selection brings none of `need`: the widest
 # selection a test can make that still leaves `need` out
 #[testing]
-pub fun without(table: *Extension, count: u32, bits: u64, need: u64) u64 {
+pub fun without(t: *Table, bits: u64, need: u64) u64 {
     var out: u64 = 0;
     var i:   u32 = 0;
-    for (i < count) {
-        val bit: u64 = table[i].bit;
-        if ((bits & bit) != 0 && (close(table, count, bit) & need) == 0) { out = out | bit; }
+    for (i < t.count) {
+        val bit: u64 = t.rows[i].bit;
+        if ((bits & bit) != 0 && (close(t, bit) & need) == 0) { out = out | bit; }
         i = i + 1;
     }
     ret out;
@@ -148,21 +268,21 @@ pub fun admits(admitted_bits: u64, required: u64) bool {
 }
 
 # every bit the table names
-pub fun domain(table: *Extension, count: u32) u64 {
+pub fun domain(t: *Table) u64 {
     var mask: u64 = 0;
     var i:    u32 = 0;
-    for (i < count) {
-        mask = mask | table[i].bit;
+    for (i < t.count) {
+        mask = mask | t.rows[i].bit;
         i    = i + 1;
     }
     ret mask;
 }
 
 # the first name the table gives any bit of `bits`, nil when it names none
-pub fun first_name(table: *Extension, count: u32, bits: u64) str {
+pub fun first_name(t: *Table, bits: u64) str {
     var i: u32 = 0;
-    for (i < count) {
-        if ((table[i].bit & bits) != 0) { ret table[i].name; }
+    for (i < t.count) {
+        if ((t.rows[i].bit & bits) != 0) { ret row_name(t, i); }
         i = i + 1;
     }
     ret nil;
@@ -196,47 +316,26 @@ pub fun is_spelling(name: str, len: usize) bool {
     ret is_name(name, len) || is_level_spelling(name, len);
 }
 
-# a level table is well formed against its extension table: every spelling a
-# level spelling that no row also answers, no spelling repeated, every member
-# a row of the table, nonempty, and each level a strict superset of the one
-# before it, which is the order the published levels have
-pub fun levels_valid(levels: *Level, count: u32, table: *Extension, ext_count: u32) bool {
-    if (count == 0)    { ret true; }
-    if (levels == nil) { ret false; }
-    val all: u64 = domain(table, ext_count);
+# a table is well formed: every bit a single nonzero bit, no bit or row repeated, every
+# row of its catalog and named by an identifier, and in a table with no catalog every
+# implied bit another row of the table
+pub fun table_valid(t: *Table) bool {
+    if (t.count > MAX_SELECTED)       { ret false; }
+    if (t.count > 0 && t.rows == nil) { ret false; }
+    val all: u64 = domain(t);
     var i:   u32 = 0;
-    for (i < count) {
-        val row: *Level = ?levels[i];
-        val len: usize  = str_len(row.name);
-        if (!is_level_spelling(row.name, len))                                                              { ret false; }
-        if (bit_of(table, ext_count, row.name, len) != 0)                                                   { ret false; }
-        if (row.members == 0 || (row.members & ~all) != 0)                                                  { ret false; }
-        if (i > 0 && ((levels[i - 1].members & ~row.members) != 0 || levels[i - 1].members == row.members)) { ret false; }
+    for (i < t.count) {
+        val row: *Extension = ?t.rows[i];
+        if (row.bit == 0 || (row.bit & (row.bit - 1)) != 0)    { ret false; }
+        if (t.catalog != nil && row.handle >= t.catalog.count) { ret false; }
+        val name: str = row_name(t, i);
+        if (!is_name(name, str_len(name)))                                                   { ret false; }
+        if (t.catalog == nil && ((row.implies & row.bit) != 0 || (row.implies & ~all) != 0)) { ret false; }
         var j: u32 = 0;
         for (j < i) {
-            if (level_of(?levels[j], 1, row.name, len) != 0) { ret false; }
-            j = j + 1;
-        }
-        i = i + 1;
-    }
-    ret true;
-}
-
-# a table is well formed: every name an identifier, every bit a single nonzero
-# bit, no name or bit repeated, and every implied bit another row of the table
-pub fun table_valid(table: *Extension, count: u32) bool {
-    if (count > MAX_SELECTED) { ret false; }
-    val all: u64 = domain(table, count);
-    var i:   u32 = 0;
-    for (i < count) {
-        val row: *Extension = ?table[i];
-        if (row.bit == 0 || (row.bit & (row.bit - 1)) != 0)            { ret false; }
-        if (!is_name(row.name, str_len(row.name)))                     { ret false; }
-        if ((row.implies & row.bit) != 0 || (row.implies & ~all) != 0) { ret false; }
-        var j: u32 = 0;
-        for (j < i) {
-            if (table[j].bit == row.bit)                                { ret false; }
-            if (bit_of(?table[j], 1, row.name, str_len(row.name)) != 0) { ret false; }
+            if (t.rows[j].bit == row.bit)                           { ret false; }
+            if (t.catalog != nil && t.rows[j].handle == row.handle) { ret false; }
+            if (str_equals(row_name(t, j), name))                   { ret false; }
             j = j + 1;
         }
         i = i + 1;
@@ -253,12 +352,19 @@ fun name_append(b: *textbuild.TextBuilder, first: bool, name: str) err[textbuild
     ret textbuild.tb_append(b, name);
 }
 
-# the level table's spellings, `, `-separated, appended to `b`
-pub fun levels_append(b: *textbuild.TextBuilder, levels: *Level, count: u32) err[textbuild.Error] {
-    var i: u32 = 0;
-    for (i < count) {
-        val r: err[textbuild.Error] = name_append(b, i == 0, levels[i].name);
-        if (sel r.err) { ret r; }
+# the catalog's levels whose members the code generator emits against any of,
+# `, `-separated, appended to `b`
+pub fun levels_append(b: *textbuild.TextBuilder, t: *Table) err[textbuild.Error] {
+    if (t.catalog == nil) { ret err[textbuild.Error].ok{}; }
+    var first: bool = true;
+    var i:     u32  = 0;
+    for (i < t.catalog.level_count) {
+        val level: *masc_extension.Level = ?t.catalog.levels[i];
+        if (bits_of_ids(t, level.members) != 0) {
+            val r: err[textbuild.Error] = name_append(b, first, level.name);
+            if (sel r.err) { ret r; }
+            first = false;
+        }
         i = i + 1;
     }
     ret err[textbuild.Error].ok{};
@@ -266,12 +372,12 @@ pub fun levels_append(b: *textbuild.TextBuilder, levels: *Level, count: u32) err
 
 # the names of every row whose bit is in `bits`, `, `-separated, appended to `b`
 #[testing]
-pub fun bits_append(b: *textbuild.TextBuilder, table: *Extension, count: u32, bits: u64) err[textbuild.Error] {
+pub fun bits_append(b: *textbuild.TextBuilder, t: *Table, bits: u64) err[textbuild.Error] {
     var first: bool = true;
     var i:     u32  = 0;
-    for (i < count) {
-        if ((table[i].bit & bits) != 0) {
-            val r: err[textbuild.Error] = name_append(b, first, table[i].name);
+    for (i < t.count) {
+        if ((t.rows[i].bit & bits) != 0) {
+            val r: err[textbuild.Error] = name_append(b, first, row_name(t, i));
             if (sel r.err) { ret r; }
             first = false;
         }
@@ -281,10 +387,10 @@ pub fun bits_append(b: *textbuild.TextBuilder, table: *Extension, count: u32, bi
 }
 
 # the table's names, `, `-separated, appended to `b`
-pub fun names_append(b: *textbuild.TextBuilder, table: *Extension, count: u32) err[textbuild.Error] {
+pub fun names_append(b: *textbuild.TextBuilder, t: *Table) err[textbuild.Error] {
     var i: u32 = 0;
-    for (i < count) {
-        val r: err[textbuild.Error] = name_append(b, i == 0, table[i].name);
+    for (i < t.count) {
+        val r: err[textbuild.Error] = name_append(b, i == 0, row_name(t, i));
         if (sel r.err) { ret r; }
         i = i + 1;
     }
@@ -298,8 +404,7 @@ pub val VOCABULARY_CAP: u32 = 8;
 # once in registration order: what a name in `#[extensions(...)]` may mean beside
 # the selected instruction set's own table
 pub rec Vocabulary {
-    tables: [VOCABULARY_CAP]*Extension;
-    counts: [VOCABULARY_CAP]u32;
+    tables: [VOCABULARY_CAP]*Table;
     len:    u32;
 }
 
@@ -309,19 +414,29 @@ pub fun vocabulary_empty() Vocabulary {
     ret v;
 }
 
-# `table` joins `v` unless it is empty or already there; false when `v` is full
-pub fun vocabulary_add(v: *Vocabulary, table: *Extension, count: u32) bool {
-    if (table == nil || count == 0) { ret true; }
+# `t` joins `v` unless it is empty or already there; false when `v` is full
+pub fun vocabulary_add(v: *Vocabulary, t: *Table) bool {
+    if (t == nil || t.count == 0) { ret true; }
     var i: u32 = 0;
     for (i < v.len) {
-        if (v.tables[i] == table) { ret true; }
+        if (v.tables[i] == t) { ret true; }
         i = i + 1;
     }
     if (v.len >= VOCABULARY_CAP) { ret false; }
-    v.tables[v.len] = table;
-    v.counts[v.len] = count;
+    v.tables[v.len] = t;
     v.len           = v.len + 1;
     ret true;
+}
+
+# where the names of every table of `v` are read from, `, `-separated
+pub fun sources_append(b: *textbuild.TextBuilder, v: *Vocabulary) err[textbuild.Error] {
+    var i: u32 = 0;
+    for (i < v.len) {
+        val r: err[textbuild.Error] = name_append(b, i == 0, v.tables[i].source);
+        if (sel r.err) { ret r; }
+        i = i + 1;
+    }
+    ret err[textbuild.Error].ok{};
 }
 
 # the names of every table of `v`, `, `-separated
@@ -332,7 +447,7 @@ pub fun vocabulary_append(b: *textbuild.TextBuilder, v: *Vocabulary) err[textbui
             val sep: err[textbuild.Error] = textbuild.tb_append(b, ", ");
             if (sel sep.err) { ret sep; }
         }
-        val r: err[textbuild.Error] = names_append(b, v.tables[i], v.counts[i]);
+        val r: err[textbuild.Error] = names_append(b, v.tables[i]);
         if (sel r.err) { ret r; }
         i = i + 1;
     }
@@ -361,135 +476,73 @@ fun t_spelled_is(a: *A.Allocator, text: str, want: str) bool {
 }
 
 #[testing]
-val T_TABLE: [3]Extension = [3]Extension{
+val T_ROWS: [3]Extension = [3]Extension{
     Extension{name: "ssse3", bit: 1, implies: 0, target_only: nil},
     Extension{name: "sse41", bit: 2, implies: 1, target_only: nil},
     Extension{name: "sha", bit: 4, implies: 2, target_only: nil},
 };
 
-test table__lookup_and_validity {
-    if (bit_of(?T_TABLE[0], 3, "sse41", 5) != 2)  { ret 1; }
-    if (bit_of(?T_TABLE[0], 3, "sse4", 4) != 0)   { ret 2; }
-    if (bit_of(?T_TABLE[0], 3, "sha256", 3) != 4) { ret 3; }
-    if (domain(?T_TABLE[0], 3) != 7)              { ret 4; }
-    if (!table_valid(?T_TABLE[0], 3))             { ret 5; }
-    val dup: [2]Extension = [2]Extension{Extension{name: "a", bit: 1, implies: 0, target_only: nil}, Extension{name: "a", bit: 2, implies: 0, target_only: nil}};
-    if (table_valid(?dup[0], 2)) { ret 6; }
-    val two: [1]Extension = [1]Extension{Extension{name: "a", bit: 3, implies: 0, target_only: nil}};
-    if (table_valid(?two[0], 1)) { ret 7; }
-    val dotted: [1]Extension = [1]Extension{Extension{name: "sse4.1", bit: 1, implies: 0, target_only: nil}};
-    if (table_valid(?dotted[0], 1)) { ret 8; }
-    val kw: [1]Extension = [1]Extension{Extension{name: "sel", bit: 1, implies: 0, target_only: nil}};
-    if (table_valid(?kw[0], 1)) { ret 11; }
-    val self_implied: [1]Extension = [1]Extension{Extension{name: "a", bit: 1, implies: 1, target_only: nil}};
-    if (table_valid(?self_implied[0], 1)) { ret 12; }
-    val stray: [1]Extension = [1]Extension{Extension{name: "a", bit: 1, implies: 8, target_only: nil}};
-    if (table_valid(?stray[0], 1)) { ret 13; }
-    var a:    A.Allocator;
-    val made: err[A.Error] = page.make(?a);
-    if (sel made.err) { ret 9; }
-    var b: textbuild.TextBuilder = textbuild.tb_init(?a);
-    if (!t_spelled_is(?a, t_spelled(?b, names_append(?b, ?T_TABLE[0], 3)), "ssse3, sse41, sha")) { ret 9; }
-    if (!str_region_equals(first_name(?T_TABLE[0], 3, 6), 0, 5, "sse41"))                        { ret 10; }
-    ret 0;
-}
+#[testing]
+val T_TABLE: Table = Table{source: "test", catalog: nil, rows: ?T_ROWS[0], count: 3};
 
-# a vocabulary is spelled whole however long it grows: no fixed buffer cuts it short
-test names_append__spells_a_long_vocabulary_whole {
+# a table with no catalog is read by its own names: lookup, validity, closure over
+# `implies` to a fixpoint, the widest selection that leaves a bit out, and spelling
+test table__lookup_validity_and_closure {
+    if (bit_of(?T_TABLE, "sse41", 5) != 2)  { ret 1; }
+    if (bit_of(?T_TABLE, "sse4", 4) != 0)   { ret 2; }
+    if (bit_of(?T_TABLE, "sha256", 3) != 4) { ret 3; }
+    if (domain(?T_TABLE) != 7)              { ret 4; }
+    if (!table_valid(?T_TABLE))             { ret 5; }
+    val dup:  [2]Extension = [2]Extension{Extension{name: "a", bit: 1}, Extension{name: "a", bit: 2}};
+    val dupt: Table        = Table{source: "test", catalog: nil, rows: ?dup[0], count: 2};
+    if (table_valid(?dupt)) { ret 6; }
+    val two:  [1]Extension = [1]Extension{Extension{name: "a", bit: 3}};
+    val twot: Table        = Table{source: "test", catalog: nil, rows: ?two[0], count: 1};
+    if (table_valid(?twot)) { ret 7; }
+    val kw:  [1]Extension = [1]Extension{Extension{name: "sel", bit: 1}};
+    val kwt: Table        = Table{source: "test", catalog: nil, rows: ?kw[0], count: 1};
+    if (table_valid(?kwt)) { ret 8; }
+    val stray:  [1]Extension = [1]Extension{Extension{name: "a", bit: 1, implies: 8}};
+    val strayt: Table        = Table{source: "test", catalog: nil, rows: ?stray[0], count: 1};
+    if (table_valid(?strayt))                                                                         { ret 9; }
+    if (close(?T_TABLE, 4) != 7 || close(?T_TABLE, 1) != 1)                                           { ret 10; }
+    if (without(?T_TABLE, 7, 1) != 0 || without(?T_TABLE, 7, 4) != 3 || without(?T_TABLE, 5, 2) != 1) { ret 11; }
+    if (!admits(admitted(3, 0), 1) || !admits(admitted(0, 3), 1) || admits(admitted(1, 0), 2))        { ret 12; }
     var a:    A.Allocator;
     val made: err[A.Error] = page.make(?a);
-    if (sel made.err) { ret 1; }
-    var rows: [160]Extension;
-    var i:    u32 = 0;
-    for (i < 160) {
-        rows[i] = Extension{name: "extension", bit: 1, implies: 0, target_only: nil};
-        i       = i + 1;
-    }
-    var b:       textbuild.TextBuilder = textbuild.tb_init(?a);
-    val spelled: str                   = t_spelled(?b, names_append(?b, ?rows[0], 160));
-    if (spelled == nil) { ret 2; }
-    val n: usize = str_len(spelled);
-    str_free(?a, spelled);
-    if (n != 160 * 9 + 159 * 2) { ret 3; }
+    if (sel made.err) { ret 13; }
+    var b: textbuild.TextBuilder = textbuild.tb_init(?a);
+    if (!t_spelled_is(?a, t_spelled(?b, names_append(?b, ?T_TABLE)), "ssse3, sse41, sha")) { ret 14; }
+    var bb: textbuild.TextBuilder = textbuild.tb_init(?a);
+    if (!t_spelled_is(?a, t_spelled(?bb, bits_append(?bb, ?T_TABLE, 5)), "ssse3, sha"))      { ret 15; }
+    if (!str_equals(first_name(?T_TABLE, 6), "sse41"))                                       { ret 16; }
+    if (!is_spelling("x86-64-v2", 9) || !is_spelling("sse41", 5) || is_name("x86-64-v2", 9)) { ret 17; }
     ret 0;
 }
 
 # a vocabulary holds each table once in the order it first arrives, skips an
 # empty one, refuses a table past its capacity and spells every table's names
 test vocabulary__each_table_once_within_capacity {
-    var v: Vocabulary = vocabulary_empty();
-    if (!vocabulary_add(?v, nil, 3) || !vocabulary_add(?v, ?T_TABLE[0], 0) || v.len != 0) { ret 1; }
-    if (!vocabulary_add(?v, ?T_TABLE[1], 2) || !vocabulary_add(?v, ?T_TABLE[0], 1))       { ret 2; }
-    if (!vocabulary_add(?v, ?T_TABLE[1], 2) || v.len != 2)                                { ret 3; }
+    var v:     Vocabulary = vocabulary_empty();
+    val empty: Table      = Table{source: "test", catalog: nil, rows: ?T_ROWS[0], count: 0};
+    val tail:  Table      = Table{source: "test", catalog: nil, rows: ?T_ROWS[1], count: 2};
+    if (!vocabulary_add(?v, nil) || !vocabulary_add(?v, ?empty) || v.len != 0) { ret 1; }
+    if (!vocabulary_add(?v, ?tail) || !vocabulary_add(?v, ?T_TABLE))           { ret 2; }
+    if (!vocabulary_add(?v, ?tail) || v.len != 2)                              { ret 3; }
     var a:    A.Allocator;
     val made: err[A.Error] = page.make(?a);
     if (sel made.err) { ret 4; }
     var b: textbuild.TextBuilder = textbuild.tb_init(?a);
-    if (!t_spelled_is(?a, t_spelled(?b, vocabulary_append(?b, ?v)), "sse41, sha, ssse3")) { ret 5; }
-    var rows: [9]Extension;
-    var full: Vocabulary = vocabulary_empty();
-    var i:    u32        = 0;
+    if (!t_spelled_is(?a, t_spelled(?b, vocabulary_append(?b, ?v)), "sse41, sha, ssse3, sse41, sha")) { ret 5; }
+    var full:   Vocabulary = vocabulary_empty();
+    var tables: [9]Table;
+    var i:      u32        = 0;
     for (i < VOCABULARY_CAP) {
-        rows[i] = Extension{name: "row", bit: 1, implies: 0, target_only: nil};
-        if (!vocabulary_add(?full, ?rows[i], 1)) { ret 6; }
+        tables[i] = Table{source: "test", catalog: nil, rows: ?T_ROWS[0], count: 1};
+        if (!vocabulary_add(?full, ?tables[i])) { ret 6; }
         i = i + 1;
     }
-    rows[i] = Extension{name: "row", bit: 1, implies: 0, target_only: nil};
-    if (vocabulary_add(?full, ?rows[i], 1) || full.len != VOCABULARY_CAP) { ret 7; }
-    ret 0;
-}
-
-#[testing]
-val T_LEVELS: [2]Level = [2]Level{
-    Level{name: "t-v2", members: 3},
-    Level{name: "t-v3", members: 7},
-};
-
-# a level is looked up by its own table, spelled with hyphens, and is valid
-# only as a growing chain of the extension table's rows
-test levels__spellings_over_the_rows {
-    if (level_of(?T_LEVELS[0], 2, "t-v3", 4) != 7)                                                      { ret 1; }
-    if (level_of(?T_LEVELS[0], 2, "t-v", 3) != 0)                                                       { ret 2; }
-    if (level_of(?T_LEVELS[0], 2, "sse41", 5) != 0)                                                     { ret 3; }
-    if (!levels_valid(?T_LEVELS[0], 2, ?T_TABLE[0], 3))                                                 { ret 4; }
-    if (!levels_valid(nil, 0, ?T_TABLE[0], 3))                                                          { ret 5; }
-    if (!is_level_spelling("x86-64-v2", 9) || !is_spelling("x86-64-v2", 9) || !is_spelling("sse41", 5)) { ret 6; }
-    if (is_level_spelling("-v2", 3) || is_level_spelling("v2-", 3) || is_level_spelling("a--b", 4)
-        || is_level_spelling("", 0) || is_level_spelling("sse4.1", 6) || is_name("x86-64-v2", 9)) { ret 7; }
-    # a level named like a row, a member outside the domain, a shrinking or
-    # repeated chain, an empty level and a repeated spelling are all refused
-    val as_row: [1]Level = [1]Level{Level{name: "sse41", members: 3}};
-    if (levels_valid(?as_row[0], 1, ?T_TABLE[0], 3)) { ret 8; }
-    val stray: [1]Level = [1]Level{Level{name: "t-v2", members: 8}};
-    if (levels_valid(?stray[0], 1, ?T_TABLE[0], 3)) { ret 9; }
-    val shrink: [2]Level = [2]Level{Level{name: "t-v2", members: 7}, Level{name: "t-v3", members: 3}};
-    if (levels_valid(?shrink[0], 2, ?T_TABLE[0], 3)) { ret 10; }
-    val same: [2]Level = [2]Level{Level{name: "t-v2", members: 3}, Level{name: "t-v3", members: 3}};
-    if (levels_valid(?same[0], 2, ?T_TABLE[0], 3)) { ret 11; }
-    val empty: [1]Level = [1]Level{Level{name: "t-v2", members: 0}};
-    if (levels_valid(?empty[0], 1, ?T_TABLE[0], 3)) { ret 12; }
-    val twice: [2]Level = [2]Level{Level{name: "t-v2", members: 3}, Level{name: "t-v2", members: 7}};
-    if (levels_valid(?twice[0], 2, ?T_TABLE[0], 3)) { ret 13; }
-    var a:    A.Allocator;
-    val made: err[A.Error] = page.make(?a);
-    if (sel made.err) { ret 14; }
-    var lb: textbuild.TextBuilder = textbuild.tb_init(?a);
-    if (!t_spelled_is(?a, t_spelled(?lb, levels_append(?lb, ?T_LEVELS[0], 2)), "t-v2, t-v3")) { ret 14; }
-    var bb: textbuild.TextBuilder = textbuild.tb_init(?a);
-    if (!t_spelled_is(?a, t_spelled(?bb, bits_append(?bb, ?T_TABLE[0], 3, 5)), "ssse3, sha")) { ret 15; }
-    ret 0;
-}
-
-# a selection closes over `implies` to a fixpoint: sha brings sse41 brings ssse3
-test close__follows_implies_to_a_fixpoint {
-    if (close(?T_TABLE[0], 3, 0) != 0)                                                         { ret 1; }
-    if (close(?T_TABLE[0], 3, 1) != 1)                                                         { ret 2; }
-    if (close(?T_TABLE[0], 3, 2) != 3)                                                         { ret 3; }
-    if (close(?T_TABLE[0], 3, 4) != 7)                                                         { ret 4; }
-    if (!admits(admitted(3, 0), 1) || !admits(admitted(0, 3), 1) || admits(admitted(1, 0), 2)) { ret 5; }
-    # leaving ssse3 out leaves out everything that brings it
-    if (without(?T_TABLE[0], 3, 7, 1) != 0) { ret 6; }
-    if (without(?T_TABLE[0], 3, 7, 4) != 3) { ret 7; }
-    if (without(?T_TABLE[0], 3, 5, 2) != 1) { ret 8; }
+    tables[i] = Table{source: "test", catalog: nil, rows: ?T_ROWS[0], count: 1};
+    if (vocabulary_add(?full, ?tables[i]) || full.len != VOCABULARY_CAP) { ret 7; }
     ret 0;
 }

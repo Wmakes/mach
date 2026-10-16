@@ -9,6 +9,8 @@ use std.types.string.str_equals;
 use std.types.string.str_len;
 use std.types.string.str_region_equals;
 
+use riscv_extension: masc.isa.riscv.extension;
+
 use mach.lang.target.extension;
 
 pub val I:        u64 = 1;
@@ -35,40 +37,42 @@ pub val DEFAULT32: u64 = I | M | A | C;
 pub val DEFAULT64: u64 = G | C;
 pub val ALL:       u64 = DEFAULT64 | ZKT | ZICOND | ZFHMIN | ZFH;
 
-# the riscv extension vocabulary: the letters and z-extensions a selection
-# string spells, each the same bit the string sets, so a manifest's
-# `extensions` list and an `rv64imac` isa string feed one set. d brings f and
-# f brings zicsr, as the string grammar has it. i is the baseline, c is a
-# code-size selection mach never emits, and f and d select the float register
-# file and the calling convention's float registers, so none of the four is a
-# function's to admit alone. zkt is a timing promise about the whole machine
-# the constant-time rows read, so it is the target's too
-pub val NAME_COUNT: u32 = 12;
+# the riscv extensions the code generator emits against, each a row of masc's riscv
+# catalog, which names it and says what it implies (d brings f and f brings zicsr),
+# each the same bit a selection string sets, so a manifest's `extensions` list and
+# an `rv64imac` isa string feed one set. i is the baseline, c is a code-size
+# selection mach never emits, and f and d select the float register file and the
+# calling convention's float registers, so none of the four is a function's to admit
+# alone. zkt is a timing promise about the whole machine the constant-time rows
+# read, so it is the target's too
+val ROW_COUNT: u32 = 12;
 
 val ONLY_BASELINE: str = "it is the baseline every selection holds";
 val ONLY_CODESIZE: str = "it is a code-size selection of the whole target; mach emits no compressed forms";
 val ONLY_FLOAT:    str = "it selects the float register file and the calling convention's float registers for the whole target";
 val ONLY_TIMING:   str = "it is a promise about the machine's execution timing that the constant-time rows read, not a set of instructions";
 
-pub val NAMES: [NAME_COUNT]extension.Extension = [NAME_COUNT]extension.Extension{
-    extension.Extension{name: "i", bit: I, implies: 0, target_only: ONLY_BASELINE},
-    extension.Extension{name: "m", bit: M, implies: 0, target_only: nil},
-    extension.Extension{name: "a", bit: A, implies: 0, target_only: nil},
-    extension.Extension{name: "f", bit: F, implies: ZICSR, target_only: ONLY_FLOAT},
-    extension.Extension{name: "d", bit: D, implies: F, target_only: ONLY_FLOAT},
-    extension.Extension{name: "c", bit: C, implies: 0, target_only: ONLY_CODESIZE},
-    extension.Extension{name: "zicond", bit: ZICOND, implies: 0, target_only: nil},
-    extension.Extension{name: "zicsr", bit: ZICSR, implies: 0, target_only: nil},
-    extension.Extension{name: "zifencei", bit: ZIFENCEI, implies: 0, target_only: nil},
-    extension.Extension{name: "zfhmin", bit: ZFHMIN, implies: F | ZICSR, target_only: nil},
-    extension.Extension{name: "zfh", bit: ZFH, implies: ZFHMIN | F | ZICSR, target_only: nil},
-    extension.Extension{name: "zkt", bit: ZKT, implies: 0, target_only: ONLY_TIMING},
+val ROWS: [ROW_COUNT]extension.Extension = [ROW_COUNT]extension.Extension{
+    extension.Extension{handle: riscv_extension.id.I, bit: I, target_only: ONLY_BASELINE},
+    extension.Extension{handle: riscv_extension.id.M, bit: M},
+    extension.Extension{handle: riscv_extension.id.A, bit: A},
+    extension.Extension{handle: riscv_extension.id.F, bit: F, target_only: ONLY_FLOAT},
+    extension.Extension{handle: riscv_extension.id.D, bit: D, target_only: ONLY_FLOAT},
+    extension.Extension{handle: riscv_extension.id.C, bit: C, target_only: ONLY_CODESIZE},
+    extension.Extension{handle: riscv_extension.id.ZICOND, bit: ZICOND},
+    extension.Extension{handle: riscv_extension.id.ZICSR, bit: ZICSR},
+    extension.Extension{handle: riscv_extension.id.ZIFENCEI, bit: ZIFENCEI},
+    extension.Extension{handle: riscv_extension.id.ZFHMIN, bit: ZFHMIN},
+    extension.Extension{handle: riscv_extension.id.ZFH, bit: ZFH},
+    extension.Extension{handle: riscv_extension.id.ZKT, bit: ZKT, target_only: ONLY_TIMING},
 };
+
+pub val TABLE: extension.Table = extension.Table{source: "masc's riscv catalog", catalog: ?riscv_extension.CATALOG, rows: ?ROWS[0], count: ROW_COUNT};
 
 # a selection widened by names from a manifest list and closed over what they
 # imply: d brings f, f brings zicsr
 pub fun widen(bits: u64, added: u64) u64 {
-    ret extension.close(?NAMES[0], NAME_COUNT, bits | added);
+    ret extension.close(?TABLE, bits | added);
 }
 
 # the extensions a standard toolchain names in an object's Tag_RISCV_arch, and what
@@ -412,8 +416,8 @@ fun t_parse_at_refused(name: str, bad: *extension.Span) bool {
 }
 
 test names__cover_every_modelled_bit {
-    if (!extension.table_valid(?NAMES[0], NAME_COUNT))             { ret 1; }
-    if (extension.domain(?NAMES[0], NAME_COUNT) != ALL)            { ret 2; }
+    if (!extension.table_valid(?TABLE))                            { ret 1; }
+    if (extension.domain(?TABLE) != ALL)                           { ret 2; }
     if (widen(I, F) != (I | F | ZICSR))                            { ret 3; }
     if (widen(I, D) != (I | D | F | ZICSR) || !valid(widen(I, D))) { ret 4; }
     if (widen(I, C) != (I | C) || widen(I, M) != (I | M))          { ret 5; }

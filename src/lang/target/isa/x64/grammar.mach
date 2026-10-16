@@ -1385,7 +1385,7 @@ pub fun machine() *target_model.Machine {
 #[testing]
 pub fun select_extensions(bits: u64) {
     val m: *target_model.Machine = machine();
-    m.extensions = extension.close(?extension_x64.NAMES[0], extension_x64.NAME_COUNT, bits);
+    m.extensions = extension.close(?extension_x64.TABLE, bits);
 }
 
 #[testing]
@@ -2167,7 +2167,7 @@ test asm_extensions__vpmullq_needs_avx512dq_and_avx512vl {
     if (!t_ext_refusal("vpmullq xmm0, xmm1, xmm2", extension_x64.AVX2, 0, "needs the `avx512dq` extension"))                         { ret 1; }
     if (!t_ext_refusal("vpmullq xmm0, xmm1, xmm2", extension_x64.AVX512DQ, 0, "needs the `avx512vl` extension"))                     { ret 2; }
     if (!t_ext_refusal("vpmullq xmm0, xmm1, xmm2", extension_x64.AVX512VL, extension_x64.AVX512F, "needs the `avx512dq` extension")) { ret 3; }
-    if (!t_ext_admitted("vpmullq xmm0, xmm1, xmm2", extension_x64.LEVEL_V4, 0))                                                      { ret 4; }
+    if (!t_ext_admitted("vpmullq xmm0, xmm1, xmm2", extension_x64.level("x86-64-v4"), 0))                                            { ret 4; }
     if (!t_asm_refused("vpmullq xmm0, [rax], xmm1", "a vector register or 128-bit memory source"))                                   { ret 5; }
     if (!t_asm_refused("vpmullq xmm0, xmm1, qword [rax]", "a vector register or 128-bit memory source"))                             { ret 6; }
     ret 0;
@@ -2255,10 +2255,10 @@ test asm_extensions__an_unselected_extension_is_refused_unless_the_function_admi
     for (i < T_EXT_BODY_COUNT) {
         val body: str = T_EXT_BODIES[i];
         val need: u64 = T_EXT_NEEDS[i];
-        if (!t_ext_refusal(body, 0, 0, "needs the `"))                                                                                     { ret 20 + i::i32; }
-        if (!t_ext_refusal(body, extension.without(?extension_x64.NAMES[0], extension_x64.NAME_COUNT, T_EXT_ALL, need), 0, "needs the `")) { ret 40 + i::i32; }
-        if (!t_ext_admitted(body, need, 0))                                                                                                { ret 60 + i::i32; }
-        if (!t_ext_admitted(body, 0, need))                                                                                                { ret 80 + i::i32; }
+        if (!t_ext_refusal(body, 0, 0, "needs the `"))                                                        { ret 20 + i::i32; }
+        if (!t_ext_refusal(body, extension.without(?extension_x64.TABLE, T_EXT_ALL, need), 0, "needs the `")) { ret 40 + i::i32; }
+        if (!t_ext_admitted(body, need, 0))                                                                   { ret 60 + i::i32; }
+        if (!t_ext_admitted(body, 0, need))                                                                   { ret 80 + i::i32; }
         i = i + 1;
     }
     ret 0;
