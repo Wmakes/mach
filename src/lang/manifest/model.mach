@@ -111,6 +111,7 @@ pub rec TargetDef {
 # at:           where the table's key is written
 # default_at:   where its `default` value is written, the zero place when absent
 # export_at:    where its `export` value is written, the zero place when absent
+# entry_at:     where its `entry` value is written
 # out_at:       where its `out` value is written
 # targets_at:   where its `targets` value is written
 # link_at:      where each `link` entry is written, parallel to `link`
@@ -137,6 +138,7 @@ pub rec ArtifactDef {
     at:                 fail.Place;
     default_at:         fail.Place;
     export_at:          fail.Place;
+    entry_at:           fail.Place;
     out_at:             fail.Place;
     targets_at:         fail.Place;
     link_at:            *fail.Place;

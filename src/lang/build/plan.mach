@@ -772,6 +772,7 @@ fun plan_unit(a: *A.Allocator, itn: *intern.Interner, reg: *lang_target.TargetRe
     te.extensions      = bu.target.extensions;
     te.extension_count = bu.target.extension_count;
     te.entrypoint      = bu.entry;
+    te.entry_at        = bu.artifact.entry_at;
     te.kind            = bu.artifact.kind;
     te.optimize        = bu.optimize;
     te.libs            = bu.libs;

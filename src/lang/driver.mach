@@ -495,7 +495,9 @@ fun parse_project_roots(p: *project.Project, roots: *intern.StrId, count: u32) e
     for (i < selected_count) {
         val loaded: res[session.ModuleId, fail.Fail] = driver_load.module_open(p, selected_roots[i]);
         if (sel loaded.err) {
-            ret retain_loaded(p, driver_load.collect_loaded_parses(p, err[fail.Fail].err{load_failure_of(p, loaded.err)}));
+            var failure: fail.Fail = load_failure_of(p, loaded.err);
+            if (count == 0) { failure = entry_failure(p, entry, p.config.bin_name, p.target_entry.entry_at, failure); }
+            ret retain_loaded(p, driver_load.collect_loaded_parses(p, err[fail.Fail].err{failure}));
         }
         i = i + 1;
     }
@@ -594,7 +596,8 @@ fun load_phase_impl(p: *project.Project, extra_roots: *intern.StrId,
     project.set_origin(p, diagnostic.ORIGIN_LOAD);
     val load_r: res[session.ModuleId, fail.Fail] = driver_load.module_load(p, entry_fqn);
     if (sel load_r.err) {
-        ret driver_load.collect_loaded_parses(p, err[fail.Fail].err{load_failure_of(p, load_r.err)});
+        val failure: fail.Fail = entry_failure(p, entry_fqn, p.config.bin_name, te.entry_at, load_failure_of(p, load_r.err));
+        ret driver_load.collect_loaded_parses(p, err[fail.Fail].err{failure});
     }
 
     if (p.roots == project.ROOT_UNION) {
@@ -605,10 +608,12 @@ fun load_phase_impl(p: *project.Project, extra_roots: *intern.StrId,
         var ei:            u32          = 0;
         for (ei < p.union_entry_count) {
             p.loader.artifact = p.union_entries[ei].artifact;
-            val ear: res[session.ModuleId, fail.Fail] = driver_load.module_load(p, p.union_entries[ei].fqn);
+            val ue:  *project.ArtifactEntry           = ?p.union_entries[ei];
+            val ear: res[session.ModuleId, fail.Fail] = driver_load.module_load(p, ue.fqn);
             if (sel ear.err) {
                 p.loader.artifact = cell_artifact;
-                ret driver_load.collect_loaded_parses(p, err[fail.Fail].err{load_failure_of(p, ear.err)});
+                val failure: fail.Fail = entry_failure(p, ue.fqn, ue.artifact, ue.at, load_failure_of(p, ear.err));
+                ret driver_load.collect_loaded_parses(p, err[fail.Fail].err{failure});
             }
             ei = ei + 1;
         }
@@ -618,11 +623,13 @@ fun load_phase_impl(p: *project.Project, extra_roots: *intern.StrId,
         var fi_: u32 = 0;
         for (fi_ < p.foreign_entry_count) {
             p.loader.artifact = p.foreign_entries[fi_].artifact;
-            val far: res[session.ModuleId, fail.Fail] = driver_load.module_load(p, p.foreign_entries[fi_].fqn);
+            val fo:  *project.ArtifactEntry           = ?p.foreign_entries[fi_];
+            val far: res[session.ModuleId, fail.Fail] = driver_load.module_load(p, fo.fqn);
             if (sel far.err) {
                 p.loader.foreign  = false;
                 p.loader.artifact = cell_artifact;
-                ret driver_load.collect_loaded_parses(p, err[fail.Fail].err{load_failure_of(p, far.err)});
+                val failure: fail.Fail = entry_failure(p, fo.fqn, fo.artifact, fo.at, load_failure_of(p, far.err));
+                ret driver_load.collect_loaded_parses(p, err[fail.Fail].err{failure});
             }
             fi_ = fi_ + 1;
         }
@@ -984,6 +991,16 @@ fun load_failure_of(p: *project.Project, f: fail.Fail) fail.Fail {
     val status: fail.PhaseStatus = frontend.frontend_status(p);
     if (!sel status.kind.accepted) { ret fail.phase_failure(status); }
     ret fail.as_user(diagnostic_kind.SOURCE_LOAD, f);
+}
+
+# a load failure of the module an artifact's `entry` names: when the entry's own file could
+# not be read, the failure names the key and points at where the manifest writes it
+fun entry_failure(p: *project.Project, fqn: intern.StrId, artifact: intern.StrId, at: fail.Place, f: fail.Fail) fail.Fail {
+    if (fail.kind_of(f) != diagnostic_kind.SOURCE_LOAD) { ret f; }
+    if (!driver_load.module_unread(p, fqn))             { ret f; }
+    val text: res[str, fail.Fail] = fail.format_intern(?p.s.interner, p.alloc, "mach.toml: [artifact.{}].entry: {}", intern.text(?p.s.interner, artifact), fail.describe(f));
+    if (sel text.err) { ret text.err; }
+    ret fail.at(p.alloc, fail.with_text(f, text.ok), at);
 }
 
 #[testing]
@@ -8515,6 +8532,42 @@ test manifest__the_root_and_each_dependency_are_held_to_one_rule_per_key {
     val bare_refusal: opt[str] = build_refusal(?s, root);
     if (sel bare_refusal.none)                                                                    { ret 16; }
     if (!str_contains(bare_refusal.some, "dependency 'old': mach.toml: missing [profile] table")) { ret 17; }
+    ret 0;
+}
+
+# an artifact entry naming a missing file is refused naming the path the load tried and
+# the key that named it, pointing at where the manifest writes it
+test load__a_missing_entry_names_the_path_and_the_key {
+    var alloc:  A.Allocator;
+    val make_r: err[A.Error] = page.make(?alloc);
+    if (sel make_r.err) { ret 1; }
+    val sr: res[session.Session, fail.Fail] = toolchain.session_init(?alloc);
+    if (sel sr.err) { ret 1; }
+    var s: session.Session = sr.ok;
+    fin { session.dnit(?s); }
+
+    val text:   str                 = "[project]\nmach = \">=5\"\nid = \"app\"\nversion = \"0.0.0\"\nsrc = \"src\"\nwork = \"out\"\n\n[profile.debug]\ndefault = true\noptimize = false\ndebug = false\nsimd = \"scalarize\"\n\n[artifact.app]\nkind = \"bin\"\nentry = \"src/bin/app.mach\"\nout = \"{project.work}/bin/app\"\ntargets = [\"*\"]\nlink = []\nneed = []\n";
+    var names:  [1]str              = [1]str{"bin/app.mach"};
+    var texts:  [1]str              = [1]str{"fun main() i32 { ret 0; }\n"};
+    val root_r: res[str, fail.Fail] = scaffold(?alloc, text, ?names[0], ?texts[0], 1);
+    if (sel root_r.err) { ret 2; }
+    val root: str = root_r.ok;
+    fin { fs.remove_all(?alloc, root); }
+
+    val pr: res[project.Project, fail.Fail] = rebuild(?s, root);
+    if (sel pr.ok) {
+        var p: project.Project = pr.ok;
+        project.dnit_project(?p);
+        ret 3;
+    }
+    if (fail.kind_of(pr.err) != diagnostic_kind.SOURCE_LOAD) { ret 4; }
+    val message: str = fail.describe(pr.err);
+    if (!str_contains(message, "mach.toml: [artifact.app].entry: "))                             { ret 5; }
+    if (!str_contains(message, joined(?alloc, "cannot read '", root, "/src/src/bin/app.mach'"))) { ret 6; }
+    val at: opt[fail.Place] = fail.place_of(pr.err);
+    if (sel at.none)                                                   { ret 7; }
+    if (!str_equals(at.some.path, joined(?alloc, root, "/mach.toml"))) { ret 8; }
+    if (at.some.start.line != 16)                                      { ret 9; }
     ret 0;
 }
 

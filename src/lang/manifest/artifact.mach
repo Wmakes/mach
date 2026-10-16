@@ -183,7 +183,8 @@ fun artifact_decode(alloc: *A.Allocator, itn: *intern.Interner, name: str, label
     if (sel res_check_entry.err) { ret res_check_entry; }
     val entry_id: res[intern.StrId, fail.Fail] = id_of(itn, entry_s);
     if (sel entry_id.err) { ret err[fail.Fail].err{entry_id.err}; }
-    d.entry = entry_id.ok;
+    d.entry    = entry_id.ok;
+    d.entry_at = span_site(value_span(sub, "entry"));
 
     val out_s:     str                 = key_text(sub, "out");
     val out_field: res[str, fail.Fail] = sfmt(alloc, "{}.out", label);
