@@ -240,6 +240,14 @@ environment is read only during the call. everything else is as spawn
 
 envp: the child's environment, given native entries or this process's inherited
 
+## fun running
+
+```mach
+pub fun running(p: *OwnedSubprocess) bool;
+```
+
+whether `p` holds a child that has not ended, which a cancel or a timeout can stop
+
 ## fun wait
 
 ```mach

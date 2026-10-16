@@ -219,10 +219,13 @@ pub fun run(cx: *args.Call) res[i64, fail.Fail] {
         if (sel waited.ok)  { res_wait = res[subprocess.SubprocessTerminal, fail.Fail].ok{waited.ok}; }
     }
     if (sel res_wait.err) {
-        subprocess.cancel(alloc, ?child, 0);
-        val said: res[str, std_format.FormatError] = std_format.sprint(alloc, "failed to wait for the executed process: {}", fail.describe(res_wait.err));
-        if (sel said.err) { ret res[i64, fail.Fail].err{res_wait.err}; }
-        ret res[i64, fail.Fail].err{fail.with_text(res_wait.err, said.ok)};
+        val said:        res[str, std_format.FormatError] = std_format.sprint(alloc, "failed to wait for the executed process: {}", fail.describe(res_wait.err));
+        var waited_fail: fail.Fail                        = res_wait.err;
+        if (sel said.ok)                 { waited_fail = fail.with_text(res_wait.err, said.ok); }
+        if (!subprocess.running(?child)) { ret res[i64, fail.Fail].err{waited_fail}; }
+        val cancelled: res[subprocess.SubprocessTerminal, subprocess.Error] = subprocess.cancel(alloc, ?child, 0);
+        if (sel cancelled.err) { ret res[i64, fail.Fail].err{fail.with_secondary(alloc, waited_fail, subprocess.refusal(alloc, diagnostic_kind.PROCESS_WAIT, cancelled.err))}; }
+        ret res[i64, fail.Fail].err{waited_fail};
     }
     val expired:  bool                          = subprocess.expired(?child);
     val terminal: subprocess.SubprocessTerminal = res_wait.ok;
