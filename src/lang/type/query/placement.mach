@@ -221,7 +221,11 @@ fun entry_walk(p: *Places, ix: u32) {
     var f:          u32 = 0;
     for (f < fields_len) {
         val entry: opt[*type.FieldEntry] = type.field_at(p.q.types, nominal, f);
-        if (sel entry.some) { walk(p, ix, entry.some.ty, LAID, f); }
+        if (!sel entry.some) {
+            fail.internal(p.q.status, "placement: a field table runs past its fields");
+            ret;
+        }
+        walk(p, ix, entry.some.ty, LAID, f);
         f = f + 1;
     }
 }
@@ -256,7 +260,11 @@ fun walk(p: *Places, ix: u32, tid: type.TypeId, place: Place, field: u32) {
         var pi: u32 = 0;
         for (pi < t.data.fn.params_len) {
             val pp: opt[type.TypeId] = type.get_param(p.q.types, t.data.fn.params_start + pi);
-            if (sel pp.some) { walk(p, ix, pp.some, POINTEE, field); }
+            if (!sel pp.some) {
+                fail.internal(p.q.status, "placement: a parameter list runs past the store");
+                ret;
+            }
+            walk(p, ix, pp.some, POINTEE, field);
             pi = pi + 1;
         }
         ret;
@@ -274,14 +282,16 @@ fun walk(p: *Places, ix: u32, tid: type.TypeId, place: Place, field: u32) {
         var j:      u32         = 0;
         for (j < t.data.instance.args_len) {
             val arg: opt[type.TypeId] = type.get_param(p.q.types, t.data.instance.args_start + j);
-            if (sel arg.some) {
-                val held: u8  = bits(p, target, j);
-                var b:    u32 = 0;
-                for (b < PLACE_COUNT) {
-                    val at: Place = place_at(b);
-                    if ((held & at::u8) != 0) { walk(p, ix, arg.some, compose(place, at), field); }
-                    b = b + 1;
-                }
+            if (!sel arg.some) {
+                fail.internal(p.q.status, "placement: an argument list runs past the store");
+                ret;
+            }
+            val held: u8  = bits(p, target, j);
+            var b:    u32 = 0;
+            for (b < PLACE_COUNT) {
+                val at: Place = place_at(b);
+                if ((held & at::u8) != 0) { walk(p, ix, arg.some, compose(place, at), field); }
+                b = b + 1;
             }
             j = j + 1;
         }
@@ -298,7 +308,11 @@ fun walk(p: *Places, ix: u32, tid: type.TypeId, place: Place, field: u32) {
         var f:     u32   = 0;
         for (f < n) {
             val entry: opt[*type.FieldEntry] = type.field_at(p.q.types, tid, f);
-            if (sel entry.some) { walk(p, ix, entry.some.ty, inner, field); }
+            if (!sel entry.some) {
+                fail.internal(p.q.status, "placement: a field table runs past its fields");
+                ret;
+            }
+            walk(p, ix, entry.some.ty, inner, field);
             f = f + 1;
         }
     }
