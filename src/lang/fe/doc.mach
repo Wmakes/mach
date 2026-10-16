@@ -63,6 +63,7 @@ pub fun component_iter(source: str, doc: lang_source.Span) DocComponentIter {
     ret it;
 }
 
+# the next component written to `out`, false once none is left
 pub fun component_next(it: *DocComponentIter, out: *DocComponent) bool {
     var have:    bool             = false;
     var name:    lang_source.Span = empty_span();
@@ -78,7 +79,10 @@ pub fun component_next(it: *DocComponentIter, out: *DocComponent) bool {
         val starts:    bool             = component_head(it.source, it.off, content, le, ?name_span, ?head_lo);
 
         if (starts) {
-            if (have) { ret emit_component(out, name, desc_lo, desc_hi); }
+            if (have) {
+                emit_component(out, name, desc_lo, desc_hi);
+                ret true;
+            }
 
             have    = true;
             name    = name_span;
@@ -94,8 +98,8 @@ pub fun component_next(it: *DocComponentIter, out: *DocComponent) bool {
         if (it.off < it.end && it.source[it.off] == '\n') { it.off = it.off + 1; }
     }
 
-    if (have) { ret emit_component(out, name, desc_lo, desc_hi); }
-    ret false;
+    if (have) { emit_component(out, name, desc_lo, desc_hi); }
+    ret have;
 }
 
 fun empty_span() lang_source.Span {
@@ -176,7 +180,7 @@ fun component_head(source: str, off: usize, content: usize, le: usize, name_out:
     ret true;
 }
 
-fun emit_component(out: *DocComponent, name: lang_source.Span, desc_lo: usize, desc_hi: usize) bool {
+fun emit_component(out: *DocComponent, name: lang_source.Span, desc_lo: usize, desc_hi: usize) {
     out.name_span = name;
     if (desc_hi > desc_lo) {
         out.desc_span.offset = desc_lo;
@@ -185,7 +189,6 @@ fun emit_component(out: *DocComponent, name: lang_source.Span, desc_lo: usize, d
     or {
         out.desc_span = empty_span();
     }
-    ret true;
 }
 
 #[testing]
