@@ -216,6 +216,5 @@ pub fun fail_dnit(es: *EditorSession, f: *fail.Fail);
 release an operational failure returned by analyze or build
 
 es: the editor session that returned the Fail
-f: the Fail; nil, a reported Fail and an empty message are no-ops, and borrowed text (the
-    out-of-memory message) is left alone
+f: the Fail; nil is a no-op, and borrowed text (the out-of-memory message) is left alone
 

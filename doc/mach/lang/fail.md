@@ -25,7 +25,11 @@ failure is one that invents no text. an allocation refusal is internal; the
 compiler recovers from none of them at the site that met them. a failure
 that carries text records whether it owns it: owned text was allocated
 through the allocator `dnit` is given and is released there, borrowed text
-(a literal, an interned text, storage someone else releases) never is
+(a literal, an interned text, storage someone else releases) never is. a
+failure that points somewhere records whether it owns its places in the same
+way, all of them or none: `places_retain`, `retain` and the constructors that
+copy a place through an allocator own them, and every constructor that
+borrows a place leaves them borrowed
 
 ## rec Fix
 
@@ -167,8 +171,9 @@ pub fun placed(a: *A.Allocator, f: Fail, path: str, text: str) Fail;
 ```
 
 the same failure with its ranges resolved in `text`, the file at `path`, as
-`located` places them: its own and each related one still without a file. a
-failure without a range, or one already resolved, is returned as it is
+`located` places them: its own and each related one still without a file.
+the failure owns its places through `a` as `located` leaves them. a failure
+without a range, or one already resolved, is returned as it is
 
 ## fun placed_bytes
 
@@ -195,9 +200,9 @@ pub fun with_related(a: *A.Allocator, f: Fail, ps: *Place, n: usize) Fail;
 ```
 
 the same failure naming the `n` places at `ps` as its related places, in
-order, each copied through `a` as `at` copies a place; an unspanned place is
-skipped. a failure that already names related places keeps them, and one
-whose copy is refused is that refusal
+order, each copied through `a`, the failure owning its places as `located`
+leaves them; an unspanned place is skipped. a failure that already names
+related places keeps them, and one whose copy is refused is that refusal
 
 ## fun with_fix
 
@@ -207,8 +212,9 @@ pub fun with_fix(f: Fail, label: str, s: opt[lang_source.Span], replacement: str
 
 the same failure carrying the rewrite `label` names, which replaces the span
 `s` of the file it points into, or the bytes it points at when `s` is nil, with
-`replacement`. a failure with no kind carries none, and one that already
-carries a fix keeps it
+`replacement`, both borrowed, so the failure borrows its places: ones it owned
+before are the caller's to release. a failure with no kind carries none, and
+one that already carries a fix keeps it
 
 ## fun fix_of
 
@@ -233,9 +239,19 @@ the related places a failure names, none for one that names no other
 pub fun located(a: *A.Allocator, f: Fail, at: Place) Fail;
 ```
 
-the same failure pointing at `at`, its path copied through `a` so the failure
-owns it as it owns its text. a failure with no kind points nowhere, and one
-whose copy is refused is that refusal
+the same failure pointing at `at`, its path copied through `a`, so the failure
+owns its places through `a`: one that borrowed them owns copies of the rest
+too, and one that owned them releases the place `at` replaces. a failure with
+no kind points nowhere, and one whose copy is refused is that refusal
+
+## fun borrowing_places
+
+```mach
+pub fun borrowing_places(f: Fail) Fail;
+```
+
+the same failure borrowing its places, for a view of places a holder owns:
+the places it owned before are the caller's to release
 
 ## fun place
 
@@ -331,8 +347,8 @@ failure that outlives the storage its message was made in; released with
 pub fun dnit(a: *A.Allocator, f: Fail);
 ```
 
-release what a retained failure owns through `a`: its text when it owns it,
-and its places
+release what a failure owns through `a`: its text and its places, each when
+it owns them
 
 ## fun places_retain
 
@@ -351,7 +367,7 @@ pub fun places_dnit(a: *A.Allocator, f: Fail);
 ```
 
 release the places a failure owns through `a`, as `places_retain` made them;
-a failure carrying no fix owns no fix text
+borrowed places are left alone, and a failure carrying no fix owns no fix text
 
 ## fun without_places
 
