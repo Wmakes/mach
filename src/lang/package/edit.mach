@@ -482,7 +482,7 @@ pub fun apply(edit: *Edit, op: *package_closure.Operation, mode: u8, spec: *mani
             if (mode == package_pin.REPOSITORY_ROOT) { completed = "removed the dependency registration; checkout retained"; }
         }
         if (purge) {
-            val removed: res[usize, fail.Fail] = purge_beneath(edit.root_fd, name);
+            val removed: res[usize, fail.Fail] = purge_beneath(op.a, edit.root_fd, name);
             if (sel removed.err) { ret err[fail.Fail].err{removed.err}; }
             completed = "removed the dependency registration and purged its checkout";
         }
@@ -524,10 +524,10 @@ fun purge_dependency_dir(a: *A.Allocator, root: str, name: str) res[usize, fail.
     if (opened < 0) { ret res[usize, fail.Fail].err{fail.environment(diagnostic_kind.FS_READ, system_os.error_message(opened))}; }
     # a directory opened read-only loses nothing to a refused close
     fin { system_os.close(root_fd); }
-    ret purge_beneath(root_fd, name);
+    ret purge_beneath(a, root_fd, name);
 }
 
-fun purge_beneath(root_fd: usize, name: str) res[usize, fail.Fail] {
+fun purge_beneath(a: *A.Allocator, root_fd: usize, name: str) res[usize, fail.Fail] {
     var fd:     usize = system_os.INVALID_HANDLE;
     val opened: i64   = remove.open_dir(root_fd, driver_closure.DEP_DIR, ?fd);
     if (system_os.error_kind(opened) == io_error.NOT_FOUND) { ret res[usize, fail.Fail].ok{0}; }
@@ -536,8 +536,8 @@ fun purge_beneath(root_fd: usize, name: str) res[usize, fail.Fail] {
     fin { system_os.close(fd); }
     val rr: remove.Removal = remove.relative(fd, name);
     if (rr.failed) {
-        if (rr.containment) { ret res[usize, fail.Fail].err{fail.user(diagnostic_kind.DEP_PATH_ESCAPE, "dependency directory escapes the dependency root or is reached through a symlink; nothing was removed")}; }
-        ret res[usize, fail.Fail].err{fail.environment(diagnostic_kind.FS_REMOVE, remove.message(rr))};
+        if (rr.containment) { ret res[usize, fail.Fail].err{remove.with_cleanup(a, fail.user(diagnostic_kind.DEP_PATH_ESCAPE, "dependency directory escapes the dependency root or is reached through a symlink; nothing was removed"), rr)}; }
+        ret res[usize, fail.Fail].err{remove.with_cleanup(a, fail.environment(diagnostic_kind.FS_REMOVE, remove.message(rr)), rr)};
     }
     ret res[usize, fail.Fail].ok{rr.removed};
 }
@@ -557,11 +557,11 @@ test purge_beneath__a_removal_refusal_is_an_error {
     if (system_os.make_dir(root, "dep", 0o700) < 0 || system_os.make_dir(root, "dep/kept", 0o700) < 0) { ret 4; }
     val long: str = remove.t_component(?a, 256);
     if (long == nil) { ret 5; }
-    val too_long: res[usize, fail.Fail] = purge_beneath(root, long);
+    val too_long: res[usize, fail.Fail] = purge_beneath(?a, root, long);
     if (!sel too_long.err) { ret 6; }
-    val trailing: res[usize, fail.Fail] = purge_beneath(root, "kept/");
+    val trailing: res[usize, fail.Fail] = purge_beneath(?a, root, "kept/");
     if (sel trailing.ok) { ret 7; }
-    val kept: res[usize, fail.Fail] = purge_beneath(root, "kept");
+    val kept: res[usize, fail.Fail] = purge_beneath(?a, root, "kept");
     if (!(sel kept.ok && kept.ok > 0)) { ret 8; }
     ret 0;
 }
