@@ -3197,8 +3197,10 @@ fun named_builder(rc: *ResolveContext, k: diagnostic_kind.Kind, span: lang_sourc
     fail.reject(?rc.status);
     var begun: res[diagnostic.DiagnosticBuilder, fail.Fail] = res[diagnostic.DiagnosticBuilder, fail.Fail].err{fail.message("a reported name is absent from the interner")};
     val no:    opt[str]                                     = intern.get(?rc.s.interner, name_id);
-    if (sel no.some)   { begun = diagnostic.builder_initf(rc.diags.a, k, rc.a.file_id, span, "{}{}{}", prefix, no.some, suffix); }
-    if (sel begun.err) { fail.internal(?rc.status, fail.describe(begun.err)); }
+    # a nil name reports the prefix alone; a name the interner lacks is a defect
+    if (sel no.some)                { begun = diagnostic.builder_initf(rc.diags.a, k, rc.a.file_id, span, "{}{}{}", prefix, no.some, suffix); }
+    or (intern.str_is_nil(name_id)) { begun = diagnostic.builder_init(rc.diags.a, k, rc.a.file_id, span, prefix); }
+    if (sel begun.err)              { fail.internal(?rc.status, fail.describe(begun.err)); }
     ret begun;
 }
 

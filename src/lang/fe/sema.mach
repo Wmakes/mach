@@ -3057,16 +3057,18 @@ test uni_secrecy__annotations_share_one_walk {
     ret 0;
 }
 
-test alloc_failure__primitive_type_scan_is_internal {
+# the deep walk marks each nominal it meets, and a mark the allocator refuses fails the query
+# with that refusal
+test alloc_failure__nominal_type_scan_is_internal {
     var backing: A.Allocator;
     page.make(?backing);
     val sr: res[session.Session, fail.Fail] = session.init(?backing);
     if (sel sr.err) { ret 2; }
     var s: session.Session = sr.ok;
     fin { session.dnit(?s); }
-    val p: opt[type.TypeId] = type.prim(?s.types, type.TYPE_U32);
-    if (!sel p.some)                   { ret 3; }
-    if (s.types.scans.visits_cap != 0) { ret 4; }
+    val at: type.TypeOwner              = type.TypeOwner{module: module.stable_id(999), file: lang_source.file_id(1)};
+    val p:  res[type.TypeId, fail.Fail] = type.intern_nominal(?s.types, intern.STR_NIL, at, type.TYPE_REC);
+    if (sel p.err) { ret 3; }
     var t:      T.Testing;
     val make_2: err[A.Error] = T.make(?t);
     if (sel make_2.err) { ret 5; }
@@ -3074,7 +3076,7 @@ test alloc_failure__primitive_type_scan_is_internal {
     T.fail_at_ordinal(?t, 1);
     val original: *A.Allocator = s.types.a;
     s.types.a = T.allocator_of(?t);
-    val r: res[bool, fail.Fail] = deep.contains_secret(?s, p.some);
+    val r: res[bool, fail.Fail] = deep.contains_secret(?s, p.ok);
     s.types.a = original;
     if (sel r.ok)                                                                 { ret 6; }
     if (!str_equals(fail.describe(r.err), "out of memory"))                       { ret 7; }
