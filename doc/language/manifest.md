@@ -266,7 +266,7 @@ to whichever *declared* target matches the host.
 | Key   | Required | Meaning |
 |-------|----------|---------|
 | `isa` | yes      | Instruction-set architecture. Read by `$project.target.arch`. |
-| `baseline` | absent: the isa's default | The selection the target stands on, spelled as masc's catalog for the isa spells one, such as `rv32imc`. Only an isa whose catalog spells selections takes it. See [RISC-V baselines](#risc-v-baselines). |
+| `baseline` | absent: the os's floor; required on `freestanding` | The selection the target stands on, spelled as masc's catalog for the isa spells one, such as `rv32imc`. Only an isa whose catalog spells selections takes it. See [RISC-V baselines](#risc-v-baselines). |
 | `os`  | yes      | Operating system. Read by `$project.target.os`. |
 | `abi` | yes      | Application binary interface. Read by `$project.target.abi`. |
 | `of`  | absent: the os's format | Object-format override; defers to the os's format when omitted. See [Object-format override](#object-format-override). |
@@ -536,10 +536,12 @@ emits a finished GPU module rather than machine code (see
 ### RISC-V baselines
 
 `isa` names the architecture, and `baseline` the selection the target stands on,
-spelled as masc's riscv catalog spells one. A target that names no baseline stands
-on its isa's **default profile**: `riscv64` is `rv64gc` and `riscv32` is `rv32imac`.
-A baseline such as `rv32imc` or `rv64imafd` selects a smaller machine, and
-`extensions` adds names on top of it:
+spelled as masc's riscv catalog spells one. A target with an operating system that
+names no baseline stands on that system's **floor** for the isa: `riscv64` is
+`rv64gc`. A `freestanding` target must name its baseline, since the chip decides
+it and a default would fault on hardware that lacks an extension; leaving it out is
+refused (`target.baseline_required`). A baseline such as `rv32imc` or `rv64imafd`
+selects a smaller machine, and `extensions` adds names on top of it:
 
 ```toml
 [target.board]
@@ -574,10 +576,9 @@ the documented unchecked encoding boundary. C is accepted as a capability of the
 selected machine, but the emitter writes full-width instructions only.
 
 The ABI still selects the calling convention on its own, and it must fit the
-selected machine: `rv32imc` has no floating-point registers, so it takes
-`ilp32`, and `riscv32` (rv32imac) is refused with `ilp32f` or `ilp32d`; name
-`baseline = "rv32imafdc"` when RV32 hardware floating point is wanted. `mach init` scaffolds
-`riscv32`/`freestanding` with `ilp32` for that reason.
+selected machine: `rv32imc` and `rv32imac` have no floating-point registers, so
+they take `ilp32` and are refused with `ilp32f` or `ilp32d`; name
+`baseline = "rv32imafdc"` when RV32 hardware floating point is wanted.
 
 `lp64`, `lp64f`, `lp64d`, `ilp32`, `ilp32f`, and `ilp32d` are the RISC-V psABI
 calling-convention family, one `abi` per member. The lp64 three target
