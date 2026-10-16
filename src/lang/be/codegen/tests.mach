@@ -29,6 +29,7 @@ use std.types.string.str_replace;
 
 use mach.lang.be.codegen;
 use mach.lang.be.codegen.dwarf;
+use mach.lang.be.linker;
 use mir_lower: mach.lang.be.codegen.mir.lower;
 use mach.lang.be.codegen.testing.CODEGEN_CASE_NONE;
 use mach.lang.be.codegen.testing.CODEGEN_CASE_PUBLIC_MUL;
@@ -4857,4 +4858,192 @@ test stack_reserve__reaches_the_linked_pe {
     fs.remove_all(?alloc, root);
     session.dnit(?s);
     ret bad;
+}
+
+# the uniontest project with a static library of the same entry beside its binary
+#[testing]
+fun manifest_with_static() str {
+    ret "[project]\nmach = \">=5\"\nid = \"uniontest\"\nversion = \"0.0.0\"\nsrc = \"src\"\nwork = \"out/{target.name}/{profile.name}\"\n\n[target.linux]\nisa = \"x86_64\"\nos = \"linux\"\nabi = \"sysv64\"\n\n[target.windows]\nisa = \"x86_64\"\nos = \"windows\"\nabi = \"win64\"\n\n[target.darwin-x86_64]\nisa = \"x86_64\"\nos = \"darwin\"\nabi = \"sysv64\"\n\n[artifact.uniontest]\nkind = \"bin\"\nentry = \"main.mach\"\nout = \"{project.work}/bin/uniontest\"\ntargets = [\"*\"]\nlink = []\nneed = []\ndefault = true\n\n[artifact.unionlib]\nkind = \"static\"\nentry = \"main.mach\"\nout = \"{project.work}/lib/unionlib.a\"\ntargets = [\"*\"]\nlink = []\nneed = []\n[profile.debug]\ndefault = true\noptimize = false\ndebug = false\nsimd = \"scalarize\"\n";
+}
+
+# builds the static library `artifact` of the project at `root` for `target`
+# without the object cache and hands back the path it wrote
+#[testing]
+fun static_artifact_path(s: *session.Session, alloc: *A.Allocator, root: str, target: str, artifact: str) str {
+    val mr: res[manifest.Manifest, fail.Fail] = driver.load_manifest(s, root);
+    if (sel mr.err) { ret nil; }
+    var m:  manifest.Manifest    = mr.ok;
+    var rq: request.BuildRequest = request.defaults();
+    rq.project_root = root;
+    rq.target       = target;
+    rq.artifact     = artifact;
+    rq.goal         = request.GOAL_ARTIFACT;
+    rq.object_cache = false;
+    rq.debug        = false;
+    val pr: res[build_plan.BuildPlan, fail.Fail] = build_plan.plan_to_run(alloc, s, toolchain.t_registry(), ?m, rq);
+    if (sel pr.err) { ret nil; }
+    var bp:        build_plan.BuildPlan     = pr.ok;
+    var published: publication.Publications = publication.init(alloc);
+    fin { publication.dnit(?published); }
+    val r: res[outcome.BuildOutcome, fail.Fail] = engine.execute_warm(?bp, 0, s, ?published, alloc, nil);
+    if (sel r.err) {
+        print.eprintln(fail.describe(r.err));
+        ret nil;
+    }
+    var built:     outcome.BuildOutcome = r.ok;
+    val succeeded: bool                 = built.severity == outcome.BUILD_OK;
+    outcome.outcome_dnit(?built);
+    if (!succeeded) { ret nil; }
+    ret bp.units.data[0].out_path;
+}
+
+# the kept symbols agree: every one names the same size, kind and binding
+#[testing]
+fun same_symbols(a: *linker.CapturedImage, b: *linker.CapturedImage) bool {
+    if (a.symbol_count != b.symbol_count) { ret false; }
+    var i: u32 = 0;
+    for (i < a.symbol_count) {
+        val x:     *target_of.SymtabEntry = ?a.symbols[i];
+        var found: bool                   = false;
+        var k:     u32                    = 0;
+        for (!found && k < b.symbol_count) {
+            val y: *target_of.SymtabEntry = ?b.symbols[k];
+            found = intern.str_same(x.name, y.name) && x.size == y.size && x.kind == y.kind && x.global == y.global;
+            k     = k + 1;
+        }
+        if (!found) { ret false; }
+        i = i + 1;
+    }
+    ret true;
+}
+
+# the unwound functions agree: as many, each one with a match of its size and
+# unwind steps
+#[testing]
+fun same_functions(a: *linker.CapturedImage, b: *linker.CapturedImage) bool {
+    if (a.function_count != b.function_count) { ret false; }
+    var i: u32 = 0;
+    for (i < a.function_count) {
+        val x:     *target_of.ExecFunction = ?a.functions[i];
+        var found: bool                    = false;
+        var k:     u32                     = 0;
+        for (!found && k < b.function_count) {
+            val y: *target_of.ExecFunction = ?b.functions[k];
+            found = x.size == y.size && x.step_count == y.step_count;
+            k     = k + 1;
+        }
+        if (!found) { ret false; }
+        i = i + 1;
+    }
+    ret true;
+}
+
+#[testing]
+fun keeps_named(img: *linker.CapturedImage, s: *session.Session, needle: str) bool {
+    var i: u32 = 0;
+    for (i < img.symbol_count) {
+        val name: opt[str] = intern.get(?s.interner, img.symbols[i].name);
+        if (sel name.some && str_contains(name.some, needle)) { ret true; }
+        i = i + 1;
+    }
+    ret false;
+}
+
+# linking the static library of a project's modules keeps the code the link of
+# the modules themselves keeps, on each relocatable format: the same symbols
+# with the same sizes and the same unwound functions, whatever the layout. the
+# objects carry the symbol sizes the link splits sections by, the retained and
+# mergeable sections and the unwind frames, so the link collects the
+# unreferenced function, keeps the unreferenced global of a named section and
+# unwinds every function it keeps
+test static_library__keeps_what_its_modules_keep {
+    var alloc:  A.Allocator;
+    val make_r: err[A.Error] = page.make(?alloc);
+    if (sel make_r.err) { ret 1; }
+    var targets: [3]str = [3]str{"linux", "windows", "darwin-x86_64"};
+    var entries: [3]str = [3]str{"_start", "mainCRTStartup", "start"};
+    var t:       usize  = 0;
+    for (t < 3) {
+        var names: [2]str;
+        names[0] = "main.mach";
+        names[1] = "leaf.mach";
+        val main_r: res[str, fail.Fail] = fail.join(?alloc, "use uniontest.leaf;\n\n#[symbol(\"", entries[t],
+            "\")]\nfun start() i32 { ret leaf.one() + leaf.scale(2.5)::i32; }\n");
+        if (sel main_r.err) { ret 1; }
+        var texts: [2]str;
+        texts[0] = main_r.ok;
+        texts[1] = "fun unused(x: i32) i32 { ret x * 3; }\n\npub fun one() i32 { ret 1; }\n\npub fun scale(x: f64) f64 { ret x * 2.5; }\n\n#[section(\".kept\")]\npub var kept: [2]u64 = [2]u64{5, 6};\n";
+        val root_r: res[str, fail.Fail] = driver.scaffold(?alloc, manifest_with_static(), ?names[0], ?texts[0], 2);
+        if (sel root_r.err) { ret 1; }
+        val root:       str                 = root_r.ok;
+        val direct_r:   res[str, fail.Fail] = fail.join(?alloc, root, "/direct");
+        val relinked_r: res[str, fail.Fail] = fail.join(?alloc, root, "/relinked");
+        if (sel direct_r.err || sel relinked_r.err) { ret 1; }
+        var bad: i32 = 0;
+
+        val sr: res[session.Session, fail.Fail] = toolchain.session_init(?alloc);
+        if (sel sr.err) { ret 1; }
+        var s:        session.Session = sr.ok;
+        val lib_path: str             = static_artifact_path(?s, ?alloc, root, targets[t], "unionlib");
+        if (lib_path == nil) { bad = 3; }
+        var direct: linker.CapturedImage;
+        var linked: linker.CapturedImage;
+        if (bad == 0) {
+            var selection: manifest.Selectors              = manifest.t_selectors("", targets[t], "");
+            val opened:    res[project.Project, fail.Fail] = driver.build_project(?s, root, ?selection);
+            if (sel opened.err) { bad = 4; }
+            if (sel opened.ok) {
+                var p: project.Project = opened.ok;
+                if (run_codegen_ok(?p) != 0 || p.emit_len == 0) { bad = 5; }
+                var images: [8]target_of.ObjectImage;
+                var i:      u32 = 0;
+                for (bad == 0 && i < p.emit_len) {
+                    val m: *project.ModuleEntry = project.module_at(?p, (p.topo[i])::u32);
+                    if (i >= 8 || m.object_image == nil) { bad = 6; }
+                    or                                   { images[i] = @m.object_image; }
+                    i = i + 1;
+                }
+                val options: target_of.ImageOptions = target_of.image_options_default(catalog_subsystem.CONSOLE);
+                if (bad == 0) {
+                    val dr: err[fail.Fail] = linker.link_observed(?s, ?p.linkage, ?p.diags, ?p.target, ?images[0], p.emit_len,
+                        nil::*target_of.ObjectInput, 0, direct_r.ok, "uniontest"::*u8, options, ?direct);
+                    if (sel dr.err) {
+                        print.eprintln(fail.describe(dr.err));
+                        bad = 7;
+                    }
+                }
+                if (bad == 0) {
+                    var paths: [1]target_of.ObjectInput;
+                    paths[0] = target_of.ObjectInput{path: lib_path::*u8, origin: target_of.RELOC_INPUT};
+                    val lr: err[fail.Fail] = linker.link_observed(?s, ?p.linkage, ?p.diags, ?p.target, nil::*target_of.ObjectImage, 0,
+                        ?paths[0], 1, relinked_r.ok, "uniontest"::*u8, options, ?linked);
+                    if (sel lr.err) {
+                        print.eprintln(fail.describe(lr.err));
+                        bad = 8;
+                    }
+                }
+                project.dnit_project(?p);
+            }
+        }
+        if (bad == 0 && (!same_symbols(?direct, ?linked) || !keeps_named(?linked, ?s, "scale")
+            || keeps_named(?direct, ?s, "unused") || !keeps_named(?linked, ?s, "kept"))) {
+            print.eprint("static_library: ");
+            print.eprint(targets[t]);
+            print.eprintln(" keeps other symbols from its library");
+            bad = 9;
+        }
+        if (bad == 0 && (linked.function_count == 0 || !same_functions(?direct, ?linked))) {
+            print.eprint("static_library: ");
+            print.eprint(targets[t]);
+            print.eprintln(" unwinds other functions from its library");
+            bad = 10;
+        }
+        linker.captured_image_dnit(?direct, ?alloc);
+        linker.captured_image_dnit(?linked, ?alloc);
+        session.dnit(?s);
+        fs.remove_all(?alloc, root);
+        if (bad != 0) { ret (t::i32 + 1) * 100 + bad; }
+        t = t + 1;
+    }
+    ret 0;
 }
