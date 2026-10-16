@@ -122,8 +122,7 @@ pub fun parsed(p: *project.Project, m: *project.ModuleEntry) opt[ParsedModule] {
     val shown: opt[query.QueryView] = query.published(?p.s.queries, ?PARSE, lang_source.file_index(m.file_id)::u64, p.since);
     if (sel shown.none) { ret opt[ParsedModule].none{}; }
     val view: query.QueryView = shown.some;
-    if (view.value == nil || view.value_len::usize < $size_of(ParsedModule)) { ret opt[ParsedModule].none{}; }
-    ret opt[ParsedModule].some{@(view.value::ptr::*ParsedModule)};
+    ret opt[ParsedModule].some{@(codec.handle_bytes(view.value, view.value_len, $size_of(ParsedModule))::ptr::*ParsedModule)};
 }
 
 # a module's resolution as this project's operations last published it, nil when none did or its
@@ -239,9 +238,7 @@ fun parse_compute(raw: ptr, kind: *query.Kind, key: u64, alloc: *A.Allocator, di
 }
 
 fun parse_finalize(value: *u8, value_len: u32, alloc: *A.Allocator) {
-    if (value == nil || value_len::usize < $size_of(ParsedModule)) { ret; }
-    val a: *ast.Ast = (value::ptr::*ParsedModule).a;
-    if (a == nil) { ret; }
+    val a: *ast.Ast = (codec.handle_bytes(value, value_len, $size_of(ParsedModule))::ptr::*ParsedModule).a;
     ast.dnit(a);
     A.deallocate[ast.Ast](alloc, a, 1::usize);
 }
@@ -265,8 +262,7 @@ fun ast_handle_encode(alloc: *A.Allocator, a: *ast.Ast, status: fail.PhaseStatus
 }
 
 fun ast_handle_decode(e: query.QueryView) *ast.Ast {
-    if (e.value == nil || e.value_len::usize < $size_of(ParsedModule)) { ret nil; }
-    ret (e.value::ptr::*ParsedModule).a;
+    ret (codec.handle_bytes(e.value, e.value_len, $size_of(ParsedModule))::ptr::*ParsedModule).a;
 }
 
 fun exports_compute(raw: ptr, kind: *query.Kind, key: u64, alloc: *A.Allocator, diags: *diagnostic.DiagnosticStore) res[query.QueryOutput, fail.Fail] {
@@ -410,10 +406,7 @@ fun resolve_compute(raw: ptr, kind: *query.Kind, key: u64, alloc: *A.Allocator, 
 }
 
 fun resolve_finalize(value: *u8, value_len: u32, alloc: *A.Allocator) {
-    if (value == nil || value_len::usize < $size_of(ptr)) { ret; }
-    val slot: *ptr                   = value::ptr::*ptr;
-    val r:    *resolve.ResolveResult = slot[0]::*resolve.ResolveResult;
-    if (r == nil) { ret; }
+    val r: *resolve.ResolveResult = codec.resolve_handle_decode(query.QueryView{value: value, value_len: value_len});
     resolve.result_dnit(r);
     A.deallocate[resolve.ResolveResult](alloc, r, 1::usize);
 }
@@ -510,10 +503,7 @@ fun sema_compute(raw: ptr, kind: *query.Kind, key: u64, alloc: *A.Allocator, dia
 }
 
 fun sema_finalize(value: *u8, value_len: u32, alloc: *A.Allocator) {
-    if (value == nil || value_len::usize < $size_of(ptr)) { ret; }
-    val slot: *ptr                = value::ptr::*ptr;
-    val r:    *fe_sema.SemaResult = slot[0]::*fe_sema.SemaResult;
-    if (r == nil) { ret; }
+    val r: *fe_sema.SemaResult = sema_handle_decode(query.QueryView{value: value, value_len: value_len});
     fe_sema.result_dnit(r);
     A.deallocate[fe_sema.SemaResult](alloc, r, 1::usize);
 }
@@ -536,8 +526,7 @@ fun sema_handle_encode(alloc: *A.Allocator, r: *fe_sema.SemaResult) res[query.Qu
 }
 
 fun sema_handle_decode(e: query.QueryView) *fe_sema.SemaResult {
-    if (e.value == nil || e.value_len::usize < $size_of(ptr)) { ret nil; }
-    val slot: *ptr = e.value::ptr::*ptr;
+    val slot: *ptr = codec.handle_bytes(e.value, e.value_len, $size_of(ptr))::ptr::*ptr;
     ret slot[0]::*fe_sema.SemaResult;
 }
 
@@ -624,8 +613,7 @@ fun typed_surface_compute(raw: ptr, kind: *query.Kind, key: u64, alloc: *A.Alloc
 }
 
 fun surface_handle_decode(e: query.QueryView) *fe_sema.ModuleSema {
-    if (e.value == nil || e.value_len::usize < $size_of(ptr)) { ret nil; }
-    ret (e.value::ptr::*ptr)[0]::*fe_sema.ModuleSema;
+    ret (codec.handle_bytes(e.value, e.value_len, $size_of(ptr))::ptr::*ptr)[0]::*fe_sema.ModuleSema;
 }
 
 fun surface_release(surface: *fe_sema.ModuleSema, alloc: *A.Allocator) {
@@ -634,9 +622,7 @@ fun surface_release(surface: *fe_sema.ModuleSema, alloc: *A.Allocator) {
 }
 
 fun surface_finalize(value: *u8, value_len: u32, alloc: *A.Allocator) {
-    if (value == nil || value_len::usize < $size_of(ptr)) { ret; }
-    val surface: *fe_sema.ModuleSema = (value::ptr::*ptr)[0]::*fe_sema.ModuleSema;
-    if (surface != nil) { surface_release(surface, alloc); }
+    surface_release(surface_handle_decode(query.QueryView{value: value, value_len: value_len}), alloc);
 }
 
 fun read_typed_surface(p: *project.Project, mid: session.ModuleId, a: *A.Allocator) res[fe_sema.ModuleSema, fail.Fail] {
@@ -854,6 +840,7 @@ fun collect_lower_closure(p: *project.Project, m: *project.ModuleEntry) res[Lowe
     ret res[LowerClosure, fail.Fail].ok{cl};
 }
 
+# release a lowering closure; an empty one owns no list
 fun free_lower_closure(alloc: *A.Allocator, cl: *LowerClosure) {
     if (cl.list == nil || cl.cap == 0) { ret; }
     A.deallocate[session.ModuleId](alloc, cl.list, cl.cap::usize);

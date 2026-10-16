@@ -563,6 +563,7 @@ fun inline_bodies_compute(raw: ptr, kind: *query.Kind, key: u64, alloc: *A.Alloc
     ret encoded;
 }
 
+# release a lowering's output; an output with no bytes owns nothing
 fun release_lower_output(alloc: *A.Allocator, output: query.QueryOutput) {
     if (output.bytes == nil) { ret; }
     lower_finalize(output.bytes, output.len, alloc);
@@ -744,6 +745,7 @@ fun lower_stable_err(p: *project.Project, msg: str) str {
     ret "lowering failed, and re-homing its diagnostic off the module arena failed in turn (allocation failure)";
 }
 
+# release a module's IR home; a nil home holds nothing
 fun ir_release(alloc: *A.Allocator, home: *me_ir.ModuleHome) {
     if (home == nil) { ret; }
     me_ir.home_dnit(home);
@@ -751,8 +753,7 @@ fun ir_release(alloc: *A.Allocator, home: *me_ir.ModuleHome) {
 }
 
 fun lower_finalize(value: *u8, value_len: u32, alloc: *A.Allocator) {
-    if (value == nil || value_len < ir_handle_len()) { ret; }
-    val slot: *ptr = value::ptr::*ptr;
+    val slot: *ptr = codec.handle_bytes(value, value_len, ir_handle_len()::usize)::ptr::*ptr;
     ir_release(alloc, slot[1]::*me_ir.ModuleHome);
 }
 
@@ -777,8 +778,7 @@ fun ir_handle_encode(alloc: *A.Allocator, r: *me_ir.Module, home: *me_ir.ModuleH
 }
 
 fun ir_handle_decode(e: query.QueryView) *me_ir.Module {
-    if (e.value == nil || e.value_len < ir_handle_len()) { ret nil; }
-    val slot: *ptr = e.value::ptr::*ptr;
+    val slot: *ptr = codec.handle_bytes(e.value, e.value_len, ir_handle_len()::usize)::ptr::*ptr;
     ret slot[0]::*me_ir.Module;
 }
 
@@ -1366,10 +1366,7 @@ fun q_codegen_restored(p: *project.Project, mid: session.ModuleId, test_object: 
 }
 
 fun codegen_finalize(value: *u8, value_len: u32, alloc: *A.Allocator) {
-    if (value == nil || value_len::usize < $size_of(ptr)) { ret; }
-    val slot: *ptr                   = value::ptr::*ptr;
-    val r:    *target_of.ObjectImage = slot[0]::*target_of.ObjectImage;
-    if (r == nil) { ret; }
+    val r: *target_of.ObjectImage = image_handle_decode(query.QueryView{value: value, value_len: value_len});
     target_of.object_image_dnit(r);
     A.deallocate[target_of.ObjectImage](alloc, r, 1::usize);
 }
@@ -1392,8 +1389,7 @@ fun image_handle_encode(alloc: *A.Allocator, r: *target_of.ObjectImage) res[quer
 }
 
 fun image_handle_decode(e: query.QueryView) *target_of.ObjectImage {
-    if (e.value == nil || e.value_len::usize < $size_of(ptr)) { ret nil; }
-    val slot: *ptr = e.value::ptr::*ptr;
+    val slot: *ptr = codec.handle_bytes(e.value, e.value_len, $size_of(ptr))::ptr::*ptr;
     ret slot[0]::*target_of.ObjectImage;
 }
 
@@ -1476,6 +1472,5 @@ pub fun module_in_current_project(p: *project.Project, fqn: intern.StrId) bool {
 fun lower_output_equal(a: *u8, a_len: u32, b: *u8, b_len: u32) bool {
     val left:  *me_ir.Module = ir_handle_decode(query.QueryView{value: a, value_len: a_len});
     val right: *me_ir.Module = ir_handle_decode(query.QueryView{value: b, value_len: b_len});
-    if (left == nil || right == nil) { ret false; }
     ret equal.content_equal(left, right);
 }
