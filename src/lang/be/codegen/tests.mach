@@ -62,6 +62,7 @@ use mach.lang.be.codegen.testing.codegen_outcome_text;
 use mach.lang.be.codegen.testing.codegen_profile_ok;
 use mach.lang.be.codegen.testing.codegen_profile_rejects;
 use mach.lang.be.codegen.testing.codegen_result;
+use mach.lang.be.codegen.testing.concat;
 use mach.lang.be.codegen.testing.ct_edge_project;
 use mach.lang.be.codegen.testing.defined_fn_exact;
 use mach.lang.be.codegen.testing.divide_manifest;
@@ -130,6 +131,28 @@ use catalog_subsystem: mach.lang.target.catalog.subsystem;
 use extension_x64:     mach.lang.target.extension.x64;
 use target_of:         mach.lang.target.of;
 use mach.lang.target.of.bin;
+#[testing]
+use std.system.capability;
+#[testing]
+use diagnostic_kind: mach.lang.diagnostic.kind;
+#[testing]
+use mach.lang.stack;
+#[testing]
+use lang_target: mach.lang.target;
+#[testing]
+use mach.lang.target.abi;
+#[testing]
+use mach.lang.target.isa;
+#[testing]
+use lang_target_os: mach.lang.target.os;
+#[testing]
+use mach.lang.driver.config;
+#[testing]
+use mach.lang.driver.passes;
+#[testing]
+use target_os_linux: mach.lang.target.os.linux;
+#[testing]
+use step_glob: mach.lang.step.glob;
 
 #[testing]
 fun manifest_riscv_pair() str {
@@ -4978,7 +5001,8 @@ test static_library__keeps_what_its_modules_keep {
         val root:       str                 = root_r.ok;
         val direct_r:   res[str, fail.Fail] = fail.join(?alloc, root, "/direct");
         val relinked_r: res[str, fail.Fail] = fail.join(?alloc, root, "/relinked");
-        if (sel direct_r.err || sel relinked_r.err) { ret 1; }
+        if (sel direct_r.err)   { ret 1; }
+        if (sel relinked_r.err) { ret 1; }
         var bad: i32 = 0;
 
         val sr: res[session.Session, fail.Fail] = toolchain.session_init(?alloc);
@@ -5198,5 +5222,207 @@ test testing_mark__emitted_only_for_tests {
     val tested: i32 = testing_objects(true, ?seen);
     if (tested != 0)                                                                              { ret tested; }
     if (seen != (TESTING_PLAIN | TESTING_HELPER | TESTING_SLOT | TESTING_CALLED | TESTING_SHARED)) { ret 30; }
+    ret 0;
+}
+
+#[testing]
+fun fs_elf_manifest() str {
+    ret "[project]\nmach = \">=5\"\nid = \"fself\"\nversion = \"0.0.0\"\nsrc = \"src\"\nwork = \"out/{target.name}/{profile.name}\"\n\n[target.fsx]\nisa = \"x86_64\"\nos = \"freestanding\"\nabi = \"sysv64\"\nof = \"elf\"\n\n[target.fsr32]\nisa = \"rv32imafdc\"\nos = \"freestanding\"\nabi = \"ilp32d\"\nof = \"elf\"\n\n[target.lx]\nisa = \"x86_64\"\nos = \"linux\"\nabi = \"sysv64\"\n\n[profile.debug]\noptimize = false\ndebug = false\nsimd = \"scalarize\"\n\n[artifact.fself]\nkind = \"bin\"\nentry = \"main.mach\"\nout = \"{project.work}/bin/fself\"\ntargets = [\"*\"]\nlink = []\nneed = []\n";
+}
+
+#[testing]
+fun fs_elf_src() str {
+    ret "val table: [4]u32 = [4]u32{11, 22, 33, 44};\nvar counter: u32 = 0;\nvar scratch: [16]u32;\n#[symbol(\"_start\")]\npub fun start() {\n    var i: u32 = 0;\n    for (i < 4) {\n        counter = counter + table[i];\n        scratch[i] = counter;\n        i = i + 1;\n    }\n}\n";
+}
+
+#[testing]
+rec LoadSeg {
+    off:    u64;
+    vaddr:  u64;
+    filesz: u64;
+}
+
+#[testing]
+fun le64(b: *u8, off: usize) u64 {
+    ret le32(b, off) | (le32(b, off + 4) << 32);
+}
+
+#[testing]
+fun elf_loads(img: *Vector[u8], segs: *LoadSeg, cap: u32, entry_out: *u64) u32 {
+    if (img.len < 64) { ret 0; }
+    val b:     *u8  = img.data;
+    val elf32: bool = b[4] == 1;
+
+    var phoff:     u64 = 0;
+    var phentsize: u64 = 0;
+    var phnum:     u64 = 0;
+    if (elf32) {
+        @entry_out = le32(b, 24);
+        phoff      = le32(b, 28);
+        phentsize  = le16(b, 42);
+        phnum      = le16(b, 44);
+    }
+    or {
+        @entry_out = le64(b, 24);
+        phoff      = le64(b, 32);
+        phentsize  = le16(b, 54);
+        phnum      = le16(b, 56);
+    }
+
+    var n: u32 = 0;
+    var i: u64 = 0;
+    for (i < phnum && n < cap) {
+        val p: usize = (phoff + i * phentsize)::usize;
+        if (p + phentsize::usize > img.len) { ret n; }
+        if (le32(b, p) == 1) {
+            if (elf32) {
+                segs[n].off    = le32(b, p + 4);
+                segs[n].vaddr  = le32(b, p + 8);
+                segs[n].filesz = le32(b, p + 16);
+            }
+            or {
+                segs[n].off    = le64(b, p + 8);
+                segs[n].vaddr  = le64(b, p + 16);
+                segs[n].filesz = le64(b, p + 32);
+            }
+            n = n + 1;
+        }
+        i = i + 1;
+    }
+    ret n;
+}
+
+#[testing]
+fun link_exe_image(p: *project.Project, root: str, out: *Vector[u8]) bool {
+    val alloc: *A.Allocator = p.alloc;
+    if (p.emit_len == 0) { ret false; }
+
+    val ir: res[*target_of.ObjectImage, A.Error] = A.allocate[target_of.ObjectImage](alloc, p.emit_len::usize);
+    if (sel ir.err) { ret false; }
+    val images:  *target_of.ObjectImage = ir.ok;
+    var missing: bool                   = false;
+    var i:       u32                    = 0;
+    for (i < p.emit_len) {
+        val m: *project.ModuleEntry = project.module_at(p, (p.topo[i])::u32);
+        if (m.object_image == nil) { missing = true; }
+        or                         { images[i] = @m.object_image; }
+        i = i + 1;
+    }
+
+    var linked: bool = false;
+    val path:   str  = concat(alloc, root, "/", "image.elf");
+    if (!missing) {
+        val lr: err[fail.Fail] = planned_link_images(p.s, ?p.linkage, ?p.target, images, p.emit_len,
+            nil::*target_of.DynLib, 0, path::*u8, "fself"::*u8, catalog_artifact.EXECUTABLE, false,
+            target_of.image_options_default(catalog_subsystem.CONSOLE));
+        linked = sel lr.ok;
+    }
+    A.deallocate[target_of.ObjectImage](alloc, images, p.emit_len::usize);
+    if (!linked) { ret false; }
+
+    val br: res[Vector[u8], fs.FsError] = fs.read_bytes(alloc, path);
+    if (sel br.err) { ret false; }
+    @out = br.ok;
+    ret true;
+}
+
+#[testing]
+fun fs_elf_image(alloc: *A.Allocator, target_name: str, out: *Vector[u8]) bool {
+    val sr: res[session.Session, fail.Fail] = toolchain.session_init(alloc);
+    if (sel sr.err) { ret false; }
+    var s: session.Session = sr.ok;
+    fin { session.dnit(?s); }
+
+    var names: [1]str;
+    names[0] = "main.mach";
+    var texts: [1]str;
+    texts[0] = fs_elf_src();
+    val root_r: res[str, fail.Fail] = driver.scaffold(alloc, fs_elf_manifest(), ?names[0], ?texts[0], 1);
+    if (sel root_r.err) { ret false; }
+    val root: str = root_r.ok;
+
+    var ok:         bool                            = false;
+    var tsel_16525: manifest.Selectors              = manifest.t_selectors("", target_name, "");
+    val pr:         res[project.Project, fail.Fail] = driver.build_project(?s, root, ?tsel_16525);
+    if (sel pr.ok) {
+        var p: project.Project = pr.ok;
+        if (run_codegen_ok(?p) == 0) { ok = link_exe_image(?p, root, out); }
+        project.dnit_project(?p);
+    }
+    fs.remove_all(alloc, root);
+    ret ok;
+}
+
+#[testing]
+val FS_VADDR_CEIL: u64 = 0x100000;
+
+#[testing]
+fun fs_elf_unmapped_header(alloc: *A.Allocator, target_name: str) bool {
+    var img: Vector[u8];
+    if (!fs_elf_image(alloc, target_name, ?img)) { ret false; }
+
+    var segs:  [16]LoadSeg;
+    var entry: u64 = 0;
+    val n:     u32 = elf_loads(?img, ?segs[0], 16, ?entry);
+
+    var ok:           bool = n > 0;
+    var covers_entry: bool = false;
+    var i:            u32  = 0;
+    for (i < n) {
+        if (segs[i].off == 0)                                                 { ok = false; }
+        if (segs[i].vaddr >= FS_VADDR_CEIL)                                { ok = false; }
+        if (segs[i].off + segs[i].filesz > img.len::u64)                      { ok = false; }
+        if (entry >= segs[i].vaddr && entry < segs[i].vaddr + segs[i].filesz) { covers_entry = true; }
+        i = i + 1;
+    }
+    if (!covers_entry) { ok = false; }
+
+    collections_vector.dnit[u8](?img);
+    ret ok;
+}
+
+#[testing]
+fun linux_elf_maps_header(alloc: *A.Allocator) bool {
+    var img: Vector[u8];
+    if (!fs_elf_image(alloc, "lx", ?img)) { ret false; }
+
+    var segs:  [16]LoadSeg;
+    var entry: u64 = 0;
+    val n:     u32 = elf_loads(?img, ?segs[0], 16, ?entry);
+
+    var headers: u32  = 0;
+    var content: u32  = 0;
+    var ok:      bool = n > 1;
+    var i:       u32  = 0;
+    for (i < n) {
+        if (segs[i].off == 0) {
+            headers = headers + 1;
+            if (segs[i].vaddr != target_os_linux.BASE_ADDR - target_os_linux.PAGE_SIZE) { ok = false; }
+        }
+        or {
+            content = content + 1;
+            if (segs[i].vaddr < target_os_linux.BASE_ADDR) { ok = false; }
+        }
+        i = i + 1;
+    }
+    if (headers != 1 || content == 0) { ok = false; }
+
+    collections_vector.dnit[u8](?img);
+    ret ok;
+}
+
+# a freestanding elf, 64-bit and 32-bit, maps no header segment and keeps every load below
+# the ceiling; a linux elf maps its header one page below the base
+test elf_link__freestanding_maps_no_header_segment {
+    var alloc:  A.Allocator;
+    val make_r: err[A.Error] = page.make(?alloc);
+    if (sel make_r.err) { ret 1; }
+
+    var bad: bool = false;
+    if (!fs_elf_unmapped_header(?alloc, "fsx"))   { bad = true; }
+    if (!fs_elf_unmapped_header(?alloc, "fsr32")) { bad = true; }
+    if (!linux_elf_maps_header(?alloc))           { bad = true; }
+
+    if (bad) { ret 1; }
     ret 0;
 }

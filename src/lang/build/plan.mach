@@ -1617,6 +1617,25 @@ test plan__a_test_goal_selection_error_fails_at_planning_with_the_selector_messa
     ret 0;
 }
 
+# a test goal names no artifact: the plan tests the one the selected target builds
+test test_goal__plans_the_artifact_of_the_selected_target {
+    var alloc: A.Allocator;
+    var itn:   intern.Interner;
+    var m:     manifest.Manifest;
+    if (!ut_scaffold_src(?alloc, ?itn, ?m, ut_split_src())) { ret 1; }
+
+    var rq: request.BuildRequest = request.defaults();
+    rq.project_root = "/r";
+    rq.target       = "host";
+    rq.goal         = request.GOAL_TESTS;
+
+    val pr: res[BuildPlan, fail.Fail] = plan(?alloc, ?itn, lang_target.t_registry(), ?m, rq);
+    if (sel pr.err)                                           { ret 2; }
+    if (pr.ok.units.len != 1)                                 { ret 3; }
+    if (!str_equals(pr.ok.units.data[0].sel_artifact, "tool")) { ret 4; }
+    ret 0;
+}
+
 # a test goal never falls back to the first-declared artifact
 test plan__a_test_goal_without_a_default_among_several_artifacts_is_refused_naming_the_default_key {
     var alloc: A.Allocator;
@@ -1635,6 +1654,16 @@ test plan__a_test_goal_without_a_default_among_several_artifacts_is_refused_nami
     if (!sel f.user)                                                                                                          { ret 2; }
     if (!str_contains(fail.describe(f), "several artifacts support the selected target and none is marked `default = true`")) { ret 3; }
     if (!str_contains(fail.describe(f), "select one with -a"))                                                                { ret 4; }
+
+    # the request the command line composes leaves the artifact for the plan to refuse
+    var cli: request.Overrides = request.overrides_init(?alloc);
+    cli.jobs = 1;
+    val composed: res[request.BuildRequest, fail.Fail] = request.compose(?alloc, ?itn, ?m, ?cli, "/r", request.GOAL_TESTS, "");
+    if (sel composed.err) { ret 7; }
+    var crq: request.BuildRequest = composed.ok;
+    crq.target = "ta";
+    val cr: res[BuildPlan, fail.Fail] = plan(?alloc, ?itn, lang_target.t_registry(), ?m, crq);
+    if (sel cr.ok) { ret 8; }
 
     # naming the artifact selects it
     rq.artifact = "second";

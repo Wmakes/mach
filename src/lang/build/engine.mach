@@ -77,6 +77,32 @@ use std.types.string.str_join;
 use fe_sema: mach.lang.fe.sema;
 #[testing]
 use mach.lang.me.pipeline;
+#[testing]
+use mach.lang.driver.frontend;
+#[testing]
+use sema_checked: mach.lang.fe.sema.checked;
+#[testing]
+use mach.lang.manifest.target.on_host;
+#[testing]
+use std.system.capability;
+#[testing]
+use std.text.string.str_dup;
+#[testing]
+use mach.lang.linkage;
+#[testing]
+use mach.lang.stack;
+#[testing]
+use mach.lang.target.abi;
+#[testing]
+use mach.lang.target.isa;
+#[testing]
+use lang_target_os: mach.lang.target.os;
+#[testing]
+use mach.lang.driver.config;
+#[testing]
+use target_os_linux: mach.lang.target.os.linux;
+#[testing]
+use step_glob: mach.lang.step.glob;
 
 rec UnitState {
     inputs:     *target_of.ObjectInput;
@@ -2869,10 +2895,10 @@ test readout__a_gate_deferred_module_is_counted_once {
     ret bad;
 }
 
-# `head` followed by `tail` in `alloc`, never released; a refused allocation ends the test
+# the pieces joined in order in `alloc`, never released; a refused allocation ends the test
 #[testing]
-fun spliced(alloc: *A.Allocator, head: str, tail: str) str {
-    val made: res[str, StrError] = str_join(alloc, head, tail);
+fun spliced(alloc: *A.Allocator, va: ...) str {
+    val made: res[str, StrError] = str_join(alloc, va...);
     if (sel made.ok) { ret made.ok; }
     panic("engine: a spliced source was refused\n");
     ret "";
@@ -3631,4 +3657,1701 @@ $if ($mach.build.os == $mach.os.linux && $mach.build.arch == $mach.arch.x86_64) 
         if (native_case(?alloc, "linux-x86_64", "", true, generic_over_user_res_program(), "generic over a user res") != 0)  { ret 2; }
         ret 0;
     }
+}
+
+#[testing]
+fun manifest_mixed_targets() str {
+    ret "[project]\nmach = \">=5\"\nid = \"mixtest\"\nversion = \"0.1.0\"\nsrc = \"src\"\nwork = \"out/{target.name}/{profile.name}\"\n\n[target.linux-x86_64]\nisa = \"x86_64\"\nos = \"linux\"\nabi = \"sysv64\"\n\n[target.spirv]\nisa = \"spirv\"\nos = \"freestanding\"\nabi = \"spirv\"\nof = \"spv\"\n\n[profile.debug]\noptimize = false\ndebug = false\nsimd = \"scalarize\"\n\n[artifact.host]\nkind = \"static\"\nentry = \"lib.mach\"\nout = \"{project.work}/lib/mixtest\"\ntargets = [\"linux-x86_64\"]\nlink = []\nneed = []\n\n[artifact.probe_frag]\nkind = \"bin\"\nentry = \"probe_frag.mach\"\nout = \"{project.work}/probe_frag.spv\"\ntargets = [\"spirv\"]\nlink = []\nneed = []\n";
+}
+
+#[testing]
+fun shard_len(s: *session.Session, kind: *query.Kind) u32 {
+    ret query.shard_len(?s.queries, kind);
+}
+
+#[testing]
+fun stable_of(s: *session.Session, fqn: str) session.StableModuleId {
+    val idr: res[intern.StrId, A.Error] = intern.add(?s.interner, fqn);
+    if (sel idr.err) { ret session.STABLE_MODULE_NIL; }
+    ret session.stable_module_id_lookup(s, idr.ok);
+}
+
+test execute__artifact_build_roots_at_reachable_modules {
+    var w:      WarmProject;
+    val opened: err[fail.Fail] = warm_project_init(?w);
+    if (sel opened.err) { ret 1; }
+    fin { warm_project_dnit(?w); }
+
+    var names: [3]str;
+    names[0] = "lib.mach";
+    names[1] = "probe_frag.mach";
+    names[2] = "other.mach";
+    var texts: [3]str;
+    texts[0] = "pub fun hello() i32 { ret missing_host_function(); }\n";
+    texts[1] = "#[output(0)] var out_colour: f32x4;\n\n#[stage(\"fragment\")]\nfun frag_main() {\n    out_colour = f32x4{1.0, 0.0, 0.0, 1.0};\n}\n";
+    texts[2] = "pub fun touch() { missing_unrelated_function(); }\n";
+    val scaffolded: err[fail.Fail] = warm_project_scaffold(?w, manifest_mixed_targets(), ?names[0], ?texts[0], 3);
+    if (sel scaffolded.err) { ret 1; }
+
+    var rq: request.BuildRequest = request.defaults();
+    rq.target   = "spirv";
+    rq.artifact = "probe_frag";
+    val planned: err[fail.Fail] = warm_project_plan(?w, rq);
+    if (sel planned.err) { ret 1; }
+
+    var bad: i32                                  = 0;
+    val r:   res[outcome.BuildOutcome, fail.Fail] = execute_warm(?w.plan, 0, ?w.s, ?w.published, ?w.alloc, nil);
+    if (sel r.err)                         { ret 1; }
+    if (r.ok.severity != outcome.BUILD_OK) { bad = 1; }
+
+    val st_shader: session.StableModuleId = stable_of(?w.s, "mixtest.probe_frag");
+    val st_host:   session.StableModuleId = stable_of(?w.s, "mixtest.lib");
+    val st_other:  session.StableModuleId = stable_of(?w.s, "mixtest.other");
+    if (module.stable_is_nil(st_shader))                                                              { bad = 1; }
+    if (!module.stable_is_nil(st_host))                                                               { bad = 1; }
+    if (!module.stable_is_nil(st_other))                                                              { bad = 1; }
+    if (query.peek_revision(?w.s.queries, ?frontend.SEMA, module.stable_index(st_shader)::u64) == 0)  { bad = 1; }
+    if (query.peek_revision(?w.s.queries, ?passes.CODEGEN, module.stable_index(st_shader)::u64) == 0) { bad = 1; }
+
+    ret bad;
+}
+
+# a root project whose surface module re-exports one declaration of every kind
+# that has instances instead of a definition, one ordinary declaration, and a
+# whole module that holds a generic; built as a shared library, a static
+# archive and an executable
+#[testing]
+fun manifest_shared_fwd() str {
+    ret "[project]\nmach = \">=5\"\nid = \"shfwd\"\nversion = \"0.0.0\"\nsrc = \"src\"\nwork = \"out/{target.name}/{profile.name}\"\n\n[target.linux]\nisa = \"x86_64\"\nos = \"linux\"\nabi = \"sysv64\"\n\n[target.windows]\nisa = \"x86_64\"\nos = \"windows\"\nabi = \"win64\"\n\n[target.linux-arm64]\nisa = \"aarch64\"\nos = \"linux\"\nabi = \"aapcs64\"\n\n[target.linux-riscv64]\nisa = \"riscv64\"\nos = \"linux\"\nabi = \"lp64d\"\n\n[target.darwin-x86_64]\nisa = \"x86_64\"\nos = \"darwin\"\nabi = \"sysv64\"\n\n[target.darwin-arm64]\nisa = \"aarch64\"\nos = \"darwin\"\nabi = \"aapcs64\"\n\n[artifact.shared]\nkind = \"shared\"\nentry = \"lib.mach\"\nout = \"{project.work}/lib/shared\"\ntargets = [\"*\"]\nlink = []\nneed = []\n\n[artifact.archive]\nkind = \"static\"\nentry = \"lib.mach\"\nout = \"{project.work}/lib/archive\"\ntargets = [\"*\"]\nlink = []\nneed = []\n\n[artifact.program]\nkind = \"bin\"\nentry = \"main.mach\"\nout = \"{project.work}/bin/program\"\ntargets = [\"*\"]\nlink = []\nneed = []\n[profile.debug]\ndefault = true\noptimize = false\ndebug = false\nsimd = \"scalarize\"\n";
+}
+
+#[testing]
+val SHARED_FWD_WARNING: str = "exports nothing from a shared library";
+
+#[testing]
+fun diag_count_warning(d: *diagnostic.DiagnosticStore, needle: str) u32 {
+    var hits: u32   = 0;
+    var i:    usize = 0;
+    for (i < diagnostic.len(d)) {
+        if (!diagnostic_kind.is_error(d.items.data[i].kind)
+            && str_contains(d.items.data[i].message, needle)) { hits = hits + 1; }
+        i = i + 1;
+    }
+    ret hits;
+}
+
+# builds the named artifact of the shared-fwd project and reports how many
+# re-export warnings the build raised; negative is a scaffold or engine failure
+#[testing]
+fun shared_fwd_arm(alloc: *A.Allocator, artifact: str, s: *session.Session) i32 {
+    var names: [4]str;
+    names[0] = "lib.mach";
+    names[1] = "parts.mach";
+    names[2] = "deep.mach";
+    names[3] = "main.mach";
+    var texts: [4]str;
+    texts[0] = "use shfwd.parts;\n\nfwd parts.ident;\nfwd parts.plain;\nfwd parts.sized;\nfwd parts.total;\nfwd shfwd.deep;\n\npub fun anchor() i32 { ret 1; }\n";
+    texts[1] = "pub fun ident[T](x: T) T { ret x; }\npub fun plain(x: i32) i32 { ret x; }\npub fun sized($n: i32) i32 { ret n; }\npub fun total(xs: ...) i32 { ret 0; }\n";
+    texts[2] = "pub fun gen[T](x: T) T { ret x; }\npub fun leaf() i32 { ret 2; }\n";
+    texts[3] = spliced(alloc, "use shfwd.parts;\n\nfwd parts.ident;\n\n#[symbol(\"", entry_symbol(), "\")]\nfun start() i32 { ret parts.plain(0); }\n");
+    val root_r: res[str, fail.Fail] = driver.scaffold(alloc, manifest_shared_fwd(), ?names[0], ?texts[0], 4);
+    if (sel root_r.err) { ret -1; }
+    val root: str = root_r.ok;
+    fin { fs.remove_all(alloc, root); }
+
+    val mr: res[manifest.Manifest, fail.Fail] = driver.load_manifest(s, root);
+    if (sel mr.err) { ret -2; }
+    var m:  manifest.Manifest    = mr.ok;
+    var rq: request.BuildRequest = request.defaults();
+    rq.project_root = root;
+    rq.artifact     = artifact;
+    val pr: res[build_plan.BuildPlan, fail.Fail] = build_plan.plan_to_run(alloc, s, toolchain.t_registry(), ?m, rq);
+    if (sel pr.err) { ret -3; }
+    var bp: build_plan.BuildPlan = pr.ok;
+
+    # the warning is raised at lowering, so the link's verdict on this host is
+    # not what the arm measures
+    var published: publication.Publications = publication.init(alloc);
+    fin { publication.dnit(?published); }
+    val r: res[outcome.BuildOutcome, fail.Fail] = execute_warm(?bp, 0, s, ?published, alloc, nil);
+    if (sel r.err)                       { ret -4; }
+    if (diagnostic.has_errors(?s.diags)) { ret -5; }
+    ret diag_count_warning(?s.diags, SHARED_FWD_WARNING)::i32;
+}
+
+# a shared library build warns once per `fwd` of a generic, comptime-parameter
+# or pack declaration, naming it, and says nothing about the ordinary `fwd` or
+# the `fwd` of a module
+test execute_warm__a_shared_library_fwd_of_a_generic_warns_at_the_fwd {
+    var alloc:  A.Allocator;
+    val make_r: err[A.Error] = page.make(?alloc);
+    if (sel make_r.err) { ret 1; }
+    val sr: res[session.Session, fail.Fail] = toolchain.session_init(?alloc);
+    if (sel sr.err) { ret 1; }
+    var s: session.Session = sr.ok;
+    fin { session.dnit(?s); }
+
+    val count: i32 = shared_fwd_arm(?alloc, "shared", ?s);
+    if (count < 0)                                                                                             { ret 10 - count; }
+    if (count != 3)                                                                                            { ret 2; }
+    if (!diag_has_warning(?s.diags, "`fwd` of the generic declaration `ident` exports nothing"))            { ret 3; }
+    if (!diag_has_warning(?s.diags, "`fwd` of the comptime-parameter declaration `sized` exports nothing")) { ret 4; }
+    if (!diag_has_warning(?s.diags, "`fwd` of the pack declaration `total` exports nothing"))               { ret 5; }
+    if (!diag_has_warning(?s.diags, "export a `pub` non-generic wrapper"))                                  { ret 6; }
+    if (diag_has_warning(?s.diags, "`plain`"))                                                              { ret 7; }
+    # `fwd` of a whole module exports its non-generic surface, so nothing names what it holds
+    if (diag_has_warning(?s.diags, "`gen`"))  { ret 8; }
+    if (diag_has_warning(?s.diags, "`leaf`")) { ret 9; }
+    if (diag_has_warning(?s.diags, "`deep`")) { ret 10; }
+    ret 0;
+}
+
+# the same `fwd` lines in a static archive or an executable raise nothing: no
+# export surface is at stake
+test execute_warm__a_static_or_executable_fwd_of_a_generic_does_not_warn {
+    var artifacts: [2]str = [2]str{"archive", "program"};
+    var i:         usize  = 0;
+    for (i < 2) {
+        var alloc:  A.Allocator;
+        val make_r: err[A.Error] = page.make(?alloc);
+        if (sel make_r.err) { ret 1; }
+        val sr: res[session.Session, fail.Fail] = toolchain.session_init(?alloc);
+        if (sel sr.err) { ret 1; }
+        var s:     session.Session = sr.ok;
+        val count: i32             = shared_fwd_arm(?alloc, artifacts[i], ?s);
+        session.dnit(?s);
+        if (count < 0)  { ret 10 - count; }
+        if (count != 0) { ret 2 + i::i32; }
+        i = i + 1;
+    }
+    ret 0;
+}
+
+# `[project].work` is the user's: the build replaces a stale entry beneath it
+# but never a file standing where the output directory itself belongs
+test execute_warm__blocked_output_directory_is_environmental {
+    var w:      WarmProject;
+    val opened: err[fail.Fail] = warm_project_init(?w);
+    if (sel opened.err) { ret 1; }
+    fin { warm_project_dnit(?w); }
+
+    var names: [1]str;
+    names[0] = "main.mach";
+    var texts: [1]str;
+    texts[0] = spliced(?w.alloc, "#[symbol(\"", entry_symbol(), "\")]\nfun start() i32 { ret 0; }\n");
+    val scaffolded: err[fail.Fail] = warm_project_scaffold(?w, driver.fixture_manifest(), ?names[0], ?texts[0], 1);
+    if (sel scaffolded.err) { ret 1; }
+
+    val out_path: str             = spliced(?w.alloc, w.root, "/", "out");
+    val blk:      err[fs.FsError] = fs.write_bytes(out_path, "blocked", 7, 420);
+    if (sel blk.err) { ret 1; }
+
+    var rq:      request.BuildRequest = request.defaults();
+    val planned: err[fail.Fail]       = warm_project_plan(?w, rq);
+    if (sel planned.err) { ret 1; }
+
+    var bad: i32                                  = 0;
+    val r:   res[outcome.BuildOutcome, fail.Fail] = execute_warm(?w.plan, 0, ?w.s, ?w.published, ?w.alloc, nil);
+    if (sel r.err) { bad = 1; }
+    if (sel r.ok) {
+        val bo: outcome.BuildOutcome = r.ok;
+        if (bo.severity != outcome.BUILD_ENVIRONMENT) { bad = 1; }
+    }
+
+    ret bad;
+}
+
+# an unchanged rebuild in one warm session reuses every query in memory, and an edit reruns
+# only what it reaches. the object cache is off (request.defaults), so nothing here is read
+# from obj/: a cached rebuild is object_cache__warm_build_links_the_same_binary's
+test execute_warm__unchanged_rebuild_reuses_and_stays_bounded {
+    var w:      WarmProject;
+    val opened: err[fail.Fail] = warm_project_init(?w);
+    if (sel opened.err) { ret 1; }
+    fin { warm_project_dnit(?w); }
+
+    var names: [3]str;
+    names[0] = "main.mach";
+    names[1] = "a.mach";
+    names[2] = "b.mach";
+    var texts: [3]str;
+    texts[0] = spliced(?w.alloc, "use uniontest.a.fa;\nuse uniontest.b.fb;\n#[symbol(\"", entry_symbol(), "\")]\nfun start() i32 { ret fa() + fb(); }\n");
+    texts[1] = "pub fun fa() i32 { ret 1; }\n";
+    texts[2] = "pub fun fb() i32 { ret 2; }\n";
+    val scaffolded: err[fail.Fail] = warm_project_scaffold(?w, driver.fixture_manifest(), ?names[0], ?texts[0], 3);
+    if (sel scaffolded.err) { ret 1; }
+
+    var rq:      request.BuildRequest = request.defaults();
+    val planned: err[fail.Fail]       = warm_project_plan(?w, rq);
+    if (sel planned.err) { ret 1; }
+
+    var bad: i32 = 0;
+
+    val r1: res[outcome.BuildOutcome, fail.Fail] = execute_warm(?w.plan, 0, ?w.s, ?w.published, ?w.alloc, nil);
+    if (sel r1.err) { ret 1; }
+    val bo1: outcome.BuildOutcome = r1.ok;
+    if (bo1.severity != outcome.BUILD_OK) { bad = 1; }
+    if (bo1.artifacts.len != 1)           { bad = 1; }
+    or {
+        val is_file_r: res[bool, io_error.Error] = fs.is_file(bo1.artifacts.data[0].path);
+        if (sel is_file_r.err)                   { ret 99; }
+        if (!(sel is_file_r.ok && is_file_r.ok)) { bad = 1; }
+    }
+
+    val st_main: session.StableModuleId = stable_of(?w.s, "uniontest.main");
+    val st_a:    session.StableModuleId = stable_of(?w.s, "uniontest.a");
+    val st_b:    session.StableModuleId = stable_of(?w.s, "uniontest.b");
+    if (module.stable_is_nil(st_main) || module.stable_is_nil(st_a) || module.stable_is_nil(st_b)) { bad = 1; }
+
+    val sema_a_1: query.Revision = query.peek_revision(?w.s.queries, ?frontend.SEMA, module.stable_index(st_a)::u64);
+    val low_a_1:  query.Revision = query.peek_revision(?w.s.queries, ?passes.LOWER, module.stable_index(st_a)::u64);
+    val cg_m_1:   query.Revision = query.peek_revision(?w.s.queries, ?passes.CODEGEN, module.stable_index(st_main)::u64);
+    val cg_a_1:   query.Revision = query.peek_revision(?w.s.queries, ?passes.CODEGEN, module.stable_index(st_a)::u64);
+    val cg_b_1:   query.Revision = query.peek_revision(?w.s.queries, ?passes.CODEGEN, module.stable_index(st_b)::u64);
+    val lk_1:     query.Revision = query.peek_revision(?w.s.queries, ?passes.LINK, 0);
+    if (sema_a_1 == 0 || low_a_1 == 0 || cg_m_1 == 0 || cg_a_1 == 0 || cg_b_1 == 0 || lk_1 == 0) { bad = 1; }
+    val interned_1: usize = intern.count(?w.s.interner);
+    val sources_1:  usize = lang_source.count(?w.s.sources);
+    val n_parse_1:  u32   = shard_len(?w.s, ?frontend.PARSE);
+    val n_sema_1:   u32   = shard_len(?w.s, ?frontend.SEMA);
+    val n_low_1:    u32   = shard_len(?w.s, ?passes.LOWER);
+    val n_cg_1:     u32   = shard_len(?w.s, ?passes.CODEGEN);
+
+    val r2: res[outcome.BuildOutcome, fail.Fail] = execute_warm(?w.plan, 0, ?w.s, ?w.published, ?w.alloc, nil);
+    if (sel r2.err)                                                                                      { ret 1; }
+    if (r2.ok.severity != outcome.BUILD_OK)                                                              { bad = 1; }
+    if (query.peek_revision(?w.s.queries, ?frontend.SEMA, module.stable_index(st_a)::u64) != sema_a_1)   { bad = 1; }
+    if (query.peek_revision(?w.s.queries, ?passes.LOWER, module.stable_index(st_a)::u64) != low_a_1)     { bad = 1; }
+    if (query.peek_revision(?w.s.queries, ?passes.CODEGEN, module.stable_index(st_main)::u64) != cg_m_1) { bad = 1; }
+    if (query.peek_revision(?w.s.queries, ?passes.CODEGEN, module.stable_index(st_a)::u64) != cg_a_1)    { bad = 1; }
+    if (query.peek_revision(?w.s.queries, ?passes.CODEGEN, module.stable_index(st_b)::u64) != cg_b_1)    { bad = 1; }
+    if (query.peek_revision(?w.s.queries, ?passes.LINK, 0) != lk_1)                                      { bad = 1; }
+    if (intern.count(?w.s.interner) != interned_1)                                                       { bad = 1; }
+    if (lang_source.count(?w.s.sources) != sources_1)                                                    { bad = 1; }
+    if (shard_len(?w.s, ?frontend.PARSE) != n_parse_1)                                                { bad = 1; }
+    if (shard_len(?w.s, ?frontend.SEMA) != n_sema_1)                                                  { bad = 1; }
+    if (shard_len(?w.s, ?passes.LOWER) != n_low_1)                                                    { bad = 1; }
+    if (shard_len(?w.s, ?passes.CODEGEN) != n_cg_1)                                                   { bad = 1; }
+
+    val src_dir:       str             = spliced(?w.alloc, w.root, "/", "src");
+    val a_path:        str             = spliced(?w.alloc, src_dir, "/", "a.mach");
+    val a_v2:          str             = "pub fun fa() i32 { val t: i32 = 1; ret t; }\n";
+    val write_bytes_r: err[fs.FsError] = fs.write_bytes(a_path, a_v2, str_len(a_v2), 420);
+    if (sel write_bytes_r.err) { ret 1; }
+
+    val r3: res[outcome.BuildOutcome, fail.Fail] = execute_warm(?w.plan, 0, ?w.s, ?w.published, ?w.alloc, nil);
+    if (sel r3.err)                                                                                   { ret 1; }
+    if (r3.ok.severity != outcome.BUILD_OK)                                                           { bad = 1; }
+    if (query.peek_revision(?w.s.queries, ?passes.CODEGEN, module.stable_index(st_a)::u64) == cg_a_1) { bad = 1; }
+    if (query.peek_revision(?w.s.queries, ?passes.CODEGEN, module.stable_index(st_b)::u64) != cg_b_1) { bad = 1; }
+    if (query.peek_revision(?w.s.queries, ?passes.LINK, 0) == lk_1)                                   { bad = 1; }
+    if (lang_source.count(?w.s.sources) != sources_1)                                                 { bad = 1; }
+    if (shard_len(?w.s, ?frontend.PARSE) != n_parse_1)                                             { bad = 1; }
+    if (shard_len(?w.s, ?frontend.SEMA) != n_sema_1)                                               { bad = 1; }
+    if (shard_len(?w.s, ?passes.LOWER) != n_low_1)                                                 { bad = 1; }
+    if (shard_len(?w.s, ?passes.CODEGEN) != n_cg_1)                                                { bad = 1; }
+
+    ret bad;
+}
+
+# the reuse refused here is the warm session's link query; the object cache is off
+test execute_warm__tampered_artifact_forces_relink_not_silent_reuse {
+    var w:      WarmProject;
+    val opened: err[fail.Fail] = warm_project_init(?w);
+    if (sel opened.err) { ret 1; }
+    fin { warm_project_dnit(?w); }
+
+    var names: [3]str;
+    names[0] = "main.mach";
+    names[1] = "a.mach";
+    names[2] = "b.mach";
+    var texts: [3]str;
+    texts[0] = spliced(?w.alloc, "use uniontest.a.fa;\nuse uniontest.b.fb;\n#[symbol(\"", entry_symbol(), "\")]\nfun start() i32 { ret fa() + fb(); }\n");
+    texts[1] = "pub fun fa() i32 { ret 1; }\n";
+    texts[2] = "pub fun fb() i32 { ret 2; }\n";
+    val scaffolded: err[fail.Fail] = warm_project_scaffold(?w, driver.fixture_manifest(), ?names[0], ?texts[0], 3);
+    if (sel scaffolded.err) { ret 1; }
+
+    var rq:      request.BuildRequest = request.defaults();
+    val planned: err[fail.Fail]       = warm_project_plan(?w, rq);
+    if (sel planned.err) { ret 1; }
+
+    var bad: i32 = 0;
+
+    val r1: res[outcome.BuildOutcome, fail.Fail] = execute_warm(?w.plan, 0, ?w.s, ?w.published, ?w.alloc, nil);
+    if (sel r1.err) { ret 1; }
+    val bo1: outcome.BuildOutcome = r1.ok;
+    if (bo1.severity != outcome.BUILD_OK) { bad = 1; }
+    or (bo1.artifacts.len != 1)           { bad = 1; }
+    or {
+        val is_file_r: res[bool, io_error.Error] = fs.is_file(bo1.artifacts.data[0].path);
+        if (sel is_file_r.err)                   { ret 99; }
+        if (!(sel is_file_r.ok && is_file_r.ok)) { bad = 1; }
+    }
+    val artifact: str = bo1.artifacts.data[0].path;
+
+    val lk_1: query.Revision = query.peek_revision(?w.s.queries, ?passes.LINK, 0);
+    if (lk_1 == 0) { bad = 1; }
+
+    val marker:        str             = "TAMPERED-DEFECT-B-MARKER-NOT-A-REAL-BINARY";
+    val write_bytes_r: err[fs.FsError] = fs.write_bytes(artifact, marker, str_len(marker), 420);
+    if (sel write_bytes_r.err) { bad = 1; }
+
+    val r2: res[outcome.BuildOutcome, fail.Fail] = execute_warm(?w.plan, 0, ?w.s, ?w.published, ?w.alloc, nil);
+    if (sel r2.err) { ret 1; }
+    val bo2: outcome.BuildOutcome = r2.ok;
+    if (bo2.severity != outcome.BUILD_OK) { bad = 1; }
+
+    val lk_2: query.Revision = query.peek_revision(?w.s.queries, ?passes.LINK, 0);
+    if (lk_2 != lk_1) { bad = 1; }
+
+    val rr: res[Vector[u8], fs.FsError] = fs.read_bytes(?w.alloc, artifact);
+    if (sel rr.err) { bad = 1; }
+    if (sel rr.ok) {
+        var buf:            Vector[u8] = rr.ok;
+        val mbytes:         *u8        = marker::*u8;
+        val mlen:           usize      = str_len(marker);
+        var matches_marker: bool       = buf.len::usize == mlen;
+        if (matches_marker) {
+            var i: usize = 0;
+            for (i < mlen) {
+                if (buf.data[i] != mbytes[i]) {
+                    matches_marker = false;
+                    brk;
+                }
+                i = i + 1;
+            }
+        }
+        if (matches_marker) { bad = 1; }
+        collections_vector.dnit[u8](?buf);
+    }
+
+    ret bad;
+}
+
+# a symlink to a directory at the artifact fails the link: the build replaces
+# a stale directory there, never a link
+test execute_warm__failed_link_retries_at_unchanged_revision {
+    $if ($mach.build.os == $mach.os.windows) { ret 0; }
+    var w:      WarmProject;
+    val opened: err[fail.Fail] = warm_project_init(?w);
+    if (sel opened.err) { ret 1; }
+    fin { warm_project_dnit(?w); }
+
+    var names: [1]str;
+    names[0] = "main.mach";
+    var texts: [1]str;
+    texts[0] = spliced(?w.alloc, "#[symbol(\"", entry_symbol(), "\")]\nfun start() i32 { ret 0; }\n\ntest main_zero { ret 0; }\n");
+    val scaffolded: err[fail.Fail] = warm_project_scaffold(?w, driver.fixture_manifest(), ?names[0], ?texts[0], 1);
+    if (sel scaffolded.err) { ret 1; }
+
+    var rq: request.BuildRequest = request.defaults();
+    rq.goal = request.GOAL_TESTS;
+    val planned: err[fail.Fail] = warm_project_plan(?w, rq);
+    if (sel planned.err) { ret 1; }
+
+    val artifact:  str               = w.plan.units.data[0].out_path;
+    val elsewhere: res[str, A.Error] = types_path.join(?w.alloc, w.root, "elsewhere");
+    if (sel elsewhere.err) { ret 1; }
+    val made: err[fs.FsError] = fs.create_dir_all(?w.alloc, elsewhere.ok, 493);
+    if (sel made.err) { ret 1; }
+    val parent: res[str, A.Error] = types_path.parent(?w.alloc, artifact);
+    if (sel parent.err) { ret 1; }
+    val made_parent: err[fs.FsError] = fs.create_dir_all(?w.alloc, parent.ok, 493);
+    if (sel made_parent.err) { ret 1; }
+    val linked: err[io_error.Error] = fs.symlink(elsewhere.ok, artifact);
+    if (sel linked.err) { ret 1; }
+
+    var bad: i32                                  = 0;
+    val r1:  res[outcome.BuildOutcome, fail.Fail] = execute_warm(?w.plan, 0, ?w.s, ?w.published, ?w.alloc, nil);
+    if (sel r1.err) { bad = 1; }
+    if (sel r1.ok) {
+        val bo1: outcome.BuildOutcome = r1.ok;
+        if (bo1.severity == outcome.BUILD_OK) { bad = 1; }
+    }
+
+    val lk_1: query.Revision = query.peek_revision(?w.s.queries, ?passes.LINK, 0);
+    if (lk_1 == 0) { bad = 1; }
+    fs.remove_file(artifact);
+
+    val r2: res[outcome.BuildOutcome, fail.Fail] = execute_warm(?w.plan, 0, ?w.s, ?w.published, ?w.alloc, nil);
+    if (sel r2.err) { bad = 1; }
+    if (sel r2.ok) {
+        val bo2: outcome.BuildOutcome = r2.ok;
+        if (bo2.severity != outcome.BUILD_OK) { bad = 1; }
+    }
+    if (query.peek_revision(?w.s.queries, ?passes.LINK, 0) != lk_1) { bad = 1; }
+    val is_file_r: res[bool, io_error.Error] = fs.is_file(artifact);
+    if (sel is_file_r.err)                   { ret 99; }
+    if (!(sel is_file_r.ok && is_file_r.ok)) { bad = 1; }
+
+    ret bad;
+}
+
+# the modules left alone keep their codegen queries in the warm session; the object cache is
+# off, so none is restored from obj/
+test execute_warm__parallel_pool_rebuilds_only_stale_modules {
+    var w:      WarmProject;
+    val opened: err[fail.Fail] = warm_project_init(?w);
+    if (sel opened.err) { ret 1; }
+    fin { warm_project_dnit(?w); }
+
+    var names: [4]str;
+    names[0] = "main.mach";
+    names[1] = "a.mach";
+    names[2] = "b.mach";
+    names[3] = "c.mach";
+    var texts: [4]str;
+    texts[0] = spliced(?w.alloc, "use uniontest.a.fa;\nuse uniontest.b.fb;\nuse uniontest.c.fc;\n#[symbol(\"", entry_symbol(), "\")]\nfun start() i32 { ret fa() + fb() + fc(); }\n");
+    texts[1] = "pub fun fa() i32 { ret 1; }\n";
+    texts[2] = "pub fun fb() i32 { ret 2; }\n";
+    texts[3] = "pub fun fc() i32 { ret 3; }\n";
+    val scaffolded: err[fail.Fail] = warm_project_scaffold(?w, driver.fixture_manifest(), ?names[0], ?texts[0], 4);
+    if (sel scaffolded.err) { ret 1; }
+
+    var rq: request.BuildRequest = request.defaults();
+    rq.jobs = 2;
+    val planned: err[fail.Fail] = warm_project_plan(?w, rq);
+    if (sel planned.err) { ret 1; }
+
+    var bad: i32 = 0;
+
+    val r1: res[outcome.BuildOutcome, fail.Fail] = execute_warm(?w.plan, 0, ?w.s, ?w.published, ?w.alloc, nil);
+    if (sel r1.err) { ret 1; }
+    val bo1: outcome.BuildOutcome = r1.ok;
+    if (bo1.severity != outcome.BUILD_OK) { bad = 1; }
+    if (bo1.artifacts.len != 1)           { bad = 1; }
+    or {
+        val is_file_r: res[bool, io_error.Error] = fs.is_file(bo1.artifacts.data[0].path);
+        if (sel is_file_r.err)                   { ret 99; }
+        if (!(sel is_file_r.ok && is_file_r.ok)) { bad = 1; }
+    }
+
+    val st_main: session.StableModuleId = stable_of(?w.s, "uniontest.main");
+    val st_a:    session.StableModuleId = stable_of(?w.s, "uniontest.a");
+    val st_b:    session.StableModuleId = stable_of(?w.s, "uniontest.b");
+    val st_c:    session.StableModuleId = stable_of(?w.s, "uniontest.c");
+    if (module.stable_is_nil(st_main) || module.stable_is_nil(st_a)
+        || module.stable_is_nil(st_b) || module.stable_is_nil(st_c)) { bad = 1; }
+
+    val cg_m_1: query.Revision = query.peek_revision(?w.s.queries, ?passes.CODEGEN, module.stable_index(st_main)::u64);
+    val cg_a_1: query.Revision = query.peek_revision(?w.s.queries, ?passes.CODEGEN, module.stable_index(st_a)::u64);
+    val cg_b_1: query.Revision = query.peek_revision(?w.s.queries, ?passes.CODEGEN, module.stable_index(st_b)::u64);
+    val cg_c_1: query.Revision = query.peek_revision(?w.s.queries, ?passes.CODEGEN, module.stable_index(st_c)::u64);
+    val lk_1:   query.Revision = query.peek_revision(?w.s.queries, ?passes.LINK, 0);
+    if (cg_m_1 == 0 || cg_a_1 == 0 || cg_b_1 == 0 || cg_c_1 == 0 || lk_1 == 0) { bad = 1; }
+    val n_cg_1: u32 = shard_len(?w.s, ?passes.CODEGEN);
+
+    val r2: res[outcome.BuildOutcome, fail.Fail] = execute_warm(?w.plan, 0, ?w.s, ?w.published, ?w.alloc, nil);
+    if (sel r2.err)                                                                                   { ret 1; }
+    if (r2.ok.severity != outcome.BUILD_OK)                                                           { bad = 1; }
+    if (query.peek_revision(?w.s.queries, ?passes.CODEGEN, module.stable_index(st_a)::u64) != cg_a_1) { bad = 1; }
+    if (query.peek_revision(?w.s.queries, ?passes.CODEGEN, module.stable_index(st_c)::u64) != cg_c_1) { bad = 1; }
+    if (query.peek_revision(?w.s.queries, ?passes.LINK, 0) != lk_1)                                   { bad = 1; }
+
+    val src_dir:       str             = spliced(?w.alloc, w.root, "/", "src");
+    val a_path:        str             = spliced(?w.alloc, src_dir, "/", "a.mach");
+    val c_path:        str             = spliced(?w.alloc, src_dir, "/", "c.mach");
+    val a_v2:          str             = "pub fun fa() i32 { val t: i32 = 1; ret t; }\n";
+    val c_v2:          str             = "pub fun fc() i32 { val t: i32 = 3; ret t; }\n";
+    val write_bytes_r: err[fs.FsError] = fs.write_bytes(a_path, a_v2, str_len(a_v2), 420);
+    if (sel write_bytes_r.err) { ret 1; }
+    val write_bytes_r2: err[fs.FsError] = fs.write_bytes(c_path, c_v2, str_len(c_v2), 420);
+    if (sel write_bytes_r2.err) { ret 1; }
+
+    val r3: res[outcome.BuildOutcome, fail.Fail] = execute_warm(?w.plan, 0, ?w.s, ?w.published, ?w.alloc, nil);
+    if (sel r3.err) { ret 1; }
+    val bo3: outcome.BuildOutcome = r3.ok;
+    if (bo3.severity != outcome.BUILD_OK) { bad = 1; }
+    if (bo3.artifacts.len != 1)           { bad = 1; }
+    or {
+        val is_file_r2: res[bool, io_error.Error] = fs.is_file(bo3.artifacts.data[0].path);
+        if (sel is_file_r2.err)                    { ret 99; }
+        if (!(sel is_file_r2.ok && is_file_r2.ok)) { bad = 1; }
+    }
+    if (query.peek_revision(?w.s.queries, ?passes.CODEGEN, module.stable_index(st_a)::u64) == cg_a_1)    { bad = 1; }
+    if (query.peek_revision(?w.s.queries, ?passes.CODEGEN, module.stable_index(st_c)::u64) == cg_c_1)    { bad = 1; }
+    if (query.peek_revision(?w.s.queries, ?passes.CODEGEN, module.stable_index(st_main)::u64) != cg_m_1) { bad = 1; }
+    if (query.peek_revision(?w.s.queries, ?passes.CODEGEN, module.stable_index(st_b)::u64) != cg_b_1)    { bad = 1; }
+    if (query.peek_revision(?w.s.queries, ?passes.LINK, 0) == lk_1)                                      { bad = 1; }
+    if (shard_len(?w.s, ?passes.CODEGEN) != n_cg_1)                                                   { bad = 1; }
+
+    ret bad;
+}
+
+#[testing]
+fun scale_names(alloc: *A.Allocator, names: *str, texts: *str) {
+    names[0] = "main.mach";
+    var uses:  str = "";
+    var calls: str = "";
+    var i:     u32 = 1;
+    for (i <= 8) {
+        val idx: str = u32_str(alloc, i);
+        val nm:  str = spliced(alloc, "m", idx, ".mach");
+        names[i] = nm;
+        val head: str = spliced(alloc, "pub fun f", idx, "() i32 {\n    val x: f64 = ");
+        val mid:  str = spliced(alloc, idx, ".25;\n    val y: f64 = x * 2.0 + 0.5;\n    var acc: i32 = 0;\n    var j: i32 = 0;\n    for (j < 40) {\n        acc = acc + j * 2;\n        j = j + 1;\n    }\n    ret acc + (y::i32) + ", idx);
+        val body: str = spliced(alloc, head, mid, ";\n}\n");
+        texts[i] = body;
+        uses     = spliced(alloc, uses, "use scaletest.m", spliced(alloc, idx, ".f", idx));
+        uses     = spliced(alloc, uses, ";\n", "");
+        calls    = spliced(alloc, calls, "acc = acc + f", spliced(alloc, idx, "();\n", ""));
+        i        = i + 1;
+    }
+    texts[0] = spliced(alloc, uses, spliced(alloc, "#[symbol(\"", "_start", "\")]\n"),
+        spliced(alloc, "fun start() i32 {\n    var acc: i32 = 0;\n", calls, "    ret acc;\n}\n"));
+}
+
+#[testing]
+fun u32_str(alloc: *A.Allocator, v: u32) str {
+    var digits: [std_format.DECIMAL_MAX]u8;
+    val n:      usize             = std_format.put_u64(?digits[0], v::u64);
+    val r:      res[*u8, A.Error] = A.allocate[u8](alloc, n + 1);
+    if (sel r.err) { ret "0"; }
+    val buf: *u8 = r.ok;
+    memory.raw_copy(buf::ptr, (?digits[0])::ptr, n);
+    buf[n] = 0;
+    ret buf::str;
+}
+
+#[testing]
+fun build_scale(alloc: *A.Allocator, root: str, jobs: u32, out_bytes: *Vector[u8]) i32 {
+    val sr: res[session.Session, fail.Fail] = toolchain.session_init(alloc);
+    if (sel sr.err) { ret 1; }
+    var s: session.Session = sr.ok;
+    fin { session.dnit(?s); }
+
+    val mr: res[manifest.Manifest, fail.Fail] = driver.load_manifest(?s, root);
+    if (sel mr.err) { ret 1; }
+    var m:  manifest.Manifest    = mr.ok;
+    var rq: request.BuildRequest = request.defaults();
+    rq.project_root = root;
+    rq.target       = "linux";
+    rq.jobs         = jobs;
+    rq.opt          = pipeline.OPT_RELEASE;
+    rq.debug        = true;
+    val pr: res[build_plan.BuildPlan, fail.Fail] = build_plan.plan_to_run(alloc, ?s, toolchain.t_registry(), ?m, rq);
+    if (sel pr.err) { ret 1; }
+    var bp: build_plan.BuildPlan = pr.ok;
+
+    var published: publication.Publications = publication.init(alloc);
+    fin { publication.dnit(?published); }
+    val r: res[outcome.BuildOutcome, fail.Fail] = execute_warm(?bp, 0, ?s, ?published, alloc, nil);
+    if (sel r.err) { ret 1; }
+    val bo: outcome.BuildOutcome = r.ok;
+    if (bo.severity != outcome.BUILD_OK || bo.artifacts.len != 1) { ret 1; }
+    val is_file_r: res[bool, io_error.Error] = fs.is_file(bo.artifacts.data[0].path);
+    if (sel is_file_r.err)                   { ret 99; }
+    if (!(sel is_file_r.ok && is_file_r.ok)) { ret 1; }
+
+    val rb: res[Vector[u8], fs.FsError] = fs.read_bytes(alloc, bo.artifacts.data[0].path);
+    if (sel rb.err) { ret 1; }
+    @out_bytes = rb.ok;
+
+    ret 0;
+}
+
+#[testing]
+fun manifest_scale() str {
+    ret "[project]\nmach = \">=5\"\nid = \"scaletest\"\nversion = \"0.0.0\"\nsrc = \"src\"\nwork = \"out/{target.name}/{profile.name}\"\n\n[target.linux]\nisa = \"x86_64\"\nos = \"linux\"\nabi = \"sysv64\"\n\n[artifact.scaletest]\nkind = \"bin\"\nentry = \"main.mach\"\nout = \"{project.work}/bin/scaletest\"\ntargets = [\"*\"]\nlink = []\nneed = []\n[profile.debug]\ndefault = true\noptimize = false\ndebug = true\nsimd = \"scalarize\"\n[profile.release]\noptimize = true\ndebug = false\nsimd = \"scalarize\"\n";
+}
+
+test execute_warm__worker_count_does_not_change_the_artifact {
+    var alloc:  A.Allocator;
+    val make_r: err[A.Error] = page.make(?alloc);
+    if (sel make_r.err) { ret 1; }
+
+    var names: [9]str;
+    var texts: [9]str;
+    scale_names(?alloc, ?names[0], ?texts[0]);
+    val root_r: res[str, fail.Fail] = driver.scaffold(?alloc, manifest_scale(), ?names[0], ?texts[0], 9);
+    if (sel root_r.err) { ret 1; }
+    val root: str = root_r.ok;
+    fin { fs.remove_all(?alloc, root); }
+
+    var b1: Vector[u8];
+    val c1: i32 = build_scale(?alloc, root, 1::u32, ?b1);
+    if (c1 != 0) { ret 1; }
+    var b6: Vector[u8];
+    val c6: i32 = build_scale(?alloc, root, 6::u32, ?b6);
+    if (c6 != 0) { ret 1; }
+
+    if (b1.len != b6.len) { ret 1; }
+    var i: usize = 0;
+    for (i < b1.len) {
+        if (b1.data[i] != b6.data[i]) { ret 1; }
+        i = i + 1;
+    }
+    ret 0;
+}
+
+test execute_warm__replaced_image_owns_section_bytes {
+    var w:      WarmProject;
+    val opened: err[fail.Fail] = warm_project_init(?w);
+    if (sel opened.err) { ret 1; }
+    fin { warm_project_dnit(?w); }
+
+    val LIT: str = "warm-owned-section-bytes";
+
+    var names: [3]str;
+    names[0] = "main.mach";
+    names[1] = "a.mach";
+    names[2] = "b.mach";
+    var texts: [3]str;
+    texts[0] = spliced(?w.alloc, "use uniontest.a.greeting;\n#[symbol(\"", entry_symbol(), "\")]\nfun start() i32 { if (greeting[0] == 'w') { ret 0; } ret 1; }\n");
+    texts[1] = "use uniontest.b.fb;\npub val greeting: *u8 = \"warm-owned-section-bytes\";\npub fun fa() i32 { ret fb(); }\n";
+    texts[2] = "pub fun fb() i32 { ret 2; }\n";
+    val scaffolded: err[fail.Fail] = warm_project_scaffold(?w, driver.fixture_manifest(), ?names[0], ?texts[0], 3);
+    if (sel scaffolded.err) { ret 1; }
+
+    var rq:      request.BuildRequest = request.defaults();
+    val planned: err[fail.Fail]       = warm_project_plan(?w, rq);
+    if (sel planned.err) { ret 1; }
+
+    var bad: i32 = 0;
+
+    val r1: res[outcome.BuildOutcome, fail.Fail] = execute_warm(?w.plan, 0, ?w.s, ?w.published, ?w.alloc, nil);
+    if (sel r1.err)                         { ret 1; }
+    if (r1.ok.severity != outcome.BUILD_OK) { bad = 1; }
+
+    val src_dir:       str             = spliced(?w.alloc, w.root, "/", "src");
+    val b_path:        str             = spliced(?w.alloc, src_dir, "/", "b.mach");
+    val b_v2:          str             = "pub fun fb() i32 { ret 2; }\npub fun fb2() i32 { ret 3; }\n";
+    val write_bytes_r: err[fs.FsError] = fs.write_bytes(b_path, b_v2, str_len(b_v2), 420);
+    if (sel write_bytes_r.err) { ret 1; }
+
+    val r2: res[outcome.BuildOutcome, fail.Fail] = execute_warm(?w.plan, 0, ?w.s, ?w.published, ?w.alloc, nil);
+    if (sel r2.err)                         { ret 1; }
+    if (r2.ok.severity != outcome.BUILD_OK) { bad = 1; }
+
+    val id_r: res[intern.StrId, A.Error] = intern.add(?w.s.interner, LIT);
+    if (sel id_r.ok) {
+        val lo: opt[str] = intern.get(?w.s.interner, id_r.ok);
+        if (sel lo.none)               { ret 99; }
+        if (!str_equals(lo.some, LIT)) { bad = 1; }
+    }
+
+    ret bad;
+}
+
+# whether a failure or a diagnostic the recording kept, or a file a diagnostic
+# points into, holds needle
+#[testing]
+fun recording_contains(rd: *readout.Recording, needle: str) bool {
+    var i: usize = 0;
+    for (i < rd.failures.len) {
+        if (rd.failures.data[i] != nil && str_contains(rd.failures.data[i], needle)) { ret true; }
+        i = i + 1;
+    }
+    i = 0;
+    for (i < rd.diagnostics.len) {
+        val d: *readout.RecordedDiagnostic = ?rd.diagnostics.data[i];
+        if (d.message != nil && str_contains(d.message, needle)) { ret true; }
+        if (d.path != nil && str_contains(d.path, needle))       { ret true; }
+        i = i + 1;
+    }
+    ret false;
+}
+
+#[testing]
+fun manifest_two_bins() str {
+    ret "[project]\nmach = \">=5\"\nid = \"uniontest\"\nversion = \"0.0.0\"\nsrc = \"src\"\nwork = \"out/{target.name}/{profile.name}\"\n\n[target.linux]\nisa = \"x86_64\"\nos = \"linux\"\nabi = \"sysv64\"\n\n[target.windows]\nisa = \"x86_64\"\nos = \"windows\"\nabi = \"win64\"\n\n[target.linux-arm64]\nisa = \"aarch64\"\nos = \"linux\"\nabi = \"aapcs64\"\n\n[target.linux-riscv64]\nisa = \"riscv64\"\nos = \"linux\"\nabi = \"lp64d\"\n\n[target.darwin-x86_64]\nisa = \"x86_64\"\nos = \"darwin\"\nabi = \"sysv64\"\n\n[target.darwin-arm64]\nisa = \"aarch64\"\nos = \"darwin\"\nabi = \"aapcs64\"\n\n[artifact.alpha]\nkind = \"bin\"\nentry = \"alpha.mach\"\nout = \"{project.work}/bin/alpha\"\ntargets = [\"*\"]\nlink = []\nneed = []\n\n[artifact.beta]\nkind = \"bin\"\nentry = \"beta.mach\"\nout = \"{project.work}/bin/beta\"\ntargets = [\"*\"]\nlink = []\nneed = []\n[profile.debug]\ndefault = true\noptimize = false\ndebug = true\nsimd = \"scalarize\"\n[profile.release]\noptimize = true\ndebug = false\nsimd = \"scalarize\"\n";
+}
+
+# a module forking on `$bin.name` compiles once per artifact: the second artifact's build
+# reuses neither the warm session's codegen query nor the obj/ object the first one wrote.
+# the object cache is on, both artifacts share the cell's obj/, and fresh sessions rebuild
+# each artifact through it
+test execute_warm__bin_name_keys_the_artifact_cache {
+    var w:      WarmProject;
+    val opened: err[fail.Fail] = warm_project_init(?w);
+    if (sel opened.err) { ret 1; }
+    fin { warm_project_dnit(?w); }
+
+    var names: [3]str;
+    names[0] = "alpha.mach";
+    names[1] = "beta.mach";
+    names[2] = "shared.mach";
+    var texts: [3]str;
+    texts[0] = spliced(?w.alloc, "use uniontest.shared.sh;\n#[symbol(\"", entry_symbol(), "\")]\nfun sa() i32 { ret sh(); }\n");
+    texts[1] = spliced(?w.alloc, "use uniontest.shared.sh;\n#[symbol(\"", entry_symbol(), "\")]\nfun sb() i32 { ret sh(); }\n");
+    texts[2] = "pub fun sh() i32 { $if ($bin.name == \"alpha\") { ret 111; } ret 222; }\n";
+    val scaffolded: err[fail.Fail] = warm_project_scaffold(?w, manifest_two_bins(), ?names[0], ?texts[0], 3);
+    if (sel scaffolded.err) { ret 1; }
+
+    var rq: request.BuildRequest = request.defaults();
+    rq.object_cache = true;
+    val planned: err[fail.Fail] = warm_project_plan(?w, rq);
+    if (sel planned.err) { ret 1; }
+
+    var bad: i32 = 0;
+    if (w.plan.units.len != 2) { bad = 1; }
+
+    val r0: res[outcome.BuildOutcome, fail.Fail] = execute_warm(?w.plan, 0, ?w.s, ?w.published, ?w.alloc, nil);
+    if (sel r0.err) { ret 1; }
+    val bo0: outcome.BuildOutcome                 = r0.ok;
+    val r1:  res[outcome.BuildOutcome, fail.Fail] = execute_warm(?w.plan, 1, ?w.s, ?w.published, ?w.alloc, nil);
+    if (sel r1.err) { ret 1; }
+    val bo1: outcome.BuildOutcome = r1.ok;
+
+    if (bo0.severity != outcome.BUILD_OK || bo1.severity != outcome.BUILD_OK) { bad = 1; }
+    if (bo0.artifacts.len != 1 || bo1.artifacts.len != 1)                     { ret 1; }
+
+    val f0: res[Vector[u8], fs.FsError] = fs.read_bytes(?w.alloc, bo0.artifacts.data[0].path);
+    val f1: res[Vector[u8], fs.FsError] = fs.read_bytes(?w.alloc, bo1.artifacts.data[0].path);
+    if (sel f0.err) { ret 1; }
+    if (sel f1.err) { ret 1; }
+    val v0: Vector[u8] = f0.ok;
+    val v1: Vector[u8] = f1.ok;
+
+    if (same_image_bytes(?v0, ?v1)) { bad = 1; }
+
+    # fresh sessions, as new processes run them, rebuild the first artifact and then the
+    # second: only obj/ could hand the second the object the first just wrote
+    var c0: Vector[u8];
+    var c1: Vector[u8];
+    if (fresh_unit(?w.alloc, w.root, 0, ?c0) != 0)         { ret 2; }
+    if (fresh_unit(?w.alloc, w.root, 1, ?c1) != 0)         { ret 2; }
+    if (!same_image_bytes(?c0, ?v0) || !same_image_bytes(?c1, ?v1)) { bad = 3; }
+
+    ret bad;
+}
+
+# builds planned unit `unit` of the project at `root` in a fresh session with the object cache on
+#[testing]
+fun fresh_unit(alloc: *A.Allocator, root: str, unit: usize, out_bytes: *Vector[u8]) i32 {
+    val sr: res[session.Session, fail.Fail] = toolchain.session_init(alloc);
+    if (sel sr.err) { ret 1; }
+    var s: session.Session = sr.ok;
+    fin { session.dnit(?s); }
+    val mr: res[manifest.Manifest, fail.Fail] = driver.load_manifest(?s, root);
+    if (sel mr.err) { ret 1; }
+    var m:  manifest.Manifest    = mr.ok;
+    var rq: request.BuildRequest = request.defaults();
+    rq.project_root = root;
+    rq.object_cache = true;
+    val pr: res[build_plan.BuildPlan, fail.Fail] = build_plan.plan_to_run(alloc, ?s, toolchain.t_registry(), ?m, rq);
+    if (sel pr.err) { ret 1; }
+    var bp:        build_plan.BuildPlan     = pr.ok;
+    var published: publication.Publications = publication.init(alloc);
+    fin { publication.dnit(?published); }
+    val r: res[outcome.BuildOutcome, fail.Fail] = execute_warm(?bp, unit, ?s, ?published, alloc, nil);
+    if (sel r.err) { ret 1; }
+    val bo: outcome.BuildOutcome = r.ok;
+    if (bo.severity != outcome.BUILD_OK || bo.artifacts.len != 1) { ret 1; }
+    val rb: res[Vector[u8], fs.FsError] = fs.read_bytes(alloc, bo.artifacts.data[0].path);
+    if (sel rb.err) { ret 1; }
+    @out_bytes = rb.ok;
+    ret 0;
+}
+
+#[testing]
+fun same_image_bytes(a: *Vector[u8], b: *Vector[u8]) bool {
+    if (a.len != b.len) { ret false; }
+    var i: usize = 0;
+    for (i < a.len) {
+        if (a.data[i] != b.data[i]) { ret false; }
+        i = i + 1;
+    }
+    ret true;
+}
+
+# under -v a growing cycle shows as it expands, each time its instance count doubles
+test execute_warm__growing_cycle_expansion_is_shown {
+    var w:      WarmProject;
+    val opened: err[fail.Fail] = warm_project_init(?w);
+    if (sel opened.err) { ret 1; }
+    fin { warm_project_dnit(?w); }
+
+    var names: [1]str;
+    names[0] = "main.mach";
+    var texts: [1]str;
+    texts[0] = spliced(?w.alloc, "fun peel[T](x: i64) i64 { $if ($is_pointer(T)) { ret peel[$pointee_of(T)](x + 1); } ret x; }\n#[symbol(\"",
+        entry_symbol(), "\")]\nfun start() i32 { ret peel[*****i64](0)::i32; }\n");
+    val scaffolded: err[fail.Fail] = warm_project_scaffold(?w, driver.fixture_manifest(), ?names[0], ?texts[0], 1);
+    if (sel scaffolded.err) { ret 1; }
+    val planned: err[fail.Fail] = warm_project_plan(?w, request.defaults());
+    if (sel planned.err) { ret 1; }
+
+    var rd: readout.Recording;
+    readout.recording_init(?rd, ?w.alloc, readout.LEVEL_PHASES);
+    fin { readout.recording_dnit(?rd); }
+    var bad: i32                                  = 0;
+    val r:   res[outcome.BuildOutcome, fail.Fail] = execute_warm(?w.plan, 0, ?w.s, ?w.published, ?w.alloc, ?rd.sink);
+    if (sel r.err) { ret 2; }
+    var bo: outcome.BuildOutcome = r.ok;
+    if (bo.severity != outcome.BUILD_OK) { bad = 3; }
+    outcome.outcome_dnit(?bo);
+    # five pointers peel to six instances: shown at one, two and four
+    if (rd.growths.len != 3)                        { bad = 4; }
+    or (!str_equals(rd.growths.data[0], "peel: 1")) { bad = 5; }
+    or (!str_equals(rd.growths.data[2], "peel: 4")) { bad = 6; }
+    ret bad;
+}
+
+test execute_warm__pool_error_message_survives_teardown {
+    var w:      WarmProject;
+    val opened: err[fail.Fail] = warm_project_init(?w);
+    if (sel opened.err) { ret 1; }
+    fin { warm_project_dnit(?w); }
+
+    var names: [4]str;
+    names[0] = "main.mach";
+    names[1] = "a.mach";
+    names[2] = "b.mach";
+    names[3] = "c.mach";
+    var texts: [4]str;
+    texts[0] = spliced(?w.alloc, "use uniontest.a.fa;\nuse uniontest.b.fb;\nuse uniontest.c.fc;\n#[symbol(\"", entry_symbol(), "\")]\nfun start() i32 { ret fa() + fb() + fc(); }\n");
+    texts[1] = "pub fun fa() i32 { ret 1; }\n";
+    texts[2] = "pub fun fb() i32 { ret 2; }\n";
+    texts[3] = "pub fun fc() i32 {\n    $if ($mach.build.arch == $mach.arch.x86_64) { asm x86_64 { frobnicate } }\n    $or ($mach.build.arch == $mach.arch.aarch64) { asm aarch64 { frobnicate } }\n    $or { asm riscv64 { frobnicate } }\n    ret 3;\n}\n";
+    val scaffolded: err[fail.Fail] = warm_project_scaffold(?w, driver.fixture_manifest(), ?names[0], ?texts[0], 4);
+    if (sel scaffolded.err) { ret 1; }
+
+    var rq: request.BuildRequest = request.defaults();
+    rq.jobs = 2;
+    val planned: err[fail.Fail] = warm_project_plan(?w, rq);
+    if (sel planned.err) { ret 1; }
+
+    var rd: readout.Recording;
+    readout.recording_init(?rd, ?w.alloc, readout.LEVEL_RESULTS);
+    fin { readout.recording_dnit(?rd); }
+    var bad: i32                                  = 0;
+    val r:   res[outcome.BuildOutcome, fail.Fail] = execute_warm(?w.plan, 0, ?w.s, ?w.published, ?w.alloc, ?rd.sink);
+    if (sel r.err) { bad = 1; }
+    if (sel r.ok) {
+        var bo: outcome.BuildOutcome = r.ok;
+        if (bo.severity == outcome.BUILD_OK)             { bad = 1; }
+        if (rd.failures.len != 1)                        { bad = 1; }
+        if (!recording_contains(?rd, "'frobnicate'")) { bad = 1; }
+        if (!recording_contains(?rd, "c.mach"))       { bad = 1; }
+        outcome.outcome_dnit(?bo);
+    }
+
+    ret bad;
+}
+
+test execute_warm__sema_phase_diagnostic_fails_build {
+    var w:      WarmProject;
+    val opened: err[fail.Fail] = warm_project_init(?w);
+    if (sel opened.err) { ret 1; }
+    fin { warm_project_dnit(?w); }
+
+    var names: [1]str;
+    names[0] = "main.mach";
+    var texts: [1]str;
+    texts[0] = spliced(?w.alloc, "#[symbol(\"", entry_symbol(), "\")]\nfun start() i32 { val x: u32 = \"not a u32\"; ret 0; }\n");
+    val scaffolded: err[fail.Fail] = warm_project_scaffold(?w, driver.fixture_manifest(), ?names[0], ?texts[0], 1);
+    if (sel scaffolded.err) { ret 1; }
+
+    var rq:      request.BuildRequest = request.defaults();
+    val planned: err[fail.Fail]       = warm_project_plan(?w, rq);
+    if (sel planned.err) { ret 1; }
+
+    var bad: i32                                  = 0;
+    val r:   res[outcome.BuildOutcome, fail.Fail] = execute_warm(?w.plan, 0, ?w.s, ?w.published, ?w.alloc, nil);
+    if (sel r.err) { bad = 1; }
+    if (sel r.ok) {
+        val bo: outcome.BuildOutcome = r.ok;
+        if (bo.severity == outcome.BUILD_OK) { bad = 1; }
+        if (bo.artifacts.len != 0)           { bad = 1; }
+    }
+
+    ret bad;
+}
+
+#[testing]
+fun diag_has_warning(d: *diagnostic.DiagnosticStore, needle: str) bool {
+    var i: usize = 0;
+    for (i < diagnostic.len(d)) {
+        if (!diagnostic_kind.is_error(d.items.data[i].kind)
+            && str_contains(d.items.data[i].message, needle)) { ret true; }
+        i = i + 1;
+    }
+    ret false;
+}
+
+#[testing]
+fun manifest_renamed_artifact() str {
+    ret on_host("[project]\nmach = \">=5\"\nid = \"uniontest\"\nversion = \"0.0.0\"\nsrc = \"src\"\nwork = \"out/{target.name}/{profile.name}\"\n\n[target.linux]\nisa = \"x86_64\"\nos = \"linux\"\nabi = \"sysv64\"\n\n[artifact.uniontest]\nkind = \"bin\"\nentry = \"main.mach\"\nout = \"{project.work}/bin/renamed\"\ntargets = [\"*\"]\nlink = []\nneed = []\n[profile.debug]\ndefault = true\noptimize = false\ndebug = true\nsimd = \"scalarize\"\n[profile.release]\noptimize = true\ndebug = false\nsimd = \"scalarize\"\n");
+}
+
+test execute_warm__refuses_a_manifest_that_changed_after_planning {
+    var w:      WarmProject;
+    val opened: err[fail.Fail] = warm_project_init(?w);
+    if (sel opened.err) { ret 1; }
+    fin { warm_project_dnit(?w); }
+
+    var names: [1]str;
+    names[0] = "main.mach";
+    var texts: [1]str;
+    texts[0] = spliced(?w.alloc, "#[symbol(\"", entry_symbol(), "\")]\nfun start() i32 { ret 0; }\n");
+    val scaffolded: err[fail.Fail] = warm_project_scaffold(?w, driver.fixture_manifest(), ?names[0], ?texts[0], 1);
+    if (sel scaffolded.err) { ret 1; }
+
+    var rq:      request.BuildRequest = request.defaults();
+    val planned: err[fail.Fail]       = warm_project_plan(?w, rq);
+    if (sel planned.err) { ret 1; }
+
+    val mf:            str             = spliced(?w.alloc, w.root, "/", manifest.MANIFEST_FILE);
+    val alt:           str             = manifest_renamed_artifact();
+    val write_bytes_r: err[fs.FsError] = fs.write_bytes(mf, alt, str_len(alt), 420);
+    if (sel write_bytes_r.err) { ret 1; }
+    # the host reads the edited manifest into the session; the plan made before it is stale
+    val reloaded: res[manifest.Manifest, fail.Fail] = driver.load_manifest(?w.s, w.root);
+    if (sel reloaded.err) { ret 1; }
+    var edited: manifest.Manifest = reloaded.ok;
+    fin { manifest.dnit(?edited, ?w.alloc); }
+
+    var rd: readout.Recording;
+    readout.recording_init(?rd, ?w.alloc, readout.LEVEL_RESULTS);
+    fin { readout.recording_dnit(?rd); }
+    var bad: i32                                  = 0;
+    val r:   res[outcome.BuildOutcome, fail.Fail] = execute_warm(?w.plan, 0, ?w.s, ?w.published, ?w.alloc, ?rd.sink);
+    if (sel r.err) { bad = 1; }
+    if (sel r.ok) {
+        var bo: outcome.BuildOutcome = r.ok;
+        if (bo.severity != outcome.BUILD_USER)                                   { bad = 1; }
+        or (!recording_contains(?rd, "changed after this build was planned")) { bad = 1; }
+        outcome.outcome_dnit(?bo);
+    }
+
+    ret bad;
+}
+
+#[testing]
+fun ro_mod_text() str {
+    ret "pub fun f0(x: i32) i32 { var a: i32 = x; var i: i32 = 0; for (i < 12) { a = a * 3 + i * 1; if (a > 1000) { a = a - 997; } i = i + 1; } ret a; }\npub fun f1(x: i32) i32 { var a: i32 = x; var i: i32 = 0; for (i < 12) { a = a * 3 + i * 2; if (a > 1000) { a = a - 997; } i = i + 1; } ret a; }\npub fun f2(x: i32) i32 { var a: i32 = x; var i: i32 = 0; for (i < 12) { a = a * 3 + i * 3; if (a > 1000) { a = a - 997; } i = i + 1; } ret a; }\npub fun f3(x: i32) i32 { var a: i32 = x; var i: i32 = 0; for (i < 12) { a = a * 3 + i * 4; if (a > 1000) { a = a - 997; } i = i + 1; } ret a; }\npub fun f4(x: i32) i32 { var a: i32 = x; var i: i32 = 0; for (i < 12) { a = a * 3 + i * 5; if (a > 1000) { a = a - 997; } i = i + 1; } ret a; }\npub fun f5(x: i32) i32 { var a: i32 = x; var i: i32 = 0; for (i < 12) { a = a * 3 + i * 6; if (a > 1000) { a = a - 997; } i = i + 1; } ret a; }\npub fun f6(x: i32) i32 { var a: i32 = x; var i: i32 = 0; for (i < 12) { a = a * 3 + i * 7; if (a > 1000) { a = a - 997; } i = i + 1; } ret a; }\npub fun f7(x: i32) i32 { var a: i32 = x; var i: i32 = 0; for (i < 12) { a = a * 3 + i * 8; if (a > 1000) { a = a - 997; } i = i + 1; } ret a; }\npub fun f8(x: i32) i32 { var a: i32 = x; var i: i32 = 0; for (i < 12) { a = a * 3 + i * 9; if (a > 1000) { a = a - 997; } i = i + 1; } ret a; }\npub fun f9(x: i32) i32 { var a: i32 = x; var i: i32 = 0; for (i < 12) { a = a * 3 + i * 10; if (a > 1000) { a = a - 997; } i = i + 1; } ret a; }\npub fun f10(x: i32) i32 { var a: i32 = x; var i: i32 = 0; for (i < 12) { a = a * 3 + i * 11; if (a > 1000) { a = a - 997; } i = i + 1; } ret a; }\npub fun f11(x: i32) i32 { var a: i32 = x; var i: i32 = 0; for (i < 12) { a = a * 3 + i * 12; if (a > 1000) { a = a - 997; } i = i + 1; } ret a; }\npub fun f12(x: i32) i32 { var a: i32 = x; var i: i32 = 0; for (i < 12) { a = a * 3 + i * 13; if (a > 1000) { a = a - 997; } i = i + 1; } ret a; }\npub fun f13(x: i32) i32 { var a: i32 = x; var i: i32 = 0; for (i < 12) { a = a * 3 + i * 14; if (a > 1000) { a = a - 997; } i = i + 1; } ret a; }\npub fun f14(x: i32) i32 { var a: i32 = x; var i: i32 = 0; for (i < 12) { a = a * 3 + i * 15; if (a > 1000) { a = a - 997; } i = i + 1; } ret a; }\npub fun f15(x: i32) i32 { var a: i32 = x; var i: i32 = 0; for (i < 12) { a = a * 3 + i * 16; if (a > 1000) { a = a - 997; } i = i + 1; } ret a; }\npub fun f16(x: i32) i32 { var a: i32 = x; var i: i32 = 0; for (i < 12) { a = a * 3 + i * 17; if (a > 1000) { a = a - 997; } i = i + 1; } ret a; }\npub fun f17(x: i32) i32 { var a: i32 = x; var i: i32 = 0; for (i < 12) { a = a * 3 + i * 18; if (a > 1000) { a = a - 997; } i = i + 1; } ret a; }\npub fun f18(x: i32) i32 { var a: i32 = x; var i: i32 = 0; for (i < 12) { a = a * 3 + i * 19; if (a > 1000) { a = a - 997; } i = i + 1; } ret a; }\npub fun f19(x: i32) i32 { var a: i32 = x; var i: i32 = 0; for (i < 12) { a = a * 3 + i * 20; if (a > 1000) { a = a - 997; } i = i + 1; } ret a; }\n";
+}
+
+#[testing]
+fun ro_main_text(alloc: *A.Allocator) str {
+    ret spliced(alloc, "use uniontest.rm0;\nuse uniontest.rm1;\nuse uniontest.rm2;\nuse uniontest.rm3;\nuse uniontest.rm4;\nuse uniontest.rm5;\nuse uniontest.rm6;\nuse uniontest.rm7;\nuse uniontest.rm8;\nuse uniontest.rm9;\nuse uniontest.rm10;\nuse uniontest.rm11;\nuse uniontest.rm12;\nuse uniontest.rm13;\nuse uniontest.rm14;\nuse uniontest.rm15;\n\n#[symbol(\"", entry_symbol(), "\")]\nfun start() i32 {\n    var t: i32 = 1;\n    t = t + rm0.f0(t + 0);\n    t = t + rm1.f1(t + 1);\n    t = t + rm2.f2(t + 2);\n    t = t + rm3.f3(t + 3);\n    t = t + rm4.f4(t + 4);\n    t = t + rm5.f5(t + 5);\n    t = t + rm6.f6(t + 6);\n    t = t + rm7.f7(t + 7);\n    t = t + rm8.f8(t + 8);\n    t = t + rm9.f9(t + 9);\n    t = t + rm10.f10(t + 10);\n    t = t + rm11.f11(t + 11);\n    t = t + rm12.f12(t + 12);\n    t = t + rm13.f13(t + 13);\n    t = t + rm14.f14(t + 14);\n    t = t + rm15.f15(t + 15);\n    ret t;\n}\n");
+}
+
+#[testing]
+fun ro_files(alloc: *A.Allocator, names: *str, texts: *str) {
+    names[0] = "main.mach";
+    texts[0] = ro_main_text(alloc);
+    val body: str = ro_mod_text();
+    names[1]  = "rm0.mach";
+    texts[1]  = body;
+    names[2]  = "rm1.mach";
+    texts[2]  = body;
+    names[3]  = "rm2.mach";
+    texts[3]  = body;
+    names[4]  = "rm3.mach";
+    texts[4]  = body;
+    names[5]  = "rm4.mach";
+    texts[5]  = body;
+    names[6]  = "rm5.mach";
+    texts[6]  = body;
+    names[7]  = "rm6.mach";
+    texts[7]  = body;
+    names[8]  = "rm7.mach";
+    texts[8]  = body;
+    names[9]  = "rm8.mach";
+    texts[9]  = body;
+    names[10] = "rm9.mach";
+    texts[10] = body;
+    names[11] = "rm10.mach";
+    texts[11] = body;
+    names[12] = "rm11.mach";
+    texts[12] = body;
+    names[13] = "rm12.mach";
+    texts[13] = body;
+    names[14] = "rm13.mach";
+    texts[14] = body;
+    names[15] = "rm14.mach";
+    texts[15] = body;
+    names[16] = "rm15.mach";
+    texts[16] = body;
+}
+
+#[testing]
+fun readout_rows_case(jobs: u32) i32 {
+    var alloc:  A.Allocator;
+    val make_r: err[A.Error] = page.make(?alloc);
+    if (sel make_r.err) { ret 1; }
+    val sr: res[session.Session, fail.Fail] = toolchain.session_init(?alloc);
+    if (sel sr.err) { ret 1; }
+    var s: session.Session = sr.ok;
+    fin { session.dnit(?s); }
+
+    var names: [17]str;
+    var texts: [17]str;
+    ro_files(?alloc, ?names[0], ?texts[0]);
+
+    val root_r: res[str, fail.Fail] = driver.scaffold(?alloc, driver.fixture_manifest(), ?names[0], ?texts[0], 17);
+    if (sel root_r.err) { ret 1; }
+    val root: str = root_r.ok;
+    fin { fs.remove_all(?alloc, root); }
+
+    val mr: res[manifest.Manifest, fail.Fail] = driver.load_manifest(?s, root);
+    if (sel mr.err) { ret 1; }
+    var m:  manifest.Manifest    = mr.ok;
+    var rq: request.BuildRequest = request.defaults();
+    rq.project_root = root;
+    rq.jobs         = jobs;
+    val pr_r: res[build_plan.BuildPlan, fail.Fail] = build_plan.plan_to_run(?alloc, ?s, toolchain.t_registry(), ?m, rq);
+    if (sel pr_r.err) { ret 1; }
+    var bp: build_plan.BuildPlan = pr_r.ok;
+
+    var rd: readout.Recording;
+    readout.recording_init(?rd, ?alloc, readout.LEVEL_ITEMS);
+    fin { readout.recording_dnit(?rd); }
+
+    var published: publication.Publications = publication.init(?alloc);
+    fin { publication.dnit(?published); }
+    val r: res[outcome.BuildOutcome, fail.Fail] = execute_warm(?bp, 0, ?s, ?published, ?alloc, ?rd.sink);
+
+    var bad: i32 = 0;
+    if (sel r.err) { bad = 1; }
+    if (sel r.ok) {
+        val bo: outcome.BuildOutcome = r.ok;
+        if (bo.severity != outcome.BUILD_OK) { bad = 1; }
+        if (bo.artifacts.len != 1)           { bad = 1; }
+    }
+
+    var phs: [8]readout.Phase;
+    phs[0] = readout.LOAD;
+    phs[1] = readout.RESOLVE;
+    phs[2] = readout.SEMA;
+    phs[3] = readout.LOWER;
+    phs[4] = readout.OPTIMIZE;
+    phs[5] = readout.CODEGEN;
+    phs[6] = readout.EMIT;
+    phs[7] = readout.LINK;
+
+    var i: u32 = 0;
+    for (i < 8) {
+        val pm: *readout.Recorded = ?rd.phases[phs[i]];
+        if (pm.occurrences != 1) { bad = 10 + i::i32; }
+        if (pm.items == 0)       { bad = 30 + i::i32; }
+        if (pm.workers == 0)     { bad = 50 + i::i32; }
+        i = i + 1;
+    }
+    if (rd.summaries != 1 || rd.other < 0) { bad = 1; }
+
+    ret bad;
+}
+
+# a serial and a pooled build each send one row per phase, with its items and workers;
+# the durations are the clock's and are not checked
+test readout__a_build_records_one_row_per_phase_serial_and_pooled {
+    val serial: i32 = readout_rows_case(0);
+    if (serial != 0) { ret serial; }
+    ret readout_rows_case(4);
+}
+
+# a linux project whose app needs one step `vendor` running `argv` and declaring the output
+# `{project.work}/<out>`
+#[testing]
+fun manifest_vendor(alloc: *A.Allocator, argv: str, out: str) str {
+    val head: str = spliced(alloc, "[project]\nmach = \">=5\"\nid = \"vend\"\nversion = \"0.0.0\"\nsrc = \"src\"\nwork = \"out/{target.name}/{profile.name}\"\n\n[target.linux]\nisa = \"x86_64\"\nos = \"linux\"\nabi = \"sysv64\"\n\n[step.vendor]\nargv = ", argv, "\nin = [\"src/main.mach\"]\nout = [\"{project.work}/");
+    ret spliced(alloc, head, out, "\"]\nneed = []\n\n[artifact.app]\nkind = \"bin\"\nentry = \"main.mach\"\nout = \"{project.work}/bin/app\"\ntargets = [\"*\"]\nlink = []\nneed = [\"step.vendor\"]\n[profile.debug]\ndefault = true\noptimize = false\ndebug = true\nsimd = \"scalarize\"\n[profile.release]\noptimize = true\ndebug = false\nsimd = \"scalarize\"\n");
+}
+
+#[testing]
+fun manifest_step_count() str {
+    ret "[project]\nmach = \">=5\"\nid = \"repeatw\"\nversion = \"0.0.0\"\nsrc = \"src\"\nwork = \"out/{target.name}/{profile.name}\"\n\n[target.linux]\nisa = \"x86_64\"\nos = \"linux\"\nabi = \"sysv64\"\n\n[step.count]\nargv = [\"sh\", \"-c\", 'n=0; if [ -f counter ]; then IFS= read -r n < counter; fi; n=$((n + 1)); printf \"%s\" \"$n\" > counter']\nin = [\"watched\"]\nout = [\"counter\"]\nneed = []\n\n[artifact.app]\nkind = \"bin\"\nentry = \"main.mach\"\nout = \"{project.work}/bin/app\"\ntargets = [\"*\"]\nlink = []\nneed = [\"step.count\"]\n[profile.debug]\ndefault = true\noptimize = false\ndebug = true\nsimd = \"scalarize\"\n[profile.release]\noptimize = true\ndebug = false\nsimd = \"scalarize\"\n";
+}
+
+$if ($mach.build.os == $mach.os.linux && $mach.build.arch == $mach.arch.x86_64) {
+    # a run-time result outside 0..255 exits 255 instead of its low eight bits, so it
+    # can never read as a pass; a result inside the range is the exit code as is
+    test dispatcher__folds_a_wide_run_time_result_to_255 {
+        var alloc:  A.Allocator;
+        val make_r: err[A.Error] = page.make(?alloc);
+        if (sel make_r.err) { ret 1; }
+        val sr: res[session.Session, fail.Fail] = toolchain.session_init(?alloc);
+        if (sel sr.err) { ret 1; }
+        var s: session.Session = sr.ok;
+        fin { session.dnit(?s); }
+
+        var names: [1]str;
+        names[0] = "main.mach";
+        var texts: [1]str;
+        texts[0] = spliced(?alloc,
+            "#[noinline]\nfun wide(v: i32) i32 { ret v; }\n",
+            "test r256 { ret wide(256); }\ntest rneg1 { ret wide(-1); }\ntest r3 { ret 3; }\ntest r255 { ret 255; }\n",
+            dispatcher_stub());
+        val root_r: res[str, fail.Fail] = driver.scaffold(?alloc, driver.fixture_manifest(), ?names[0], ?texts[0], 1);
+        if (sel root_r.err) { ret 1; }
+        val root: str = root_r.ok;
+        fin { fs.remove_all(?alloc, root); }
+
+        val mr: res[manifest.Manifest, fail.Fail] = driver.load_manifest(?s, root);
+        if (sel mr.err) { ret 1; }
+        var m:  manifest.Manifest    = mr.ok;
+        var rq: request.BuildRequest = request.defaults();
+        rq.project_root = root;
+        rq.target       = "linux";
+        rq.goal         = request.GOAL_TESTS;
+        val pr: res[build_plan.BuildPlan, fail.Fail] = build_plan.plan_to_run(?alloc, ?s, toolchain.t_registry(), ?m, rq);
+        if (sel pr.err) { ret 1; }
+        var bp:        build_plan.BuildPlan     = pr.ok;
+        var published: publication.Publications = publication.init(?alloc);
+        fin { publication.dnit(?published); }
+        val r: res[outcome.BuildOutcome, fail.Fail] = execute_warm(?bp, 0, ?s, ?published, ?alloc, nil);
+        if (sel r.err) {
+            print.eprintln(fail.describe(r.err));
+            ret 1;
+        }
+        var bo: outcome.BuildOutcome = r.ok;
+        if (bo.severity != outcome.BUILD_OK) { ret 2; }
+        if (bo.tests.len != 4)               { ret 3; }
+
+        var labels: [4]str = [4]str{"uniontest.main#r256", "uniontest.main#rneg1", "uniontest.main#r3", "uniontest.main#r255"};
+        var want:   [4]i32 = [4]i32{255, 255, 3, 255};
+        var i:      usize  = 0;
+        for (i < 4) {
+            var found: bool  = false;
+            var t:     usize = 0;
+            for (t < bo.tests.len) {
+                val art: *outcome.TestArtifact = ?bo.tests.data[t];
+                if (str_equals(art.name::str, labels[i])) {
+                    found = true;
+                    val got: i32 = dispatch_status(art.exe::str, art.idx);
+                    if (got != want[i]) {
+                        print.eprintlnf("{}: exit {} (want {})", labels[i], got::i64, want[i]::i64);
+                        ret 10 + i::i32;
+                    }
+                }
+                t = t + 1;
+            }
+            if (!found) { ret 4; }
+            i = i + 1;
+        }
+        ret 0;
+    }
+}
+
+# builds the app of `mtext` (main and window modules) for linux in a fresh session, after
+# writing a stale window.o into the directory `stale` under the root when it is not empty:
+# 0 when it built and `needle_len` is 0, or when it was refused naming every needle
+#[testing]
+fun vendor_build(alloc: *A.Allocator, mtext: str, stale: str, needles: *str, needle_len: usize) i32 {
+    val sr: res[session.Session, fail.Fail] = toolchain.session_init(alloc);
+    if (sel sr.err) { ret 1; }
+    var s: session.Session = sr.ok;
+    fin { session.dnit(?s); }
+    var names:  [2]str              = [2]str{"main.mach", "window.mach"};
+    var texts:  [2]str              = [2]str{"fun main() i32 { ret 0; }\n", "pub fun w() i32 { ret 1; }\n"};
+    val root_r: res[str, fail.Fail] = driver.scaffold(alloc, mtext, ?names[0], ?texts[0], 2);
+    if (sel root_r.err) { ret 1; }
+    val root: str = root_r.ok;
+    fin { fs.remove_all(alloc, root); }
+    if (!str_equals(stale, "")) {
+        val stale_dir: str             = spliced(alloc, root, "/", stale);
+        val made:      err[fs.FsError] = fs.create_dir_all(alloc, stale_dir, 493);
+        if (sel made.err) { ret 2; }
+        val wrote: err[fs.FsError] = fs.write_bytes(spliced(alloc, stale_dir, "/", "window.o"), "stale-from-a-crashed-run"::*u8, 24, 420);
+        if (sel wrote.err) { ret 2; }
+    }
+    val refused: opt[str] = step_check(?s, alloc, root, false);
+    if (sel refused.none) {
+        if (needle_len == 0) { ret 0; }
+        ret 3;
+    }
+    if (needle_len == 0) { ret 4; }
+    val msg: str   = refused.some;
+    var i:   usize = 0;
+    for (i < needle_len) {
+        if (!str_contains(msg, needles[i])) { ret 5; }
+        i = i + 1;
+    }
+    ret 0;
+}
+
+#[testing]
+rec StepOut {
+    argv: str;
+    out:  str;
+    tree: str;
+}
+
+#[testing]
+val STEP_OUTS: [4]StepOut = [4]StepOut{
+    StepOut{argv: "[\"true\"]", out: "obj/vend/window.o", tree: "module object tree"},
+    StepOut{argv: "[\"true\"]", out: ".stage/window.o", tree: "build step staging area"},
+    StepOut{argv: "[\"true\"]", out: ".cache/window.o", tree: "compiler cache directory"},
+    StepOut{argv: "[\"touch\", \"{project.work}/obj/vend-c/window.o\"]", out: "obj/vend-c/window.o", tree: ""}
+};
+
+# a step output inside the module object tree, the staging area or the cache is refused
+# naming the step, the path and the tree; a sibling of a module's object directory is not
+test step_out__refused_inside_compiler_owned_trees {
+    var alloc:  A.Allocator;
+    val make_r: err[A.Error] = page.make(?alloc);
+    if (sel make_r.err) { ret 1; }
+    var i: usize = 0;
+    for (i < 4) {
+        val c:       StepOut = STEP_OUTS[i];
+        var needles: [3]str    = [3]str{"[step.vendor]", c.out, c.tree};
+        var n:       usize     = 3;
+        if (str_equals(c.tree, "")) { n = 0; }
+        val code: i32 = vendor_build(?alloc, manifest_vendor(?alloc, c.argv, c.out), "", ?needles[0], n);
+        if (code != 0) { ret (i::i32 + 1) * 10 + code; }
+        i = i + 1;
+    }
+    ret 0;
+}
+
+$if ($mach.build.os != $mach.os.windows) {
+    # a step runs once, reruns under no-cache, is reused from its stamp, and reruns when its
+    # declared input changes
+    test build_step__reruns_only_under_no_cache_or_a_changed_input {
+        var alloc:  A.Allocator;
+        val make_r: err[A.Error] = page.make(?alloc);
+        if (sel make_r.err) { ret 1; }
+        val sr: res[session.Session, fail.Fail] = toolchain.session_init(?alloc);
+        if (sel sr.err) { ret 1; }
+        var s: session.Session = sr.ok;
+        fin { session.dnit(?s); }
+
+        var names:  [1]str              = [1]str{"main.mach"};
+        var texts:  [1]str              = [1]str{"fun main() i32 { ret 0; }\n"};
+        val root_r: res[str, fail.Fail] = driver.scaffold(?alloc, manifest_step_count(), ?names[0], ?texts[0], 1);
+        if (sel root_r.err) { ret 1; }
+        val root: str = root_r.ok;
+        fin { fs.remove_all(?alloc, root); }
+        val counter: str             = spliced(?alloc, root, "/", "counter");
+        val watched: str             = spliced(?alloc, root, "/", "watched");
+        val first:   err[fs.FsError] = fs.write_bytes(watched, "a"::*u8, 1, 420);
+        if (sel first.err) { ret 2; }
+
+        # round 0 runs the step, round 1 forces it again, round 2 reuses the round-1 stamp, and
+        # round 3 follows an edit of the declared input
+        val want:  [4]str = [4]str{"1", "2", "2", "3"};
+        var round: u32    = 0;
+        for (round < 4) {
+            if (round == 3) {
+                val edited: err[fs.FsError] = fs.write_bytes(watched, "b"::*u8, 1, 420);
+                if (sel edited.err) { ret 2; }
+            }
+            val refused: opt[str] = step_check(?s, ?alloc, root, round == 1);
+            if (sel refused.some) { ret 3; }
+            val text_r: res[str, fs.FsError] = fs.read_string(?alloc, counter);
+            if (sel text_r.err) { ret 4; }
+            val same: bool = str_equals(text_r.ok, want[round::usize]);
+            str_free(?alloc, text_r.ok);
+            if (!same) { ret (10 + round)::i32; }
+            round = round + 1;
+        }
+        ret 0;
+    }
+}
+
+$if ($mach.build.os != $mach.os.windows) {
+    # a stale staged output left by a crashed run is discarded before the step runs, so a step
+    # that never writes its output is refused rather than publishing the stale file
+    test build_step__stale_staging_is_discarded_before_the_run {
+        var alloc:  A.Allocator;
+        val make_r: err[A.Error] = page.make(?alloc);
+        if (sel make_r.err) { ret 1; }
+        var needles: [1]str = [1]str{"did not publish valid declared output"};
+        ret vendor_build(?alloc, manifest_vendor(?alloc, "[\"true\"]", "obj/vend-c/window.o"),
+            "out/linux/debug/.stage/vendor/obj/vend-c", ?needles[0], 1);
+    }
+}
+
+test build__gate_on_a_variable_fails_the_build {
+    var alloc:  A.Allocator;
+    val make_r: err[A.Error] = page.make(?alloc);
+    if (sel make_r.err) { ret 1; }
+    var bad: i32 = 0;
+
+    # a gate reading a variable is refused by sema, which gives every gate its verdict
+    val pk: str = spliced(?alloc,
+        "tag Reply: u8 { empty; value: i64; }\nvar G: Reply = Reply.value{1};\nfun f() i32 { $if (sel G.value) { ret 1; } ret 0; }\n#[symbol(\"",
+        entry_symbol(), "\")]\nfun start() i32 { ret f(); }\n");
+    val ok: str = spliced(?alloc,
+        "fun sink(va: ...) u32 { var acc: u32 = 0; $each a in va { acc = acc + a; } ret acc; }\n#[symbol(\"",
+        entry_symbol(), "\")]\nfun start() i32 { sink(7::u32, 8::u32); ret 0; }\n");
+
+    if (sema_checked.sema_clean(pk))              { bad = 1; }
+    if (engine_build_fails(pk) != 0) { bad = 1; }
+
+    if (engine_build_fails(ok) == 0) { bad = 1; }
+    if (!sema_checked.sema_clean(ok))             { bad = 1; }
+
+    ret bad;
+}
+
+# a test build links every module's normal object and each test object beside it
+test q_link__records_the_normal_and_test_codegen_keys {
+    var alloc:  A.Allocator;
+    val make_r: err[A.Error] = page.make(?alloc);
+    if (sel make_r.err) { ret 1; }
+    val sr: res[session.Session, fail.Fail] = toolchain.session_init(?alloc);
+    if (sel sr.err) { ret 1; }
+    var s: session.Session = sr.ok;
+
+    var names: [2]str;
+    names[0] = "main.mach";
+    names[1] = "a.mach";
+    var texts: [2]str;
+    texts[0] = spliced(?alloc, "use uniontest.a.fa;\n#[symbol(\"", entry_symbol(), "\")]\nfun start() i32 { ret fa(); }\n");
+    texts[1] = "pub fun fa() i32 { ret 0; }\n\ntest a_zero { ret fa(); }\n";
+    val root_r: res[str, fail.Fail] = driver.scaffold(?alloc, driver.fixture_manifest(), ?names[0], ?texts[0], 2);
+    if (sel root_r.err) {
+        session.dnit(?s);
+        ret 1;
+    }
+    val root: str = root_r.ok;
+
+    val mr: res[manifest.Manifest, fail.Fail] = driver.load_manifest(?s, root);
+    if (sel mr.err) {
+        fs.remove_all(?alloc, root);
+        session.dnit(?s);
+        ret 1;
+    }
+    var m:  manifest.Manifest    = mr.ok;
+    var rq: request.BuildRequest = request.defaults();
+    rq.project_root = root;
+    rq.goal         = request.GOAL_TESTS;
+    val pr: res[build_plan.BuildPlan, fail.Fail] = build_plan.plan_to_run(?alloc, ?s, toolchain.t_registry(), ?m, rq);
+    if (sel pr.err) {
+        fs.remove_all(?alloc, root);
+        session.dnit(?s);
+        ret 1;
+    }
+    var bp: build_plan.BuildPlan = pr.ok;
+
+    var bad:       i32                      = 0;
+    var published: publication.Publications = publication.init(?alloc);
+    fin { publication.dnit(?published); }
+    val r1: res[outcome.BuildOutcome, fail.Fail] = execute_warm(?bp, 0, ?s, ?published, ?alloc, nil);
+    if (sel r1.err) {
+        fs.remove_all(?alloc, root);
+        session.dnit(?s);
+        ret 1;
+    }
+    if (r1.ok.severity != outcome.BUILD_OK) { bad = 1; }
+
+    val keys_r: res[Vector[query.QueryKey], fail.Fail] = query.cached_dependency_keys(?s.queries, ?passes.LINK, 0, ?alloc);
+    if (sel keys_r.err) {
+        fs.remove_all(?alloc, root);
+        session.dnit(?s);
+        ret 1;
+    }
+    var keys: Vector[query.QueryKey] = keys_r.ok;
+    fin { collections_vector.dnit[query.QueryKey](?keys); }
+
+    var normal_deps: u32   = 0;
+    var test_deps:   u32   = 0;
+    var i:           usize = 0;
+    for (i < keys.len) {
+        val d: query.QueryKey = keys.data[i];
+        if (d.kind == ?passes.CODEGEN) {
+            if (passes.back_half_key_is_test(d.key)) { test_deps = test_deps + 1; }
+            or                                       { normal_deps = normal_deps + 1; }
+        }
+        i = i + 1;
+    }
+    # only uniontest.a declares a test
+    if (normal_deps < 2 || test_deps != 1) { bad = 1; }
+
+    fs.remove_all(?alloc, root);
+    session.dnit(?s);
+    ret bad;
+}
+
+#[testing]
+fun manifest_step_target_env() str {
+    ret "[project]\nmach = \">=5\"\nid = \"tenv\"\nversion = \"0.0.0\"\nsrc = \"src\"\nwork = \"out/{target.name}/{profile.name}\"\n\n[target.linux]\nisa = \"x86_64\"\nos = \"linux\"\nabi = \"sysv64\"\n\n[step.probe]\nargv = [\"sh\", \"-c\", 'test \"$MACH_TARGET_ISA\" = x86_64 && test \"$MACH_TARGET_OS\" = linux && test \"$MACH_TARGET_ABI\" = sysv64 && printf ok > seen']\nenv = { MACH_TARGET_ISA = \"spoofed\", CARRIED = \"through\" }\nin = []\nout = [\"seen\"]\nneed = []\n\n[artifact.app]\nkind = \"bin\"\nentry = \"main.mach\"\nout = \"{project.work}/bin/app\"\ntargets = [\"*\"]\nlink = []\nneed = [\"step.probe\"]\n[profile.debug]\ndefault = true\noptimize = false\ndebug = true\nsimd = \"scalarize\"\n[profile.release]\noptimize = true\ndebug = false\nsimd = \"scalarize\"\n";
+}
+
+$if ($mach.build.os != $mach.os.windows) {
+    test build_step__target_environment_replaces_a_declared_override {
+        var alloc:  A.Allocator;
+        val make_r: err[A.Error] = page.make(?alloc);
+        if (sel make_r.err) { ret 1; }
+        val sr: res[session.Session, fail.Fail] = toolchain.session_init(?alloc);
+        if (sel sr.err) { ret 1; }
+        var s: session.Session = sr.ok;
+
+        var names: [1]str;
+        names[0] = "main.mach";
+        var texts: [1]str;
+        texts[0] = "fun main() i32 { ret 0; }\n";
+        val root_r: res[str, fail.Fail] = driver.scaffold(?alloc, manifest_step_target_env(), ?names[0], ?texts[0], 1);
+        if (sel root_r.err) {
+            session.dnit(?s);
+            ret 1;
+        }
+        val root: str = root_r.ok;
+
+        var bad:     i32      = 0;
+        val refused: opt[str] = step_check(?s, ?alloc, root, false);
+        if (sel refused.some) { bad = 1; }
+
+        val seen_r: res[str, A.Error] = types_path.resolve(?alloc, root, "seen");
+        if (sel seen_r.err) { bad = 1; }
+        if (sel seen_r.ok) {
+            val text_r: res[str, fs.FsError] = fs.read_string(?alloc, seen_r.ok);
+            if (sel text_r.err)                                  { ret 99; }
+            if (!(sel text_r.ok && str_equals(text_r.ok, "ok"))) { bad = 1; }
+        }
+
+        fs.remove_all(?alloc, root);
+        session.dnit(?s);
+        ret bad;
+    }
+}
+
+#[testing]
+fun manifest_two_artifacts() str {
+    ret "[project]\nmach = \">=5\"\nid = \"lessons\"\nversion = \"0.1.0\"\nsrc = \"src\"\nwork = \"out/{target.name}/{profile.name}\"\n\n[target.linux]\nisa = \"x86_64\"\nos = \"linux\"\nabi = \"sysv64\"\n\n[profile.debug]\ndefault = true\noptimize = false\ndebug = false\nsimd = \"scalarize\"\n\n[artifact.hello]\ndefault = true\nkind = \"bin\"\nentry = \"hello.mach\"\nout = \"{project.work}/bin/hello\"\ntargets = [\"*\"]\nlink = []\nneed = []\n\n[artifact.shaded]\nkind = \"bin\"\nentry = \"shaded.mach\"\nout = \"{project.work}/bin/shaded\"\ntargets = [\"*\"]\nlink = []\nneed = []\n";
+}
+
+# a two-artifact project: `common` is shared, `stray` is reached by neither and does not
+# type-check, and `shaded` refuses to be compiled for any artifact but its own
+#[testing]
+fun scaffold_two_artifacts(alloc: *A.Allocator) res[str, fail.Fail] {
+    val start: str = dispatcher_stub();
+    var names: [4]str;
+    var texts: [4]str;
+    names[0] = "hello.mach";
+    texts[0] = spliced(alloc, "use lessons.common;\n\n", start, "\ntest own { ret common.zero(); }\n");
+    names[1] = "shaded.mach";
+    texts[1] = spliced(alloc, "$if ($bin.name != \"shaded\") { $error(\"wrong artifact\"); }\n\nuse lessons.common;\n\n", start,
+        "\ntest own { ret common.zero(); }\n");
+    names[2] = "common.mach";
+    texts[2] = "pub fun zero() i32 { ret 0; }\n\ntest names_its_artifact {\n    $if ($bin.name == \"hello\") { ret 11; }\n    $or ($bin.name == \"shaded\") { ret 12; }\n    ret 13;\n}\n";
+    names[3] = "stray.mach";
+    texts[3] = "pub fun broken() i32 { ret lessons_undefined_symbol(); }\n\ntest never { ret 0; }\n";
+    ret driver.scaffold(alloc, manifest_two_artifacts(), ?names[0], ?texts[0], 4);
+}
+
+# the tests `mach test` builds for `artifact` ("" selects the default), each label
+# with the status its dispatcher exits with, or the build's failure
+#[testing]
+fun artifact_test_statuses(alloc: *A.Allocator, s: *session.Session, root: str, artifact: str,
+    labels: *Vector[str], statuses: *Vector[i32]) i32 {
+    val mr: res[manifest.Manifest, fail.Fail] = driver.load_manifest(s, root);
+    if (sel mr.err) { ret 1; }
+    var m:  manifest.Manifest    = mr.ok;
+    var rq: request.BuildRequest = request.defaults();
+    rq.project_root = root;
+    rq.target       = "linux";
+    rq.artifact     = artifact;
+    rq.debug        = false;
+    rq.goal         = request.GOAL_TESTS;
+    val pr: res[build_plan.BuildPlan, fail.Fail] = build_plan.plan_to_run(alloc, s, toolchain.t_registry(), ?m, rq);
+    if (sel pr.err) {
+        print.eprintln(fail.describe(pr.err));
+        ret 2;
+    }
+    var bp:        build_plan.BuildPlan     = pr.ok;
+    var published: publication.Publications = publication.init(alloc);
+    fin { publication.dnit(?published); }
+    val r: res[outcome.BuildOutcome, fail.Fail] = execute_warm(?bp, 0, s, ?published, alloc, nil);
+    if (sel r.err) {
+        print.eprintln(fail.describe(r.err));
+        ret 3;
+    }
+    var bo: outcome.BuildOutcome = r.ok;
+    fin { outcome.outcome_dnit(?bo); }
+    if (bo.severity != outcome.BUILD_OK) {
+        var di: usize = 0;
+        for (di < diagnostic.len(?s.diags)) {
+            print.eprintln(s.diags.items.data[di].message);
+            di = di + 1;
+        }
+        ret 4;
+    }
+    var t: usize = 0;
+    for (t < bo.tests.len) {
+        val art:   *outcome.TestArtifact = ?bo.tests.data[t];
+        val label: res[str, A.Error]     = str_dup(alloc, art.name::str);
+        if (sel label.err) { ret 5; }
+        val pl: res[usize, A.Error] = collections_vector.push[str](labels, label.ok);
+        if (sel pl.err) { ret 5; }
+        val ps: res[usize, A.Error] = collections_vector.push[i32](statuses, dispatch_status(art.exe::str, art.idx));
+        if (sel ps.err) { ret 5; }
+        t = t + 1;
+    }
+    ret 0;
+}
+
+#[testing]
+fun status_of(labels: *Vector[str], statuses: *Vector[i32], label: str) i32 {
+    var i: usize = 0;
+    for (i < labels.len) {
+        if (str_equals(labels.data[i], label)) { ret statuses.data[i]; }
+        i = i + 1;
+    }
+    ret -2;
+}
+
+$if ($mach.build.os == $mach.os.linux && $mach.build.arch == $mach.arch.x86_64) {
+    # `mach test` tests one artifact's closure, the way `mach build` builds it: the default
+    # artifact's tests without a selector, the named artifact's under `-a`, never a module
+    # neither reaches, and `$bin.name` in a test block is the artifact under test
+    test test_goal__tests_the_selected_artifacts_closure {
+        var alloc:  A.Allocator;
+        val make_r: err[A.Error] = page.make(?alloc);
+        if (sel make_r.err) { ret 1; }
+        val sr: res[session.Session, fail.Fail] = toolchain.session_init(?alloc);
+        if (sel sr.err) { ret 1; }
+        var s: session.Session = sr.ok;
+        fin { session.dnit(?s); }
+
+        val root_r: res[str, fail.Fail] = scaffold_two_artifacts(?alloc);
+        if (sel root_r.err) { ret 1; }
+        val root: str = root_r.ok;
+        fin { fs.remove_all(?alloc, root); }
+
+        var labels:   Vector[str] = collections_vector.init[str](?alloc);
+        var statuses: Vector[i32] = collections_vector.init[i32](?alloc);
+        fin {
+            collections_vector.dnit[str](?labels);
+            collections_vector.dnit[i32](?statuses);
+        }
+
+        # the default artifact
+        val dr: i32 = artifact_test_statuses(?alloc, ?s, root, "", ?labels, ?statuses);
+        if (dr != 0)                                                                     { ret 10 + dr; }
+        if (labels.len != 2)                                                             { ret 20; }
+        if (status_of(?labels, ?statuses, "lessons.hello#own") != 0)                  { ret 21; }
+        if (status_of(?labels, ?statuses, "lessons.common#names_its_artifact") != 11) { ret 22; }
+
+        # the other artifact, which a default run never compiles
+        labels.len   = 0;
+        statuses.len = 0;
+        val sr2: i32 = artifact_test_statuses(?alloc, ?s, root, "shaded", ?labels, ?statuses);
+        if (sr2 != 0)                                                                    { ret 30 + sr2; }
+        if (labels.len != 2)                                                             { ret 40; }
+        if (status_of(?labels, ?statuses, "lessons.shaded#own") != 0)                 { ret 41; }
+        if (status_of(?labels, ?statuses, "lessons.common#names_its_artifact") != 12) { ret 42; }
+        ret 0;
+    }
+}
+
+# a compile error in a module the tests reach fails the test build and collects no test
+test test_goal__compile_error_collects_no_tests {
+    var alloc:  A.Allocator;
+    val make_r: err[A.Error] = page.make(?alloc);
+    if (sel make_r.err) { ret 1; }
+    val sr: res[session.Session, fail.Fail] = toolchain.session_init(?alloc);
+    if (sel sr.err) { ret 1; }
+    var s: session.Session = sr.ok;
+
+    var names: [2]str;
+    names[0] = "main.mach";
+    names[1] = "bad.mach";
+    var texts: [2]str;
+    texts[0] = spliced(?alloc, "use uniontest.bad;\n\n#[symbol(\"", entry_symbol(), "\")]\nfun start() i32 { ret 0; }\n\ntest main_runs { ret 0; }\n");
+    texts[1] = "pub fun oops() i32 { ret uniontest_undefined_symbol(); }\n";
+    val root_r: res[str, fail.Fail] = driver.scaffold(?alloc, driver.fixture_manifest(), ?names[0], ?texts[0], 2);
+    if (sel root_r.err) {
+        session.dnit(?s);
+        ret 1;
+    }
+    val root: str = root_r.ok;
+
+    val mr: res[manifest.Manifest, fail.Fail] = driver.load_manifest(?s, root);
+    if (sel mr.err) {
+        fs.remove_all(?alloc, root);
+        session.dnit(?s);
+        ret 1;
+    }
+    var m:  manifest.Manifest    = mr.ok;
+    var rq: request.BuildRequest = request.defaults();
+    rq.project_root = root;
+    rq.goal         = request.GOAL_TESTS;
+    val pr: res[build_plan.BuildPlan, fail.Fail] = build_plan.plan_to_run(?alloc, ?s, toolchain.t_registry(), ?m, rq);
+    if (sel pr.err) {
+        fs.remove_all(?alloc, root);
+        session.dnit(?s);
+        ret 1;
+    }
+    var bp: build_plan.BuildPlan = pr.ok;
+
+    var bad:       i32                      = 0;
+    var published: publication.Publications = publication.init(?alloc);
+    fin { publication.dnit(?published); }
+    val r: res[outcome.BuildOutcome, fail.Fail] = execute_warm(?bp, 0, ?s, ?published, ?alloc, nil);
+    if (sel r.err) { bad = 1; }
+    if (sel r.ok) {
+        var bo: outcome.BuildOutcome = r.ok;
+        if (bo.severity == outcome.BUILD_OK) { bad = 1; }
+        or (bo.tests.len != 0)               { bad = 1; }
+        outcome.outcome_dnit(?bo);
+    }
+
+    fs.remove_all(?alloc, root);
+    session.dnit(?s);
+    ret bad;
+}
+
+
+# the failure checking the linux `app` artifact of the project at `root` reports, the steps it
+# needs run first, or none when it checked clean; `no_cache` reruns every step
+#[testing]
+fun step_check(s: *session.Session, alloc: *A.Allocator, root: str, no_cache: bool) opt[str] {
+    val loaded: res[manifest.Manifest, fail.Fail] = driver.load_manifest(s, root);
+    if (sel loaded.err) { ret opt[str].some{fail.describe(loaded.err)}; }
+    var m:  manifest.Manifest    = loaded.ok;
+    var rq: request.BuildRequest = request.defaults();
+    rq.project_root = root;
+    rq.target       = "linux";
+    rq.artifact     = "app";
+    rq.goal         = request.GOAL_CHECK;
+    rq.no_cache     = no_cache;
+    val planned: res[build_plan.BuildPlan, fail.Fail] = build_plan.plan_to_run(alloc, s, toolchain.t_registry(), ?m, rq);
+    if (sel planned.err) { ret opt[str].some{fail.describe(planned.err)}; }
+    var bp:        build_plan.BuildPlan     = planned.ok;
+    var published: publication.Publications = publication.init(alloc);
+    fin { publication.dnit(?published); }
+    val built: res[outcome.BuildOutcome, fail.Fail] = execute_warm(?bp, 0, s, ?published, alloc, nil);
+    if (sel built.err) { ret opt[str].some{fail.describe(built.err)}; }
+    var bo:    outcome.BuildOutcome = built.ok;
+    val clean: bool                 = bo.severity == outcome.BUILD_OK;
+    outcome.outcome_dnit(?bo);
+    if (clean) { ret opt[str].none{}; }
+    var text: str   = "";
+    var i:    usize = 0;
+    for (i < diagnostic.len(?s.diags)) {
+        text = spliced(alloc, text, s.diags.items.data[i].message, "\n");
+        i    = i + 1;
+    }
+    ret opt[str].some{text};
+}
+
+# zero when building `src` as the default artifact of the fixture project fails and links nothing
+#[testing]
+fun engine_build_fails(src: str) i32 {
+    var alloc:  A.Allocator;
+    val make_r: err[A.Error] = page.make(?alloc);
+    if (sel make_r.err) { ret 1; }
+    val sr: res[session.Session, fail.Fail] = toolchain.session_init(?alloc);
+    if (sel sr.err) { ret 1; }
+    var s: session.Session = sr.ok;
+    fin { session.dnit(?s); }
+
+    var names:  [1]str              = [1]str{"main.mach"};
+    var texts:  [1]str              = [1]str{src};
+    val root_r: res[str, fail.Fail] = driver.scaffold(?alloc, driver.fixture_manifest(), ?names[0], ?texts[0], 1);
+    if (sel root_r.err) { ret 1; }
+    val root: str = root_r.ok;
+    fin { fs.remove_all(?alloc, root); }
+
+    val mr: res[manifest.Manifest, fail.Fail] = driver.load_manifest(?s, root);
+    if (sel mr.err) { ret 1; }
+    var m:  manifest.Manifest    = mr.ok;
+    var rq: request.BuildRequest = request.defaults();
+    rq.project_root = root;
+    val pr: res[build_plan.BuildPlan, fail.Fail] = build_plan.plan_to_run(?alloc, ?s, toolchain.t_registry(), ?m, rq);
+    if (sel pr.err) { ret 1; }
+    var bp:        build_plan.BuildPlan     = pr.ok;
+    var published: publication.Publications = publication.init(?alloc);
+    fin { publication.dnit(?published); }
+    val r: res[outcome.BuildOutcome, fail.Fail] = execute_warm(?bp, 0, ?s, ?published, ?alloc, nil);
+    if (sel r.err) { ret 1; }
+    if (r.ok.severity == outcome.BUILD_OK) { ret 1; }
+    if (r.ok.artifacts.len != 0)           { ret 1; }
+    ret 0;
 }
