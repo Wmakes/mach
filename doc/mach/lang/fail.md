@@ -319,7 +319,8 @@ keeps the text apart. released with `places_dnit`
 pub fun places_dnit(a: *A.Allocator, f: Fail);
 ```
 
-release the places a failure owns through `a`, as `places_retain` made them
+release the places a failure owns through `a`, as `places_retain` made them;
+a failure carrying no fix owns no fix text
 
 ## fun without_places
 
@@ -446,6 +447,15 @@ pub fun user_of(k: diagnostic_kind.Kind, made: res[str, Fail]) Fail;
 
 the user failure under `k` carrying a made text, or the failure that refused
 to make it
+
+## fun environment_of
+
+```mach
+pub fun environment_of(k: diagnostic_kind.Kind, made: res[str, Fail]) Fail;
+```
+
+the environment failure under `k` carrying a made text, or the failure that
+refused to make it
 
 ## fun text_retain
 

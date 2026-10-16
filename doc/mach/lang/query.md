@@ -111,7 +111,8 @@ role: INPUT or DERIVED
 owner: what the kind's keys name
 origin: the phase a derived product's diagnostics belong to
 compute: a derived product's computation; an input has none
-finalize: releases what an owned derived product's bytes hold; nil when the bytes own nothing
+finalize: releases what an owned derived product's bytes hold, called only on bytes its own
+          computation published; nil when the bytes own nothing
 equal: whether two owned products are the same, so an equal recomputation keeps the revision;
           requires finalize
 replay: the product lowers or generates a module's object, so a restored object replays its
@@ -319,6 +320,9 @@ pub rec PreparedRetirement;
 ```mach
 pub fun discard_retirement(prepared: *PreparedRetirement);
 ```
+
+release a retirement that was prepared and not committed; one already committed or
+discarded owns nothing
 
 ## fun prepare_retirement
 

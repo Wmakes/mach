@@ -14,6 +14,8 @@ pub rec SemaResult;
 pub fun result_dnit(r: *SemaResult);
 ```
 
+release a semantic result; a nil result holds nothing
+
 ## val INFERRED_LEN_NONE
 
 ```mach
@@ -127,6 +129,8 @@ a reader lives for one computation, which acquires the same current definition o
 ```mach
 pub fun reader_dnit(reader: *DefinitionReader);
 ```
+
+release a reader; a nil reader holds nothing
 
 ## rec DefinedSymbol
 

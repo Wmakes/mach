@@ -90,6 +90,8 @@ pub rec UniReports;
 pub fun uni_report_mark(ur: *UniReports, key: type.TypeId) bool;
 ```
 
+whether a report about `key` goes out: the first time it is marked, or always with no record
+
 ## rec SecrecyWalk
 
 ```mach
@@ -139,6 +141,11 @@ annotation_check_fn: the per-instance checks over one type annotation, run as ea
 module: the stable id of the module being typed
 values: the store the module's constant values are built in, which its
                      interface publishes
+a walk outside a module's typing, as a check of one construct is, leaves the parts it does
+without nil, and each reads as absent: with no `deps` no imported surface is acquired, with no
+`insts` the walk records no instance or frame and types the template, with no
+`logical_seen` no type is refused for a logical-addressing target, with no `uni_reports`
+every report goes out, and with no `deps.watch.expanded` nothing hears of a growing cycle
 
 ## rec ModuleView
 
@@ -147,7 +154,12 @@ pub rec ModuleView;
 ```
 
 the module a walk reads and the typing tables it writes: the module being typed, or the
-declaring module of an instance
+declaring module of an instance. a walk over one construct, as a check is, may leave a table
+it does without nil: with no `rr` no name is resolved and no deferred name is reported, and a
+typing table nil is not written and a read of it answers as unrecorded, with the error or nil
+type, no state or no operand type, except a type read through `resolved_type_of`, which also
+records the failure. `inferred_len`, `layout_state`, `type_resolved_memo` and the
+constant tables are the module's own and nil in a view of another module
 
 ## rec Instance
 
@@ -375,11 +387,29 @@ the verdict the walk gives a comptime gate in its frame
 pub fun decl_type_for(sc: *SemaContext, sym: *resolve.Symbol) type.TypeId;
 ```
 
+## fun expr_in_view
+
+```mach
+pub fun expr_in_view(sc: *SemaContext, eid: ast_id.ExprId) bool;
+```
+
+whether expression `eid` lies in this view's syntax; one past it records an internal failure
+
+## fun decl_in_view
+
+```mach
+pub fun decl_in_view(sc: *SemaContext, did: ast_id.DeclId) bool;
+```
+
+whether declaration `did` lies in this view's syntax; one past it records an internal failure
+
 ## fun symbol_for_expr
 
 ```mach
 pub fun symbol_for_expr(sc: *SemaContext, eid: ast_id.ExprId) opt[*resolve.Symbol];
 ```
+
+the symbol an expression names, none when it names none
 
 ## fun comptime_ident_is_runtime
 
@@ -392,6 +422,8 @@ pub fun comptime_ident_is_runtime(sc: *SemaContext, eid: ast_id.ExprId) bool;
 ```mach
 pub fun symbol_for_type(sc: *SemaContext, tid: ast_id.TypeId) opt[*resolve.Symbol];
 ```
+
+the symbol a type names, none when it names none
 
 ## fun machine_of
 
@@ -518,6 +550,8 @@ the type store a comptime evaluation inside this walk reads
 pub fun resolve_type_comparison_operand(sc: *SemaContext, eid: ast_id.ExprId) res[opt[u32], comptime.EvalFail];
 ```
 
+the type of an operand of a type comparison, none when the walk has no typing of it
+
 ## fun gated_member_const_message
 
 ```mach
@@ -529,6 +563,9 @@ pub fun gated_member_const_message(sc: *SemaContext, name: intern.StrId, dep_pat
 ```mach
 pub fun resolve_module_member_const(sc: *SemaContext, eid: ast_id.ExprId) res[opt[comptime.CTValue], comptime.EvalFail];
 ```
+
+the value of a module member constant an expression names, none when it names none or the walk
+has no resolution
 
 ## fun own_nominal_declaration
 
@@ -557,6 +594,8 @@ the constant array the `$each` at `sid` reads in the walk's frame
 ```mach
 pub fun definition_ast(sc: *SemaContext, origin: session.ModuleId) *ast.Ast;
 ```
+
+the syntax of module `origin`, nil when it cannot be had, the reason recorded in the status
 
 ## fun generic_owner_of_decl
 

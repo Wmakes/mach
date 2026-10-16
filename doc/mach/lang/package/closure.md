@@ -213,21 +213,3 @@ a string key as the dependency commands read it: absent reads as empty
 pub fun parse_file(a: *A.Allocator, p: str) res[manifest.Doc, fail.Fail];
 ```
 
-## fun own
-
-```mach
-pub fun own(a: *A.Allocator, s: str) str;
-```
-
-## fun concat3
-
-```mach
-pub fun concat3(a: *A.Allocator, s1: str, s2: str, s3: str) str;
-```
-
-## fun oom
-
-```mach
-pub fun oom() fail.Fail;
-```
-

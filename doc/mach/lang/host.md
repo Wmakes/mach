@@ -87,6 +87,8 @@ ret: the units and their length, or the refusal
 pub fun native_text_free(a: *A.Allocator, name: *NativeName);
 ```
 
+release a native text; an empty one owns no units
+
 ## fun native_text_message
 
 ```mach

@@ -21,6 +21,8 @@ runs a later doc lookup reads; the stream borrows `source` and owns the rest
 pub fun dnit(stream: *TokenStream, alloc: *A.Allocator);
 ```
 
+release a token stream; a nil stream holds nothing
+
 ## fun doc_run_above
 
 ```mach

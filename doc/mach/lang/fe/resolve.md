@@ -32,6 +32,14 @@ pub fun symbol_index(id: SymbolId) u32;
 pub fun symbol_same(left: SymbolId, right: SymbolId) bool;
 ```
 
+## fun symbol_is_sentinel
+
+```mach
+pub fun symbol_is_sentinel(id: SymbolId) bool;
+```
+
+whether an id is one of the sentinels, which name no symbol
+
 ## fun symbol_is_nil
 
 ```mach
@@ -333,13 +341,15 @@ reached one re-exports, each once, allocated from `alloc` and released with deps
 pub fun deps_dnit(alloc: *A.Allocator, deps: *ResolveDeps);
 ```
 
-release what deps_of allocated
+release what deps_of allocated; a list it left empty owns nothing
 
 ## fun result_dnit
 
 ```mach
 pub fun result_dnit(r: *ResolveResult);
 ```
+
+release a resolution; a nil result holds nothing
 
 ## fun result_copy
 

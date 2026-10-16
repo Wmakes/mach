@@ -164,6 +164,8 @@ pub fun bindings_init(alloc: *A.Allocator) Bindings;
 pub fun bindings_dnit(b: *Bindings);
 ```
 
+release a binding list; a nil list, or one never made, holds nothing
+
 ## fun bindings_copy
 
 ```mach
@@ -282,7 +284,8 @@ owner_ver: the owning project's `[project].version`
 pub fun dnit(c: *ComptimeCtx);
 ```
 
-release the scope's own bindings; what it reads below belongs to the stages that made it
+release the scope's own bindings; what it reads below belongs to the stages that made it.
+a nil scope holds nothing
 
 ## fun prepare_gates
 

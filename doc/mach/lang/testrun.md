@@ -10,13 +10,22 @@ a collected test: its qualified name, where it is declared, the test object
 that holds it, the dispatcher that runs it as `<exe> <idx>`, and the target and
 profile that dispatcher was built for
 
+## val EXIT_SKIP
+
+```mach
+pub val EXIT_SKIP: i32 = 77
+```
+
+the exit status a test reports a skip with: 0 is a pass, this is a skip, and
+any other status is a failure
+
 ## def GateResultKind
 
 ```mach
 pub def GateResultKind: u8
 ```
 
-how a test ran: passed, disagreed with what it checks, or could not be judged
+how a test ran: passed, skipped, disagreed with what it checks, or could not be judged
 
 ## val RESULT_PASS
 
@@ -46,6 +55,12 @@ pub val RESULT_INFRASTRUCTURE_FAILURE: GateResultKind = 4
 
 ```mach
 pub val RESULT_RESOURCE_EXHAUSTION:    GateResultKind = 5
+```
+
+## val RESULT_SKIP
+
+```mach
+pub val RESULT_SKIP:                   GateResultKind = 7
 ```
 
 ## def GateCause
@@ -96,6 +111,12 @@ pub val CAUSE_ORACLE_EXIT:          GateCause = 9
 
 ```mach
 pub val CAUSE_INVALID_TERMINAL:     GateCause = 10
+```
+
+## val CAUSE_SKIP
+
+```mach
+pub val CAUSE_SKIP:                 GateCause = 11
 ```
 
 ## rec GateResult

@@ -104,6 +104,8 @@ pub fun init(alloc: *A.Allocator) Store;
 pub fun dnit(s: *Store);
 ```
 
+release a deep store; a nil store holds nothing
+
 ## fun node_add
 
 ```mach

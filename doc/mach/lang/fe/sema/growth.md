@@ -52,6 +52,8 @@ pub fun init(alloc: *A.Allocator) Analysis;
 pub fun dnit(an: *Analysis);
 ```
 
+release an analysis; a nil one, or one never made, holds nothing
+
 ## fun cycle_of
 
 ```mach

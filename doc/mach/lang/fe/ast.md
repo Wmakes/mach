@@ -21,6 +21,8 @@ pub fun init(a: *A.Allocator, file_id: lang_source.FileId) Ast;
 pub fun dnit(a: *Ast);
 ```
 
+release a tree; a nil tree holds nothing
+
 ## fun copy
 
 ```mach
