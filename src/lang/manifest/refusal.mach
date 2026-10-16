@@ -33,7 +33,7 @@ pub fun sfmt(alloc: *A.Allocator, fmt: str, va: ...) res[str, fail.Fail] {
 pub fun refuse(alloc: *A.Allocator, k: diagnostic_kind.Kind, fmt: str, va: ...) fail.Fail {
     val r: res[str, std_format.FormatError] = std_format.sprint(alloc, fmt, va...);
     if (sel r.err) { ret fail.format_refused(r.err); }
-    ret fail.user(k, r.ok);
+    ret fail.owning(fail.user(k, r.ok));
 }
 
 # the same failure pointing at `sp` in the manifest being parsed; the zero span

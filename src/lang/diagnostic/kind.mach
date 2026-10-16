@@ -545,9 +545,10 @@ pub val OP_OPERAND_NOT_CONSTANT:          Kind = 502;
 pub val OP_OPERAND_VALUE:                 Kind = 503;
 pub val OP_RESULT_FLOW:                   Kind = 504;
 pub val GENERIC_GROWING_CYCLE:            Kind = 505;
-pub val TARGET_RETIRED_SPELLING:          Kind = 506;
-pub val SECRET_TARGET_UNENFORCEABLE:      Kind = 507;
-pub val TARGET_BASELINE_REQUIRED:         Kind = 508;
+pub val DEF_NO_TYPE:                      Kind = 506;
+pub val TARGET_RETIRED_SPELLING:          Kind = 507;
+pub val SECRET_TARGET_UNENFORCEABLE:      Kind = 508;
+pub val TARGET_BASELINE_REQUIRED:         Kind = 509;
 
 # kind:    the row's own kind, which is its position in the table plus one
 # key:     the dotted key the kind is printed and selected by
@@ -564,7 +565,7 @@ pub rec Spec {
     retired: bool;
 }
 
-pub val COUNT: usize       = 508;
+pub val COUNT: usize       = 509;
 val     KINDS: [COUNT]Spec = [COUNT]Spec{
     Spec{kind: IMPORT_UNUSED, key: "import.unused", level: LEVEL_WARNING, source: true, retired: false},
     Spec{kind: DECL_DEPRECATED, key: "decl.deprecated", level: LEVEL_WARNING, source: true, retired: false},
@@ -1071,6 +1072,7 @@ val     KINDS: [COUNT]Spec = [COUNT]Spec{
     Spec{kind: OP_OPERAND_VALUE, key: "op.operand_value", level: LEVEL_ERROR, source: false, retired: false},
     Spec{kind: OP_RESULT_FLOW, key: "op.result_flow", level: LEVEL_ERROR, source: false, retired: false},
     Spec{kind: GENERIC_GROWING_CYCLE, key: "generic.growing_cycle", level: LEVEL_ERROR, source: false, retired: false},
+    Spec{kind: DEF_NO_TYPE, key: "def.no_type", level: LEVEL_ERROR, source: false, retired: false},
     Spec{kind: TARGET_RETIRED_SPELLING, key: "target.retired_spelling", level: LEVEL_ERROR, source: false, retired: false},
     Spec{kind: SECRET_TARGET_UNENFORCEABLE, key: "secret.target_unenforceable", level: LEVEL_WARNING, source: false, retired: false},
     Spec{kind: TARGET_BASELINE_REQUIRED, key: "target.baseline_required", level: LEVEL_ERROR, source: false, retired: false},
@@ -1222,7 +1224,7 @@ rec Issued {
 }
 
 #[testing]
-val ISSUED_COUNT: usize = 508;
+val ISSUED_COUNT: usize = 509;
 
 #[testing]
 val ISSUED: [ISSUED_COUNT]Issued = [ISSUED_COUNT]Issued{
@@ -1731,6 +1733,7 @@ val ISSUED: [ISSUED_COUNT]Issued = [ISSUED_COUNT]Issued{
     Issued{key: "op.operand_value", level: LEVEL_ERROR},
     Issued{key: "op.result_flow", level: LEVEL_ERROR},
     Issued{key: "generic.growing_cycle", level: LEVEL_ERROR},
+    Issued{key: "def.no_type", level: LEVEL_ERROR},
     Issued{key: "target.retired_spelling", level: LEVEL_ERROR},
     Issued{key: "secret.target_unenforceable", level: LEVEL_WARNING},
     Issued{key: "target.baseline_required", level: LEVEL_ERROR},

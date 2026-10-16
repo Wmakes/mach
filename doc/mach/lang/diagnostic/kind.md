@@ -2979,22 +2979,10 @@ pub val OP_RESULT_FLOW:                   Kind = 504
 pub val GENERIC_GROWING_CYCLE:            Kind = 505
 ```
 
-## val TARGET_RETIRED_SPELLING
+## val DEF_NO_TYPE
 
 ```mach
-pub val TARGET_RETIRED_SPELLING:          Kind = 506
-```
-
-## val SECRET_TARGET_UNENFORCEABLE
-
-```mach
-pub val SECRET_TARGET_UNENFORCEABLE:      Kind = 507
-```
-
-## val TARGET_BASELINE_REQUIRED
-
-```mach
-pub val TARGET_BASELINE_REQUIRED:         Kind = 508
+pub val DEF_NO_TYPE:                      Kind = 506
 ```
 
 ## rec Spec
@@ -3014,7 +3002,7 @@ retired: nothing raises the kind any more; the row stays so its key is
 ## val COUNT
 
 ```mach
-pub val COUNT: usize       = 508
+pub val COUNT: usize       = 506
 ```
 
 ## fun at

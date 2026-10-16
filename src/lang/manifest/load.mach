@@ -233,7 +233,7 @@ pub fun doc_read(alloc: *A.Allocator, path: str) res[Doc, fail.Fail] {
     if (sel rb.err) {
         val said: res[str, fail.Fail] = sfmt(alloc, "cannot read '{}': {}", path, fail.fs_text(rb.err));
         if (sel said.err) { ret res[Doc, fail.Fail].err{said.err}; }
-        ret res[Doc, fail.Fail].err{fail.environment(diagnostic_kind.FS_READ, said.ok)};
+        ret res[Doc, fail.Fail].err{fail.owning(fail.environment(diagnostic_kind.FS_READ, said.ok))};
     }
     var bytes: Vector[u8] = rb.ok;
     fin { collections_vector.dnit[u8](?bytes); }

@@ -42,27 +42,41 @@ use lang_source: mach.lang.source;
 # code derives from the case: 1 for user, 2 for internal, 3 where a command
 # distinguishes the environment. `reported` is declared first so a zero
 # failure is one that invents no text. an allocation refusal is internal; the
-# compiler recovers from none of them at the site that met them
+# compiler recovers from none of them at the site that met them. a failure
+# that carries text records whether it owns it: owned text was allocated
+# through the allocator `dnit` is given and is released there, borrowed text
+# (a literal, an interned text, storage someone else releases) never is
 pub tag Fail: u8 {
     reported;
-    message:     str;
+    message:     Message;
     user:        Keyed;
     environment: Keyed;
 }
 
-# kind: the row of the diagnostic kind table the failure is reported as
-# text: the message
-# at:   where in the file that caused it the failure points, the zero place
-#       when it points nowhere
-# also: the other places the failure names, none when it names no other
-# fix:  the rewrite of the input that clears the failure, none when the
-#       rewrite is not mechanical
+# the text of an internal failure
+# ---
+# text:  the message
+# owned: whether the failure owns `text`
+rec Message {
+    text:  str;
+    owned: bool;
+}
+
+# kind:  the row of the diagnostic kind table the failure is reported as
+# text:  the message
+# owned: whether the failure owns `text`
+# at:    where in the file that caused it the failure points, the zero place
+#        when it points nowhere
+# also:  the other places the failure names, none when it names no other
+# fix:   the rewrite of the input that clears the failure, none when the
+#        rewrite is not mechanical
 rec Keyed {
-    kind: diagnostic_kind.Kind;
-    text: str;
-    at:   Place;
-    also: Related;
-    fix:  Fix;
+    kind:  diagnostic_kind.Kind;
+    text:  str;
+    owned: bool;
+    at:    Place;
+    also:  Related;
+    fix:   Fix;
 }
 
 # a machine-applicable rewrite of the file a failure points into: the bytes at
@@ -117,24 +131,43 @@ pub fun reported() Fail {
 # this is the one channel for a defect: a function that meets a broken
 # invariant returns it as a message failure, never as a placeholder, a default
 # answer or an abort. panic is left to a function documented as total, which
-# has no failure to return, when its caller breaks the precondition it states
+# has no failure to return, when its caller breaks the precondition it states.
+# the failure borrows `text`; `owning` hands it text it owns
 pub fun message(text: str) Fail {
-    ret Fail.message{text};
+    ret Fail.message{Message{text: text}};
 }
 
 # the input is wrong or unsupported. a failure names a live row of the
 # registry: one that names none, or a retired one, is a compiler defect and
-# becomes an internal failure
+# becomes an internal failure. the failure borrows `text`
 pub fun user(k: diagnostic_kind.Kind, text: str) Fail {
-    if (!diagnostic_kind.live(k)) { ret Fail.message{text}; }
+    if (!diagnostic_kind.live(k)) { ret message(text); }
     ret Fail.user{Keyed{kind: k, text: text}};
 }
 
 # the machine refused: a file could not be read or written, a tool could not
-# be spawned
+# be spawned. the failure borrows `text`
 pub fun environment(k: diagnostic_kind.Kind, text: str) Fail {
-    if (!diagnostic_kind.live(k)) { ret Fail.message{text}; }
+    if (!diagnostic_kind.live(k)) { ret message(text); }
     ret Fail.environment{Keyed{kind: k, text: text}};
+}
+
+# the same failure owning its text, which was allocated through the allocator
+# its holder releases it with (`dnit`); a reported failure carries none
+pub fun owning(f: Fail) Fail {
+    var out: Fail = f;
+    if (sel out.message)     { out.message.owned = true; }
+    or (sel out.user)        { out.user.owned = true; }
+    or (sel out.environment) { out.environment.owned = true; }
+    ret out;
+}
+
+# whether the failure owns the text it carries; a reported failure carries none
+fun owns_text(f: Fail) bool {
+    if (sel f.message)     { ret f.message.owned; }
+    or (sel f.user)        { ret f.user.owned; }
+    or (sel f.environment) { ret f.environment.owned; }
+    ret false;
 }
 
 # a failure the user caused met by a phase that cannot classify it (target
@@ -142,7 +175,7 @@ pub fun environment(k: diagnostic_kind.Kind, text: str) Fail {
 # user class under `k`, a keyed failure keeps its own class and kind, a
 # reported failure stays reported
 pub fun as_user(k: diagnostic_kind.Kind, f: Fail) Fail {
-    if (sel f.message) { ret user(k, f.message); }
+    if (sel f.message) { ret with_ownership(user(k, f.message.text), f.message.owned); }
     ret f;
 }
 
@@ -152,7 +185,7 @@ pub fun as_user(k: diagnostic_kind.Kind, f: Fail) Fail {
 # stays reported
 pub fun as_internal(f: Fail) Fail {
     if (sel f.reported) { ret f; }
-    ret Fail.message{describe(f)};
+    ret with_ownership(message(describe(f)), owns_text(f));
 }
 
 # the same failure pointing at the span `s` of the file that caused it, which
@@ -396,7 +429,7 @@ pub fun is_message(f: Fail) bool {
 
 # the text a failure carries, absent for a reported one
 pub fun text(f: Fail) opt[str] {
-    if (sel f.message)     { ret opt[str].some{f.message}; }
+    if (sel f.message)     { ret opt[str].some{f.message.text}; }
     or (sel f.user)        { ret opt[str].some{f.user.text}; }
     or (sel f.environment) { ret opt[str].some{f.environment.text}; }
     ret opt[str].none{};
@@ -407,21 +440,33 @@ pub fun text(f: Fail) opt[str] {
 val REPORTED_TEXT: str = "failure was reported through diagnostics";
 
 pub fun describe(f: Fail) str {
-    if (sel f.message)     { ret f.message; }
+    if (sel f.message)     { ret f.message.text; }
     or (sel f.user)        { ret f.user.text; }
     or (sel f.environment) { ret f.environment.text; }
     ret REPORTED_TEXT;
 }
 
-# the same failure carrying `text` instead: the class, the kind and the places
-# are kept (a caller that copies the message into storage it owns)
+# the same failure carrying `text` instead, which it borrows: the class, the
+# kind and the places are kept. text the failure is to own goes through
+# `owning` as well. the text it carried before is the caller's to release
 pub fun with_text(f: Fail, text: str) Fail {
     var out: Fail = f;
-    if (sel out.user)        { out.user.text = text; }
-    or (sel out.message)     { ret Fail.message{text}; }
-    or (sel out.environment) { out.environment.text = text; }
-    or                       { ret Fail.reported{}; }
+    if (sel out.user) {
+        out.user.text  = text;
+        out.user.owned = false;
+    }
+    or (sel out.message) { ret message(text); }
+    or (sel out.environment) {
+        out.environment.text  = text;
+        out.environment.owned = false;
+    }
+    or { ret Fail.reported{}; }
     ret out;
+}
+
+fun with_ownership(f: Fail, owned: bool) Fail {
+    if (owned) { ret owning(f); }
+    ret f;
 }
 
 # the same failure also naming `secondary`, a failure met while releasing what
@@ -431,17 +476,20 @@ pub fun with_text(f: Fail, text: str) Fail {
 # has no text to carry it, so the secondary goes out in its place, the reported
 # diagnostics already recorded, and a reported secondary already named itself.
 # a refused join leaves the failure as it was, as `prefixed` does, so the
-# secondary never takes the failure's place
+# secondary never takes the failure's place. the joined text is owned through
+# `a`; a failure returned as it was keeps the ownership it had
 pub fun with_secondary(a: *A.Allocator, f: Fail, secondary: Fail) Fail {
     if (is_reported(secondary)) { ret f; }
     if (is_reported(f))         { ret secondary; }
     val joined: res[str, Fail] = join(a, describe(f), "; cleanup also failed: ", describe(secondary));
     if (sel joined.err) { ret f; }
-    ret with_text(f, joined.ok);
+    ret owning(with_text(f, joined.ok));
 }
 
-# release the text a failure owns through `a`; a reported failure owns nothing
+# release the text a failure owns through `a`; borrowed text, and a reported
+# failure's absent text, are left alone
 fun text_free(a: *A.Allocator, f: Fail) {
+    if (!owns_text(f)) { ret; }
     val carried: opt[str] = text(f);
     if (sel carried.some) {
         if (carried.some != nil) { str_free(a, carried.some); }
@@ -458,7 +506,7 @@ pub fun retain(a: *A.Allocator, f: Fail) res[Fail, A.Error] {
         if (carried.some != nil) {
             val dup_r: res[str, A.Error] = str_dup(a, carried.some);
             if (sel dup_r.err) { ret res[Fail, A.Error].err{dup_r.err}; }
-            out = with_text(out, dup_r.ok);
+            out = owning(with_text(out, dup_r.ok));
         }
     }
     val placed_r: res[Fail, A.Error] = places_retain(a, out);
@@ -466,7 +514,8 @@ pub fun retain(a: *A.Allocator, f: Fail) res[Fail, A.Error] {
     ret placed_r;
 }
 
-# release what a retained failure owns through `a`: its text and its places
+# release what a retained failure owns through `a`: its text when it owns it,
+# and its places
 pub fun dnit(a: *A.Allocator, f: Fail) {
     text_free(a, f);
     places_dnit(a, f);
@@ -664,43 +713,47 @@ pub fun join(a: *A.Allocator, va: ...) res[str, Fail] {
 
 # `cause` with `context` in front of its text, joined into `a`, which owns the
 # new text; the class, the kind and the places are kept. a reported cause has
-# no text to extend, and a refused join leaves the cause as it was, so the
-# context never takes the cause's place
+# no text to extend, and a refused join leaves the cause as it was, keeping the
+# ownership it had, so the context never takes the cause's place
 pub fun prefixed(a: *A.Allocator, context: str, cause: Fail) Fail {
     if (is_reported(cause)) { ret cause; }
     val joined: res[str, Fail] = join(a, context, describe(cause));
     if (sel joined.err) { ret cause; }
-    ret with_text(cause, joined.ok);
+    ret owning(with_text(cause, joined.ok));
 }
 
 # an internal failure whose text is `fmt` formatted with `va` into `a`, which
-# owns the text; a refusal to format is the failure instead
+# the failure owns; a refusal to format is the failure instead
 pub fun formatted(a: *A.Allocator, fmt: str, va: ...) Fail {
-    ret message_of(format(a, fmt, va...));
+    val made: res[str, Fail] = format(a, fmt, va...);
+    if (sel made.err) { ret made.err; }
+    ret owning(message(made.ok));
 }
 
 # a user failure under `k` whose text is `fmt` formatted with `va` into `a`,
-# which owns the text; a refusal to format is the failure instead
+# which the failure owns; a refusal to format is the failure instead
 pub fun formatted_user(a: *A.Allocator, k: diagnostic_kind.Kind, fmt: str, va: ...) Fail {
-    ret user_of(k, format(a, fmt, va...));
+    val made: res[str, Fail] = format(a, fmt, va...);
+    if (sel made.err) { ret made.err; }
+    ret owning(user(k, made.ok));
 }
 
-# the internal failure carrying a made text, or the failure that refused to
-# make it
+# the internal failure carrying a made text, which it borrows (a made text may
+# be interned), or the failure that refused to make it
 pub fun message_of(made: res[str, Fail]) Fail {
     if (sel made.err) { ret made.err; }
     ret message(made.ok);
 }
 
-# the user failure under `k` carrying a made text, or the failure that refused
-# to make it
+# the user failure under `k` carrying a made text, which it borrows, or the
+# failure that refused to make it
 pub fun user_of(k: diagnostic_kind.Kind, made: res[str, Fail]) Fail {
     if (sel made.err) { ret made.err; }
     ret user(k, made.ok);
 }
 
-# the environment failure under `k` carrying a made text, or the failure that
-# refused to make it
+# the environment failure under `k` carrying a made text, which it borrows, or
+# the failure that refused to make it
 pub fun environment_of(k: diagnostic_kind.Kind, made: res[str, Fail]) Fail {
     if (sel made.err) { ret made.err; }
     ret environment(k, made.ok);
@@ -736,27 +789,27 @@ pub fun format_intern(itn: *intern.Interner, a: *A.Allocator, fmt: str, va: ...)
 # carrying its text: the allocator's, a write to a sink of its own, a string
 # operation, a filesystem step and a format
 pub fun refused(e: A.Error) Fail {
-    ret Fail.message{lang_alloc.text(e)};
+    ret message(lang_alloc.text(e));
 }
 
 pub fun write_refused(e: io_writer.WriteError) Fail {
-    ret Fail.message{write_text(e)};
+    ret message(write_text(e));
 }
 
 pub fun str_refused(e: StrError) Fail {
-    ret Fail.message{str_text(e)};
+    ret message(str_text(e));
 }
 
 pub fun fs_refused(e: fs.FsError) Fail {
-    ret Fail.message{fs_text(e)};
+    ret message(fs_text(e));
 }
 
 pub fun format_refused(e: std_format.FormatError) Fail {
-    ret Fail.message{format_text(e)};
+    ret message(format_text(e));
 }
 
 pub fun source_refused(e: lang_source.Error) Fail {
-    ret Fail.message{lang_source.text(e)};
+    ret message(lang_source.text(e));
 }
 
 # a filesystem operation on a file the build was handed (an object, an
@@ -941,14 +994,14 @@ fun catalog_status(s: *PhaseStatus, c: Catalog, message: str) {
 }
 
 # the closed-catalog policy as a failure: an input or capability fault is the
-# user's, a compiler-produced member is internal. the message belongs to the
-# caller's allocator
+# user's, a compiler-produced member is internal. the failure owns the message
+# through the caller's allocator
 pub fun catalog(a: *A.Allocator, c: Catalog) Fail {
     val formatted: res[str, std_format.FormatError] = catalog_text(a, c);
     if (sel formatted.err) { ret format_refused(formatted.err); }
-    if (sel c.internal)    { ret message(formatted.ok); }
-    if (sel c.unsupported) { ret user(diagnostic_kind.CATALOG_UNSUPPORTED, formatted.ok); }
-    ret user(diagnostic_kind.CATALOG_MALFORMED, formatted.ok);
+    if (sel c.internal)    { ret owning(message(formatted.ok)); }
+    if (sel c.unsupported) { ret owning(user(diagnostic_kind.CATALOG_UNSUPPORTED, formatted.ok)); }
+    ret owning(user(diagnostic_kind.CATALOG_MALFORMED, formatted.ok));
 }
 
 pub fun unknown_catalog(a: *A.Allocator, catalog_name: str, tag: u32) Fail {
@@ -961,14 +1014,14 @@ test fail__cases_text_and_the_zero_value {
     val t: opt[str] = text(r);
     if (!sel t.none) { ret 2; }
     val m: Fail = message("lower: expression id out of range");
-    if (!sel m.message)                                              { ret 3; }
-    if (!str_equals(m.message, "lower: expression id out of range")) { ret 3; }
+    if (!sel m.message)                                                   { ret 3; }
+    if (!str_equals(m.message.text, "lower: expression id out of range")) { ret 3; }
     val mt: opt[str] = text(m);
     if (!sel mt.some)                                              { ret 4; }
     if (!str_equals(mt.some, "lower: expression id out of range")) { ret 4; }
     val e: Fail = refused(A.Error.exhausted{});
-    if (!sel e.message)                          { ret 5; }
-    if (!str_equals(e.message, "out of memory")) { ret 5; }
+    if (!sel e.message)                               { ret 5; }
+    if (!str_equals(e.message.text, "out of memory")) { ret 5; }
     var zero: Fail;
     if (!sel zero.reported)                                            { ret 6; }
     if (!str_equals(describe(zero), REPORTED_TEXT))                    { ret 7; }
@@ -1008,7 +1061,7 @@ test with_secondary__the_failure_going_out_names_its_cleanup {
     if (!sel both.user || kind_of(both) != diagnostic_kind.TOML_MALFORMED)                          { ret 3; }
     if (!str_equals(describe(both), "bad object; cleanup also failed: cannot remove 'm.toml.tmp'")) { ret 4; }
     if (!same_places(both, primary))                                                                { ret 5; }
-    t_text_free(a, both);
+    text_free(a, both);
     val alone: Fail = with_secondary(a, reported(), secondary);
     if (!sel alone.environment || !str_equals(describe(alone), "cannot remove 'm.toml.tmp'")) { ret 6; }
     val kept: Fail = with_secondary(a, primary, reported());
@@ -1037,13 +1090,7 @@ fun t_user_with(f: Fail, want: str) bool {
 #[testing]
 fun t_message_with(f: Fail, want: str) bool {
     if (!sel f.message) { ret false; }
-    ret str_equals(f.message, want);
-}
-
-#[testing]
-fun t_text_free(a: *A.Allocator, f: Fail) {
-    val carried: opt[str] = text(f);
-    if (sel carried.some) { str_free(a, carried.some); }
+    ret str_equals(f.message.text, want);
 }
 
 test catalog__three_classes_land_on_distinct_kinds_naming_the_member {
@@ -1051,13 +1098,13 @@ test catalog__three_classes_land_on_distinct_kinds_naming_the_member {
     val made: err[A.Error] = page.make(?a);
     if (sel made.err) { ret 1; }
     val malformed: Fail = catalog(?a, malformed_member("SectionKind", 200));
-    fin { t_text_free(?a, malformed); }
+    fin { text_free(?a, malformed); }
     if (!t_user_with(malformed, "malformed SectionKind tag 200")) { ret 2; }
     val unsupported: Fail = catalog(?a, unsupported_member("Subsystem", "gui", "x86_64-linux"));
-    fin { t_text_free(?a, unsupported); }
+    fin { text_free(?a, unsupported); }
     if (!t_user_with(unsupported, "Subsystem gui is unsupported by x86_64-linux")) { ret 3; }
     val internal_fail: Fail = unknown_catalog(?a, "PhaseKind", 255);
-    fin { t_text_free(?a, internal_fail); }
+    fin { text_free(?a, internal_fail); }
     if (!t_message_with(internal_fail, "unknown PhaseKind tag 255")) { ret 4; }
     if (sel malformed.message || sel unsupported.message)            { ret 5; }
     ret 0;
@@ -1121,8 +1168,8 @@ test phase_status__transitions_and_merge {
     if (!sel it.some)                  { ret 5; }
     if (!str_equals(it.some, "first")) { ret 5; }
     val inf: Fail = phase_failure(s);
-    if (!sel inf.message)                  { ret 6; }
-    if (!str_equals(inf.message, "first")) { ret 6; }
+    if (!sel inf.message)                       { ret 6; }
+    if (!str_equals(inf.message.text, "first")) { ret 6; }
     var target:   PhaseStatus = accepted();
     var rejected: PhaseStatus = accepted();
     reject(?rejected);
@@ -1192,7 +1239,7 @@ fun t_interned_is(r: res[str, Fail], want: str) bool {
 fun t_refused_with(r: res[str, Fail], want: str) bool {
     if (!sel r.err)         { ret false; }
     if (!sel r.err.message) { ret false; }
-    ret str_equals(r.err.message, want);
+    ret str_equals(r.err.message.text, want);
 }
 
 #[testing]
@@ -1242,8 +1289,8 @@ test formatted_user__a_refused_text_stays_the_refusal {
     dnit(a, f);
     T.fail_at_ordinal(?t, T.attempt_count(?t) + 1);
     val r: Fail = formatted_user(a, diagnostic_kind.CATALOG_MALFORMED, "bad {}", "tag");
-    if (!sel r.message)                          { ret 4; }
-    if (!str_equals(r.message, "out of memory")) { ret 5; }
+    if (!sel r.message)                               { ret 4; }
+    if (!str_equals(r.message.text, "out of memory")) { ret 5; }
     T.clear_failure(?t);
     if (T.leaked(?t) || T.double_free_count(?t) != 0) { ret 6; }
     ret 0;
@@ -1268,5 +1315,41 @@ test prefixed__the_context_goes_in_front_and_never_in_place {
     T.clear_failure(?t);
     if (!t_user_with(refused_join, "bad object") || kind_of(refused_join) != diagnostic_kind.TOML_MALFORMED) { ret 6; }
     if (T.leaked(?t) || T.double_free_count(?t) != 0)                                                        { ret 7; }
+    ret 0;
+}
+
+# a failure records whether it owns its text, so `dnit` releases owned text and
+# leaves borrowed text alone: a literal, a formatted text, and `prefixed` and
+# `with_secondary` on both their joined and their refused branch
+test dnit__frees_only_the_text_a_failure_owns {
+    var t:    T.Testing;
+    val made: err[A.Error] = T.make(?t);
+    if (sel made.err) { ret 1; }
+    fin { T.dnit(?t); }
+    val a:       *A.Allocator = T.allocator_of(?t);
+    val literal: Fail         = user(diagnostic_kind.TOML_MALFORMED, "bad object");
+    if (owns_text(literal)) { ret 2; }
+    dnit(a, literal);
+    val formatted_f: Fail = formatted(a, "bad {}", "tag");
+    if (!owns_text(formatted_f) || T.live_count(?t) != 1) { ret 3; }
+    dnit(a, formatted_f);
+    val joined: Fail = prefixed(a, "ctx: ", literal);
+    if (!owns_text(joined) || T.live_count(?t) != 1) { ret 4; }
+    dnit(a, joined);
+    val cleanup: Fail = with_secondary(a, literal, environment(diagnostic_kind.FS_REMOVE, "cannot remove"));
+    if (!owns_text(cleanup) || T.live_count(?t) != 1) { ret 5; }
+    dnit(a, cleanup);
+    T.fail_at_ordinal(?t, T.attempt_count(?t) + 1);
+    val kept: Fail = prefixed(a, "ctx: ", literal);
+    T.clear_failure(?t);
+    if (owns_text(kept) || !str_equals(describe(kept), "bad object")) { ret 6; }
+    dnit(a, kept);
+    val owned_cause: Fail = formatted_user(a, diagnostic_kind.TOML_MALFORMED, "bad {}", "tag");
+    T.fail_at_ordinal(?t, T.attempt_count(?t) + 1);
+    val kept_owned: Fail = with_secondary(a, owned_cause, environment(diagnostic_kind.FS_REMOVE, "cannot remove"));
+    T.clear_failure(?t);
+    if (!owns_text(kept_owned) || !str_equals(describe(kept_owned), "bad tag")) { ret 7; }
+    dnit(a, kept_owned);
+    if (!T.clean(?t)) { ret 8; }
     ret 0;
 }

@@ -948,7 +948,7 @@ fun choice_copy(a: *A.Allocator, pk: *Pkg, rel: *package_source.Release) res[Cho
 fun text_kept(a: *A.Allocator, f: fail.Fail) fail.Fail {
     val kept: res[str, fail.Fail] = copy_out(a, fail.describe(f));
     if (sel kept.err) { ret kept.err; }
-    ret fail.with_text(f, kept.ok);
+    ret fail.owning(fail.with_text(f, kept.ok));
 }
 
 # the selected release of every identity the root reaches, allocated in `a`;

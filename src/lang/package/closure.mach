@@ -771,7 +771,7 @@ pub fun parse_file(a: *A.Allocator, p: str) res[manifest.Doc, fail.Fail] {
     if (fail.kind_of(f) == diagnostic_kind.TOML_MALFORMED) {
         val said: res[str, fail.Fail] = fail.format(a, "{}: {}", p, fail.describe(f));
         if (sel said.err) { ret res[manifest.Doc, fail.Fail].err{said.err}; }
-        ret res[manifest.Doc, fail.Fail].err{fail.with_text(f, said.ok)};
+        ret res[manifest.Doc, fail.Fail].err{fail.owning(fail.with_text(f, said.ok))};
     }
     ret doc_r;
 }

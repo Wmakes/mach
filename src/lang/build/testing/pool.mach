@@ -88,7 +88,7 @@ pub fun run(a: *A.Allocator, sink: *readout.Sink, arts: *testrun.TestArtifact, n
     if (sel ld_r.err) {
         val said: res[str, std_format.FormatError] = std_format.sprint(a, "could not derive the test log directory: {}", fail.describe(ld_r.err));
         if (sel said.err) { ret res[Counts, fail.Fail].err{fail.format_refused(said.err)}; }
-        ret res[Counts, fail.Fail].err{fail.with_text(ld_r.err, said.ok)};
+        ret res[Counts, fail.Fail].err{fail.owning(fail.with_text(ld_r.err, said.ok))};
     }
     val log_dir:  str            = ld_r.ok;
     val prepared: err[fail.Fail] = prepare_logs(a, log_dir, n);

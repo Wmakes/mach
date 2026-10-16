@@ -4219,9 +4219,8 @@ pub fun parse_object(alloc: *A.Allocator, itn: *intern.Interner, buf: *u8, buf_s
     var parsed: target_of.ObjectImage = target_of.object_image_init(alloc, itn, intern.STR_NIL);
     val built:  err[fail.Fail]        = parse_object_into(alloc, itn, buf, buf_size, ?parsed);
     if (sel built.err) {
-        val reason: str = fail.describe(built.err);
         target_of.object_image_dnit(?parsed);
-        ret err[fail.Fail].err{fail.with_text(built.err, reason)};
+        ret built;
     }
     val valid: err[fail.Fail] = target_of.validate_owned_object_or_dnit(?parsed);
     if (sel valid.err) { ret valid; }

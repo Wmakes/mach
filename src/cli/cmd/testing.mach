@@ -246,7 +246,7 @@ fun run_reported(cx: *args.Call) i64 {
         if (sel res_resolve.err) {
             val said: res[str, std_format.FormatError] = std_format.sprint(a, "--runner '{}': {}", name::str, fail.describe(res_resolve.err));
             if (sel said.err) { ret cli_diagnostic.report_fail(r, fail.format_refused(said.err), diagnostic.ORIGIN_TEST); }
-            ret cli_diagnostic.report_fail(r, fail.with_text(res_resolve.err, said.ok), diagnostic.ORIGIN_TEST);
+            ret cli_diagnostic.report_fail(r, fail.owning(fail.with_text(res_resolve.err, said.ok)), diagnostic.ORIGIN_TEST);
         }
         runner = res_resolve.ok;
     }

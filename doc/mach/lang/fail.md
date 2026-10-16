@@ -5,7 +5,7 @@
 ```mach
 pub tag Fail: u8 {
     reported;
-    message:     str;
+    message:     Message;
     user:        Keyed;
     environment: Keyed;
 }
@@ -22,7 +22,10 @@ point at a place; an internal one is always `compiler.internal`. the exit
 code derives from the case: 1 for user, 2 for internal, 3 where a command
 distinguishes the environment. `reported` is declared first so a zero
 failure is one that invents no text. an allocation refusal is internal; the
-compiler recovers from none of them at the site that met them
+compiler recovers from none of them at the site that met them. a failure
+that carries text records whether it owns it: owned text was allocated
+through the allocator `dnit` is given and is released there, borrowed text
+(a literal, an interned text, storage someone else releases) never is
 
 ## rec Fix
 
@@ -86,7 +89,8 @@ an internal failure: a compiler defect, reported as `compiler.internal`.
 this is the one channel for a defect: a function that meets a broken
 invariant returns it as a message failure, never as a placeholder, a default
 answer or an abort. panic is left to a function documented as total, which
-has no failure to return, when its caller breaks the precondition it states
+has no failure to return, when its caller breaks the precondition it states.
+the failure borrows `text`; `owning` hands it text it owns
 
 ## fun user
 
@@ -96,7 +100,7 @@ pub fun user(k: diagnostic_kind.Kind, text: str) Fail;
 
 the input is wrong or unsupported. a failure names a live row of the
 registry: one that names none, or a retired one, is a compiler defect and
-becomes an internal failure
+becomes an internal failure. the failure borrows `text`
 
 ## fun environment
 
@@ -105,7 +109,16 @@ pub fun environment(k: diagnostic_kind.Kind, text: str) Fail;
 ```
 
 the machine refused: a file could not be read or written, a tool could not
-be spawned
+be spawned. the failure borrows `text`
+
+## fun owning
+
+```mach
+pub fun owning(f: Fail) Fail;
+```
+
+the same failure owning its text, which was allocated through the allocator
+its holder releases it with (`dnit`); a reported failure carries none
 
 ## fun as_user
 
@@ -282,8 +295,9 @@ pub fun describe(f: Fail) str;
 pub fun with_text(f: Fail, text: str) Fail;
 ```
 
-the same failure carrying `text` instead: the class, the kind and the places
-are kept (a caller that copies the message into storage it owns)
+the same failure carrying `text` instead, which it borrows: the class, the
+kind and the places are kept. text the failure is to own goes through
+`owning` as well. the text it carried before is the caller's to release
 
 ## fun with_secondary
 
@@ -298,7 +312,8 @@ the text gains "; cleanup also failed: " and the secondary's, joined into
 has no text to carry it, so the secondary goes out in its place, the reported
 diagnostics already recorded, and a reported secondary already named itself.
 a refused join leaves the failure as it was, as `prefixed` does, so the
-secondary never takes the failure's place
+secondary never takes the failure's place. the joined text is owned through
+`a`; a failure returned as it was keeps the ownership it had
 
 ## fun retain
 
@@ -316,7 +331,8 @@ failure that outlives the storage its message was made in; released with
 pub fun dnit(a: *A.Allocator, f: Fail);
 ```
 
-release what a retained failure owns through `a`: its text and its places
+release what a retained failure owns through `a`: its text when it owns it,
+and its places
 
 ## fun places_retain
 
@@ -435,8 +451,8 @@ pub fun prefixed(a: *A.Allocator, context: str, cause: Fail) Fail;
 
 `cause` with `context` in front of its text, joined into `a`, which owns the
 new text; the class, the kind and the places are kept. a reported cause has
-no text to extend, and a refused join leaves the cause as it was, so the
-context never takes the cause's place
+no text to extend, and a refused join leaves the cause as it was, keeping the
+ownership it had, so the context never takes the cause's place
 
 ## fun formatted
 
@@ -445,7 +461,7 @@ pub fun formatted(a: *A.Allocator, fmt: str, va: ...) Fail;
 ```
 
 an internal failure whose text is `fmt` formatted with `va` into `a`, which
-owns the text; a refusal to format is the failure instead
+the failure owns; a refusal to format is the failure instead
 
 ## fun formatted_user
 
@@ -454,7 +470,7 @@ pub fun formatted_user(a: *A.Allocator, k: diagnostic_kind.Kind, fmt: str, va: .
 ```
 
 a user failure under `k` whose text is `fmt` formatted with `va` into `a`,
-which owns the text; a refusal to format is the failure instead
+which the failure owns; a refusal to format is the failure instead
 
 ## fun message_of
 
@@ -462,8 +478,8 @@ which owns the text; a refusal to format is the failure instead
 pub fun message_of(made: res[str, Fail]) Fail;
 ```
 
-the internal failure carrying a made text, or the failure that refused to
-make it
+the internal failure carrying a made text, which it borrows (a made text may
+be interned), or the failure that refused to make it
 
 ## fun user_of
 
@@ -471,8 +487,8 @@ make it
 pub fun user_of(k: diagnostic_kind.Kind, made: res[str, Fail]) Fail;
 ```
 
-the user failure under `k` carrying a made text, or the failure that refused
-to make it
+the user failure under `k` carrying a made text, which it borrows, or the
+failure that refused to make it
 
 ## fun environment_of
 
@@ -480,8 +496,8 @@ to make it
 pub fun environment_of(k: diagnostic_kind.Kind, made: res[str, Fail]) Fail;
 ```
 
-the environment failure under `k` carrying a made text, or the failure that
-refused to make it
+the environment failure under `k` carrying a made text, which it borrows, or
+the failure that refused to make it
 
 ## fun text_retain
 
@@ -717,8 +733,8 @@ pub fun catalog(a: *A.Allocator, c: Catalog) Fail;
 ```
 
 the closed-catalog policy as a failure: an input or capability fault is the
-user's, a compiler-produced member is internal. the message belongs to the
-caller's allocator
+user's, a compiler-produced member is internal. the failure owns the message
+through the caller's allocator
 
 ## fun unknown_catalog
 
