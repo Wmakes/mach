@@ -70,10 +70,6 @@ use std_format: std.format;
 #[testing]
 use std.system.panic.panic;
 #[testing]
-use std.types.string.StrError;
-#[testing]
-use std.types.string.str_join;
-#[testing]
 use fe_sema: mach.lang.fe.sema;
 #[testing]
 use mach.lang.me.pipeline;
@@ -84,25 +80,11 @@ use sema_checked: mach.lang.fe.sema.checked;
 #[testing]
 use mach.lang.manifest.target.on_host;
 #[testing]
-use std.system.capability;
-#[testing]
 use std.text.string.str_dup;
-#[testing]
-use mach.lang.linkage;
 #[testing]
 use mach.lang.stack;
 #[testing]
-use mach.lang.target.abi;
-#[testing]
 use mach.lang.target.isa;
-#[testing]
-use lang_target_os: mach.lang.target.os;
-#[testing]
-use mach.lang.driver.config;
-#[testing]
-use target_os_linux: mach.lang.target.os.linux;
-#[testing]
-use step_glob: mach.lang.step.glob;
 
 rec UnitState {
     inputs:     *target_of.ObjectInput;
@@ -2895,15 +2877,6 @@ test readout__a_gate_deferred_module_is_counted_once {
     ret bad;
 }
 
-# the pieces joined in order in `alloc`, never released; a refused allocation ends the test
-#[testing]
-fun spliced(alloc: *A.Allocator, va: ...) str {
-    val made: res[str, StrError] = str_join(alloc, va...);
-    if (sel made.ok) { ret made.ok; }
-    panic("engine: a spliced source was refused\n");
-    ret "";
-}
-
 # the entry stub the test dispatcher a linux x86_64 test build links is started through
 #[testing]
 fun dispatcher_stub() str {
@@ -3015,7 +2988,7 @@ fun native_case_files(alloc: *A.Allocator, manifest_text: str, root_names: *str,
     fin { warm_project_dnit(?w); }
     var names: [1]str = [1]str{"main.mach"};
     var texts: [1]str = [1]str{program};
-    if (root_count == 0) { texts[0] = spliced(alloc, program, native_stub()); }
+    if (root_count == 0) { texts[0] = driver.joined(alloc, program, native_stub()); }
     val scaffolded: err[fail.Fail] = warm_project_scaffold(?w, manifest_text, ?names[0], ?texts[0], 1);
     if (sel scaffolded.err) { ret 2; }
     var ri: u32 = 0;
@@ -3272,9 +3245,9 @@ fun renamed_reexport_links(main_text: str) i32 {
 test fwd__renamed_reexport_links {
     var alloc: A.Allocator;
     page.make(?alloc);
-    val qualified: i32 = renamed_reexport_links(spliced(?alloc, "use uniontest.mid;\n#[symbol(\"main\")]\nfun main() i32 { ret mid.renamed_alias() - mid.original_name(); }\n", native_stub()));
+    val qualified: i32 = renamed_reexport_links(driver.joined(?alloc, "use uniontest.mid;\n#[symbol(\"main\")]\nfun main() i32 { ret mid.renamed_alias() - mid.original_name(); }\n", native_stub()));
     if (qualified != 0) { ret 100 + qualified; }
-    val leaves: i32 = renamed_reexport_links(spliced(?alloc, "use uniontest.mid.renamed_alias;\nuse uniontest.mid.original_name;\n#[symbol(\"main\")]\nfun main() i32 { ret renamed_alias() - original_name(); }\n", native_stub()));
+    val leaves: i32 = renamed_reexport_links(driver.joined(?alloc, "use uniontest.mid.renamed_alias;\nuse uniontest.mid.original_name;\n#[symbol(\"main\")]\nfun main() i32 { ret renamed_alias() - original_name(); }\n", native_stub()));
     if (leaves != 0) { ret 200 + leaves; }
     ret 0;
 }
@@ -3284,8 +3257,8 @@ test fwd__renamed_reexport_links {
 #[testing]
 fun testing_dep_scaffold(alloc: *A.Allocator, main_text: str) res[str, fail.Fail] {
     var names:    [1]str              = [1]str{"main.mach"};
-    var texts:    [1]str              = [1]str{spliced(alloc, main_text, dispatcher_stub())};
-    val consumer: str                 = spliced(alloc, driver.fixture_manifest(), "\n[dep.leaf]\npath = \"dep/leaf\"\n");
+    var texts:    [1]str              = [1]str{driver.joined(alloc, main_text, dispatcher_stub())};
+    val consumer: str                 = driver.joined(alloc, driver.fixture_manifest(), "\n[dep.leaf]\npath = \"dep/leaf\"\n");
     val made:     res[str, fail.Fail] = driver.scaffold(alloc, consumer, ?names[0], ?texts[0], 1);
     if (sel made.err) { ret made; }
     val root:    str               = made.ok;
@@ -3344,7 +3317,7 @@ fun tag_verdicts(rows: *fe_sema.TagFixture, count: usize) i32 {
     var i: usize = 0;
     for (i < count) {
         var names: [1]str = [1]str{"main.mach"};
-        var texts: [1]str = [1]str{spliced(?alloc, fe_sema.TAG_STD_PRELUDE, rows[i].text)};
+        var texts: [1]str = [1]str{driver.joined(?alloc, fe_sema.TAG_STD_PRELUDE, rows[i].text)};
         var pass:  u32    = 0;
         for (pass < 2) {
             var w:    WarmProject;
@@ -3426,7 +3399,7 @@ fun trap_target(alloc: *A.Allocator, target_name: str, runner_name: str, release
     if (sel made.err) { ret 1; }
     fin { warm_project_dnit(?w); }
     var names: [1]str = [1]str{"main.mach"};
-    var texts: [1]str = [1]str{spliced(alloc, tag_trap_program(), native_stub())};
+    var texts: [1]str = [1]str{driver.joined(alloc, tag_trap_program(), native_stub())};
     val scaffolded: err[fail.Fail] = warm_project_scaffold(?w, native_manifest(), ?names[0], ?texts[0], 1);
     if (sel scaffolded.err) { ret 2; }
     var rq: request.BuildRequest = request.defaults();
@@ -3469,7 +3442,7 @@ $if ($mach.build.os == $mach.os.linux && $mach.build.arch == $mach.arch.x86_64) 
         var alloc: A.Allocator;
         page.make(?alloc);
         var names: [1]str = [1]str{"main.mach"};
-        var texts: [1]str = [1]str{spliced(?alloc, "val N: i32 = (4);\ntest grouped {\n    var x: i32 = (N);\n    (x) = ('a')::i32 + (1);\n    val s: *u8 = (\"hi\");\n    val p: *u8 = (nil);\n    val f: f64 = (2.5);\n    if (p != nil) { ret 11; }\n    if (f != 2.5) { ret 12; }\n    if (s[0] != 104 || s[1] != 105 || s[2] != 0) { ret 13; }\n    ret (x) - 98;\n}\n", dispatcher_stub())};
+        var texts: [1]str = [1]str{driver.joined(?alloc, "val N: i32 = (4);\ntest grouped {\n    var x: i32 = (N);\n    (x) = ('a')::i32 + (1);\n    val s: *u8 = (\"hi\");\n    val p: *u8 = (nil);\n    val f: f64 = (2.5);\n    if (p != nil) { ret 11; }\n    if (f != 2.5) { ret 12; }\n    if (s[0] != 104 || s[1] != 105 || s[2] != 0) { ret 13; }\n    ret (x) - 98;\n}\n", dispatcher_stub())};
         val made:  res[str, fail.Fail] = driver.scaffold(?alloc, driver.fixture_manifest(), ?names[0], ?texts[0], 1);
         if (sel made.err) { ret 1; }
         fin { fs.remove_all(?alloc, made.ok); }
@@ -3527,7 +3500,7 @@ $if ($mach.build.os == $mach.os.linux && $mach.build.arch == $mach.arch.x86_64) 
         page.make(?alloc);
         var names:   [1]str = [1]str{"src/a.mach"};
         var texts:   [1]str = [1]str{"pub tag Reply: u8 { empty; value: i64; }\npub rec P { x: i64; y: i64; }\npub rec Q { p: P; name: *u8; }\npub rec Rule { tag: i64; fn: fun(i64) i64; }\npub fun inc(n: i64) i64 { ret n + 1; }\npub fun dbl(n: i64) i64 { ret n * 2; }\npub val PS: [2]P = [2]P{P{x: 1, y: 2}, P{x: 30, y: 4}};\npub val QS: [2]Q = [2]Q{Q{p: P{x: 5, y: 6}, name: \"ab\"}, Q{p: P{x: 7}, name: \"cde\"}};\npub val TS: [2]Reply = [2]Reply{Reply.value{100}, Reply.empty{}};\npub val RULES: [2]Rule = [2]Rule{Rule{tag: 1, fn: inc}, Rule{tag: 2, fn: dbl}};\n"};
-        val program: str    = spliced(?alloc, "use divtrap.a;\nval PS: [2]a.P = [2]a.P{a.P{x: 1, y: 2}, a.P{x: 30, y: 4}};\nval QS: [2]a.Q = [2]a.Q{a.Q{p: a.P{x: 5, y: 6}, name: \"ab\"}, a.Q{p: a.P{x: 7}, name: \"cde\"}};\nval TS: [2]a.Reply = [2]a.Reply{a.Reply.value{100}, a.Reply.empty{}};\nval RULES: [2]a.Rule = [2]a.Rule{a.Rule{tag: 1, fn: a.inc}, a.Rule{tag: 2, fn: a.dbl}};\n\n#[noinline] fun take(p: a.P) i64 { ret p.x * 10 + p.y; }\n#[noinline] fun local($n: i64) i64 { val L: [2]a.P = [2]a.P{a.P{x: n, y: 1}, a.P{x: 2}}; var s: i64 = 0; $each p in L { s = s + take(p); } ret s; }\n\n#[symbol(\"main\")]\nfun main(argc: i64) i64 {\n    var s: i64 = 0;\n    $each p in a.PS { s = s + take(p); $if (p.x == 30) { s = s + 1000; } }\n    $each p in PS { s = s - take(p); $if (p.x == 30) { s = s - 1000; } }\n    if (s != 0) { ret 1; }\n    $each q in a.QS { s = s + q.p.x * 100 + q.p.y + q.name[1]::i64; }\n    $each q in QS { s = s - q.p.x * 100 - q.p.y - q.name[1]::i64; }\n    if (s != 0) { ret 2; }\n    $each t in a.TS { $if (sel t.value) { s = s + t.value; } $or { s = s + 1; } }\n    $each t in TS { if (sel t.value) { s = s - t.value; } or { s = s - 1; } }\n    if (s != 0) { ret 3; }\n    $each r in a.RULES { s = s + r.fn(10) + r.tag; }\n    $each r in RULES { s = s - r.fn(10) - r.tag; }\n    if (s != 0) { ret 4; }\n    if (local(5) != 71 || local(6) != 81) { ret 5; }\n    ret 0;\n}\n", native_stub());
+        val program: str    = driver.joined(?alloc, "use divtrap.a;\nval PS: [2]a.P = [2]a.P{a.P{x: 1, y: 2}, a.P{x: 30, y: 4}};\nval QS: [2]a.Q = [2]a.Q{a.Q{p: a.P{x: 5, y: 6}, name: \"ab\"}, a.Q{p: a.P{x: 7}, name: \"cde\"}};\nval TS: [2]a.Reply = [2]a.Reply{a.Reply.value{100}, a.Reply.empty{}};\nval RULES: [2]a.Rule = [2]a.Rule{a.Rule{tag: 1, fn: a.inc}, a.Rule{tag: 2, fn: a.dbl}};\n\n#[noinline] fun take(p: a.P) i64 { ret p.x * 10 + p.y; }\n#[noinline] fun local($n: i64) i64 { val L: [2]a.P = [2]a.P{a.P{x: n, y: 1}, a.P{x: 2}}; var s: i64 = 0; $each p in L { s = s + take(p); } ret s; }\n\n#[symbol(\"main\")]\nfun main(argc: i64) i64 {\n    var s: i64 = 0;\n    $each p in a.PS { s = s + take(p); $if (p.x == 30) { s = s + 1000; } }\n    $each p in PS { s = s - take(p); $if (p.x == 30) { s = s - 1000; } }\n    if (s != 0) { ret 1; }\n    $each q in a.QS { s = s + q.p.x * 100 + q.p.y + q.name[1]::i64; }\n    $each q in QS { s = s - q.p.x * 100 - q.p.y - q.name[1]::i64; }\n    if (s != 0) { ret 2; }\n    $each t in a.TS { $if (sel t.value) { s = s + t.value; } $or { s = s + 1; } }\n    $each t in TS { if (sel t.value) { s = s - t.value; } or { s = s - 1; } }\n    if (s != 0) { ret 3; }\n    $each r in a.RULES { s = s + r.fn(10) + r.tag; }\n    $each r in RULES { s = s - r.fn(10) - r.tag; }\n    if (s != 0) { ret 4; }\n    if (local(5) != 71 || local(6) != 81) { ret 5; }\n    ret 0;\n}\n", native_stub());
         if (native_case_files(?alloc, native_manifest(), ?names[0], ?texts[0], 1, "linux-x86_64", "", false, program, "each arrays") != 0) { ret 1; }
         if (native_case_files(?alloc, native_manifest(), ?names[0], ?texts[0], 1, "linux-x86_64", "", true, program, "each arrays") != 0)  { ret 2; }
         ret 0;
@@ -3753,7 +3726,7 @@ fun shared_fwd_arm(alloc: *A.Allocator, artifact: str, s: *session.Session) i32 
     texts[0] = "use shfwd.parts;\n\nfwd parts.ident;\nfwd parts.plain;\nfwd parts.sized;\nfwd parts.total;\nfwd shfwd.deep;\n\npub fun anchor() i32 { ret 1; }\n";
     texts[1] = "pub fun ident[T](x: T) T { ret x; }\npub fun plain(x: i32) i32 { ret x; }\npub fun sized($n: i32) i32 { ret n; }\npub fun total(xs: ...) i32 { ret 0; }\n";
     texts[2] = "pub fun gen[T](x: T) T { ret x; }\npub fun leaf() i32 { ret 2; }\n";
-    texts[3] = spliced(alloc, "use shfwd.parts;\n\nfwd parts.ident;\n\n#[symbol(\"", entry_symbol(), "\")]\nfun start() i32 { ret parts.plain(0); }\n");
+    texts[3] = driver.joined(alloc, "use shfwd.parts;\n\nfwd parts.ident;\n\n#[symbol(\"", entry_symbol(), "\")]\nfun start() i32 { ret parts.plain(0); }\n");
     val root_r: res[str, fail.Fail] = driver.scaffold(alloc, manifest_shared_fwd(), ?names[0], ?texts[0], 4);
     if (sel root_r.err) { ret -1; }
     val root: str = root_r.ok;
@@ -3838,11 +3811,11 @@ test execute_warm__blocked_output_directory_is_environmental {
     var names: [1]str;
     names[0] = "main.mach";
     var texts: [1]str;
-    texts[0] = spliced(?w.alloc, "#[symbol(\"", entry_symbol(), "\")]\nfun start() i32 { ret 0; }\n");
+    texts[0] = driver.joined(?w.alloc, "#[symbol(\"", entry_symbol(), "\")]\nfun start() i32 { ret 0; }\n");
     val scaffolded: err[fail.Fail] = warm_project_scaffold(?w, driver.fixture_manifest(), ?names[0], ?texts[0], 1);
     if (sel scaffolded.err) { ret 1; }
 
-    val out_path: str             = spliced(?w.alloc, w.root, "/", "out");
+    val out_path: str             = driver.joined(?w.alloc, w.root, "/", "out");
     val blk:      err[fs.FsError] = fs.write_bytes(out_path, "blocked", 7, 420);
     if (sel blk.err) { ret 1; }
 
@@ -3875,7 +3848,7 @@ test execute_warm__unchanged_rebuild_reuses_and_stays_bounded {
     names[1] = "a.mach";
     names[2] = "b.mach";
     var texts: [3]str;
-    texts[0] = spliced(?w.alloc, "use uniontest.a.fa;\nuse uniontest.b.fb;\n#[symbol(\"", entry_symbol(), "\")]\nfun start() i32 { ret fa() + fb(); }\n");
+    texts[0] = driver.joined(?w.alloc, "use uniontest.a.fa;\nuse uniontest.b.fb;\n#[symbol(\"", entry_symbol(), "\")]\nfun start() i32 { ret fa() + fb(); }\n");
     texts[1] = "pub fun fa() i32 { ret 1; }\n";
     texts[2] = "pub fun fb() i32 { ret 2; }\n";
     val scaffolded: err[fail.Fail] = warm_project_scaffold(?w, driver.fixture_manifest(), ?names[0], ?texts[0], 3);
@@ -3933,8 +3906,8 @@ test execute_warm__unchanged_rebuild_reuses_and_stays_bounded {
     if (shard_len(?w.s, ?passes.LOWER) != n_low_1)                                                    { bad = 1; }
     if (shard_len(?w.s, ?passes.CODEGEN) != n_cg_1)                                                   { bad = 1; }
 
-    val src_dir:       str             = spliced(?w.alloc, w.root, "/", "src");
-    val a_path:        str             = spliced(?w.alloc, src_dir, "/", "a.mach");
+    val src_dir:       str             = driver.joined(?w.alloc, w.root, "/", "src");
+    val a_path:        str             = driver.joined(?w.alloc, src_dir, "/", "a.mach");
     val a_v2:          str             = "pub fun fa() i32 { val t: i32 = 1; ret t; }\n";
     val write_bytes_r: err[fs.FsError] = fs.write_bytes(a_path, a_v2, str_len(a_v2), 420);
     if (sel write_bytes_r.err) { ret 1; }
@@ -3966,7 +3939,7 @@ test execute_warm__tampered_artifact_forces_relink_not_silent_reuse {
     names[1] = "a.mach";
     names[2] = "b.mach";
     var texts: [3]str;
-    texts[0] = spliced(?w.alloc, "use uniontest.a.fa;\nuse uniontest.b.fb;\n#[symbol(\"", entry_symbol(), "\")]\nfun start() i32 { ret fa() + fb(); }\n");
+    texts[0] = driver.joined(?w.alloc, "use uniontest.a.fa;\nuse uniontest.b.fb;\n#[symbol(\"", entry_symbol(), "\")]\nfun start() i32 { ret fa() + fb(); }\n");
     texts[1] = "pub fun fa() i32 { ret 1; }\n";
     texts[2] = "pub fun fb() i32 { ret 2; }\n";
     val scaffolded: err[fail.Fail] = warm_project_scaffold(?w, driver.fixture_manifest(), ?names[0], ?texts[0], 3);
@@ -4041,7 +4014,7 @@ test execute_warm__failed_link_retries_at_unchanged_revision {
     var names: [1]str;
     names[0] = "main.mach";
     var texts: [1]str;
-    texts[0] = spliced(?w.alloc, "#[symbol(\"", entry_symbol(), "\")]\nfun start() i32 { ret 0; }\n\ntest main_zero { ret 0; }\n");
+    texts[0] = driver.joined(?w.alloc, "#[symbol(\"", entry_symbol(), "\")]\nfun start() i32 { ret 0; }\n\ntest main_zero { ret 0; }\n");
     val scaffolded: err[fail.Fail] = warm_project_scaffold(?w, driver.fixture_manifest(), ?names[0], ?texts[0], 1);
     if (sel scaffolded.err) { ret 1; }
 
@@ -4102,7 +4075,7 @@ test execute_warm__parallel_pool_rebuilds_only_stale_modules {
     names[2] = "b.mach";
     names[3] = "c.mach";
     var texts: [4]str;
-    texts[0] = spliced(?w.alloc, "use uniontest.a.fa;\nuse uniontest.b.fb;\nuse uniontest.c.fc;\n#[symbol(\"", entry_symbol(), "\")]\nfun start() i32 { ret fa() + fb() + fc(); }\n");
+    texts[0] = driver.joined(?w.alloc, "use uniontest.a.fa;\nuse uniontest.b.fb;\nuse uniontest.c.fc;\n#[symbol(\"", entry_symbol(), "\")]\nfun start() i32 { ret fa() + fb() + fc(); }\n");
     texts[1] = "pub fun fa() i32 { ret 1; }\n";
     texts[2] = "pub fun fb() i32 { ret 2; }\n";
     texts[3] = "pub fun fc() i32 { ret 3; }\n";
@@ -4149,9 +4122,9 @@ test execute_warm__parallel_pool_rebuilds_only_stale_modules {
     if (query.peek_revision(?w.s.queries, ?passes.CODEGEN, module.stable_index(st_c)::u64) != cg_c_1) { bad = 1; }
     if (query.peek_revision(?w.s.queries, ?passes.LINK, 0) != lk_1)                                   { bad = 1; }
 
-    val src_dir:       str             = spliced(?w.alloc, w.root, "/", "src");
-    val a_path:        str             = spliced(?w.alloc, src_dir, "/", "a.mach");
-    val c_path:        str             = spliced(?w.alloc, src_dir, "/", "c.mach");
+    val src_dir:       str             = driver.joined(?w.alloc, w.root, "/", "src");
+    val a_path:        str             = driver.joined(?w.alloc, src_dir, "/", "a.mach");
+    val c_path:        str             = driver.joined(?w.alloc, src_dir, "/", "c.mach");
     val a_v2:          str             = "pub fun fa() i32 { val t: i32 = 1; ret t; }\n";
     val c_v2:          str             = "pub fun fc() i32 { val t: i32 = 3; ret t; }\n";
     val write_bytes_r: err[fs.FsError] = fs.write_bytes(a_path, a_v2, str_len(a_v2), 420);
@@ -4187,19 +4160,19 @@ fun scale_names(alloc: *A.Allocator, names: *str, texts: *str) {
     var i:     u32 = 1;
     for (i <= 8) {
         val idx: str = u32_str(alloc, i);
-        val nm:  str = spliced(alloc, "m", idx, ".mach");
+        val nm:  str = driver.joined(alloc, "m", idx, ".mach");
         names[i] = nm;
-        val head: str = spliced(alloc, "pub fun f", idx, "() i32 {\n    val x: f64 = ");
-        val mid:  str = spliced(alloc, idx, ".25;\n    val y: f64 = x * 2.0 + 0.5;\n    var acc: i32 = 0;\n    var j: i32 = 0;\n    for (j < 40) {\n        acc = acc + j * 2;\n        j = j + 1;\n    }\n    ret acc + (y::i32) + ", idx);
-        val body: str = spliced(alloc, head, mid, ";\n}\n");
+        val head: str = driver.joined(alloc, "pub fun f", idx, "() i32 {\n    val x: f64 = ");
+        val mid:  str = driver.joined(alloc, idx, ".25;\n    val y: f64 = x * 2.0 + 0.5;\n    var acc: i32 = 0;\n    var j: i32 = 0;\n    for (j < 40) {\n        acc = acc + j * 2;\n        j = j + 1;\n    }\n    ret acc + (y::i32) + ", idx);
+        val body: str = driver.joined(alloc, head, mid, ";\n}\n");
         texts[i] = body;
-        uses     = spliced(alloc, uses, "use scaletest.m", spliced(alloc, idx, ".f", idx));
-        uses     = spliced(alloc, uses, ";\n", "");
-        calls    = spliced(alloc, calls, "acc = acc + f", spliced(alloc, idx, "();\n", ""));
+        uses     = driver.joined(alloc, uses, "use scaletest.m", driver.joined(alloc, idx, ".f", idx));
+        uses     = driver.joined(alloc, uses, ";\n", "");
+        calls    = driver.joined(alloc, calls, "acc = acc + f", driver.joined(alloc, idx, "();\n", ""));
         i        = i + 1;
     }
-    texts[0] = spliced(alloc, uses, spliced(alloc, "#[symbol(\"", "_start", "\")]\n"),
-        spliced(alloc, "fun start() i32 {\n    var acc: i32 = 0;\n", calls, "    ret acc;\n}\n"));
+    texts[0] = driver.joined(alloc, uses, driver.joined(alloc, "#[symbol(\"", "_start", "\")]\n"),
+        driver.joined(alloc, "fun start() i32 {\n    var acc: i32 = 0;\n", calls, "    ret acc;\n}\n"));
 }
 
 #[testing]
@@ -4298,7 +4271,7 @@ test execute_warm__replaced_image_owns_section_bytes {
     names[1] = "a.mach";
     names[2] = "b.mach";
     var texts: [3]str;
-    texts[0] = spliced(?w.alloc, "use uniontest.a.greeting;\n#[symbol(\"", entry_symbol(), "\")]\nfun start() i32 { if (greeting[0] == 'w') { ret 0; } ret 1; }\n");
+    texts[0] = driver.joined(?w.alloc, "use uniontest.a.greeting;\n#[symbol(\"", entry_symbol(), "\")]\nfun start() i32 { if (greeting[0] == 'w') { ret 0; } ret 1; }\n");
     texts[1] = "use uniontest.b.fb;\npub val greeting: *u8 = \"warm-owned-section-bytes\";\npub fun fa() i32 { ret fb(); }\n";
     texts[2] = "pub fun fb() i32 { ret 2; }\n";
     val scaffolded: err[fail.Fail] = warm_project_scaffold(?w, driver.fixture_manifest(), ?names[0], ?texts[0], 3);
@@ -4314,8 +4287,8 @@ test execute_warm__replaced_image_owns_section_bytes {
     if (sel r1.err)                         { ret 1; }
     if (r1.ok.severity != outcome.BUILD_OK) { bad = 1; }
 
-    val src_dir:       str             = spliced(?w.alloc, w.root, "/", "src");
-    val b_path:        str             = spliced(?w.alloc, src_dir, "/", "b.mach");
+    val src_dir:       str             = driver.joined(?w.alloc, w.root, "/", "src");
+    val b_path:        str             = driver.joined(?w.alloc, src_dir, "/", "b.mach");
     val b_v2:          str             = "pub fun fb() i32 { ret 2; }\npub fun fb2() i32 { ret 3; }\n";
     val write_bytes_r: err[fs.FsError] = fs.write_bytes(b_path, b_v2, str_len(b_v2), 420);
     if (sel write_bytes_r.err) { ret 1; }
@@ -4373,8 +4346,8 @@ test execute_warm__bin_name_keys_the_artifact_cache {
     names[1] = "beta.mach";
     names[2] = "shared.mach";
     var texts: [3]str;
-    texts[0] = spliced(?w.alloc, "use uniontest.shared.sh;\n#[symbol(\"", entry_symbol(), "\")]\nfun sa() i32 { ret sh(); }\n");
-    texts[1] = spliced(?w.alloc, "use uniontest.shared.sh;\n#[symbol(\"", entry_symbol(), "\")]\nfun sb() i32 { ret sh(); }\n");
+    texts[0] = driver.joined(?w.alloc, "use uniontest.shared.sh;\n#[symbol(\"", entry_symbol(), "\")]\nfun sa() i32 { ret sh(); }\n");
+    texts[1] = driver.joined(?w.alloc, "use uniontest.shared.sh;\n#[symbol(\"", entry_symbol(), "\")]\nfun sb() i32 { ret sh(); }\n");
     texts[2] = "pub fun sh() i32 { $if ($bin.name == \"alpha\") { ret 111; } ret 222; }\n";
     val scaffolded: err[fail.Fail] = warm_project_scaffold(?w, manifest_two_bins(), ?names[0], ?texts[0], 3);
     if (sel scaffolded.err) { ret 1; }
@@ -4466,7 +4439,7 @@ test execute_warm__growing_cycle_expansion_is_shown {
     var names: [1]str;
     names[0] = "main.mach";
     var texts: [1]str;
-    texts[0] = spliced(?w.alloc, "fun peel[T](x: i64) i64 { $if ($is_pointer(T)) { ret peel[$pointee_of(T)](x + 1); } ret x; }\n#[symbol(\"",
+    texts[0] = driver.joined(?w.alloc, "fun peel[T](x: i64) i64 { $if ($is_pointer(T)) { ret peel[$pointee_of(T)](x + 1); } ret x; }\n#[symbol(\"",
         entry_symbol(), "\")]\nfun start() i32 { ret peel[*****i64](0)::i32; }\n");
     val scaffolded: err[fail.Fail] = warm_project_scaffold(?w, driver.fixture_manifest(), ?names[0], ?texts[0], 1);
     if (sel scaffolded.err) { ret 1; }
@@ -4501,7 +4474,7 @@ test execute_warm__pool_error_message_survives_teardown {
     names[2] = "b.mach";
     names[3] = "c.mach";
     var texts: [4]str;
-    texts[0] = spliced(?w.alloc, "use uniontest.a.fa;\nuse uniontest.b.fb;\nuse uniontest.c.fc;\n#[symbol(\"", entry_symbol(), "\")]\nfun start() i32 { ret fa() + fb() + fc(); }\n");
+    texts[0] = driver.joined(?w.alloc, "use uniontest.a.fa;\nuse uniontest.b.fb;\nuse uniontest.c.fc;\n#[symbol(\"", entry_symbol(), "\")]\nfun start() i32 { ret fa() + fb() + fc(); }\n");
     texts[1] = "pub fun fa() i32 { ret 1; }\n";
     texts[2] = "pub fun fb() i32 { ret 2; }\n";
     texts[3] = "pub fun fc() i32 {\n    $if ($mach.build.arch == $mach.arch.x86_64) { asm x86_64 { frobnicate } }\n    $or ($mach.build.arch == $mach.arch.aarch64) { asm aarch64 { frobnicate } }\n    $or { asm riscv64 { frobnicate } }\n    ret 3;\n}\n";
@@ -4540,7 +4513,7 @@ test execute_warm__sema_phase_diagnostic_fails_build {
     var names: [1]str;
     names[0] = "main.mach";
     var texts: [1]str;
-    texts[0] = spliced(?w.alloc, "#[symbol(\"", entry_symbol(), "\")]\nfun start() i32 { val x: u32 = \"not a u32\"; ret 0; }\n");
+    texts[0] = driver.joined(?w.alloc, "#[symbol(\"", entry_symbol(), "\")]\nfun start() i32 { val x: u32 = \"not a u32\"; ret 0; }\n");
     val scaffolded: err[fail.Fail] = warm_project_scaffold(?w, driver.fixture_manifest(), ?names[0], ?texts[0], 1);
     if (sel scaffolded.err) { ret 1; }
 
@@ -4585,7 +4558,7 @@ test execute_warm__refuses_a_manifest_that_changed_after_planning {
     var names: [1]str;
     names[0] = "main.mach";
     var texts: [1]str;
-    texts[0] = spliced(?w.alloc, "#[symbol(\"", entry_symbol(), "\")]\nfun start() i32 { ret 0; }\n");
+    texts[0] = driver.joined(?w.alloc, "#[symbol(\"", entry_symbol(), "\")]\nfun start() i32 { ret 0; }\n");
     val scaffolded: err[fail.Fail] = warm_project_scaffold(?w, driver.fixture_manifest(), ?names[0], ?texts[0], 1);
     if (sel scaffolded.err) { ret 1; }
 
@@ -4593,7 +4566,7 @@ test execute_warm__refuses_a_manifest_that_changed_after_planning {
     val planned: err[fail.Fail]       = warm_project_plan(?w, rq);
     if (sel planned.err) { ret 1; }
 
-    val mf:            str             = spliced(?w.alloc, w.root, "/", manifest.MANIFEST_FILE);
+    val mf:            str             = driver.joined(?w.alloc, w.root, "/", manifest.MANIFEST_FILE);
     val alt:           str             = manifest_renamed_artifact();
     val write_bytes_r: err[fs.FsError] = fs.write_bytes(mf, alt, str_len(alt), 420);
     if (sel write_bytes_r.err) { ret 1; }
@@ -4626,7 +4599,7 @@ fun ro_mod_text() str {
 
 #[testing]
 fun ro_main_text(alloc: *A.Allocator) str {
-    ret spliced(alloc, "use uniontest.rm0;\nuse uniontest.rm1;\nuse uniontest.rm2;\nuse uniontest.rm3;\nuse uniontest.rm4;\nuse uniontest.rm5;\nuse uniontest.rm6;\nuse uniontest.rm7;\nuse uniontest.rm8;\nuse uniontest.rm9;\nuse uniontest.rm10;\nuse uniontest.rm11;\nuse uniontest.rm12;\nuse uniontest.rm13;\nuse uniontest.rm14;\nuse uniontest.rm15;\n\n#[symbol(\"", entry_symbol(), "\")]\nfun start() i32 {\n    var t: i32 = 1;\n    t = t + rm0.f0(t + 0);\n    t = t + rm1.f1(t + 1);\n    t = t + rm2.f2(t + 2);\n    t = t + rm3.f3(t + 3);\n    t = t + rm4.f4(t + 4);\n    t = t + rm5.f5(t + 5);\n    t = t + rm6.f6(t + 6);\n    t = t + rm7.f7(t + 7);\n    t = t + rm8.f8(t + 8);\n    t = t + rm9.f9(t + 9);\n    t = t + rm10.f10(t + 10);\n    t = t + rm11.f11(t + 11);\n    t = t + rm12.f12(t + 12);\n    t = t + rm13.f13(t + 13);\n    t = t + rm14.f14(t + 14);\n    t = t + rm15.f15(t + 15);\n    ret t;\n}\n");
+    ret driver.joined(alloc, "use uniontest.rm0;\nuse uniontest.rm1;\nuse uniontest.rm2;\nuse uniontest.rm3;\nuse uniontest.rm4;\nuse uniontest.rm5;\nuse uniontest.rm6;\nuse uniontest.rm7;\nuse uniontest.rm8;\nuse uniontest.rm9;\nuse uniontest.rm10;\nuse uniontest.rm11;\nuse uniontest.rm12;\nuse uniontest.rm13;\nuse uniontest.rm14;\nuse uniontest.rm15;\n\n#[symbol(\"", entry_symbol(), "\")]\nfun start() i32 {\n    var t: i32 = 1;\n    t = t + rm0.f0(t + 0);\n    t = t + rm1.f1(t + 1);\n    t = t + rm2.f2(t + 2);\n    t = t + rm3.f3(t + 3);\n    t = t + rm4.f4(t + 4);\n    t = t + rm5.f5(t + 5);\n    t = t + rm6.f6(t + 6);\n    t = t + rm7.f7(t + 7);\n    t = t + rm8.f8(t + 8);\n    t = t + rm9.f9(t + 9);\n    t = t + rm10.f10(t + 10);\n    t = t + rm11.f11(t + 11);\n    t = t + rm12.f12(t + 12);\n    t = t + rm13.f13(t + 13);\n    t = t + rm14.f14(t + 14);\n    t = t + rm15.f15(t + 15);\n    ret t;\n}\n");
 }
 
 #[testing]
@@ -4748,8 +4721,8 @@ test readout__a_build_records_one_row_per_phase_serial_and_pooled {
 # `{project.work}/<out>`
 #[testing]
 fun manifest_vendor(alloc: *A.Allocator, argv: str, out: str) str {
-    val head: str = spliced(alloc, "[project]\nmach = \">=5\"\nid = \"vend\"\nversion = \"0.0.0\"\nsrc = \"src\"\nwork = \"out/{target.name}/{profile.name}\"\n\n[target.linux]\nisa = \"x86_64\"\nos = \"linux\"\nabi = \"sysv64\"\n\n[step.vendor]\nargv = ", argv, "\nin = [\"src/main.mach\"]\nout = [\"{project.work}/");
-    ret spliced(alloc, head, out, "\"]\nneed = []\n\n[artifact.app]\nkind = \"bin\"\nentry = \"main.mach\"\nout = \"{project.work}/bin/app\"\ntargets = [\"*\"]\nlink = []\nneed = [\"step.vendor\"]\n[profile.debug]\ndefault = true\noptimize = false\ndebug = true\nsimd = \"scalarize\"\n[profile.release]\noptimize = true\ndebug = false\nsimd = \"scalarize\"\n");
+    val head: str = driver.joined(alloc, "[project]\nmach = \">=5\"\nid = \"vend\"\nversion = \"0.0.0\"\nsrc = \"src\"\nwork = \"out/{target.name}/{profile.name}\"\n\n[target.linux]\nisa = \"x86_64\"\nos = \"linux\"\nabi = \"sysv64\"\n\n[step.vendor]\nargv = ", argv, "\nin = [\"src/main.mach\"]\nout = [\"{project.work}/");
+    ret driver.joined(alloc, head, out, "\"]\nneed = []\n\n[artifact.app]\nkind = \"bin\"\nentry = \"main.mach\"\nout = \"{project.work}/bin/app\"\ntargets = [\"*\"]\nlink = []\nneed = [\"step.vendor\"]\n[profile.debug]\ndefault = true\noptimize = false\ndebug = true\nsimd = \"scalarize\"\n[profile.release]\noptimize = true\ndebug = false\nsimd = \"scalarize\"\n");
 }
 
 #[testing]
@@ -4772,7 +4745,7 @@ $if ($mach.build.os == $mach.os.linux && $mach.build.arch == $mach.arch.x86_64) 
         var names: [1]str;
         names[0] = "main.mach";
         var texts: [1]str;
-        texts[0] = spliced(?alloc,
+        texts[0] = driver.joined(?alloc,
             "#[noinline]\nfun wide(v: i32) i32 { ret v; }\n",
             "test r256 { ret wide(256); }\ntest rneg1 { ret wide(-1); }\ntest r3 { ret 3; }\ntest r255 { ret 255; }\n",
             dispatcher_stub());
@@ -4843,10 +4816,10 @@ fun vendor_build(alloc: *A.Allocator, mtext: str, stale: str, needles: *str, nee
     val root: str = root_r.ok;
     fin { fs.remove_all(alloc, root); }
     if (!str_equals(stale, "")) {
-        val stale_dir: str             = spliced(alloc, root, "/", stale);
+        val stale_dir: str             = driver.joined(alloc, root, "/", stale);
         val made:      err[fs.FsError] = fs.create_dir_all(alloc, stale_dir, 493);
         if (sel made.err) { ret 2; }
-        val wrote: err[fs.FsError] = fs.write_bytes(spliced(alloc, stale_dir, "/", "window.o"), "stale-from-a-crashed-run"::*u8, 24, 420);
+        val wrote: err[fs.FsError] = fs.write_bytes(driver.joined(alloc, stale_dir, "/", "window.o"), "stale-from-a-crashed-run"::*u8, 24, 420);
         if (sel wrote.err) { ret 2; }
     }
     val refused: opt[str] = step_check(?s, alloc, root, false);
@@ -4916,8 +4889,8 @@ $if ($mach.build.os != $mach.os.windows) {
         if (sel root_r.err) { ret 1; }
         val root: str = root_r.ok;
         fin { fs.remove_all(?alloc, root); }
-        val counter: str             = spliced(?alloc, root, "/", "counter");
-        val watched: str             = spliced(?alloc, root, "/", "watched");
+        val counter: str             = driver.joined(?alloc, root, "/", "counter");
+        val watched: str             = driver.joined(?alloc, root, "/", "watched");
         val first:   err[fs.FsError] = fs.write_bytes(watched, "a"::*u8, 1, 420);
         if (sel first.err) { ret 2; }
 
@@ -4963,10 +4936,10 @@ test build__gate_on_a_variable_fails_the_build {
     var bad: i32 = 0;
 
     # a gate reading a variable is refused by sema, which gives every gate its verdict
-    val pk: str = spliced(?alloc,
+    val pk: str = driver.joined(?alloc,
         "tag Reply: u8 { empty; value: i64; }\nvar G: Reply = Reply.value{1};\nfun f() i32 { $if (sel G.value) { ret 1; } ret 0; }\n#[symbol(\"",
         entry_symbol(), "\")]\nfun start() i32 { ret f(); }\n");
-    val ok: str = spliced(?alloc,
+    val ok: str = driver.joined(?alloc,
         "fun sink(va: ...) u32 { var acc: u32 = 0; $each a in va { acc = acc + a; } ret acc; }\n#[symbol(\"",
         entry_symbol(), "\")]\nfun start() i32 { sink(7::u32, 8::u32); ret 0; }\n");
 
@@ -4992,7 +4965,7 @@ test q_link__records_the_normal_and_test_codegen_keys {
     names[0] = "main.mach";
     names[1] = "a.mach";
     var texts: [2]str;
-    texts[0] = spliced(?alloc, "use uniontest.a.fa;\n#[symbol(\"", entry_symbol(), "\")]\nfun start() i32 { ret fa(); }\n");
+    texts[0] = driver.joined(?alloc, "use uniontest.a.fa;\n#[symbol(\"", entry_symbol(), "\")]\nfun start() i32 { ret fa(); }\n");
     texts[1] = "pub fun fa() i32 { ret 0; }\n\ntest a_zero { ret fa(); }\n";
     val root_r: res[str, fail.Fail] = driver.scaffold(?alloc, driver.fixture_manifest(), ?names[0], ?texts[0], 2);
     if (sel root_r.err) {
@@ -5114,9 +5087,9 @@ fun scaffold_two_artifacts(alloc: *A.Allocator) res[str, fail.Fail] {
     var names: [4]str;
     var texts: [4]str;
     names[0] = "hello.mach";
-    texts[0] = spliced(alloc, "use lessons.common;\n\n", start, "\ntest own { ret common.zero(); }\n");
+    texts[0] = driver.joined(alloc, "use lessons.common;\n\n", start, "\ntest own { ret common.zero(); }\n");
     names[1] = "shaded.mach";
-    texts[1] = spliced(alloc, "$if ($bin.name != \"shaded\") { $error(\"wrong artifact\"); }\n\nuse lessons.common;\n\n", start,
+    texts[1] = driver.joined(alloc, "$if ($bin.name != \"shaded\") { $error(\"wrong artifact\"); }\n\nuse lessons.common;\n\n", start,
         "\ntest own { ret common.zero(); }\n");
     names[2] = "common.mach";
     texts[2] = "pub fun zero() i32 { ret 0; }\n\ntest names_its_artifact {\n    $if ($bin.name == \"hello\") { ret 11; }\n    $or ($bin.name == \"shaded\") { ret 12; }\n    ret 13;\n}\n";
@@ -5243,7 +5216,7 @@ test test_goal__compile_error_collects_no_tests {
     names[0] = "main.mach";
     names[1] = "bad.mach";
     var texts: [2]str;
-    texts[0] = spliced(?alloc, "use uniontest.bad;\n\n#[symbol(\"", entry_symbol(), "\")]\nfun start() i32 { ret 0; }\n\ntest main_runs { ret 0; }\n");
+    texts[0] = driver.joined(?alloc, "use uniontest.bad;\n\n#[symbol(\"", entry_symbol(), "\")]\nfun start() i32 { ret 0; }\n\ntest main_runs { ret 0; }\n");
     texts[1] = "pub fun oops() i32 { ret uniontest_undefined_symbol(); }\n";
     val root_r: res[str, fail.Fail] = driver.scaffold(?alloc, driver.fixture_manifest(), ?names[0], ?texts[0], 2);
     if (sel root_r.err) {
@@ -5315,7 +5288,7 @@ fun step_check(s: *session.Session, alloc: *A.Allocator, root: str, no_cache: bo
     var text: str   = "";
     var i:    usize = 0;
     for (i < diagnostic.len(?s.diags)) {
-        text = spliced(alloc, text, s.diags.items.data[i].message, "\n");
+        text = driver.joined(alloc, text, s.diags.items.data[i].message, "\n");
         i    = i + 1;
     }
     ret opt[str].some{text};

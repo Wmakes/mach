@@ -34,6 +34,38 @@ use git_member:        mach.lang.package.git.member;
 use package_path:      mach.lang.package.path;
 use mach.lang.package.report;
 use package_source: mach.lang.package.source;
+#[testing]
+use std.allocator.page;
+#[testing]
+use fs: std.filesystem;
+#[testing]
+use io_error: std.io.error;
+#[testing]
+use std.memory;
+#[testing]
+use std.types.option.opt;
+#[testing]
+use types_path: std.types.path;
+#[testing]
+use types_string: std.types.string;
+#[testing]
+use std.types.string.str_copy_slice;
+#[testing]
+use std.types.string.str_equals;
+#[testing]
+use std.types.string.str_len;
+#[testing]
+use mach.lang.query;
+#[testing]
+use lang_source: mach.lang.source;
+#[testing]
+use lang_fingerprint: mach.lang.fingerprint;
+#[testing]
+use mach.lang.step;
+#[testing]
+use mach.lang.package.git;
+#[testing]
+use std.types.string.str_contains;
 
 # a requirer's selector that the root's own declaration replaced. a root `ref` or `path`
 # wins over every requirer with no check that the dependency supports it; a root
@@ -308,4 +340,1158 @@ pub fun project_closure(s: *session.Session, a: *A.Allocator, root: str, release
         str_free(s.build_alloc, text.ok);
     }
     ret err[fail.Fail].ok{};
+}
+
+#[testing]
+fun git_ref(alloc: *A.Allocator, root: str, rel: str) res[str, fail.Fail] {
+    val path:  str                  = driver.joined(alloc, root, "/.git/", rel);
+    val raw_r: res[str, fs.FsError] = fs.read_string(alloc, path);
+    if (sel raw_r.err) { ret res[str, fail.Fail].err{fail.fs_refused(raw_r.err)}; }
+    val raw: str   = raw_r.ok;
+    var n:   usize = str_len(raw);
+    for (n > 0 && (raw[n - 1] == 10 || raw[n - 1] == 13)) { n = n - 1; }
+    val copy_r: res[str, types_string.StrError] = str_copy_slice(alloc, raw, 0, n);
+    str_free(alloc, raw);
+    if (sel copy_r.err) { ret res[str, fail.Fail].err{fail.str_refused(copy_r.err)}; }
+    ret res[str, fail.Fail].ok{copy_r.ok};
+}
+
+#[testing]
+fun dep_build_ok(s: *session.Session, root: str) bool {
+    val refused: opt[str] = driver.build_refusal(s, root);
+    ret sel refused.none;
+}
+
+# `mach dep verify` refuses the closure naming `needle`, and a build of the same
+# closure succeeds: the build reads what exists and checks nothing it refuses
+#[testing]
+fun dep_verify_refuses(s: *session.Session, root: str, needle: str) bool {
+    val verified: err[fail.Fail] = dependencies(s, root, false, nil);
+    if (sel verified.ok) { ret false; }
+    ret str_contains(fail.describe(verified.err), needle) && dep_build_ok(s, root);
+}
+
+# two keys realizing one project id are not a content conflict to reconcile:
+# `mach dep verify` refuses the first key that is not the project id, and a build
+# reads what exists without holding it to the identity rule
+test dep_closure__refuses_an_alias_key_before_any_conflict {
+    var alloc:  A.Allocator;
+    val make_r: err[A.Error] = page.make(?alloc);
+    if (sel make_r.err) { ret 1; }
+    val sr: res[session.Session, fail.Fail] = git.scratch_session(?alloc);
+    if (sel sr.err) { ret 1; }
+    var s: session.Session = sr.ok;
+
+    var names: [1]str;
+    names[0] = "main.mach";
+    var texts: [1]str;
+    texts[0] = "fun main() i32 { ret 0; }\n";
+    val root_manifest: str = driver.joined(?alloc, driver.dep_root_one(?alloc, "foo", "./vendor/foo"),
+        "\n[dep.bar]\npath = \"./vendor/bar\"\n", "");
+    val root_r: res[str, fail.Fail] = driver.scaffold(?alloc, root_manifest, ?names[0], ?texts[0], 1);
+    if (sel root_r.err) {
+        session.dnit(?s);
+        ret 1;
+    }
+    val root: str = root_r.ok;
+
+    var bad: i32            = 0;
+    val lib: str            = driver.lib_manifest(?alloc, "libx");
+    val wf:  err[fail.Fail] = driver.write_node(?alloc, driver.joined(?alloc, root, "/", "dep/foo"),
+        lib, "lib.mach", "pub fun v() i32 { ret 1; }\n");
+    val wb: err[fail.Fail] = driver.write_node(?alloc, driver.joined(?alloc, root, "/", "dep/bar"),
+        lib, "lib.mach", "pub fun v() i32 { ret 2; }\n");
+    if (sel wf.err) {
+        fs.remove_all(?alloc, root);
+        session.dnit(?s);
+        ret 1;
+    }
+    if (sel wb.err) {
+        fs.remove_all(?alloc, root);
+        session.dnit(?s);
+        ret 1;
+    }
+    if (!git.scratch_repo(?alloc, root, "https://example.invalid/app.git")) {
+        fs.remove_all(?alloc, root);
+        session.dnit(?s);
+        ret 1;
+    }
+
+    if (!dep_verify_refuses(?s, root, "[dep.foo] realizes project 'libx': the manifest key, the directory under dep/, and the project id are one name")
+        || !dep_verify_refuses(?s, root, "rename the table to [dep.libx] and the directory to dep/libx")) { bad = 1; }
+
+    fs.remove_all(?alloc, root);
+    session.dnit(?s);
+    ret bad;
+}
+
+# a git dependency's checkout is verified against the parent's gitlink, .gitmodules and ref
+# policy without touching either index; every drift is refused naming its fix
+test git_dependency__checkout_follows_the_parent_gitlink {
+    var alloc:  A.Allocator;
+    val make_r: err[A.Error] = page.make(?alloc);
+    if (sel make_r.err) { ret 1; }
+    val sr: res[session.Session, fail.Fail] = git.scratch_session(?alloc);
+    if (sel sr.err) { ret 1; }
+    var s: session.Session = sr.ok;
+
+    val origin: str = "https://example.invalid/verified.git";
+    var names:  [1]str;
+    names[0] = "main.mach";
+    var texts: [1]str;
+    texts[0] = "fun main() i32 { ret 0; }\n";
+    val root_r: res[str, fail.Fail] = driver.scaffold(?alloc,
+        driver.dep_root_git(?alloc, "verified", origin), ?names[0], ?texts[0], 1);
+    if (sel root_r.err) {
+        session.dnit(?s);
+        ret 1;
+    }
+    val root:     str            = root_r.ok;
+    val dep_root: str            = driver.joined(?alloc, root, "/", "dep/verified");
+    val wr:       err[fail.Fail] = driver.write_node(?alloc, dep_root,
+        driver.lib_manifest(?alloc, "verified"), "lib.mach", "pub fun v() i32 { ret 1; }\n");
+    if (sel wr.err) {
+        fs.remove_all(?alloc, root);
+        session.dnit(?s);
+        ret 1;
+    }
+    if (!git.scratch_repo(?alloc, dep_root, origin)) {
+        fs.remove_all(?alloc, root);
+        session.dnit(?s);
+        ret 1;
+    }
+    val contained_link: str                 = driver.joined(?alloc, dep_root, "/src/", "contained.mach");
+    val symlink_r:      err[io_error.Error] = fs.symlink("lib.mach", contained_link);
+    if (sel symlink_r.err) {
+        fs.remove_all(?alloc, root);
+        session.dnit(?s);
+        ret 1;
+    }
+    if (!driver.git_commit_all(?alloc, dep_root, "add contained symlink")) {
+        fs.remove_all(?alloc, root);
+        session.dnit(?s);
+        ret 1;
+    }
+
+    var tag: [2]str;
+    tag[0] = "tag";
+    tag[1] = "v1";
+    if (!git.scratch_git(?alloc, dep_root, ?tag[0], 2) || !git.write_gitmodules(?alloc, root, "verified", origin)
+        || !git.scratch_repo(?alloc, root, "https://example.invalid/app.git")) {
+        fs.remove_all(?alloc, root);
+        session.dnit(?s);
+        ret 1;
+    }
+    val initial_r: res[str, fail.Fail] = git_ref(?alloc, dep_root, "refs/tags/v1");
+    if (sel initial_r.err) {
+        fs.remove_all(?alloc, root);
+        session.dnit(?s);
+        ret 1;
+    }
+    val initial: str = initial_r.ok;
+
+    var bad:             i32                         = 0;
+    val lib_path:        str                         = driver.joined(?alloc, dep_root, "/", "src/lib.mach");
+    val child_index:     str                         = driver.joined(?alloc, dep_root, "/", ".git/index");
+    val parent_index:    str                         = driver.joined(?alloc, root, "/", ".git/index");
+    val child_before_r:  res[Vector[u8], fs.FsError] = fs.read_bytes(?alloc, child_index);
+    val parent_before_r: res[Vector[u8], fs.FsError] = fs.read_bytes(?alloc, parent_index);
+    if (!dep_build_ok(?s, root)) { bad = 1; }
+    val parent_after_r: res[Vector[u8], fs.FsError] = fs.read_bytes(?alloc, parent_index);
+    if (sel parent_after_r.err) { ret 99; }
+    val child_after_r: res[Vector[u8], fs.FsError] = fs.read_bytes(?alloc, child_index);
+    if (sel child_before_r.err) { ret 99; }
+    if (sel child_after_r.err) {
+        var released: Vector[u8] = child_before_r.ok;
+        collections_vector.dnit[u8](?released);
+        ret 99;
+    }
+    if (sel parent_before_r.err) {
+        var released_before: Vector[u8] = child_before_r.ok;
+        collections_vector.dnit[u8](?released_before);
+        var released_after: Vector[u8] = child_after_r.ok;
+        collections_vector.dnit[u8](?released_after);
+        ret 99;
+    }
+    {
+        var child_before:  Vector[u8] = child_before_r.ok;
+        var child_after:   Vector[u8] = child_after_r.ok;
+        var parent_before: Vector[u8] = parent_before_r.ok;
+        var parent_after:  Vector[u8] = parent_after_r.ok;
+        if (child_before.len != child_after.len
+            || !memory.raw_equal(child_before.data::ptr, child_after.data::ptr, child_before.len)
+            || parent_before.len != parent_after.len
+            || !memory.raw_equal(parent_before.data::ptr, parent_after.data::ptr, parent_before.len)) { bad = 1; }
+        collections_vector.dnit[u8](?child_before);
+        collections_vector.dnit[u8](?child_after);
+        collections_vector.dnit[u8](?parent_before);
+        collections_vector.dnit[u8](?parent_after);
+    }
+
+    val moved_source: str = "pub fun v() i32 { ret 2; }\n";
+    var add:          [4]str;
+    add[0] = "add";
+    add[1] = "-A";
+    var commit: [3]str;
+    commit[0] = "commit";
+    commit[1] = "-qm";
+    commit[2] = "moved";
+    var moved_tag: [2]str;
+    moved_tag[0] = "tag";
+    moved_tag[1] = "moved";
+    val write_bytes_r: err[fs.FsError] = fs.write_bytes(lib_path, moved_source, str_len(moved_source), 420);
+    if (sel write_bytes_r.err
+        || !git.scratch_git(?alloc, dep_root, ?add[0], 2) || !git.scratch_git(?alloc, dep_root, ?commit[0], 3)
+        || !git.scratch_git(?alloc, dep_root, ?moved_tag[0], 2)) { bad = 1; }
+    val moved_r: res[str, fail.Fail] = git_ref(?alloc, dep_root, "refs/tags/moved");
+    if (sel moved_r.err) {
+        fs.remove_all(?alloc, root);
+        session.dnit(?s);
+        ret 1;
+    }
+    val moved: str = moved_r.ok;
+    var track: [4]str;
+    track[0] = "update-ref";
+    track[1] = "refs/remotes/origin/main";
+    track[2] = moved;
+    track[3] = "";
+    var reset: [3]str;
+    reset[0] = "reset";
+    reset[1] = "--hard";
+    reset[2] = initial;
+    if (!git.scratch_git(?alloc, dep_root, ?track[0], 3) || !git.scratch_git(?alloc, dep_root, ?reset[0], 3)
+        || !dep_build_ok(?s, root)) { bad = 1; }
+
+    val root_manifest_path: str             = driver.joined(?alloc, root, "/", manifest.MANIFEST_FILE);
+    val tag_manifest:       str             = driver.dep_root_git_ref(?alloc, "verified", origin, "tag/v1");
+    val write_bytes_r2:     err[fs.FsError] = fs.write_bytes(root_manifest_path, tag_manifest, str_len(tag_manifest), 420);
+    if (sel write_bytes_r2.err
+        || !driver.git_commit_all(?alloc, root, "select tag") || !dep_build_ok(?s, root)) { bad = 1; }
+    var force_tag: [4]str;
+    force_tag[0] = "tag";
+    force_tag[1] = "-f";
+    force_tag[2] = "v1";
+    force_tag[3] = moved;
+    # the gitlink now lies outside the root's own `tag/`, which is refused naming the re-pin
+    if (!git.scratch_git(?alloc, dep_root, ?force_tag[0], 4)
+        || !dep_verify_refuses(?s, root, "run `mach dep update <path> verified` for project")) { bad = 1; }
+    force_tag[3] = initial;
+    if (!git.scratch_git(?alloc, dep_root, ?force_tag[0], 4)) { bad = 1; }
+
+    val initial_commit_ref:      str             = driver.joined(?alloc, "commit/", initial, "");
+    val initial_commit_manifest: str             = driver.dep_root_git_ref(?alloc, "verified", origin, initial_commit_ref);
+    val write_bytes_r3:          err[fs.FsError] = fs.write_bytes(root_manifest_path, initial_commit_manifest, str_len(initial_commit_manifest), 420);
+    if (sel write_bytes_r3.err
+        || !driver.git_commit_all(?alloc, root, "select commit") || !dep_build_ok(?s, root)) { bad = 1; }
+    val moved_commit_ref:      str             = driver.joined(?alloc, "commit/", moved, "");
+    val moved_commit_manifest: str             = driver.dep_root_git_ref(?alloc, "verified", origin, moved_commit_ref);
+    val write_bytes_r4:        err[fs.FsError] = fs.write_bytes(root_manifest_path, moved_commit_manifest, str_len(moved_commit_manifest), 420);
+    if (sel write_bytes_r4.err
+        || !driver.git_commit_all(?alloc, root, "mismatch commit")
+        || !dep_verify_refuses(?s, root, "commit ref")) { bad = 1; }
+    val write_bytes_r5: err[fs.FsError] = fs.write_bytes(root_manifest_path, initial_commit_manifest, str_len(initial_commit_manifest), 420);
+    if (sel write_bytes_r5.err
+        || !driver.git_commit_all(?alloc, root, "restore commit")) { bad = 1; }
+
+    if (!git.write_gitmodules(?alloc, root, "verified", "https://example.invalid/substituted.git")
+        || !driver.git_commit_all(?alloc, root, "substitute metadata")
+        || !dep_verify_refuses(?s, root, ".gitmodules URL")) { bad = 1; }
+    if (!git.write_gitmodules(?alloc, root, "verified", origin)
+        || !driver.git_commit_all(?alloc, root, "restore metadata")) { bad = 1; }
+
+    val wrong_path_metadata: str             = driver.joined(?alloc, "[submodule \"dep/verified\"]\n\tpath = dep/not-verified\n\turl = ", origin, "\n");
+    val gitmodules_path:     str             = driver.joined(?alloc, root, "/", ".gitmodules");
+    val write_bytes_r6:      err[fs.FsError] = fs.write_bytes(gitmodules_path, wrong_path_metadata, str_len(wrong_path_metadata), 420);
+    if (sel write_bytes_r6.err
+        || !driver.git_commit_all(?alloc, root, "move dependency mapping")
+        || !dep_verify_refuses(?s, root, ".gitmodules path")) { bad = 1; }
+    if (!git.write_gitmodules(?alloc, root, "verified", origin)
+        || !driver.git_commit_all(?alloc, root, "restore dependency mapping")) { bad = 1; }
+
+    var mirror_origin: [4]str;
+    mirror_origin[0] = "remote";
+    mirror_origin[1] = "set-url";
+    mirror_origin[2] = "origin";
+    mirror_origin[3] = "https://example.invalid/verified";
+    if (!git.scratch_git(?alloc, dep_root, ?mirror_origin[0], 4) || !dep_build_ok(?s, root)) { bad = 1; }
+    mirror_origin[3] = "https://mirror.example.invalid/elsewhere/verified.git";
+    if (!git.scratch_git(?alloc, dep_root, ?mirror_origin[0], 4) || !dep_build_ok(?s, root)) { bad = 1; }
+    mirror_origin[3] = origin;
+    if (!git.scratch_git(?alloc, dep_root, ?mirror_origin[0], 4)) { bad = 1; }
+
+    val dirty_path:  str             = driver.joined(?alloc, dep_root, "/", "untracked.txt");
+    val dirty_write: err[fs.FsError] = fs.write_bytes(dirty_path, "dirty\n", 6, 420);
+    if (sel dirty_write.err || !dep_verify_refuses(?s, root, "checkout is dirty")) { bad = 1; }
+    val remove_file_r: err[io_error.Error] = fs.remove_file(dirty_path);
+    if (sel remove_file_r.err) { bad = 1; }
+
+    reset[2] = moved;
+    if (!git.scratch_git(?alloc, dep_root, ?reset[0], 3) || !dep_verify_refuses(?s, root, "run `mach dep pull <path>` for project")) { bad = 1; }
+    reset[2] = initial;
+    if (!git.scratch_git(?alloc, dep_root, ?reset[0], 3)) { bad = 1; }
+
+    val branch_manifest: str             = driver.dep_root_git(?alloc, "verified", origin);
+    val write_bytes_r7:  err[fs.FsError] = fs.write_bytes(root_manifest_path, branch_manifest, str_len(branch_manifest), 420);
+    if (sel write_bytes_r7.err
+        || !driver.git_commit_all(?alloc, root, "restore branch policy")) { bad = 1; }
+
+    var link_index: [6]str;
+    link_index[0] = "update-index";
+    link_index[1] = "--add";
+    link_index[2] = "--cacheinfo";
+    link_index[3] = "160000";
+    link_index[4] = moved;
+    link_index[5] = "dep/verified";
+    if (!git.scratch_git(?alloc, root, ?link_index[0], 6) || !dep_verify_refuses(?s, root, "but the recorded gitlink is")) { bad = 1; }
+    link_index[4] = initial;
+    if (!git.scratch_git(?alloc, root, ?link_index[0], 6)) { bad = 1; }
+
+    link_index[4] = moved;
+    var parent_commit: [3]str;
+    parent_commit[0] = "commit";
+    parent_commit[1] = "-qm";
+    parent_commit[2] = "move gitlink";
+    if (!git.scratch_git(?alloc, root, ?link_index[0], 6) || !git.scratch_git(?alloc, root, ?parent_commit[0], 3)
+        || !dep_verify_refuses(?s, root, "but the recorded gitlink is")) { bad = 1; }
+    link_index[4]    = initial;
+    parent_commit[2] = "restore gitlink";
+    if (!git.scratch_git(?alloc, root, ?link_index[0], 6) || !git.scratch_git(?alloc, root, ?parent_commit[0], 3)) { bad = 1; }
+
+    val child_git:    str             = driver.joined(?alloc, dep_root, "/", ".git");
+    val dep_parent:   str             = driver.joined(?alloc, root, "/", "dep");
+    val remove_all_r: err[fs.FsError] = fs.remove_all(?alloc, child_git);
+    if (sel remove_all_r.err
+        || !git.scratch_repo(?alloc, dep_parent, origin)
+        || !dep_verify_refuses(?s, root, "repository root")) { bad = 1; }
+
+    fs.remove_all(?alloc, root);
+    session.dnit(?s);
+    ret bad;
+}
+
+#[testing]
+fun path_copy_revision(s: *session.Session, root: str, expected: str) res[query.Revision, fail.Fail] {
+    val built: res[project.Project, fail.Fail] = driver.rebuild(s, root);
+    if (sel built.err) {
+        ret res[query.Revision, fail.Fail].err{built.err};
+    }
+    var p: project.Project = built.ok;
+    fin { project.dnit_project(?p); }
+    var i: u32 = 0;
+    for (i < project.module_count(?p)) {
+        val file: opt[*lang_source.SourceFile] = lang_source.get(?s.sources, project.module_at(?p, i).file_id);
+        if (sel file.some && str_equals(file.some.text, expected)) {
+            val qr: res[driver.QuerySnapshot, fail.Fail] = driver.query_snapshot(p.alloc, ?p, ?session.FILE_TEXT, lang_source.file_index(project.module_at(?p, i).file_id)::u64);
+            if (sel qr.err) { ret res[query.Revision, fail.Fail].err{qr.err}; }
+            val q: driver.QuerySnapshot = qr.ok;
+            fin {
+                if (q.value != nil) { A.deallocate[u8](p.alloc, q.value, q.value_len::usize); }
+            }
+            if (q.value_len::usize != str_len(expected)
+                || !memory.raw_equal(q.value::ptr, expected::ptr, str_len(expected))) {
+                ret res[query.Revision, fail.Fail].err{fail.message("dependency query does not contain the realized source bytes")};
+            }
+            ret res[query.Revision, fail.Fail].ok{q.last_changed};
+        }
+        i = i + 1;
+    }
+    ret res[query.Revision, fail.Fail].err{fail.message("dependency source bytes were not loaded")};
+}
+
+# a path dependency is verified by its content, never through git: edits move its revision,
+# the parent's index and head are untouched, and repository metadata or a symlink is refused
+test path_dependency__verifies_content_without_changing_git {
+    var alloc:  A.Allocator;
+    val make_r: err[A.Error] = page.make(?alloc);
+    if (sel make_r.err) { ret 1; }
+    val sr: res[session.Session, fail.Fail] = git.scratch_session(?alloc);
+    if (sel sr.err) { ret 1; }
+    var s: session.Session = sr.ok;
+
+    var root_names: [1]str;
+    root_names[0] = "main.mach";
+    var root_texts: [1]str;
+    root_texts[0] = "use uniontest.alpha.alpha;\nfun main() i32 { ret alpha(); }\n";
+    val root_manifest: str                 = driver.dep_root_one(?alloc, "uniontest", "../source-not-read");
+    val root_r:        res[str, fail.Fail] = driver.scaffold(?alloc, root_manifest, ?root_names[0], ?root_texts[0], 1);
+    if (sel root_r.err) {
+        session.dnit(?s);
+        ret 1;
+    }
+    val root:      str = root_r.ok;
+    val dep_root:  str = driver.joined(?alloc, root, "/", "dep/uniontest");
+    var dep_names: [2]str;
+    dep_names[0] = "alpha.mach";
+    dep_names[1] = "beta.mach";
+    var dep_texts: [2]str;
+    dep_texts[0] = "pub fun alpha() i32 { ret 1; }\n";
+    dep_texts[1] = "pub fun beta() i32 { ret 2; }\n";
+    val nodes_written: err[fail.Fail] = driver.write_node_multi(?alloc, dep_root, driver.manifest_multi(), ?dep_names[0], ?dep_texts[0], 2);
+    if (sel nodes_written.err) {
+        fs.remove_all(?alloc, root);
+        session.dnit(?s);
+        ret 1;
+    }
+
+    var bad:     i32                             = 0;
+    val first_r: res[project.Project, fail.Fail] = driver.rebuild(?s, root);
+    if (sel first_r.err) { bad = 1; }
+    if (sel first_r.ok) {
+        var p: project.Project = first_r.ok;
+        if (p.config.dep_count != 1) { bad = 1; }
+        project.dnit_project(?p);
+    }
+
+    val project_git: str                            = driver.joined(?alloc, root, "/", ".git");
+    val initial_r:   res[query.Revision, fail.Fail] = path_copy_revision(?s, root, dep_texts[0]);
+    val exists_r:    res[bool, io_error.Error]      = fs.exists(project_git);
+    if (sel exists_r.err) { ret 99; }
+    if ((sel exists_r.ok && exists_r.ok)) {
+        fs.remove_all(?alloc, root);
+        session.dnit(?s);
+        ret 2;
+    }
+    if (sel initial_r.err) {
+        fs.remove_all(?alloc, root);
+        session.dnit(?s);
+        ret 2;
+    }
+    val initial: query.Revision = initial_r.ok;
+    if (!git.scratch_repo(?alloc, root, "https://example.invalid/app.git")) {
+        fs.remove_all(?alloc, root);
+        session.dnit(?s);
+        ret 3;
+    }
+    val index_path:    str            = driver.joined(?alloc, project_git, "/", "index");
+    var index_before:  [32]u8;
+    var index_after:   [32]u8;
+    val file_sha256_r: err[fail.Fail] = lang_fingerprint.file_sha256(index_path, ?index_before[0]);
+    if (sel file_sha256_r.err) {
+        fs.remove_all(?alloc, root);
+        session.dnit(?s);
+        ret 4;
+    }
+    val head_r: res[str, fail.Fail] = git_ref(?alloc, root, "HEAD");
+    if (sel head_r.err) {
+        fs.remove_all(?alloc, root);
+        session.dnit(?s);
+        ret 5;
+    }
+    val head: str = head_r.ok;
+    fin { str_free(?alloc, head); }
+    if (str_len(head) <= 5 || !memory.raw_equal(head::ptr, "ref: "::ptr, 5)) {
+        fs.remove_all(?alloc, root);
+        session.dnit(?s);
+        ret 6;
+    }
+    val commit_r: res[str, fail.Fail] = git_ref(?alloc, root, (?head[5])::str);
+    if (sel commit_r.err) {
+        fs.remove_all(?alloc, root);
+        session.dnit(?s);
+        ret 6;
+    }
+    val commit: str = commit_r.ok;
+    fin { str_free(?alloc, commit); }
+
+    val changed:          str             = driver.joined(?alloc, dep_root, "/src/", "alpha.mach");
+    val worktree_changed: str             = "pub fun alpha() i32 { ret 3; }\n";
+    val write_bytes_r:    err[fs.FsError] = fs.write_bytes(changed, worktree_changed, str_len(worktree_changed), 420);
+    if (sel write_bytes_r.err) {
+        fs.remove_all(?alloc, root);
+        session.dnit(?s);
+        ret 7;
+    }
+    val edited_r: res[query.Revision, fail.Fail] = path_copy_revision(?s, root, worktree_changed);
+    if (sel edited_r.err)                             { ret 99; }
+    if (!(sel edited_r.ok && edited_r.ok != initial)) { bad = 8; }
+    val repeated_r: res[query.Revision, fail.Fail] = path_copy_revision(?s, root, worktree_changed);
+    if (sel repeated_r.err) { ret 99; }
+    if (!(sel repeated_r.ok && !((sel edited_r.ok
+        && repeated_r.ok != edited_r.ok)))) { bad = 15; }
+    val file_sha256_r2: err[fail.Fail] = lang_fingerprint.file_sha256(index_path, ?index_after[0]);
+    if (sel file_sha256_r2.err
+        || !digest_eq(?index_before[0], ?index_after[0])) { bad = 9; }
+    var restore: [3]str;
+    restore[0] = "restore";
+    restore[1] = "--";
+    restore[2] = "dep/uniontest";
+    if (!git.scratch_git(?alloc, root, ?restore[0], 3)) { bad = 1; }
+
+    var stage: [3]str;
+    stage[0] = "add";
+    stage[1] = "--";
+    stage[2] = "dep/uniontest";
+    val staged_changed: str             = "pub fun alpha() i32 { ret 4; }\n";
+    val write_bytes_r2: err[fs.FsError] = fs.write_bytes(changed, staged_changed, str_len(staged_changed), 420);
+    if (sel write_bytes_r2.err)        { bad = 10; }
+    or (!git.scratch_git(?alloc, root, ?stage[0], 3)) { bad = 10; }
+    or {
+        val file_sha256_r3: err[fail.Fail] = lang_fingerprint.file_sha256(index_path, ?index_before[0]);
+        if (sel file_sha256_r3.err) { bad = 10; }
+    }
+    val staged_r: res[query.Revision, fail.Fail] = path_copy_revision(?s, root, staged_changed);
+    if (sel staged_r.err) { ret 99; }
+    if (!(sel staged_r.ok && !((sel edited_r.ok
+        && staged_r.ok == edited_r.ok)))) { bad = 11; }
+    val file_sha256_r4: err[fail.Fail] = lang_fingerprint.file_sha256(index_path, ?index_after[0]);
+    if (sel file_sha256_r4.err
+        || !digest_eq(?index_before[0], ?index_after[0])) { bad = 12; }
+    var restore_staged: [4]str;
+    restore_staged[0] = "restore";
+    restore_staged[1] = "--staged";
+    restore_staged[2] = "--";
+    restore_staged[3] = "dep/uniontest";
+    if (!git.scratch_git(?alloc, root, ?restore_staged[0], 4) || !git.scratch_git(?alloc, root, ?restore[0], 3)) { bad = 1; }
+
+    val untracked:      str             = driver.joined(?alloc, dep_root, "/", "untracked.txt");
+    val file_sha256_r6: err[fail.Fail]  = lang_fingerprint.file_sha256(index_path, ?index_before[0]);
+    val write_bytes_r3: err[fs.FsError] = fs.write_bytes(untracked, "untracked\n", 10, 420);
+    if (sel file_sha256_r6.err || sel write_bytes_r3.err) { bad = 13; }
+    or (!dep_build_ok(?s, root))                       { bad = 13; }
+    or {
+        val file_sha256_r5: err[fail.Fail] = lang_fingerprint.file_sha256(index_path, ?index_after[0]);
+        if (sel file_sha256_r5.err || !digest_eq(?index_before[0], ?index_after[0])) { bad = 13; }
+        or {
+            val remove_file_r: err[io_error.Error] = fs.remove_file(untracked);
+            if (sel remove_file_r.err) { bad = 13; }
+        }
+    }
+    val commit_after_r: res[str, fail.Fail] = git_ref(?alloc, root, (?head[5])::str);
+    if (sel commit_after_r.err) { ret 99; }
+    val head_after_r: res[str, fail.Fail] = git_ref(?alloc, root, "HEAD");
+    if (!(sel head_after_r.ok && (sel commit_after_r.ok && str_equals(head_after_r.ok, head) && str_equals(commit_after_r.ok, commit)))) { bad = 14; }
+    if (sel head_after_r.ok)                                                                                                             { str_free(?alloc, head_after_r.ok); }
+    if (sel commit_after_r.ok)                                                                                                           { str_free(?alloc, commit_after_r.ok); }
+
+    val root_manifest_path: str             = driver.joined(?alloc, root, "/", manifest.MANIFEST_FILE);
+    val dirty_manifest:     str             = driver.joined(?alloc, root_manifest, "\n", "");
+    val write_bytes_r4:     err[fs.FsError] = fs.write_bytes(root_manifest_path, dirty_manifest, str_len(dirty_manifest), 420);
+    if (sel write_bytes_r4.err
+        || !dep_build_ok(?s, root)) { bad = 1; }
+    var restore_manifest: [3]str;
+    restore_manifest[0] = "restore";
+    restore_manifest[1] = "--";
+    restore_manifest[2] = manifest.MANIFEST_FILE;
+    if (!git.scratch_git(?alloc, root, ?restore_manifest[0], 3) || !dep_build_ok(?s, root)) { bad = 1; }
+
+    val ignore_path:    str             = driver.joined(?alloc, dep_root, "/", ".gitignore");
+    val ignored_dir:    str             = driver.joined(?alloc, dep_root, "/", "out");
+    val ignored_file:   str             = driver.joined(?alloc, ignored_dir, "/", "generated.mach");
+    val write_bytes_r6: err[fs.FsError] = fs.write_bytes(ignore_path, "out/\n", 5, 420);
+    if (sel write_bytes_r6.err)                                        { bad = 1; }
+    or (!driver.git_commit_all(?alloc, root, "ignore dependency outputs")) { bad = 1; }
+    or {
+        val create_dir_all_r: err[fs.FsError] = fs.create_dir_all(?alloc, ignored_dir, 493);
+        val write_bytes_r5:   err[fs.FsError] = fs.write_bytes(ignored_file, "generated\n", 10, 420);
+        if (sel create_dir_all_r.err || sel write_bytes_r5.err || !dep_build_ok(?s, root)) { bad = 1; }
+    }
+
+    val injected_git:   str             = driver.joined(?alloc, dep_root, "/", ".git");
+    val write_bytes_r7: err[fs.FsError] = fs.write_bytes(injected_git, "ignored\n", 8, 420);
+    if (sel write_bytes_r7.err)                                            { bad = 1; }
+    or (!dep_verify_refuses(?s, root, "forbidden repository metadata")) { bad = 1; }
+    or {
+        val remove_file_r2: err[io_error.Error] = fs.remove_file(injected_git);
+        if (sel remove_file_r2.err || !dep_build_ok(?s, root)) { bad = 1; }
+    }
+
+    val contained_link: str                 = driver.joined(?alloc, dep_root, "/src/", "contained.mach");
+    val symlink_r:      err[io_error.Error] = fs.symlink("alpha.mach", contained_link);
+    if (sel symlink_r.err
+        || !driver.git_commit_all(?alloc, root, "add a contained dependency symlink")
+        || !dep_verify_refuses(?s, root, "must contain no symlinks")) { bad = 1; }
+
+    val remove_file_r3: err[io_error.Error] = fs.remove_file(contained_link);
+    val symlink_r2:     err[io_error.Error] = fs.symlink("/etc/passwd", contained_link);
+    if (sel remove_file_r3.err
+        || sel symlink_r2.err
+        || !driver.git_commit_all(?alloc, root, "add an absolute dependency symlink")
+        || !dep_verify_refuses(?s, root, "must contain no symlinks")) { bad = 1; }
+
+    val remove_file_r4: err[io_error.Error] = fs.remove_file(contained_link);
+    val symlink_r3:     err[io_error.Error] = fs.symlink("../../outside", contained_link);
+    if (sel remove_file_r4.err
+        || sel symlink_r3.err
+        || !driver.git_commit_all(?alloc, root, "add an escaping dependency symlink")
+        || !dep_verify_refuses(?s, root, "must contain no symlinks")) { bad = 1; }
+
+    fs.remove_all(?alloc, root);
+    session.dnit(?s);
+    ret bad;
+}
+
+#[testing]
+fun dep_root_override(nested: bool, root_git: bool, child_git: bool, root_first: bool) i32 {
+    var alloc:  A.Allocator;
+    val make_r: err[A.Error] = page.make(?alloc);
+    if (sel make_r.err) { ret 1; }
+    val sr: res[session.Session, fail.Fail] = git.scratch_session(?alloc);
+    if (sel sr.err) { ret 1; }
+    var s: session.Session = sr.ok;
+    fin { session.dnit(?s); }
+
+    val a_decl:           str = "\n[dep.a]\npath = \"./vendor/a\"\n";
+    val initial_manifest: str = driver.dep_root_one(?alloc, "a", "./vendor/a");
+    var names:            [1]str;
+    names[0] = "main.mach";
+    var texts: [1]str;
+    texts[0] = "use a.lib;\nfun main() i32 { ret lib.v(); }\n";
+    val outer_r: res[str, fail.Fail] = driver.scaffold(?alloc, initial_manifest, ?names[0], ?texts[0], 1);
+    if (sel outer_r.err) { ret 1; }
+    val outer: str = outer_r.ok;
+    fin { fs.remove_all(?alloc, outer); }
+    var root: str = outer;
+    if (nested) {
+        root = driver.joined(?alloc, outer, "/", "project");
+        val node_written: err[fail.Fail] = driver.write_node(?alloc, root, initial_manifest, "main.mach", texts[0]);
+        if (sel node_written.err) { ret 2; }
+    }
+
+    val a_root:     str = driver.joined(?alloc, root, "/", "dep/a");
+    val b_root:     str = driver.joined(?alloc, root, "/", "dep/b");
+    var child_decl: str = "\n[dep.b]\npath = \"../transitive-b\"\n";
+    if (child_git) {
+        child_decl = "\n[dep.b]\ngit = \"https://example.invalid/transitive-b.git\"\nref = \"commit/0000000000000000000000000000000000000000\"\n";
+    }
+    val a_manifest:       str            = driver.joined(?alloc, driver.lib_manifest(?alloc, "a"), child_decl, "");
+    val node_written2: err[fail.Fail] = driver.write_node(?alloc, b_root, driver.lib_manifest(?alloc, "b"),
+        "lib.mach", "pub fun v() i32 { ret 42; }\n");
+    val node_written3: err[fail.Fail] = driver.write_node(?alloc, a_root, a_manifest, "lib.mach",
+        "use b.lib;\npub fun v() i32 { ret lib.v(); }\n");
+    if (sel node_written3.err) { ret 3; }
+    if (sel node_written2.err) { ret 3; }
+
+    val root_source:     str = "https://example.invalid/root-b.git";
+    var root_ref:        str = "";
+    var b_decl:          str = "\n[dep.b]\npath = \"./vendor/b\"\n";
+    var root_manifest:   str = driver.dep_root_one(?alloc, "b", "./vendor/b");
+    var expected_source: str = "path ./vendor/b";
+    if (root_git) {
+        if (!git.scratch_repo(?alloc, b_root, root_source)
+            || !git.write_gitmodules(?alloc, root, "b", root_source)) { ret 4; }
+        val head_r: res[str, fail.Fail] = git_ref(?alloc, b_root, "refs/remotes/origin/main");
+        if (sel head_r.err) { ret 5; }
+        root_ref        = driver.joined(?alloc, "commit/", head_r.ok, "");
+        b_decl          = driver.joined(?alloc, "\n[dep.b]\ngit = \"https://example.invalid/root-b.git\"\nref = \"", root_ref, "\"\n");
+        root_manifest   = driver.dep_root_git_ref(?alloc, "b", root_source, root_ref);
+        expected_source = "git https://example.invalid/root-b.git";
+    }
+    if (root_first) { root_manifest = driver.joined(?alloc, root_manifest, a_decl, ""); }
+    or              { root_manifest = driver.joined(?alloc, initial_manifest, b_decl, ""); }
+    val root_manifest_path: str             = driver.joined(?alloc, root, "/", manifest.MANIFEST_FILE);
+    val write_bytes_r:      err[fs.FsError] = fs.write_bytes(root_manifest_path, root_manifest, str_len(root_manifest), 420);
+    if (sel write_bytes_r.err)                                          { ret 6; }
+    if (!git.scratch_repo(?alloc, outer, "https://example.invalid/app.git")) { ret 6; }
+
+    val pr: res[project.Project, fail.Fail] = driver.rebuild(?s, root);
+    if (sel pr.err) { ret 7; }
+    var p:   project.Project = pr.ok;
+    var bad: i32             = 0;
+    if (p.config.dep_count != 2) { bad = 8; }
+    var saw_a: bool = false;
+    var saw_b: bool = false;
+    var i:     u32  = 0;
+    for (i < p.config.dep_count) {
+        val entry: *project.DepEntry = ?p.config.deps[i];
+        if (project.id_is(?s.interner, entry.project_id, "a")) {
+            saw_a = true;
+            if (entry.direct_count != 1 || !project.id_is(?s.interner, entry.direct[0], "b")) { bad = 9; }
+        }
+        if (project.id_is(?s.interner, entry.project_id, "b")) {
+            saw_b = true;
+            if (!entry.root_declared || !project.id_is(?s.interner, entry.source, expected_source)) { bad = 10; }
+            if (root_git && !project.id_is(?s.interner, entry.ref, root_ref))                       { bad = 11; }
+            var expected_chain: str = "app -> a -> b";
+            if (root_first)                                               { expected_chain = "app -> b"; }
+            if (!project.id_is(?s.interner, entry.chain, expected_chain)) { bad = 12; }
+        }
+        i = i + 1;
+    }
+    if (!saw_a || !saw_b) { bad = 13; }
+    project.dnit_project(?p);
+
+    if (root_git) {
+        val b_source:       str             = driver.joined(?alloc, b_root, "/src/", "lib.mach");
+        val dirty:          str             = "pub fun v() i32 { ret 7; }\n";
+        val write_bytes_r2: err[fs.FsError] = fs.write_bytes(b_source, dirty, str_len(dirty), 420);
+        if (sel write_bytes_r2.err)                                { ret 14; }
+        if (!dep_verify_refuses(?s, root, "checkout is dirty")) { bad = 15; }
+    }
+    ret bad;
+}
+
+# a root declaration replaces a transitive one: path over git, git over git (url and commit)
+# and git over path, for a root at the repository top and nested in it, declared before or
+# after the dependency that reaches it; each axis pair appears at least once
+test dep_root_override__replaces_the_transitive_declaration {
+    if (dep_root_override(false, false, true, false) != 0) { ret 1; }
+    if (dep_root_override(true, false, true, true) != 0)   { ret 2; }
+    if (dep_root_override(true, true, true, true) != 0)    { ret 3; }
+    if (dep_root_override(false, true, false, true) != 0)  { ret 4; }
+    if (dep_root_override(true, true, false, false) != 0)  { ret 5; }
+    ret 0;
+}
+
+# the closure registers a transitive dependency flat under dep/ with its direct edge, and
+# dependency steps run from the loaded closure without reading a manifest again
+test dep_closure__registers_transitive_dependencies {
+    var alloc:  A.Allocator;
+    val make_r: err[A.Error] = page.make(?alloc);
+    if (sel make_r.err) { ret 1; }
+    val sr: res[session.Session, fail.Fail] = git.scratch_session(?alloc);
+    if (sel sr.err) { ret 1; }
+    var s: session.Session = sr.ok;
+
+    var names: [1]str;
+    names[0] = "main.mach";
+    var texts: [1]str;
+    texts[0] = "fun main() i32 { ret 0; }\n";
+    val root_r: res[str, fail.Fail] = driver.scaffold(?alloc, driver.dep_root_one(?alloc, "a", "./vendor/a"), ?names[0], ?texts[0], 1);
+    if (sel root_r.err) {
+        session.dnit(?s);
+        ret 1;
+    }
+    val root: str = root_r.ok;
+
+    var bad:        i32            = 0;
+    val a_manifest: str            = driver.joined(?alloc, driver.lib_manifest(?alloc, "a"), "\n[dep.b]\npath = \"./vendor/b\"\n", "");
+    val libsrc:     str            = "pub fun v() i32 { ret 1; }\n";
+    val wa:         err[fail.Fail] = driver.write_node(?alloc, driver.joined(?alloc, root, "/", "dep/a"), a_manifest, "lib.mach", libsrc);
+    val wb:         err[fail.Fail] = driver.write_node(?alloc, driver.joined(?alloc, root, "/", "dep/b"), driver.lib_manifest(?alloc, "b"), "lib.mach", libsrc);
+    if (sel wa.err) {
+        fs.remove_all(?alloc, root);
+        session.dnit(?s);
+        ret 1;
+    }
+    if (sel wb.err) {
+        fs.remove_all(?alloc, root);
+        session.dnit(?s);
+        ret 1;
+    }
+    if (!git.scratch_repo(?alloc, root, "https://example.invalid/app.git")) {
+        fs.remove_all(?alloc, root);
+        session.dnit(?s);
+        ret 1;
+    }
+
+    val pr: res[project.Project, fail.Fail] = driver.rebuild(?s, root);
+    if (sel pr.err) {
+        fs.remove_all(?alloc, root);
+        session.dnit(?s);
+        ret 1;
+    }
+    var p: project.Project = pr.ok;
+
+    if (p.config.dep_count != 2) { bad = 1; }
+    or {
+        var saw_a: bool = false;
+        var saw_b: bool = false;
+        var a_idx: u32  = 0;
+        var b_idx: u32  = 0;
+        var i:     u32  = 0;
+        for (i < p.config.dep_count) {
+            if (project.id_is(?s.interner, p.config.deps[i].project_id, "a")) {
+                saw_a = true;
+                a_idx = i;
+            }
+            if (project.id_is(?s.interner, p.config.deps[i].project_id, "b")) {
+                saw_b = true;
+                b_idx = i;
+            }
+            i = i + 1;
+        }
+        if (!saw_a || !saw_b) { bad = 1; }
+        or {
+            if (p.config.deps[a_idx].direct_count != 1
+                || !project.id_is(?s.interner, p.config.deps[a_idx].direct[0], "b")) { bad = 1; }
+            val b_root_opt: opt[str] = intern.get(?s.interner, p.config.deps[b_idx].vendor_root);
+            if (!(sel b_root_opt.some && driver.path_is(?alloc, b_root_opt.some, root, "dep/b"))) { bad = 1; }
+        }
+    }
+
+    val a_manifest_path: str             = driver.joined(?alloc, root, "/", "dep/a/mach.toml");
+    val write_bytes_r:   err[fs.FsError] = fs.write_bytes(a_manifest_path, "not = [", 7, 420);
+    if (sel write_bytes_r.err) { bad = 1; }
+    if (sel write_bytes_r.ok) {
+        val step_r: err[fail.Fail] = step.dependency_run(?p,
+            p.target_entry.isa_name, p.target_entry.os_name, p.target_entry.abi_name);
+        if (sel step_r.err) { bad = 1; }
+    }
+
+    project.dnit_project(?p);
+    fs.remove_all(?alloc, root);
+    session.dnit(?s);
+    ret bad;
+}
+
+#[testing]
+fun refused_dep_root(f: fail.Fail) bool {
+    ret str_contains(fail.describe(f), driver_closure.DEP_ROOT_REFUSED);
+}
+
+# build, test and dependency verification refuse a symlinked dependency root with one
+# message, and accept the same project once dep is a physical directory
+test dep_root__symlink_is_refused_on_every_entry_point {
+    var alloc:  A.Allocator;
+    val make_r: err[A.Error] = page.make(?alloc);
+    if (sel make_r.err) { ret 1; }
+    val sr: res[session.Session, fail.Fail] = git.scratch_session(?alloc);
+    if (sel sr.err) { ret 1; }
+    var s: session.Session = sr.ok;
+    fin { session.dnit(?s); }
+    var names: [1]str;
+    names[0] = "main.mach";
+    var texts: [1]str;
+    texts[0] = "fun main() i64 { ret 0; }\n";
+    val root_r: res[str, fail.Fail] = driver.scaffold(?alloc, driver.fixture_manifest(), ?names[0], ?texts[0], 1);
+    if (sel root_r.err) { ret 2; }
+    val root: str = root_r.ok;
+    fin { fs.remove_all(?alloc, root); }
+    val elsewhere: str             = driver.joined(?alloc, root, "/", "elsewhere");
+    val made:      err[fs.FsError] = fs.create_dir_all(?alloc, elsewhere, 493);
+    if (sel made.err) { ret 4; }
+    val link:   str                 = driver.joined(?alloc, root, "/", "dep");
+    val linked: err[io_error.Error] = fs.symlink(elsewhere, link);
+    if (sel linked.err) { ret 5; }
+
+    var pick:  manifest.Selectors              = manifest.t_selectors("", "", "");
+    var bad:   i32                             = 0;
+    val built: res[project.Project, fail.Fail] = driver.build_project(?s, root, ?pick);
+    if (sel built.ok) {
+        var p: project.Project = built.ok;
+        project.dnit_project(?p);
+        bad = bad | 1;
+    }
+    if (sel built.err && !refused_dep_root(built.err)) { bad = bad | 2; }
+    val tested: res[project.Project, fail.Fail] = driver.load_test_goal(?s, root, "", "");
+    if (sel tested.ok) {
+        var p: project.Project = tested.ok;
+        project.dnit_project(?p);
+        bad = bad | 4;
+    }
+    if (sel tested.err && !refused_dep_root(tested.err)) { bad = bad | 8; }
+    val verified: err[fail.Fail] = dependencies(?s, root, false, nil);
+    if (sel verified.ok)                                        { bad = bad | 16; }
+    if (sel verified.err && !refused_dep_root(verified.err)) { bad = bad | 32; }
+
+    # a physical dep is accepted by the same entry points
+    val unlinked: err[io_error.Error] = fs.remove_file(link);
+    if (sel unlinked.err) { ret 6; }
+    val physical: err[fs.FsError] = fs.create_dir_all(?alloc, link, 493);
+    if (sel physical.err) { ret 7; }
+    val accepted: err[fail.Fail] = dependencies(?s, root, false, nil);
+    if (sel accepted.err) { bad = bad | 64; }
+    val rebuilt: res[project.Project, fail.Fail] = driver.build_project(?s, root, ?pick);
+    if (sel rebuilt.err) { bad = bad | 128; }
+    if (sel rebuilt.ok) {
+        var p: project.Project = rebuilt.ok;
+        project.dnit_project(?p);
+    }
+    ret bad;
+}
+
+# the root manifest of fixture_manifest with a [project].mach line, and optionally a path dependency
+#[testing]
+fun manifest_mach(alloc: *A.Allocator, range: str, dep_path: str) str {
+    # fixture_manifest opens with "[project]\nmach = \">=5\"\n", which this replaces
+    val base: str = driver.fixture_manifest();
+    val rest: str = (?base[23])::str;
+    var text: str = driver.joined(alloc, "[project]\n", rest, "");
+    if (!str_empty(range)) {
+        text = driver.joined(alloc, driver.joined(alloc, "[project]\nmach = \"", range, "\"\n"), "", rest);
+    }
+    if (!str_empty(dep_path)) {
+        text = driver.joined(alloc, text, driver.joined(alloc, "\n[dep.libx]\npath = \"", dep_path, "\"\n"), "");
+    }
+    ret text;
+}
+
+# the manifest of the path dependency `libx` stating `range` (empty for no key)
+#[testing]
+fun mach_dep_manifest(alloc: *A.Allocator, range: str) str {
+    var mach_line: str = "";
+    if (!str_empty(range)) { mach_line = driver.joined(alloc, "mach = \"", range, "\"\n"); }
+    ret driver.joined(alloc, driver.joined(alloc, "[project]\nid = \"libx\"\nversion = \"1.0.0\"\n", mach_line, ""), "src = \"src\"\nwork = \"out\"\n[profile.debug]\noptimize = false\ndebug = false\nsimd = \"scalarize\"\n", "");
+}
+
+# a path dependency `libx` stating `range` (empty for no key), realized under root/dep/libx from its source beside the root
+#[testing]
+fun mach_dep(alloc: *A.Allocator, root: str, range: str) bool {
+    val manifest_text: str            = mach_dep_manifest(alloc, range);
+    val lib_text:      str            = "pub val X: u64 = 1;\n";
+    val src_dir:       str            = driver.joined(alloc, root, "/", "libx-src");
+    val real_dir:      str            = driver.joined(alloc, root, "/", "dep/libx");
+    val a:             err[fail.Fail] = driver.write_node(alloc, src_dir, manifest_text, "lib.mach", lib_text);
+    if (sel a.err) { ret false; }
+    val b: err[fail.Fail] = driver.write_node(alloc, real_dir, manifest_text, "lib.mach", lib_text);
+    if (sel b.err) { ret false; }
+    ret true;
+}
+
+# the failure points at exactly the first `needle` in `text`, the manifest at `path`: its
+# byte range, and the line and column of each end
+#[testing]
+fun points_at(f: fail.Fail, path: str, text: str, needle: str) bool {
+    val at: opt[fail.Place] = fail.place_of(f);
+    if (sel at.none) { ret false; }
+    ret place_is(at.some, path, text, needle, 0);
+}
+
+# the failure's related place `i` is exactly occurrence `nth` of `needle` in `text`
+#[testing]
+fun related_at(f: fail.Fail, i: usize, path: str, text: str, needle: str, nth: u32) bool {
+    val also: fail.Related = fail.related_of(f);
+    if (i >= also.count) { ret false; }
+    ret place_is(also.items[i], path, text, needle, nth);
+}
+
+# `p` is exactly occurrence `nth` (from 0) of `needle` in `text`, the manifest at `path`
+#[testing]
+fun place_is(p: fail.Place, path: str, text: str, needle: str, nth: u32) bool {
+    if (path == nil || p.path == nil || !str_equals(p.path, path)) { ret false; }
+    val n:     usize = str_len(needle);
+    var start: usize = 0;
+    var seen:  u32   = 0;
+    var found: bool  = false;
+    for (!found && start + n <= str_len(text)) {
+        var k: usize = 0;
+        for (k < n && text[start + k] == needle[k]) { k = k + 1; }
+        if (k == n && seen == nth) { found = true; }
+        or {
+            if (k == n) { seen = seen + 1; }
+            start = start + 1;
+        }
+    }
+    if (!found)                                    { ret false; }
+    if (p.span.offset != start || p.span.len != n) { ret false; }
+    var line:    usize = 1;
+    var line_at: usize = 0;
+    var i:       usize = 0;
+    for (i < start) {
+        if (text[i] == '\n') {
+            line    = line + 1;
+            line_at = i + 1;
+        }
+        i = i + 1;
+    }
+    ret p.start.line == line && p.start.col == start - line_at + 1
+        && p.end.line == line && p.end.col == start - line_at + 1 + n;
+}
+
+# `base` and `leaf` joined with the host's separator; nil when the allocator refuses
+#[testing]
+fun host_path(alloc: *A.Allocator, base: str, leaf: str) str {
+    val joined_r: res[types_path.Path, A.Error] = types_path.join(alloc, base, leaf);
+    if (sel joined_r.err) { ret nil; }
+    ret joined_r.ok;
+}
+
+#[testing]
+fun compiler_refusal(f: fail.Fail, needle: str) bool {
+    val text: str = fail.describe(f);
+    ret str_contains(text, "and the dependency closure does not accept it") && str_contains(text, needle);
+}
+
+# [project].mach is checked for the root and every realized dependency by the one driver
+# check every entry point runs, naming who requires what; a root without it is refused.
+# each refusal points at the manifest that caused it: an unmet or unparsable range at its
+# value, in the dependency's own manifest for a dependency's, and a missing one at the
+# root's [project] header
+test compiler_range__checked_for_every_manifest_on_every_entry_point {
+    var alloc:  A.Allocator;
+    val make_r: err[A.Error] = page.make(?alloc);
+    if (sel make_r.err) { ret 1; }
+    var pick:  manifest.Selectors = manifest.t_selectors("", "", "");
+    var bad:   i32                = 0;
+    var names: [1]str;
+    names[0] = "main.mach";
+    var texts: [1]str;
+    texts[0] = "fun main() i64 { ret 0; }\n";
+    var dep_texts: [1]str;
+    dep_texts[0] = "use libx.lib;\nfun main() i64 { ret lib.X::i64; }\n";
+
+    var round: u32 = 0;
+    for (round < 6) {
+        val sr: res[session.Session, fail.Fail] = git.scratch_session(?alloc);
+        if (sel sr.err) { ret 2; }
+        var s: session.Session = sr.ok;
+        # 0: the root excludes this compiler; 1: a dependency does; 2: both accept; 3: the root states
+        # nothing; 4: the dependency states nothing; 5: the root's range does not parse
+        var root_range: str  = "<1";
+        var dep_range:  str  = "";
+        val with_dep:   bool = round == 1 || round == 2 || round == 4;
+        if (round == 1) {
+            root_range = ">=5";
+            dep_range  = "<1, >=0.1";
+        }
+        if (round == 2) {
+            root_range = ">=5";
+            dep_range  = ">=5";
+        }
+        if (round == 3) { root_range = ""; }
+        if (round == 4) { root_range = ">=5"; }
+        if (round == 5) { root_range = "^x"; }
+        var dep_path: str = "";
+        if (with_dep) { dep_path = "libx-src"; }
+        val mtext: str  = manifest_mach(?alloc, root_range, dep_path);
+        var src:   *str = ?texts[0];
+        if (with_dep) { src = ?dep_texts[0]; }
+        val root_r: res[str, fail.Fail] = driver.scaffold(?alloc, mtext, ?names[0], src, 1);
+        if (sel root_r.err) { ret 4; }
+        val root: str = root_r.ok;
+        if (with_dep && !mach_dep(?alloc, root, dep_range)) { ret 5; }
+        # a place names the file as the driver read it, joined in the host's spelling
+        val root_toml: str = host_path(?alloc, root, "mach.toml");
+        val dep_toml:  str = host_path(?alloc, host_path(?alloc, host_path(?alloc, root, "dep"), "libx"), "mach.toml");
+        val dep_text:  str = mach_dep_manifest(?alloc, dep_range);
+
+        val want: str = "mach.toml: [project] is missing required key 'mach'";
+        # a failure's text lives until the session's next failure, so each is read before the next call
+        val built: res[project.Project, fail.Fail] = driver.build_project(?s, root, ?pick);
+        if (round == 0) {
+            if (sel built.ok)                                                                               { bad = bad | 1; }
+            if (sel built.err && !compiler_refusal(built.err, "uniontest (mach.toml) requires mach <1")) { bad = bad | 2; }
+            if (sel built.err && !points_at(built.err, root_toml, mtext, "\"<1\""))                      { bad = bad | 16384; }
+        }
+        if (round == 1) {
+            if (sel built.ok) { bad = bad | 16; }
+            if (sel built.err) {
+                if (!compiler_refusal(built.err, "-> libx requires mach <1, >=0.1")) { bad = bad | 32; }
+                if (str_contains(fail.describe(built.err), "(mach.toml)"))           { bad = bad | 64; }
+                if (!points_at(built.err, dep_toml, dep_text, "\"<1, >=0.1\""))      { bad = bad | 32768; }
+            }
+        }
+        if (round == 5) {
+            if (sel built.ok) { bad = bad | 65536; }
+            if (sel built.err) {
+                if (fail.kind_of(built.err) != diagnostic_kind.VERSION_INVALID_RANGE) { bad = bad | 65536; }
+                if (!points_at(built.err, root_toml, mtext, "\"^x\""))             { bad = bad | 131072; }
+            }
+        }
+        if (round == 2 && sel built.err) { bad = bad | 128; }
+        if (round == 4) {
+            if (sel built.ok)                                                        { bad = bad | 524288; }
+            if (sel built.err && !str_contains(fail.describe(built.err), want))   { bad = bad | 1048576; }
+            if (sel built.err && !str_contains(fail.describe(built.err), "libx")) { bad = bad | 2097152; }
+        }
+        if (round == 3) {
+            if (sel built.ok)                                                             { bad = bad | 1024; }
+            if (sel built.err && !str_contains(fail.describe(built.err), want))        { bad = bad | 2048; }
+            if (sel built.err && !points_at(built.err, root_toml, mtext, "[project]")) { bad = bad | 262144; }
+        }
+        if (sel built.ok) {
+            var p: project.Project = built.ok;
+            project.dnit_project(?p);
+        }
+        val verified: err[fail.Fail] = dependencies(?s, root, false, nil);
+        if (round == 0) {
+            if (sel verified.ok)                                                            { bad = bad | 4; }
+            if (sel verified.err && !compiler_refusal(verified.err, "requires mach <1")) { bad = bad | 8; }
+        }
+        if (round == 1 && !(sel verified.err && compiler_refusal(verified.err, "-> libx requires mach <1, >=0.1"))) { bad = bad | 4096; }
+        if (round == 2 && sel verified.err)                                                                            { bad = bad | 256; }
+        if (round == 3 && !(sel verified.err && str_contains(fail.describe(verified.err), want)))                   { bad = bad | 8192; }
+        session.dnit(?s);
+        fs.remove_all(?alloc, root);
+        round = round + 1;
+    }
+    ret bad;
+}
+
+# fixture_manifest with `from` replaced by `to`; nil when the allocator refuses
+#[testing]
+fun manifest_with(alloc: *A.Allocator, from: str, to: str) str {
+    val r: res[str, types_string.StrError] = types_string.str_replace(alloc, driver.fixture_manifest(), from, to);
+    if (sel r.err) { ret nil; }
+    ret r.ok;
+}
+
+# a refusal raised from the manifest model after the TOML tree is gone points at the
+# mach.toml entry that caused it, and one between several entries names the others as
+# related: a path template that does not expand at its value, two steps claiming one
+# output at the first claim, a local link that is nowhere at its path, an artifact that
+# does not build for the selected target at its targets, and a need cycle at each edge.
+# the first miss fails the test as 10 * round plus which check missed
+test plan_refusals__point_at_the_manifest_entry_that_caused_them {
+    var alloc:  A.Allocator;
+    val make_r: err[A.Error] = page.make(?alloc);
+    if (sel make_r.err) { ret 1; }
+    var names: [1]str;
+    names[0] = "main.mach";
+    var texts: [1]str;
+    texts[0] = "fun main() i64 { ret 0; }\n";
+    val steps: str = "\n[step.one]\nargv = [\"x\"]\nin = []\nout = [\"{project.work}/gen.txt\"]\nneed = []\n\n[step.two]\nargv = [\"y\"]\nin = []\nout = [\"{project.work}/gen.txt\"]\nneed = []\n";
+    val link:  str = "\n[link.shim]\nsource = \"local\"\npath = \"lib/missing.a\"\nos = [\"*\"]\nisa = [\"*\"]\nabi = [\"*\"]\nexport = false\n";
+    val cycle: str = "\n[step.a]\nargv = [\"x\"]\nin = []\nout = [\"{project.work}/a\"]\nneed = [\"step.b\"]\n\n[step.b]\nargv = [\"y\"]\nin = []\nout = [\"{project.work}/b\"]\nneed = [\"step.a\"]\n";
+
+    var bad:   i32 = 0;
+    var round: u32 = 0;
+    for (round < 5 && bad == 0) {
+        var pick:   manifest.Selectors   = manifest.t_selectors("", "", "");
+        var mtext:  str                  = nil;
+        var kind:   diagnostic_kind.Kind = diagnostic_kind.NONE;
+        var needle: str                  = "";
+        # 0: an unknown template variable; 1: a step output collision; 2: a missing local
+        # link; 3: an artifact without the selected target; 4: a step need cycle
+        if (round == 0) {
+            mtext  = manifest_with(?alloc, "out = \"{project.work}/bin/uniontest\"", "out = \"bin/{nope}\"");
+            kind   = diagnostic_kind.TEMPLATE_UNKNOWN_VARIABLE;
+            needle = "\"bin/{nope}\"";
+        }
+        if (round == 1) {
+            mtext  = driver.joined(?alloc, driver.fixture_manifest(), steps, "");
+            kind   = diagnostic_kind.STEP_OUTPUT_COLLISION;
+            needle = "\"{project.work}/gen.txt\"";
+        }
+        if (round == 2) {
+            mtext  = driver.joined(?alloc, manifest_with(?alloc, "link = []", "link = [\"shim\"]"), link, "");
+            kind   = diagnostic_kind.LINK_LOCAL_MISSING;
+            needle = "\"lib/missing.a\"";
+        }
+        if (round == 3) {
+            mtext  = manifest_with(?alloc, "targets = [\"*\"]", "targets = [\"linux\"]");
+            pick   = manifest.t_selectors("", "windows", "");
+            kind   = diagnostic_kind.TARGET_NO_ARTIFACTS;
+            needle = "[\"linux\"]";
+        }
+        if (round == 4) {
+            mtext  = driver.joined(?alloc, driver.fixture_manifest(), cycle, "");
+            kind   = diagnostic_kind.NEED_CYCLE;
+            needle = "\"step.b\"";
+        }
+        if (mtext == nil) { ret 2; }
+        val sr: res[session.Session, fail.Fail] = git.scratch_session(?alloc);
+        if (sel sr.err) { ret 3; }
+        var s:      session.Session     = sr.ok;
+        val root_r: res[str, fail.Fail] = driver.scaffold(?alloc, mtext, ?names[0], ?texts[0], 1);
+        if (sel root_r.err) { ret 5; }
+        val root:      str = root_r.ok;
+        val root_toml: str = host_path(?alloc, root, "mach.toml");
+
+        val base:  i32                             = 10 * round::i32;
+        val built: res[project.Project, fail.Fail] = driver.build_project(?s, root, ?pick);
+        if (sel built.ok) {
+            bad = base + 1;
+            var p: project.Project = built.ok;
+            project.dnit_project(?p);
+        }
+        if (sel built.err) {
+            val f:    fail.Fail = built.err;
+            var also: bool      = fail.related_of(f).count == 0;
+            if (round == 1)                                 { also = fail.related_of(f).count == 1 && related_at(f, 0, root_toml, mtext, needle, 1); }
+            if (round == 4)                                 { also = fail.related_of(f).count == 1 && related_at(f, 0, root_toml, mtext, "\"step.a\"", 0); }
+            if (!also)                                      { bad = base + 4; }
+            if (!points_at(f, root_toml, mtext, needle)) { bad = base + 3; }
+            if (fail.kind_of(f) != kind)                    { bad = base + 2; }
+        }
+        session.dnit(?s);
+        fs.remove_all(?alloc, root);
+        round = round + 1;
+    }
+    ret bad;
+}
+
+#[testing]
+fun digest_eq(a: *u8, b: *u8) bool {
+    ret memory.raw_equal(a::ptr, b::ptr, 32);
 }

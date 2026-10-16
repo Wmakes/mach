@@ -40,6 +40,8 @@ use mach.lang.driver.config;
 use mach.lang.driver.context;
 use mach.lang.driver.declared;
 use mach.lang.driver.frontend;
+#[testing]
+use mach.lang.driver.hygiene;
 use driver_load: mach.lang.driver.load;
 use mach.lang.driver.passes;
 use mach.lang.driver.project;
@@ -48,8 +50,6 @@ use mach.lang.fail;
 #[testing]
 use mach.lang.fuzz;
 # the compiler's own source held to its import, surface and layering rules
-#[testing]
-use mach.lang.driver.hygiene;
 use mach.lang.driver.toolchain;
 use mach.lang.module;
 
@@ -87,6 +87,8 @@ use std.types.string.str_equals;
 use std.types.string.str_region_equals;
 #[testing]
 use std.types.string.str_replace;
+#[testing]
+use std.system.panic.panic;
 #[testing]
 use std.system.capability;
 #[testing]
@@ -909,6 +911,15 @@ pub fun fixture_manifest() str {
     ret "[project]\nmach = \">=5\"\nid = \"uniontest\"\nversion = \"0.0.0\"\nsrc = \"src\"\nwork = \"out/{target.name}/{profile.name}\"\n\n[target.linux]\nisa = \"x86_64\"\nos = \"linux\"\nabi = \"sysv64\"\n\n[target.windows]\nisa = \"x86_64\"\nos = \"windows\"\nabi = \"win64\"\n\n[target.linux-arm64]\nisa = \"aarch64\"\nos = \"linux\"\nabi = \"aapcs64\"\n\n[target.linux-riscv64]\nisa = \"riscv64\"\nos = \"linux\"\nabi = \"lp64d\"\n\n[target.darwin-x86_64]\nisa = \"x86_64\"\nos = \"darwin\"\nabi = \"sysv64\"\n\n[target.darwin-arm64]\nisa = \"aarch64\"\nos = \"darwin\"\nabi = \"aapcs64\"\n\n[target.bare-arm64]\nisa = \"aarch64\"\nos = \"freestanding\"\nabi = \"aapcs64\"\nof = \"elf\"\n\n[artifact.uniontest]\nkind = \"bin\"\nentry = \"main.mach\"\nout = \"{project.work}/bin/uniontest\"\ntargets = [\"*\"]\nlink = []\nneed = []\n[profile.debug]\ndefault = true\noptimize = false\ndebug = true\nsimd = \"scalarize\"\n[profile.release]\noptimize = true\ndebug = false\nsimd = \"scalarize\"\n";
 }
 
+# the pieces joined in order in `alloc`, never released; a refused allocation ends the test
+#[testing]
+pub fun joined(alloc: *A.Allocator, va: ...) str {
+    val made: res[str, types_string.StrError] = types_string.str_join(alloc, va...);
+    if (sel made.ok) { ret made.ok; }
+    panic("a fixture's text was refused\n");
+    ret "";
+}
+
 # a project under a fresh temporary root, as `scaffold` writes it, loaded through
 # `build_project` for the cell `target` names, the default when empty, as the
 # documentation command loads one; the root is removed before this returns
@@ -976,7 +987,7 @@ fun load_failure_of(p: *project.Project, f: fail.Fail) fail.Fail {
 }
 
 #[testing]
-fun manifest_multi() str {
+pub fun manifest_multi() str {
     ret "[project]\nmach = \">=5\"\nid = \"uniontest\"\nversion = \"0.0.0\"\nsrc = \"src\"\nwork = \"out/{target.name}/{profile.name}\"\n\n[target.linux]\nisa = \"x86_64\"\nos = \"linux\"\nabi = \"sysv64\"\n\n[target.windows]\nisa = \"x86_64\"\nos = \"windows\"\nabi = \"win64\"\n\n[artifact.alpha]\nkind = \"bin\"\nentry = \"alpha.mach\"\nout = \"{project.work}/bin/alpha\"\ntargets = [\"*\"]\nlink = []\nneed = []\n\n[artifact.beta]\nkind = \"bin\"\nentry = \"beta.mach\"\nout = \"{project.work}/bin/beta\"\ntargets = [\"*\"]\nlink = []\nneed = []\ndefault = true\n[profile.debug]\ndefault = true\noptimize = false\ndebug = true\nsimd = \"scalarize\"\n[profile.release]\noptimize = true\ndebug = false\nsimd = \"scalarize\"\n";
 }
 
@@ -2524,7 +2535,7 @@ fun manifest_frontend() str {
 # load the project a test goal builds for the selected cell
 # the project a test goal builds for the cell `artifact` and `target` name, begun and loaded
 #[testing]
-fun load_test_goal(s: *session.Session, root: str, artifact: str, target: str) res[project.Project, fail.Fail] {
+pub fun load_test_goal(s: *session.Session, root: str, artifact: str, target: str) res[project.Project, fail.Fail] {
     var req: request.BuildRequest = request.defaults();
     req.project_root = root;
     req.target       = target;
@@ -4487,7 +4498,7 @@ test stack_reserve__refused_at_load_on_a_format_without_one {
 
 # a rebuild of the project at `root` on a live session, its default cell loaded as a build loads it
 #[testing]
-fun rebuild(s: *session.Session, root: str) res[project.Project, fail.Fail] {
+pub fun rebuild(s: *session.Session, root: str) res[project.Project, fail.Fail] {
     var selection: manifest.Selectors = manifest.t_selectors("", "", "");
     ret build_project(s, root, ?selection);
 }
@@ -4585,14 +4596,14 @@ fun inline_ops(fn: *me_ir.Function, kind: ir_instruction.InstrKind) u32 {
 
 # a query's value copied out of the session, and the revision it last changed at
 #[testing]
-rec QuerySnapshot {
+pub rec QuerySnapshot {
     value:        *u8;
     value_len:    u32;
     last_changed: query.Revision;
 }
 
 #[testing]
-fun query_snapshot(a: *A.Allocator, p: *project.Project, kind: *query.Kind, key: u64) res[QuerySnapshot, fail.Fail] {
+pub fun query_snapshot(a: *A.Allocator, p: *project.Project, kind: *query.Kind, key: u64) res[QuerySnapshot, fail.Fail] {
     val begun: res[query.Operation, fail.Fail] = frontend.begin_query_phase(p);
     if (sel begun.err) { ret res[QuerySnapshot, fail.Fail].err{begun.err}; }
     val operation: query.Operation                 = begun.ok;
@@ -7922,7 +7933,7 @@ test validate_local_links__skips_a_link_filtered_to_another_target {
 
 # whether `actual` names `leaf` under `base` once both are cleaned
 #[testing]
-fun path_is(a: *A.Allocator, actual: str, base: str, leaf: str) bool {
+pub fun path_is(a: *A.Allocator, actual: str, base: str, leaf: str) bool {
     val joined: res[types_path.Path, A.Error] = types_path.join(a, base, leaf);
     if (sel joined.err) { ret false; }
     val expected: res[types_path.Path, A.Error] = types_path.clean(a, joined.ok);
@@ -8353,7 +8364,7 @@ test nesting__refused_after_resolve_on_a_short_stack {
 
 # the failure building the default cell of the project at `root`, or none when it built
 #[testing]
-fun build_refusal(s: *session.Session, root: str) opt[str] {
+pub fun build_refusal(s: *session.Session, root: str) opt[str] {
     var pick: manifest.Selectors              = manifest.t_selectors("", "", "");
     val pr:   res[project.Project, fail.Fail] = build_project(s, root, ?pick);
     if (sel pr.err) { ret opt[str].some{fail.describe(pr.err)}; }
@@ -8418,3 +8429,612 @@ test manifest__the_root_and_each_dependency_are_held_to_one_rule_per_key {
     if (!str_contains(bare_refusal.some, "dependency 'old': mach.toml: missing [profile] table")) { ret 17; }
     ret 0;
 }
+
+#[testing]
+pub fun git_commit_all(alloc: *A.Allocator, dir: str, message: str) bool {
+    var add: [2]str;
+    add[0] = "add";
+    add[1] = "-A";
+    if (!git.scratch_git(alloc, dir, ?add[0], 2)) { ret false; }
+    var commit: [3]str;
+    commit[0] = "commit";
+    commit[1] = "-qm";
+    commit[2] = message;
+    ret git.scratch_git(alloc, dir, ?commit[0], 3);
+}
+
+#[testing]
+fun write_gitmodules2(alloc: *A.Allocator, root: str, a1: str, s1: str, a2: str, s2: str) bool {
+    val first:  res[str, std_format.FormatError] = git.gitmodules(alloc, a1, s1);
+    val second: res[str, std_format.FormatError] = git.gitmodules(alloc, a2, s2);
+    if (sel first.err)  { ret false; }
+    if (sel second.err) { ret false; }
+    val written: err[fail.Fail] = git.t_write_file(alloc, root, ".gitmodules", joined(alloc, first.ok, second.ok));
+    ret sel written.ok;
+}
+
+#[testing]
+pub fun dep_root_one(alloc: *A.Allocator, alias: str, path: str) str {
+    val head: str = on_host("[project]\nmach = \">=5\"\nid = \"app\"\nversion = \"0.0.0\"\nsrc = \"src\"\nwork = \"out/{target.name}/{profile.name}\"\n\n[target.linux]\nisa = \"x86_64\"\nos = \"linux\"\nabi = \"sysv64\"\n\n[profile.debug]\noptimize = false\ndebug = false\nsimd = \"scalarize\"\n\n[artifact.app]\nkind = \"bin\"\nentry = \"main.mach\"\nout = \"{project.work}/bin/app\"\ntargets = [\"*\"]\nlink = []\nneed = []\n\n[dep.");
+    val mid:  str = joined(alloc, head, alias, "]\npath = \"");
+    ret joined(alloc, mid, path, "\"\n");
+}
+
+#[testing]
+pub fun dep_root_git_ref(alloc: *A.Allocator, alias: str, source: str, ref: str) str {
+    val head:        str = on_host("[project]\nmach = \">=5\"\nid = \"app\"\nversion = \"0.0.0\"\nsrc = \"src\"\nwork = \"out/{target.name}/{profile.name}\"\n\n[target.linux]\nisa = \"x86_64\"\nos = \"linux\"\nabi = \"sysv64\"\n\n[profile.debug]\noptimize = false\ndebug = false\nsimd = \"scalarize\"\n\n[artifact.app]\nkind = \"bin\"\nentry = \"main.mach\"\nout = \"{project.work}/bin/app\"\ntargets = [\"*\"]\nlink = []\nneed = []\n\n[dep.");
+    val mid:         str = joined(alloc, head, alias, "]\ngit = \"");
+    val with_source: str = joined(alloc, mid, source, "\"\nref = \"");
+    ret joined(alloc, with_source, ref, "\"\n");
+}
+
+#[testing]
+pub fun dep_root_git(alloc: *A.Allocator, alias: str, source: str) str {
+    ret dep_root_git_ref(alloc, alias, source, "branch/main");
+}
+
+#[testing]
+fun dep_root_two(alloc: *A.Allocator, alias1: str, path1: str, alias2: str, path2: str) str {
+    val first: str = dep_root_one(alloc, alias1, path1);
+    val mid:   str = joined(alloc, first, "\n[dep.", alias2);
+    val tail:  str = joined(alloc, mid, "]\npath = \"", path2);
+    ret joined(alloc, tail, "\"\n", "");
+}
+
+#[testing]
+fun dep_lib_with_export(alloc: *A.Allocator, id: str) str {
+    ret joined(alloc, "[project]\nmach = \">=5\"\nid = \"", id,
+        "\"\nversion = \"0.0.0\"\nsrc = \"src\"\nwork = \"out/{target.name}/{profile.name}\"\n[profile.debug]\noptimize = false\ndebug = false\nsimd = \"scalarize\"\n\n[link.mylink]\nsource = \"local\"\npath = \"{project.work}/mylink.o\"\nos = [\"*\"]\nisa = [\"*\"]\nabi = [\"*\"]\nexport = true\n\n[artifact.lib]\nkind = \"static\"\nentry = \"lib.mach\"\nout = \"{project.work}/lib/l\"\ntargets = [\"*\"]\nlink = []\nneed = []\n");
+}
+
+#[testing]
+fun dep_build_fails(s: *session.Session, root: str, needle: str) bool {
+    val refused: opt[str] = build_refusal(s, root);
+    ret sel refused.some && str_contains(refused.some, needle);
+}
+
+test path_dependency__resolves_a_transitive_git_dependency {
+    var alloc:  A.Allocator;
+    val make_r: err[A.Error] = page.make(?alloc);
+    if (sel make_r.err) { ret 1; }
+    val sr: res[session.Session, fail.Fail] = git.scratch_session(?alloc);
+    if (sel sr.err) { ret 1; }
+    var s: session.Session = sr.ok;
+
+    val source: str = "https://example.invalid/b.git";
+    var names:  [1]str;
+    names[0] = "main.mach";
+    var texts: [1]str;
+    texts[0] = "fun main() i32 { ret 0; }\n";
+    val root_r: res[str, fail.Fail] = scaffold(?alloc,
+        dep_root_one(?alloc, "a", "../external-not-read"), ?names[0], ?texts[0], 1);
+    if (sel root_r.err) {
+        session.dnit(?s);
+        ret 1;
+    }
+    val root:       str = root_r.ok;
+    val a_root:     str = joined(?alloc, root, "/", "dep/a");
+    val b_root:     str = joined(?alloc, root, "/", "dep/b");
+    val a_manifest: str = joined(?alloc, lib_manifest(?alloc, "a"),
+        "\n[dep.b]\ngit = \"https://example.invalid/b.git\"\nref = \"branch/main\"\n", "");
+    val node_written: err[fail.Fail] = write_node(?alloc, a_root, a_manifest,
+        "lib.mach", "pub fun a() i32 { ret 1; }\n");
+    val node_written2: err[fail.Fail] = write_node(?alloc, b_root, lib_manifest(?alloc, "b"),
+        "lib.mach", "pub fun b() i32 { ret 2; }\n");
+    if (sel node_written2.err) {
+        fs.remove_all(?alloc, root);
+        session.dnit(?s);
+        ret 1;
+    }
+    if (!git.scratch_repo(?alloc, b_root, source)) {
+        fs.remove_all(?alloc, root);
+        session.dnit(?s);
+        ret 1;
+    }
+    if (sel node_written.err) {
+        fs.remove_all(?alloc, root);
+        session.dnit(?s);
+        ret 1;
+    }
+    if (!git.write_gitmodules(?alloc, a_root, "b", source)) {
+        fs.remove_all(?alloc, root);
+        session.dnit(?s);
+        ret 1;
+    }
+    if (!git.write_gitmodules(?alloc, root, "b", source)) {
+        fs.remove_all(?alloc, root);
+        session.dnit(?s);
+        ret 1;
+    }
+    if (!git.scratch_repo(?alloc, root, "https://example.invalid/app.git")) {
+        fs.remove_all(?alloc, root);
+        session.dnit(?s);
+        ret 1;
+    }
+    var bad: i32                             = 0;
+    val pr:  res[project.Project, fail.Fail] = rebuild(?s, root);
+    if (sel pr.err) { bad = 1; }
+    if (sel pr.ok) {
+        var p: project.Project = pr.ok;
+        if (p.config.dep_count != 2) { bad = 1; }
+        project.dnit_project(?p);
+    }
+    fs.remove_all(?alloc, root);
+    session.dnit(?s);
+    ret bad;
+}
+
+test git_dependency__transitive_resolves_flat_ignoring_the_nested_placeholder {
+    var alloc:  A.Allocator;
+    val make_r: err[A.Error] = page.make(?alloc);
+    if (sel make_r.err) { ret 1; }
+    val sr: res[session.Session, fail.Fail] = git.scratch_session(?alloc);
+    if (sel sr.err) { ret 1; }
+    var s:        session.Session = sr.ok;
+    val a_source: str             = "https://example.invalid/a.git";
+    val b_source: str             = "https://example.invalid/b.git";
+    var names:    [1]str;
+    names[0] = "main.mach";
+    var texts: [1]str;
+    texts[0] = "fun main() i32 { ret 0; }\n";
+    val root_r: res[str, fail.Fail] = scaffold(?alloc,
+        dep_root_git(?alloc, "a", a_source), ?names[0], ?texts[0], 1);
+    if (sel root_r.err) {
+        session.dnit(?s);
+        ret 1;
+    }
+    val root:               str = root_r.ok;
+    val a_root:             str = joined(?alloc, root, "/", "dep/a");
+    val b_root:             str = joined(?alloc, root, "/", "dep/b");
+    val nested_placeholder: str = joined(?alloc, a_root, "/", "dep/b");
+    val a_manifest:         str = joined(?alloc, lib_manifest(?alloc, "a"),
+        "\n[dep.b]\ngit = \"https://example.invalid/b.git\"\nref = \"branch/main\"\n", "");
+    val create_dir_all_r: err[fs.FsError] = fs.create_dir_all(?alloc, nested_placeholder, 493);
+    val node_written:  err[fail.Fail]  = write_node(?alloc, a_root, a_manifest,
+        "lib.mach", "pub fun a() i32 { ret 1; }\n");
+    val node_written2: err[fail.Fail] = write_node(?alloc, b_root, lib_manifest(?alloc, "b"),
+        "lib.mach", "pub fun b() i32 { ret 2; }\n");
+    if (sel node_written2.err) {
+        fs.remove_all(?alloc, root);
+        session.dnit(?s);
+        ret 1;
+    }
+    if (!git.scratch_repo(?alloc, b_root, b_source)) {
+        fs.remove_all(?alloc, root);
+        session.dnit(?s);
+        ret 1;
+    }
+    if (sel node_written.err) {
+        fs.remove_all(?alloc, root);
+        session.dnit(?s);
+        ret 1;
+    }
+    if (!git.write_gitmodules(?alloc, a_root, "b", b_source)) {
+        fs.remove_all(?alloc, root);
+        session.dnit(?s);
+        ret 1;
+    }
+    if (sel create_dir_all_r.err) {
+        fs.remove_all(?alloc, root);
+        session.dnit(?s);
+        ret 1;
+    }
+    if (!git.scratch_repo(?alloc, a_root, a_source)) {
+        fs.remove_all(?alloc, root);
+        session.dnit(?s);
+        ret 1;
+    }
+    if (!write_gitmodules2(?alloc, root, "a", a_source, "b", b_source)) {
+        fs.remove_all(?alloc, root);
+        session.dnit(?s);
+        ret 1;
+    }
+    if (!git.scratch_repo(?alloc, root, "https://example.invalid/app.git")) {
+        fs.remove_all(?alloc, root);
+        session.dnit(?s);
+        ret 1;
+    }
+    var bad: i32                             = 0;
+    val pr:  res[project.Project, fail.Fail] = rebuild(?s, root);
+    if (sel pr.err) { bad = 1; }
+    if (sel pr.ok) {
+        var p: project.Project = pr.ok;
+        if (p.config.dep_count != 2) { bad = 1; }
+        var saw_flat_b: bool = false;
+        var i:          u32  = 0;
+        for (i < p.config.dep_count) {
+            val vr_opt: opt[str] = intern.get(?s.interner, p.config.deps[i].vendor_root);
+            if (sel vr_opt.some) {
+                if (path_is(?alloc, vr_opt.some, root, "dep/a/dep/b")) { bad = 1; }
+                if (path_is(?alloc, vr_opt.some, root, "dep/b"))       { saw_flat_b = true; }
+            }
+            i = i + 1;
+        }
+        if (!saw_flat_b) { bad = 1; }
+        project.dnit_project(?p);
+    }
+    fs.remove_all(?alloc, root);
+    session.dnit(?s);
+    ret bad;
+}
+
+# a transitive dependency whose manifest does not parse or is not a file fails the closure
+# naming that dependency
+test dep_closure__transitive_manifest_failures_name_the_dependency {
+    var alloc:  A.Allocator;
+    val make_r: err[A.Error] = page.make(?alloc);
+    if (sel make_r.err) { ret 1; }
+    val sr: res[session.Session, fail.Fail] = git.scratch_session(?alloc);
+    if (sel sr.err) { ret 1; }
+    var s: session.Session = sr.ok;
+
+    var names: [1]str;
+    names[0] = "main.mach";
+    var texts: [1]str;
+    texts[0] = "fun main() i32 { ret 0; }\n";
+    val root_r: res[str, fail.Fail] = scaffold(?alloc,
+        dep_root_one(?alloc, "a", "../source-a"), ?names[0], ?texts[0], 1);
+    if (sel root_r.err) {
+        session.dnit(?s);
+        ret 1;
+    }
+    val root:       str = root_r.ok;
+    val a_manifest: str = joined(?alloc, lib_manifest(?alloc, "a"),
+        "\n[dep.b]\npath = \"../source-b\"\n", "");
+    val a_root:           str            = joined(?alloc, root, "/", "dep/a");
+    val b_root:           str            = joined(?alloc, root, "/", "dep/b");
+    val node_written2: err[fail.Fail] = write_node(?alloc, a_root, a_manifest, "lib.mach", "pub fun a() i32 { ret 1; }\n");
+    val node_written:  err[fail.Fail] = write_node(?alloc, b_root, "not = [", "lib.mach", "pub fun b() i32 { ret 2; }\n");
+    if (sel node_written2.err) {
+        fs.remove_all(?alloc, root);
+        session.dnit(?s);
+        ret 1;
+    }
+    if (sel node_written.err) {
+        fs.remove_all(?alloc, root);
+        session.dnit(?s);
+        ret 1;
+    }
+    if (!git.scratch_repo(?alloc, root, "https://example.invalid/app.git")) {
+        fs.remove_all(?alloc, root);
+        session.dnit(?s);
+        ret 1;
+    }
+
+    var bad: i32 = 0;
+    if (!dep_build_fails(?s, root, "dependency 'b'")) { bad = 1; }
+    val b_manifest:        str                 = joined(?alloc, b_root, "/", manifest.MANIFEST_FILE);
+    val b_manifest_marker: str                 = joined(?alloc, b_manifest, "/", "keep");
+    val remove_file_r:     err[io_error.Error] = fs.remove_file(b_manifest);
+    val create_dir_all_r:  err[fs.FsError]     = fs.create_dir_all(?alloc, b_manifest, 493);
+    val write_bytes_r:     err[fs.FsError]     = fs.write_bytes(b_manifest_marker, "keep\n", 5, 420);
+    if (sel remove_file_r.err
+        || sel create_dir_all_r.err
+        || sel write_bytes_r.err
+        || !git_commit_all(?alloc, root, "replace transitive manifest with directory")
+        || !dep_build_fails(?s, root, "cannot read")) { bad = 1; }
+
+    fs.remove_all(?alloc, root);
+    session.dnit(?s);
+    ret bad;
+}
+
+test use_root__undeclared_names_the_missing_dependency {
+    var alloc:  A.Allocator;
+    val make_r: err[A.Error] = page.make(?alloc);
+    if (sel make_r.err) { ret 1; }
+    val sr: res[session.Session, fail.Fail] = git.scratch_session(?alloc);
+    if (sel sr.err) { ret 1; }
+    var s: session.Session = sr.ok;
+
+    var names: [1]str;
+    names[0] = "main.mach";
+    var texts: [1]str;
+    texts[0] = "use std.print;\n#[symbol(\"_start\")]\nfun start() i32 { ret 0; }\n";
+    val root_r: res[str, fail.Fail] = scaffold(?alloc, fixture_manifest(), ?names[0], ?texts[0], 1);
+    if (sel root_r.err) {
+        session.dnit(?s);
+        ret 1;
+    }
+    val root: str = root_r.ok;
+
+    var bad: i32                             = 0;
+    val pr:  res[project.Project, fail.Fail] = rebuild(?s, root);
+    # the tolerant load keeps the project standing rejected; the report is what is checked
+    if (sel pr.ok) {
+        var p:        project.Project  = pr.ok;
+        val standing: fail.PhaseStatus = frontend.frontend_status(?p);
+        if (!sel standing.kind.rejected) { bad = 1; }
+        project.dnit_project(?p);
+    }
+    {
+        var seen: bool  = false;
+        var i:    usize = 0;
+        for (i < diagnostic.len(?s.diags)) {
+            val d: *diagnostic.Diagnostic = ?s.diags.items.data[i];
+            if (diagnostic_kind.is_error(d.kind) && str_contains(d.message, "module root 'std'")) {
+                seen = true;
+                if (!str_contains(d.message, "declared dependency"))     { bad = 1; }
+                if (!str_contains(d.message, "declare it in mach.toml")) { bad = 1; }
+                if (str_contains(d.message, "does not name a module"))   { bad = 1; }
+            }
+            i = i + 1;
+        }
+        if (!seen) { bad = 1; }
+    }
+
+    fs.remove_all(?alloc, root);
+    session.dnit(?s);
+    ret bad;
+}
+
+# a dependency's module reads its own manifest through `$mach.project.*` and its own
+# project-relative file through `$mach.source.*`, while `$project.*` names the root in
+# every module; a gate that reads the wrong project declares an unresolvable name
+test comptime_identity__a_dependency_reads_its_own_project {
+    var alloc:  A.Allocator;
+    val make_r: err[A.Error] = page.make(?alloc);
+    if (sel make_r.err) { ret 1; }
+    val sr: res[session.Session, fail.Fail] = git.scratch_session(?alloc);
+    if (sel sr.err) { ret 1; }
+    var s: session.Session = sr.ok;
+    fin { session.dnit(?s); }
+
+    var names:  [1]str              = [1]str{"main.mach"};
+    var texts:  [1]str              = [1]str{"use a.lib;\n\n$if ($mach.project.id != \"app\" || $mach.project.version != \"0.0.0\" || $mach.source.file != \"src/main.mach\") {\n    val WRONG: i32 = unresolved;\n}\n\nfun main() i32 { ret lib.v(); }\n"};
+    val root_r: res[str, fail.Fail] = scaffold(?alloc, dep_root_one(?alloc, "a", "./vendor/a"), ?names[0], ?texts[0], 1);
+    if (sel root_r.err) { ret 1; }
+    val root: str = root_r.ok;
+    fin { fs.remove_all(?alloc, root); }
+
+    val a_manifest: str = joined(?alloc, "[project]\nmach = \">=5\"\nid = \"", "a",
+        "\"\nversion = \"2.5.0\"\nsrc = \"src\"\nwork = \"out/{target.name}/{profile.name}\"\n[profile.debug]\noptimize = false\ndebug = false\nsimd = \"scalarize\"\n\n[artifact.lib]\nkind = \"static\"\nentry = \"lib.mach\"\nout = \"{project.work}/lib/l\"\ntargets = [\"*\"]\nlink = []\nneed = []\n");
+    val lib_src: str            = "$if ($mach.project.id != \"a\" || $mach.project.version != \"2.5.0\" || $mach.project.version.minor != 5\n    || $project.id != \"app\" || $project.version != \"0.0.0\"\n    || $mach.source.file != \"src/lib.mach\" || $mach.source.module != \"a.lib\") {\n    val WRONG: i32 = unresolved;\n}\n\npub fun v() i32 { ret 1; }\n";
+    val wa:      err[fail.Fail] = write_node(?alloc, joined(?alloc, root, "/", "dep/a"), a_manifest, "lib.mach", lib_src);
+    if (sel wa.err)                                                    { ret 1; }
+    if (!git.scratch_repo(?alloc, root, "https://example.invalid/app.git")) { ret 1; }
+
+    val pr: res[project.Project, fail.Fail] = rebuild(?s, root);
+    if (sel pr.err) { ret 2; }
+    var p:        project.Project  = pr.ok;
+    val standing: fail.PhaseStatus = frontend.frontend_status(?p);
+    project.dnit_project(?p);
+    if (sel standing.kind.rejected)     { ret 3; }
+    if (diagnostic.error_count(?s.diags) != 0) { ret 4; }
+    ret 0;
+}
+
+# an allocation failure at each point of cascade library resolution releases its scratch
+test resolve_cascade_libs__allocation_failure_releases_scratch {
+    var alloc:  A.Allocator;
+    val make_r: err[A.Error] = page.make(?alloc);
+    if (sel make_r.err) { ret 1; }
+    val sr: res[session.Session, fail.Fail] = git.scratch_session(?alloc);
+    if (sel sr.err) { ret 1; }
+    var s: session.Session = sr.ok;
+
+    var names: [1]str;
+    names[0] = "main.mach";
+    var texts: [1]str;
+    texts[0] = "fun main() i32 { ret 0; }\n";
+    val root_r: res[str, fail.Fail] = scaffold(?alloc,
+        dep_root_two(?alloc, "a", "./vendor/a", "b", "./vendor/b"), ?names[0], ?texts[0], 1);
+    if (sel root_r.err) {
+        session.dnit(?s);
+        ret 1;
+    }
+    val root: str = root_r.ok;
+
+    val a_manifest: str            = dep_lib_with_export(?alloc, "a");
+    val b_manifest: str            = lib_manifest(?alloc, "b");
+    val libsrc:     str            = "pub fun v() i32 { ret 1; }\n";
+    val wa:         err[fail.Fail] = write_node(?alloc, joined(?alloc, root, "/", "dep/a"), a_manifest, "lib.mach", libsrc);
+    if (sel wa.err) {
+        fs.remove_all(?alloc, root);
+        session.dnit(?s);
+        ret 1;
+    }
+    val wb: err[fail.Fail] = write_node(?alloc, joined(?alloc, root, "/", "dep/b"), b_manifest, "lib.mach", libsrc);
+    if (sel wb.err) {
+        fs.remove_all(?alloc, root);
+        session.dnit(?s);
+        ret 1;
+    }
+    if (!git.scratch_repo(?alloc, root, "https://example.invalid/app.git")) {
+        fs.remove_all(?alloc, root);
+        session.dnit(?s);
+        ret 1;
+    }
+
+    val pr: res[project.Project, fail.Fail] = rebuild(?s, root);
+    if (sel pr.err) {
+        fs.remove_all(?alloc, root);
+        session.dnit(?s);
+        ret 1;
+    }
+    var p: project.Project = pr.ok;
+
+    var bad: i32 = 0;
+    if (p.config.dep_count != 2) { bad = 1; }
+    or {
+        val isa_s:      intern.StrId = p.target_entry.isa_name;
+        val os_s:       intern.StrId = p.target_entry.os_name;
+        val abi_s:      intern.StrId = p.target_entry.abi_name;
+        val orig_alloc: *A.Allocator = p.alloc;
+
+        var fail_at:                          u32 = 1;
+        val scratch_construction_fail_at_max: u32 = 3;
+        for (fail_at <= scratch_construction_fail_at_max && bad == 0) {
+            if (p.config.cascade_libs != nil && p.config.cascade_lib_count > 0) {
+                manifest.free_link_claims(orig_alloc, p.config.cascade_libs, p.config.cascade_lib_count);
+                A.deallocate[manifest.LinkRequirement](orig_alloc, p.config.cascade_libs, p.config.cascade_lib_count::usize);
+                p.config.cascade_libs      = nil;
+                p.config.cascade_lib_count = 0;
+            }
+
+            var t:      T.Testing;
+            val made_t: err[A.Error] = T.make(?t);
+            if (sel made_t.err) {
+                bad = 1;
+                brk;
+            }
+            T.fail_at_ordinal(?t, fail_at::usize);
+            p.alloc = T.allocator_of(?t);
+            val cr: err[fail.Fail] = driver_closure.resolve_cascade_libs(?p, isa_s, os_s, abi_s,
+                p.target_entry.libs, p.target_entry.lib_count);
+            p.alloc = orig_alloc;
+
+            # every refusal here comes before a diagnostic is retained, so nothing survives
+            if (sel cr.ok)    { bad = 1; }
+            if (!T.clean(?t)) { bad = 1; }
+            T.dnit(?t);
+
+            fail_at = fail_at + 1;
+        }
+    }
+
+    project.dnit_project(?p);
+    fs.remove_all(?alloc, root);
+    session.dnit(?s);
+    ret bad;
+}
+
+# a missing dependency directory is refused naming the command that realizes it
+test dep_closure__missing_dependency_names_the_fix {
+    var alloc:  A.Allocator;
+    val make_r: err[A.Error] = page.make(?alloc);
+    if (sel make_r.err) { ret 1; }
+    val sr: res[session.Session, fail.Fail] = git.scratch_session(?alloc);
+    if (sel sr.err) { ret 1; }
+    var s: session.Session = sr.ok;
+
+    var names: [1]str;
+    names[0] = "main.mach";
+    var texts: [1]str;
+    texts[0] = "fun main() i32 { ret 0; }\n";
+    val root_r: res[str, fail.Fail] = scaffold(?alloc, dep_root_one(?alloc, "absdep", "./vendor/absdep"), ?names[0], ?texts[0], 1);
+    if (sel root_r.err) {
+        session.dnit(?s);
+        ret 1;
+    }
+    val root: str = root_r.ok;
+
+    var bad: i32                             = 0;
+    val pr:  res[project.Project, fail.Fail] = rebuild(?s, root);
+    if (sel pr.ok) {
+        var p: project.Project = pr.ok;
+        project.dnit_project(?p);
+        bad = 1;
+    }
+    if (sel pr.err) {
+        val msg: str = fail.describe(pr.err);
+        val fix: str = joined(?alloc, "run `mach dep pull ", root, "`");
+        if (!str_contains(msg, "dependency 'absdep' is missing")) { bad = 1; }
+        if (!str_contains(msg, fix))                              { bad = 1; }
+        if (str_contains(msg, "no such file"))                    { bad = 1; }
+    }
+
+    fs.remove_all(?alloc, root);
+    session.dnit(?s);
+    ret bad;
+}
+
+# scaffolds a root importing the git dependency `alias` with `main_text`, realizes it from
+# `dep_manifest` and the given modules, and holds the build to a refusal naming `needle`;
+# a non-empty `full_main` then must build: 0 when both hold
+#[testing]
+fun dep_import(alias: str, dep_manifest: str, dep_names: *str, dep_texts: *str, n: u32,
+    main_text: str, needle: str, full_main: str) i32 {
+    var alloc:  A.Allocator;
+    val make_r: err[A.Error] = page.make(?alloc);
+    if (sel make_r.err) { ret 1; }
+    val sr: res[session.Session, fail.Fail] = git.scratch_session(?alloc);
+    if (sel sr.err) { ret 1; }
+    var s: session.Session = sr.ok;
+    fin { session.dnit(?s); }
+
+    val origin: str                 = joined(?alloc, "https://example.invalid/", alias, ".git");
+    var names:  [1]str              = [1]str{"main.mach"};
+    var texts:  [1]str              = [1]str{main_text};
+    val root_r: res[str, fail.Fail] = scaffold(?alloc, dep_root_git(?alloc, alias, origin), ?names[0], ?texts[0], 1);
+    if (sel root_r.err) { ret 1; }
+    val root: str = root_r.ok;
+    fin { fs.remove_all(?alloc, root); }
+    val dep_root: str            = joined(?alloc, root, "/dep/", alias);
+    val wr:       err[fail.Fail] = write_node_multi(?alloc, dep_root, dep_manifest, dep_names, dep_texts, n);
+    if (sel wr.err
+        || !git.scratch_repo(?alloc, dep_root, origin)
+        || !git.write_gitmodules(?alloc, root, alias, origin)
+        || !git.scratch_repo(?alloc, root, "https://example.invalid/app.git")) { ret 1; }
+
+    val pr: res[project.Project, fail.Fail] = rebuild(?s, root);
+    # the tolerant load keeps the project standing rejected; the report is what is checked
+    if (sel pr.ok) {
+        var p:        project.Project  = pr.ok;
+        val standing: fail.PhaseStatus = frontend.frontend_status(?p);
+        project.dnit_project(?p);
+        if (!sel standing.kind.rejected) { ret 2; }
+    }
+    var seen: bool = false;
+    if (sel pr.err) { seen = str_contains(fail.describe(pr.err), needle); }
+    var i: usize = 0;
+    for (i < diagnostic.len(?s.diags)) {
+        if (str_contains(s.diags.items.data[i].message, needle)) { seen = true; }
+        i = i + 1;
+    }
+    if (!seen)                { ret 3; }
+    if (str_empty(full_main)) { ret 0; }
+    val main_path: str             = joined(?alloc, root, "/src/", "main.mach");
+    val ww:        err[fs.FsError] = fs.write_bytes(main_path, full_main, str_len(full_main), 420);
+    if (sel ww.err) { ret 4; }
+    val pr2: res[project.Project, fail.Fail] = rebuild(?s, root);
+    if (sel pr2.err) { ret 5; }
+    var p2: project.Project = pr2.ok;
+    project.dnit_project(?p2);
+    ret 0;
+}
+
+# a use path is a project id then a source path: the dependency's id alone names no module, though
+# its library is export = true and a file is named for it, and a full path to that file binds
+test use_path__project_id_alone_names_no_module {
+    var names: [2]str = [2]str{"lib.mach", "bare.mach"};
+    var texts: [2]str = [2]str{"pub fun v() i32 { ret 0; }\n", "pub fun w() i32 { ret 0; }\n"};
+    val bare:  i32    = dep_import("bare",
+        "[project]\nmach = \">=5\"\nid = \"bare\"\nversion = \"0.0.0\"\nsrc = \"src\"\nwork = \"out/{target.name}/{profile.name}\"\n\n[artifact.bare]\nexport = true\nkind = \"static\"\nentry = \"lib.mach\"\nout = \"{project.work}/lib/bare\"\ntargets = [\"*\"]\nlink = []\nneed = []\n[profile.debug]\ndefault = true\noptimize = false\ndebug = false\nsimd = \"scalarize\"\n",
+        ?names[0], ?texts[0], 2, "use bare;\n\nfun main() i32 { ret bare.v(); }\n",
+        "use path 'bare' does not name a module", "use bare.lib;\nuse bare.bare;\n\nfun main() i32 { ret lib.v() + bare.w(); }\n");
+    if (bare != 0) { ret 20 + bare; }
+    ret 0;
+}
+
+#[testing]
+pub fun write_node(alloc: *A.Allocator, dir: str, manifest_text: str, src_name: str, src_text: str) err[fail.Fail] {
+    var names: [1]str = [1]str{src_name};
+    var texts: [1]str = [1]str{src_text};
+    ret write_node_multi(alloc, dir, manifest_text, ?names[0], ?texts[0], 1);
+}
+
+# a project directory `dir`: its manifest and the `n` sources under its src
+#[testing]
+pub fun write_node_multi(alloc: *A.Allocator, dir: str, manifest_text: str, names: *str, texts: *str, n: u32) err[fail.Fail] {
+    val src_dir: str            = joined(alloc, dir, "/src");
+    val made:    err[fs.FsError] = fs.create_dir_all(alloc, src_dir, 493);
+    if (sel made.err) { ret err[fail.Fail].err{fail.fs_refused(made.err)}; }
+    val wrote: err[fail.Fail] = git.t_write_file(alloc, dir, manifest.MANIFEST_FILE, manifest_text);
+    if (sel wrote.err) { ret wrote; }
+    var i: u32 = 0;
+    for (i < n) {
+        val source: err[fail.Fail] = git.t_write_file(alloc, src_dir, names[i], texts[i]);
+        if (sel source.err) { ret source; }
+        i = i + 1;
+    }
+    ret err[fail.Fail].ok{};
+}
+
+# the manifest of the static library project `id`, its entry `lib.mach`
+#[testing]
+pub fun lib_manifest(alloc: *A.Allocator, id: str) str {
+    ret joined(alloc, "[project]\nmach = \">=5\"\nid = \"", id,
+        "\"\nversion = \"0.0.0\"\nsrc = \"src\"\nwork = \"out/{target.name}/{profile.name}\"\n[profile.debug]\noptimize = false\ndebug = false\nsimd = \"scalarize\"\n\n[artifact.lib]\nkind = \"static\"\nentry = \"lib.mach\"\nout = \"{project.work}/lib/l\"\ntargets = [\"*\"]\nlink = []\nneed = []\n");
+}
+

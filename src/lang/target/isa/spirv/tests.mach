@@ -28,10 +28,8 @@ use mir_lower: mach.lang.be.codegen.mir.lower;
 use mach.lang.be.codegen.testing.agg_call_src;
 use mach.lang.be.codegen.testing.codegen_outcome_text;
 use mach.lang.be.codegen.testing.codegen_target_ok;
-use mach.lang.be.codegen.testing.concat;
 use mach.lang.be.codegen.testing.count_vector_typed_instrs;
 use mach.lang.be.codegen.testing.ct_edge_project;
-use mach.lang.be.codegen.testing.git_repo;
 use mach.lang.be.codegen.testing.run_codegen_err;
 use mach.lang.be.codegen.testing.run_codegen_ok;
 use mach.lang.be.codegen.testing.sema_rejects;
@@ -50,6 +48,7 @@ use mach.lang.driver.passes;
 use mach.lang.driver.project;
 use mach.lang.driver.request;
 use mach.lang.driver.toolchain;
+use mach.lang.package.git;
 use mach.lang.fail;
 use mach.lang.host;
 use mach.lang.intern;
@@ -222,7 +221,7 @@ test oblivious__refused_on_spirv {
 
 #[testing]
 fun spirv_env_manifest(alloc: *A.Allocator, env_line: str) str {
-    ret concat(alloc, "[project]\nmach = \">=5\"\nid = \"envtest\"\nversion = \"0.0.0\"\nsrc = \"src\"\nwork = \"out/{target.name}/{profile.name}\"\n\n[target.gpu]\nisa = \"spirv\"\nos = \"freestanding\"\nabi = \"spirv\"\n", env_line, "\n[artifact.k]\nkind = \"bin\"\nentry = \"k.mach\"\nout = \"{project.work}/k.spv\"\ntargets = [\"*\"]\nlink = []\nneed = []\n[profile.debug]\ndefault = true\noptimize = false\ndebug = true\nsimd = \"scalarize\"\n[profile.release]\noptimize = true\ndebug = false\nsimd = \"scalarize\"\n");
+    ret driver.joined(alloc, "[project]\nmach = \">=5\"\nid = \"envtest\"\nversion = \"0.0.0\"\nsrc = \"src\"\nwork = \"out/{target.name}/{profile.name}\"\n\n[target.gpu]\nisa = \"spirv\"\nos = \"freestanding\"\nabi = \"spirv\"\n", env_line, "\n[artifact.k]\nkind = \"bin\"\nentry = \"k.mach\"\nout = \"{project.work}/k.spv\"\ntargets = [\"*\"]\nlink = []\nneed = []\n[profile.debug]\ndefault = true\noptimize = false\ndebug = true\nsimd = \"scalarize\"\n[profile.release]\noptimize = true\ndebug = false\nsimd = \"scalarize\"\n");
 }
 
 #[testing]
@@ -1489,7 +1488,7 @@ fun spv_binding_case(alloc: *A.Allocator, libb_binding: str, collide: bool) i32 
     names[1] = "liba.mach";
     texts[1] = "rec CamA { x: f32; y: f32; z: f32; w: f32; }\n#[uniform(0, 0)] pub var cam_a: CamA;\n\n#[noinline]\npub fun from_a(v: f32) f32 { ret v * cam_a.x; }\n";
     names[2] = "libb.mach";
-    texts[2] = concat(alloc, "rec CamB { p: f32; q: f32; r: f32; s: f32; }\n#[uniform(", libb_binding, ")] pub var cam_b: CamB;\n\n#[noinline]\npub fun from_b(v: f32) f32 { ret v * cam_b.p; }\n");
+    texts[2] = driver.joined(alloc, "rec CamB { p: f32; q: f32; r: f32; s: f32; }\n#[uniform(", libb_binding, ")] pub var cam_b: CamB;\n\n#[noinline]\npub fun from_b(v: f32) f32 { ret v * cam_b.p; }\n");
     val pr: res[project.Project, fail.Fail] = spv_lower(?s, alloc, ?names[0], ?texts[0], 3, "", nil, nil, 0);
     if (sel pr.err) { ret 2; }
     var p: project.Project = pr.ok;
@@ -3764,8 +3763,8 @@ test physical_pointer__only_an_address_computation_needs_int64 {
     val make_r: err[A.Error] = page.make(?alloc);
     if (sel make_r.err) { ret 1; }
     val head:    str = "rec Shard { v: [64]u32; }\nrec Table { shards: [4]*Shard; }\n#[storage(0, 0)] var table: Table;\n#[builtin(\"local_invocation_index\")] var lid: u32;\n#[stage(\"compute\")]\n#[workgroup(64, 1, 1)]\nfun cs() {\n    val p: *Shard = table.shards[0];\n";
-    val hold:    str = concat(?alloc, head, "    val q: *Shard = table.shards[1];\n    p.v[lid] = q.v[lid] + lid;\n", "}\n");
-    val compare: str = concat(?alloc, head, "    if (p == table.shards[1]) { p.v[lid] = lid; }\n", "}\n");
+    val hold:    str = driver.joined(?alloc, head, "    val q: *Shard = table.shards[1];\n    p.v[lid] = q.v[lid] + lid;\n", "}\n");
+    val compare: str = driver.joined(?alloc, head, "    if (p == table.shards[1]) { p.v[lid] = lid; }\n", "}\n");
 
     if (hold == nil || compare == nil) { ret 1; }
 
@@ -3818,8 +3817,8 @@ test physical_pointer__atomics_take_the_buffer_features {
     if (sel make_r.err) { ret 1; }
     val types: str = "env = \"vulkan1.3\"\nextensions = [\"int64\", \"float64\", \"int16\", \"float16\", \"storage_buffer_16bit_access\"";
     var v:     Bda;
-    val core:  str = concat(?alloc, BDA_ATOMIC_HEAD, "    store(?p.n, 1, 0, load(?p.next.n, 1, 0));\n    add(?p.n, 1, 0x48, 1);\n    cmpxchg(?p.next.n, 1, 0x48, 0x42, 2, 0);\n    smin(?p.s, 1, 0, -1);\n", "}\n");
-    val bare:  str = concat(?alloc, types, "]\n", "");
+    val core:  str = driver.joined(?alloc, BDA_ATOMIC_HEAD, "    store(?p.n, 1, 0, load(?p.next.n, 1, 0));\n    add(?p.n, 1, 0x48, 1);\n    cmpxchg(?p.next.n, 1, 0x48, 0x42, 2, 0);\n    smin(?p.s, 1, 0, -1);\n", "}\n");
+    val bare:  str = driver.joined(?alloc, types, "]\n", "");
     if (core == nil || bare == nil) { ret 1; }
     val r: i32 = bda_module(?alloc, core, bare, "vulkan1.3", "", ?v);
     if (r != 0)                             { ret 10 + r; }
@@ -3827,10 +3826,10 @@ test physical_pointer__atomics_take_the_buffer_features {
     var k: usize = 0;
     for (k < 8) {
         val c:    *AtomicFeature = ?BDA_ATOMIC_FEATURES[k];
-        val src:  str            = concat(?alloc, BDA_ATOMIC_HEAD, c.call, "\n}\n");
-        val with: str            = concat(?alloc, types, ", \"", concat(?alloc, c.feature, "\"]\n", ""));
-        val near: str            = concat(?alloc, types, ", \"", concat(?alloc, c.other, "\"]\n", ""));
-        val need: str            = concat(?alloc, "needs the `", c.feature, "` extension");
+        val src:  str            = driver.joined(?alloc, BDA_ATOMIC_HEAD, c.call, "\n}\n");
+        val with: str            = driver.joined(?alloc, types, ", \"", driver.joined(?alloc, c.feature, "\"]\n", ""));
+        val near: str            = driver.joined(?alloc, types, ", \"", driver.joined(?alloc, c.other, "\"]\n", ""));
+        val need: str            = driver.joined(?alloc, "needs the `", c.feature, "` extension");
         if (src == nil || with == nil || near == nil || need == nil) { ret 1; }
         val ok: i32 = bda_module(?alloc, src, with, "vulkan1.3", "", ?v);
         if (ok != 0 || v.atomics != 1) {
@@ -4045,10 +4044,10 @@ test op__sampled_image_stays_in_its_block {
     var alloc:  A.Allocator;
     val make_r: err[A.Error] = page.make(?alloc);
     if (sel make_r.err) { ret 1; }
-    val returned: i32 = spv_reference_refusal(concat(?alloc, COMBINE_PRELUDE, "#[output(0)] var o: f32x4;\n#[noinline] fun mk() Sampler2D { ret combine(tex, smp); }\n#[stage(\"fragment\")] fun fs() { o = sample(mk(), f32x2{0.5, 0.5}); }\nfun main() i32 { ret 0; }\n", ""),
+    val returned: i32 = spv_reference_refusal(driver.joined(?alloc, COMBINE_PRELUDE, "#[output(0)] var o: f32x4;\n#[noinline] fun mk() Sampler2D { ret combine(tex, smp); }\n#[stage(\"fragment\")] fun fs() { o = sample(mk(), f32x2{0.5, 0.5}); }\nfun main() i32 { ret 0; }\n", ""),
         "the result of `OpSampledImage` cannot be returned", true);
     if (returned != 0) { ret 10 + returned; }
-    val split: i32 = spv_reference_refusal(concat(?alloc, COMBINE_PRELUDE, "#[input(0)] var k: i32;\n#[output(0)] var o: f32x4;\n#[stage(\"fragment\")] fun fs() { o = sample(combine(tex, smp), f32x2{((k > 0) && (k < 5))::f32, 0.5}); }\nfun main() i32 { ret 0; }\n", ""),
+    val split: i32 = spv_reference_refusal(driver.joined(?alloc, COMBINE_PRELUDE, "#[input(0)] var k: i32;\n#[output(0)] var o: f32x4;\n#[stage(\"fragment\")] fun fs() { o = sample(combine(tex, smp), f32x2{((k > 0) && (k < 5))::f32, 0.5}); }\nfun main() i32 { ret 0; }\n", ""),
         "the result of `OpSampledImage` is consumed in another block than the one that makes it", false);
     if (split != 0) { ret 20 + split; }
 
@@ -4286,7 +4285,7 @@ test regression__inert_handle_crosses_a_module_boundary {
     var alloc:  A.Allocator;
     val make_r: err[A.Error] = page.make(?alloc);
     if (sel make_r.err) { ret 1; }
-    val sr: res[session.Session, fail.Fail] = toolchain.session_init(?alloc);
+    val sr: res[session.Session, fail.Fail] = git.scratch_session(?alloc);
     if (sel sr.err) { ret 1; }
     var s: session.Session = sr.ok;
     fin { session.dnit(?s); }
@@ -4306,10 +4305,10 @@ test regression__inert_handle_crosses_a_module_boundary {
     var dep_texts:    [1]str;
     dep_names[0] = "lib.mach";
     dep_texts[0] = "#[handle(\"spirv\", \"image\", 0, 1, 0, 0, 0, 1, 0)]\npub def Texture2D;\n\n#[handle(\"spirv\", \"sampled_image\", Texture2D)]\npub def Sampler2D;\n\n#[op(\"spirv\", \"core\", \"OpImageSampleImplicitLod\")]\npub fun sample(s: Sampler2D, uv: f32x2) f32x4;\n";
-    val dep_root: str            = concat(?alloc, root, "/", "dep/tex");
+    val dep_root: str            = driver.joined(?alloc, root, "/", "dep/tex");
     val wr:       err[fail.Fail] = write_node_multi(?alloc, dep_root, dep_manifest, ?dep_names[0], ?dep_texts[0], 1);
     if (sel wr.err)                                                 { ret 2; }
-    if (!git_repo(?alloc, root, "https://example.invalid/app.git")) { ret 2; }
+    if (!git.scratch_repo(?alloc, root, "https://example.invalid/app.git")) { ret 2; }
 
     var pick: manifest.Selectors              = manifest.t_selectors("", "linux", "");
     val pr:   res[project.Project, fail.Fail] = driver.build_project(?s, root, ?pick);
@@ -5099,11 +5098,11 @@ test env__a_narrow_value_crosses_a_call_in_its_carrier {
     var k: usize = 0;
     for (k < 7) {
         val c:   *CarriedCall = ?CARRIED_CALLS[k];
-        val src: str          = concat(?alloc, head, c.body, tail);
+        val src: str          = driver.joined(?alloc, head, c.body, tail);
         if (src == nil) { ret 1; }
         var i: usize = 0;
         for (i < 2) {
-            val line: str = concat(?alloc, "env = \"", envs[i], "\"\n");
+            val line: str = driver.joined(?alloc, "env = \"", envs[i], "\"\n");
             if (line == nil) { ret 1; }
             val r: i32 = l6_env(?alloc, src, line, envs[i], "", c.cap, nil);
             if (r != 0) {
@@ -5166,10 +5165,10 @@ test env__a_type_feature_is_declared_not_guaranteed {
     var k: usize = 0;
     for (k < 5) {
         val c:    *TypeFeature = ?TYPE_FEATURES[k];
-        val src:  str          = concat(?alloc, "rec Out { v: [4]u32; }\nrec Pair { a: u8; b: u32; }\n#[storage(0, 0)] var out: Out;\n#[builtin(\"global_invocation\")] var gid: u32x3;\n#[stage(\"compute\")]\n#[workgroup(1, 1, 1)]\nfun cs() { ", c.decl, " }\n");
-        val bare: str          = concat(?alloc, "env = \"", c.env, "\"\n");
-        val with: str          = concat(?alloc, bare, concat(?alloc, "extensions = [\"", c.declare, "\"]\n"), "");
-        val need: str          = concat(?alloc, "leaves to a device feature: name `", c.feature, "`");
+        val src:  str          = driver.joined(?alloc, "rec Out { v: [4]u32; }\nrec Pair { a: u8; b: u32; }\n#[storage(0, 0)] var out: Out;\n#[builtin(\"global_invocation\")] var gid: u32x3;\n#[stage(\"compute\")]\n#[workgroup(1, 1, 1)]\nfun cs() { ", c.decl, " }\n");
+        val bare: str          = driver.joined(?alloc, "env = \"", c.env, "\"\n");
+        val with: str          = driver.joined(?alloc, bare, driver.joined(?alloc, "extensions = [\"", c.declare, "\"]\n"), "");
+        val need: str          = driver.joined(?alloc, "leaves to a device feature: name `", c.feature, "`");
         if (src == nil || bare == nil || with == nil || need == nil) { ret 1; }
         var without: i32 = 0;
         if (c.carried != 0) { without = l6_env(?alloc, src, bare, c.env, "", c.carried, nil); }
@@ -5360,10 +5359,10 @@ test regression__ret_chain_inlined_is_structured {
     val make_r: err[A.Error] = page.make(?alloc);
     if (sel make_r.err) { ret 1; }
     # two copies, each an outer selection and a nested one forwarding to the outer merge
-    val twice: i32 = ret_chain_module(?alloc, concat(?alloc, ret_chain_pick(), "\npub fun checksum(seed: u64) u64 {\n    var x: u64 = seed + pick(seed::u32)::u64;\n    x = x + pick((seed + 1)::u32)::u64;\n    ret x;\n}\n", "\nfun main() i32 { ret 0; }\n"), 4, 0);
+    val twice: i32 = ret_chain_module(?alloc, driver.joined(?alloc, ret_chain_pick(), "\npub fun checksum(seed: u64) u64 {\n    var x: u64 = seed + pick(seed::u32)::u64;\n    x = x + pick((seed + 1)::u32)::u64;\n    ret x;\n}\n", "\nfun main() i32 { ret 0; }\n"), 4, 0);
     if (twice != 0) { ret 10 + twice; }
     # one copy inside the loop body: the loop, the outer selection and the nested one
-    val looped: i32 = ret_chain_module(?alloc, concat(?alloc, ret_chain_pick(), "\npub fun checksum(seed: u64) u64 {\n    var x: u64 = seed;\n    var i: u64 = 0;\n    for (i < 3) { x = x + pick(i::u32)::u64; i = i + 1; }\n    ret x;\n}\n", "\nfun main() i32 { ret 0; }\n"), 2, 1);
+    val looped: i32 = ret_chain_module(?alloc, driver.joined(?alloc, ret_chain_pick(), "\npub fun checksum(seed: u64) u64 {\n    var x: u64 = seed;\n    var i: u64 = 0;\n    for (i < 3) { x = x + pick(i::u32)::u64; i = i + 1; }\n    ret x;\n}\n", "\nfun main() i32 { ret 0; }\n"), 2, 1);
     if (looped != 0) { ret 20 + looped; }
     ret 0;
 }
@@ -5569,9 +5568,9 @@ test storage_access__narrow_members_need_the_feature_of_their_memory {
     var k: usize = 0;
     for (k < 7) {
         val c:    *StorageAccess = ?STORAGE_ACCESS[k];
-        val with: str            = concat(?alloc, "env = \"vulkan1.3\"\nextensions = [\"", c.feature, "\"]\n");
-        val low:  str            = concat(?alloc, concat(?alloc, "env = \"", c.low, "\"\nextensions = [\""), c.feature, "\"]\n");
-        val need: str            = concat(?alloc, "needs the `", c.feature, "` extension");
+        val with: str            = driver.joined(?alloc, "env = \"vulkan1.3\"\nextensions = [\"", c.feature, "\"]\n");
+        val low:  str            = driver.joined(?alloc, driver.joined(?alloc, "env = \"", c.low, "\"\nextensions = [\""), c.feature, "\"]\n");
+        val need: str            = driver.joined(?alloc, "needs the `", c.feature, "` extension");
         if (with == nil || low == nil || need == nil) { ret 1; }
         val ok: i32 = l6_env(?alloc, c.src, with, "vulkan1.3", "", 0, nil);
         if (ok != 0) {
@@ -5702,8 +5701,8 @@ test lanes_bits__an_array_carried_vector_reinterprets_lane_by_lane {
     val make_r: err[A.Error] = page.make(?alloc);
     if (sel make_r.err) { ret 1; }
     val ext: str = "extensions = [\"float16\", \"int16\", \"int8\", \"int64\", \"float64\", \"storage_buffer_16bit_access\", \"storage_buffer_8bit_access\"]\n";
-    val e12: str = concat(?alloc, "env = \"vulkan1.2\"\n", ext, "");
-    val e13: str = concat(?alloc, "env = \"vulkan1.3\"\n", ext, "");
+    val e12: str = driver.joined(?alloc, "env = \"vulkan1.2\"\n", ext, "");
+    val e13: str = driver.joined(?alloc, "env = \"vulkan1.3\"\n", ext, "");
     if (e12 == nil || e13 == nil) { ret 2; }
     val r12: i32 = l6_env(?alloc, LANES_BITS, e12, "vulkan1.2", "", 0, nil);
     if (r12 != 0) { ret 10 + r12; }
@@ -5878,10 +5877,10 @@ test op__wide_and_float_atomics_need_their_vulkan_feature {
     var k: usize = 0;
     for (k < 14) {
         val c:    *AtomicFeature = ?ATOMIC_FEATURES[k];
-        val src:  str            = concat(?alloc, ATOMIC_FEATURE_HEAD, c.call, "\n}\n");
-        val with: str            = concat(?alloc, ATOMIC_FEATURE_ENV, c.feature, "\"]\n");
-        val near: str            = concat(?alloc, ATOMIC_FEATURE_ENV, c.other, "\"]\n");
-        val need: str            = concat(?alloc, "needs the `", c.feature, "` extension");
+        val src:  str            = driver.joined(?alloc, ATOMIC_FEATURE_HEAD, c.call, "\n}\n");
+        val with: str            = driver.joined(?alloc, ATOMIC_FEATURE_ENV, c.feature, "\"]\n");
+        val near: str            = driver.joined(?alloc, ATOMIC_FEATURE_ENV, c.other, "\"]\n");
+        val need: str            = driver.joined(?alloc, "needs the `", c.feature, "` extension");
         if (src == nil || with == nil || near == nil || need == nil) { ret 1; }
         val ok: i32 = l6_env(?alloc, src, with, "vulkan1.3", "", 0, nil);
         if (ok != 0) {
@@ -5908,11 +5907,11 @@ test op__an_atomic_in_a_helper_needs_the_feature_of_the_callers_memory {
     var feats: [2]str = [2]str{"shared_int64_atomics", "buffer_int64_atomics"};
     var k:     usize  = 0;
     for (k < 2) {
-        val helper: str = concat(?alloc, ATOMIC_FEATURE_HEAD, "    bump(", args[k]);
-        val src:    str = concat(?alloc, "#[noinline]\nfun bump(p: *u64) { add64(p, 2, 0, 1); }\n", helper, ");\n}\n");
-        val with:   str = concat(?alloc, ATOMIC_FEATURE_ENV, feats[k], "\"]\n");
-        val near:   str = concat(?alloc, ATOMIC_FEATURE_ENV, feats[1 - k], "\"]\n");
-        val need:   str = concat(?alloc, "needs the `", feats[k], "` extension");
+        val helper: str = driver.joined(?alloc, ATOMIC_FEATURE_HEAD, "    bump(", args[k]);
+        val src:    str = driver.joined(?alloc, "#[noinline]\nfun bump(p: *u64) { add64(p, 2, 0, 1); }\n", helper, ");\n}\n");
+        val with:   str = driver.joined(?alloc, ATOMIC_FEATURE_ENV, feats[k], "\"]\n");
+        val near:   str = driver.joined(?alloc, ATOMIC_FEATURE_ENV, feats[1 - k], "\"]\n");
+        val need:   str = driver.joined(?alloc, "needs the `", feats[k], "` extension");
         if (helper == nil || src == nil || with == nil || near == nil || need == nil) { ret 1; }
         val ok: i32 = l6_env(?alloc, src, with, "vulkan1.3", "", 0, nil);
         if (ok != 0) {
@@ -5951,14 +5950,14 @@ test op__atomics_on_storage_image_texels {
     val make_r: err[A.Error] = page.make(?alloc);
     if (sel make_r.err) { ret 1; }
     val env:  str = "env = \"vulkan1.3\"\n";
-    val core: str = concat(?alloc, IMAGE_ATOMIC_HEAD, "#[storage(0, 3)] var ids: UImage2D;\n#[stage(\"compute\")]\n#[workgroup(1, 1, 1)]\n", "fun cs() { add(texel(?ids, i32x2{1, 2}, 0), 1, 0, 1); bump(?ids); }\n");
+    val core: str = driver.joined(?alloc, IMAGE_ATOMIC_HEAD, "#[storage(0, 3)] var ids: UImage2D;\n#[stage(\"compute\")]\n#[workgroup(1, 1, 1)]\n", "fun cs() { add(texel(?ids, i32x2{1, 2}, 0), 1, 0, 1); bump(?ids); }\n");
     if (core == nil) { ret 1; }
     val ok32: i32 = l6_env(?alloc, core, env, "vulkan1.3", "", isa_spirv.CAP_INT64_IMAGE, nil);
     if (ok32 != 0) {
         print.eprintlnf("an atomic add on an R32ui texel did not validate ({})", ok32);
         ret 2;
     }
-    val signed: str = concat(?alloc, IMAGE_ATOMIC_HEAD, "#[storage(0, 4)] var sids: IImage2D;\n#[stage(\"compute\")]\n#[workgroup(1, 1, 1)]\n", "fun cs() { smax(itexel(?sids, i32x2{1, 2}, 0), 1, 0, -2); icas(itexel(?sids, i32x2{0, 1}, 0), 1, 0, 0, -3, smax(itexel(?sids, i32x2{2, 2}, 0), 1, 0, 4)); }\n");
+    val signed: str = driver.joined(?alloc, IMAGE_ATOMIC_HEAD, "#[storage(0, 4)] var sids: IImage2D;\n#[stage(\"compute\")]\n#[workgroup(1, 1, 1)]\n", "fun cs() { smax(itexel(?sids, i32x2{1, 2}, 0), 1, 0, -2); icas(itexel(?sids, i32x2{0, 1}, 0), 1, 0, 0, -3, smax(itexel(?sids, i32x2{2, 2}, 0), 1, 0, 4)); }\n");
     if (signed == nil) { ret 1; }
     val oki32: i32 = l6_env(?alloc, signed, env, "vulkan1.3", "", isa_spirv.CAP_INT64_IMAGE, nil);
     if (oki32 != 0) {
@@ -5968,10 +5967,10 @@ test op__atomics_on_storage_image_texels {
     var k: usize = 0;
     for (k < 5) {
         val c:    *AtomicFeature = ?IMAGE_ATOMIC_FEATURES[k];
-        val src:  str            = concat(?alloc, IMAGE_ATOMIC_HEAD, c.call, "");
-        val with: str            = concat(?alloc, "env = \"vulkan1.3\"\nextensions = [\"int64\", \"", c.feature, "\"]\n");
-        val near: str            = concat(?alloc, "env = \"vulkan1.3\"\nextensions = [\"int64\", \"", c.other, "\"]\n");
-        val need: str            = concat(?alloc, "needs the `", c.feature, "` extension");
+        val src:  str            = driver.joined(?alloc, IMAGE_ATOMIC_HEAD, c.call, "");
+        val with: str            = driver.joined(?alloc, "env = \"vulkan1.3\"\nextensions = [\"int64\", \"", c.feature, "\"]\n");
+        val near: str            = driver.joined(?alloc, "env = \"vulkan1.3\"\nextensions = [\"int64\", \"", c.other, "\"]\n");
+        val need: str            = driver.joined(?alloc, "needs the `", c.feature, "` extension");
         if (src == nil || with == nil || near == nil || need == nil) { ret 1; }
         val ok: i32 = l6_env(?alloc, src, with, "vulkan1.3", "", 0, nil);
         if (ok != 0) {
@@ -5992,7 +5991,7 @@ test op__atomics_on_storage_image_texels {
         "fun cs() { add(texel(?ids, i32x2{1, 2}, 0), 1, 0, 1); }\n", "fun cs() { bump(?ids); }\n"};
     var u: usize = 0;
     for (u < 3) {
-        val src: str = concat(?alloc, IMAGE_ATOMIC_HEAD, ro, uses[u]);
+        val src: str = driver.joined(?alloc, IMAGE_ATOMIC_HEAD, ro, uses[u]);
         if (src == nil) { ret 1; }
         var needle: str = "a store reaches the `#[storage(0, 3, \"readonly\")]` binding";
         if (u == 0) { needle = ""; }
@@ -6990,9 +6989,9 @@ test push__one_block_per_entry_point {
     val make_r: err[A.Error] = page.make(?alloc);
     if (sel make_r.err) { ret 1; }
     val head: str = "rec A { a: f32x4; }\nrec B { b: f32x4; }\n#[push] var pa: A;\n#[push] var pb: B;\n#[output(0)] var colour: f32x4;\n#[builtin(\"position\")] var position: f32x4;\n";
-    val both: str = concat(?alloc, head, "#[stage(\"fragment\")]\nfun fs() { colour = pa.a + pb.b; }\n", "");
+    val both: str = driver.joined(?alloc, head, "#[stage(\"fragment\")]\nfun fs() { colour = pa.a + pb.b; }\n", "");
     if (l6_env(?alloc, both, "env = \"vulkan1.2\"\n", "vulkan1.2", "the stage `fs` uses two `#[push]` blocks, `pa` and `pb`", 0, nil) != 0) { ret 2; }
-    val split: str = concat(?alloc, head, "#[stage(\"fragment\")]\nfun fs() { colour = pa.a; }\n", "#[stage(\"vertex\")]\nfun vs() { position = pb.b; }\n");
+    val split: str = driver.joined(?alloc, head, "#[stage(\"fragment\")]\nfun fs() { colour = pa.a; }\n", "#[stage(\"vertex\")]\nfun vs() { position = pb.b; }\n");
     if (l6_env(?alloc, split, "env = \"vulkan1.2\"\n", "vulkan1.2", "", 0, nil) != 0) { ret 3; }
     ret 0;
 }

@@ -62,7 +62,6 @@ use mach.lang.be.codegen.testing.codegen_outcome_text;
 use mach.lang.be.codegen.testing.codegen_profile_ok;
 use mach.lang.be.codegen.testing.codegen_profile_rejects;
 use mach.lang.be.codegen.testing.codegen_result;
-use mach.lang.be.codegen.testing.concat;
 use mach.lang.be.codegen.testing.ct_edge_project;
 use mach.lang.be.codegen.testing.defined_fn_exact;
 use mach.lang.be.codegen.testing.divide_manifest;
@@ -132,27 +131,9 @@ use extension_x64:     mach.lang.target.extension.x64;
 use target_of:         mach.lang.target.of;
 use mach.lang.target.of.bin;
 #[testing]
-use std.system.capability;
-#[testing]
-use diagnostic_kind: mach.lang.diagnostic.kind;
-#[testing]
 use mach.lang.stack;
 #[testing]
-use lang_target: mach.lang.target;
-#[testing]
-use mach.lang.target.abi;
-#[testing]
-use mach.lang.target.isa;
-#[testing]
-use lang_target_os: mach.lang.target.os;
-#[testing]
-use mach.lang.driver.config;
-#[testing]
-use mach.lang.driver.passes;
-#[testing]
 use target_os_linux: mach.lang.target.os.linux;
-#[testing]
-use step_glob: mach.lang.step.glob;
 
 #[testing]
 fun manifest_riscv_pair() str {
@@ -5310,7 +5291,7 @@ fun link_exe_image(p: *project.Project, root: str, out: *Vector[u8]) bool {
     }
 
     var linked: bool = false;
-    val path:   str  = concat(alloc, root, "/", "image.elf");
+    val path:   str  = driver.joined(alloc, root, "/", "image.elf");
     if (!missing) {
         val lr: err[fail.Fail] = planned_link_images(p.s, ?p.linkage, ?p.target, images, p.emit_len,
             nil::*target_of.DynLib, 0, path::*u8, "fself"::*u8, catalog_artifact.EXECUTABLE, false,

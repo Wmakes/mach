@@ -2406,3 +2406,32 @@ test step_outputs__native_snapshot_and_declarations_share_canonical_paths {
     if (!named) { ret 7; }
     ret 0;
 }
+
+# the dependency output home is absolute and one path however the root is spelled
+test dep_out_home__relative_absolute_and_folded_roots_agree {
+    var alloc:  A.Allocator;
+    val make_r: err[A.Error] = page.make(?alloc);
+    if (sel make_r.err) { ret 1; }
+    var code: i32 = 0;
+
+    val rel: res[str, fail.Fail] = dependency_out_home(?alloc, ".", "out/linux/debug");
+    if (!(sel rel.ok && types_path.is_abs(rel.ok))) { code = 1; }
+    val cwd_r: res[types_string.OwnedString, env.EnvError] = env.current_dir(?alloc);
+    if (sel cwd_r.err) { ret 1; }
+    var cwd: types_string.OwnedString = cwd_r.ok;
+    val abs: res[str, fail.Fail]      = dependency_out_home(?alloc, cwd.data, "out/linux/debug");
+    if (!(sel abs.ok && types_path.is_abs(abs.ok)))                  { code = 1; }
+    if (sel rel.ok && (sel abs.ok && (!str_equals(rel.ok, abs.ok)))) { code = 1; }
+
+    val abs_sub_r: res[str, A.Error] = types_path.resolve(?alloc, cwd.data, "subdir");
+    if (sel abs_sub_r.err) { ret 1; }
+    val rel_sub: res[str, fail.Fail] = dependency_out_home(?alloc, "./subdir", "out/linux/debug");
+    val abs_sub: res[str, fail.Fail] = dependency_out_home(?alloc, abs_sub_r.ok, "out/linux/debug");
+    val folded:  res[str, fail.Fail] = dependency_out_home(?alloc, "./subdir/../subdir", "out/linux/debug");
+    if (sel rel_sub.err)                     { ret 1; }
+    if (sel abs_sub.err)                     { ret 1; }
+    if (sel folded.err)                      { ret 1; }
+    if (!str_equals(rel_sub.ok, abs_sub.ok)) { code = 1; }
+    if (!str_equals(folded.ok, abs_sub.ok))  { code = 1; }
+    ret code;
+}

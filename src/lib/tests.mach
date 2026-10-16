@@ -1,5 +1,0 @@
-# the test-only modules no compiler entry reaches: `mach test . -a tests` runs their tests
-
-use std.runtime;
-
-use driver_deps_tests:           mach.lang.driver.tests.deps;
