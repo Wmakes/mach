@@ -70,7 +70,7 @@ fun symlink_target(s: *session.Session, gi: *git.Inspector, alias: str, git_dir:
     val msg_r: res[str, std_format.FormatError] = std_format.sprint(s.build_alloc,
         "dependency '{}': cannot verify tracked symlink target: {}", alias, fail.describe(raw_r.err));
     if (sel msg_r.err) { ret res[str, fail.Fail].err{raw_r.err}; }
-    ret res[str, fail.Fail].err{fail.with_text(raw_r.err, msg_r.ok)};
+    ret res[str, fail.Fail].err{fail.owning(fail.with_text(raw_r.err, msg_r.ok))};
 }
 
 fun symlink_tracked(s: *session.Session, gi: *git.Inspector, alias: str, git_dir: str,

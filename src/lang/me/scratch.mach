@@ -59,7 +59,7 @@ fun retain(owner: *A.Allocator, f: fail.Fail) fail.Fail {
     if (sel f.reported) { ret f; }
     val retained: res[str, A.Error] = str_dup(owner, fail.describe(f));
     if (sel retained.err) { ret fail.refused(retained.err); }
-    ret fail.with_text(f, retained.ok);
+    ret fail.owning(fail.with_text(f, retained.ok));
 }
 
 # successful results must not borrow workspace storage

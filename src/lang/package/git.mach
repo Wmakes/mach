@@ -521,7 +521,7 @@ fun tree_load(s: *session.Session, gi: *Inspector, alias: str, git_dir: str) res
         val mr: res[str, std_format.FormatError] = std_format.sprint(s.build_alloc,
             "dependency '{}': cannot verify nested dependency gitlink: {}", alias, fail.describe(listed.err));
         if (sel mr.err) { ret res[usize, fail.Fail].err{listed.err}; }
-        ret res[usize, fail.Fail].err{fail.with_text(listed.err, mr.ok)};
+        ret res[usize, fail.Fail].err{fail.owning(fail.with_text(listed.err, mr.ok))};
     }
     var bytes: Bytes = listed.ok;
     fin { bytes_free(gi.alloc, ?bytes); }
@@ -632,7 +632,7 @@ pub fun query_named(s: *session.Session, gi: *Inspector, alias: str, dir: str,
     val mr: res[str, std_format.FormatError] = std_format.sprint(s.build_alloc,
         "dependency '{}': cannot verify {}: {}", alias, fact, fail.describe(qr.err));
     if (sel mr.err) { ret res[str, fail.Fail].err{qr.err}; }
-    ret res[str, fail.Fail].err{fail.with_text(qr.err, mr.ok)};
+    ret res[str, fail.Fail].err{fail.owning(fail.with_text(qr.err, mr.ok))};
 }
 
 pub fun require_root(s: *session.Session, gi: *Inspector, alias: str, dir: str,

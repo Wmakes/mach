@@ -134,7 +134,7 @@ fun add_submodule(s: *session.Session, gi: *git.Inspector, root: str, id: str, r
         report.notef(rep, s.build_alloc, "note: dep/{} was registered; selector checkout failed; checkout and Git changes retained", id);
         val msg_r: res[str, std_format.FormatError] = std_format.sprint(s.build_alloc, "checkout of '{}': {}", ref, fail.describe(sel_r.err));
         if (sel msg_r.err) { ret err[fail.Fail].err{fail.with_text(sel_r.err, "dependency checkout failed")}; }
-        ret err[fail.Fail].err{fail.with_text(sel_r.err, msg_r.ok)};
+        ret err[fail.Fail].err{fail.owning(fail.with_text(sel_r.err, msg_r.ok))};
     }
 
     val id_r: err[fail.Fail] = package.verify_dep_manifest_id(s, dep_full, id);
@@ -149,7 +149,7 @@ fun add_submodule(s: *session.Session, gi: *git.Inspector, root: str, id: str, r
         report.notef(rep, s.build_alloc, "note: dep/{} was registered and checked out; staging its selected gitlink failed; native state retained", id);
         val msg_r: res[str, std_format.FormatError] = std_format.sprint(s.build_alloc, "staging dependency gitlink: {}", fail.describe(stage_r.err));
         if (sel msg_r.err) { ret err[fail.Fail].err{fail.with_text(stage_r.err, "staging dependency gitlink failed")}; }
-        ret err[fail.Fail].err{fail.with_text(stage_r.err, msg_r.ok)};
+        ret err[fail.Fail].err{fail.owning(fail.with_text(stage_r.err, msg_r.ok))};
     }
     str_free(s.build_alloc, stage_r.ok);
     ret err[fail.Fail].ok{};
@@ -293,7 +293,7 @@ pub fun manifest_at(s: *session.Session, alloc: *A.Allocator, dir: str, rev: str
         if (fail.kind_of(parsed.err) != diagnostic_kind.TOML_MALFORMED) { ret parsed; }
         val msg: res[str, std_format.FormatError] = std_format.sprint(alloc, "{} at {}: {}", dir, spec_r.ok, fail.describe(parsed.err));
         if (sel msg.err) { ret parsed; }
-        ret res[manifest.Doc, fail.Fail].err{fail.with_text(parsed.err, msg.ok)};
+        ret res[manifest.Doc, fail.Fail].err{fail.owning(fail.with_text(parsed.err, msg.ok))};
     }
     ret parsed;
 }
@@ -498,14 +498,13 @@ fun clone_env(s: *session.Session, root: str, id: str, url: str, ref: str,
         val fault: str                              = fail.describe(sel_r.err);
         val msg_r: res[str, std_format.FormatError] = std_format.sprint(s.build_alloc, "checkout of '{}': {}", ref, fault);
         if (sel msg_r.err) { ret err[fail.Fail].err{fail.with_text(sel_r.err, "dependency checkout failed")}; }
-        ret err[fail.Fail].err{fail.with_text(sel_r.err, msg_r.ok)};
+        ret err[fail.Fail].err{fail.owning(fail.with_text(sel_r.err, msg_r.ok))};
     }
 
     val id_r: err[fail.Fail] = package.verify_dep_manifest_id(s, dep_full, id);
     if (sel id_r.err) {
         report.notef(rep, s.build_alloc, "note: dep/{} was cloned and checked out; manifest validation failed; clone retained", id);
-        val fault: str = fail.describe(id_r.err);
-        ret err[fail.Fail].err{fail.with_text(id_r.err, fault)};
+        ret id_r;
     }
 
     ret err[fail.Fail].ok{};

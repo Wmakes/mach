@@ -253,7 +253,7 @@ fun execute_plan(r: *cli_diagnostic.Report, a: *A.Allocator, root: str, entries:
     if (sel checked.err) {
         val text: res[str, fail.Fail] = fail.format(a, "cannot reserve clean targets: {}", fail.describe(checked.err));
         if (sel text.err) { ret cli_diagnostic.report_fail(r, text.err, diagnostic.ORIGIN_NONE); }
-        ret cli_diagnostic.report_fail(r, fail.with_text(checked.err, text.ok), diagnostic.ORIGIN_NONE);
+        ret cli_diagnostic.report_fail(r, fail.owning(fail.with_text(checked.err, text.ok)), diagnostic.ORIGIN_NONE);
     }
     var root_fd: usize = system_os.INVALID_HANDLE;
     val opened:  i64   = remove.open_path(root, ?root_fd);

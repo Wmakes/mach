@@ -293,7 +293,7 @@ fun path_filter_refusal(alloc: *A.Allocator, what: str, src: str, top: str, caus
     val mr: res[str, std_format.FormatError] = std_format.sprint(alloc,
         "path dependency '{}': cannot {} the git repository at '{}': {}", src, what, top, fail.describe(cause));
     if (sel mr.err) { ret cause; }
-    ret fail.with_text(cause, mr.ok);
+    ret fail.owning(fail.with_text(cause, mr.ok));
 }
 
 # the kept listing of a source, from the repository that holds it. an empty listing below the
