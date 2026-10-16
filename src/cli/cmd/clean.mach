@@ -274,8 +274,8 @@ fun execute_entry(r: *cli_diagnostic.Report, a: *A.Allocator, root_fd: usize, e:
     if (rr.failed) {
         if (rr.kind == io_error.NOT_FOUND && !rr.containment) { ret code; }
         val text: res[str, fail.Fail] = fail.format(a, "cannot remove clean target '{}': {}", e.rel, remove.message(rr));
-        if (rr.containment) { ret exit.worst(code, cli_diagnostic.report_fail(r, fail.user_of(diagnostic_kind.FS_REMOVE, text), diagnostic.ORIGIN_NONE)); }
-        ret exit.worst(code, cli_diagnostic.report_fail(r, fail.environment_of(diagnostic_kind.FS_REMOVE, text), diagnostic.ORIGIN_NONE));
+        if (rr.containment) { ret exit.worst(code, cli_diagnostic.report_fail(r, remove.with_cleanup(a, fail.user_of(diagnostic_kind.FS_REMOVE, text), rr), diagnostic.ORIGIN_NONE)); }
+        ret exit.worst(code, cli_diagnostic.report_fail(r, remove.with_cleanup(a, fail.environment_of(diagnostic_kind.FS_REMOVE, text), rr), diagnostic.ORIGIN_NONE));
     }
     if (rr.removed == 0) { ret code; }
 
