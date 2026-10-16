@@ -2,6 +2,7 @@ use std.allocator.page;
 use collections_vector: std.collections.vector;
 use std.collections.vector.Vector;
 use std.crypto.hash.sha256;
+use std.system.panic.panic;
 use std.text.string.str_free;
 use std.types.bool.bool;
 use std.types.bool.false;
@@ -284,23 +285,19 @@ pub fun goal_from_emit_name(name: str) opt[BuildGoal] {
     ret opt[BuildGoal].none{};
 }
 
-# the name `--emit` gives the goal, "" for a goal it does not name
+# the name `--emit` gives a catalogued goal, "" for one it does not name
 pub fun goal_emit_name(goal: BuildGoal) str {
-    val spec: *BuildGoalSpec = goal_spec(goal);
-    if (spec == nil) { ret ""; }
-    ret spec.emit_name;
+    ret catalogued(goal).emit_name;
 }
 
+# the name a catalogued goal is displayed by
 pub fun goal_name(goal: BuildGoal) str {
-    val spec: *BuildGoalSpec = goal_spec(goal);
-    if (spec == nil) { ret "unknown"; }
-    ret spec.display;
+    ret catalogued(goal).display;
 }
 
+# the verb a catalogued goal's unit is announced with
 pub fun goal_verb(goal: BuildGoal) str {
-    val spec: *BuildGoalSpec = goal_spec(goal);
-    if (spec == nil) { ret "building"; }
-    ret spec.verb;
+    ret catalogued(goal).verb;
 }
 
 pub fun validate(a: *A.Allocator, r: *BuildRequest) err[fail.Fail] {
@@ -636,6 +633,15 @@ fun goal_spec(goal: BuildGoal) *BuildGoalSpec {
     ret nil;
 }
 
+# the entry of a goal in BUILD_GOALS. every goal a request carries is one validate admitted, so a
+# goal outside the catalog is a defect in its caller
+fun catalogued(goal: BuildGoal) *BuildGoalSpec {
+    val spec: *BuildGoalSpec = goal_spec(goal);
+    if (spec == nil) { panic("a build goal outside BUILD_GOALS"); }
+    ret spec;
+}
+
+# whether a goal caches objects; a goal outside the catalog does not, and validate refuses it
 fun goal_caches(goal: BuildGoal) bool {
     val spec: *BuildGoalSpec = goal_spec(goal);
     ret spec != nil && spec.caches;
@@ -766,8 +772,7 @@ test build_goal_catalog__is_complete_unique_ordered_and_round_trips {
     val goal_from_emit_name_r: opt[BuildGoal] = goal_from_emit_name("tests");
     if (sel goal_from_emit_name_r.some) { ret 1; }
     val goal_from_emit_name_r2: opt[BuildGoal] = goal_from_emit_name("");
-    if (sel goal_from_emit_name_r2.some)                   { ret 1; }
-    if (!str_equals(goal_name(255::BuildGoal), "unknown")) { ret 1; }
+    if (sel goal_from_emit_name_r2.some) { ret 1; }
     i = 0;
     for (i < BUILD_GOAL_N) {
         if (!seen[i]) { ret 1; }
