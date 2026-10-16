@@ -221,6 +221,7 @@ pub fun native_text(a: *A.Allocator, text: str) res[NativeName, NativeTextError]
     ret res[NativeName, NativeTextError].ok{NativeName{units: units, length: length}};
 }
 
+# release a native text; an empty one owns no units
 pub fun native_text_free(a: *A.Allocator, name: *NativeName) {
     if (name.units == nil) { ret; }
     A.deallocate[Unit](a, name.units, name.length + 1);
@@ -318,7 +319,7 @@ fun program_resolve_in(a: *A.Allocator, name: str, search: str) res[str, fail.Fa
                     types_string.owned_release(?released);
                 }
                 val d_r: res[str, types_string.StrError] = str_copy(a, ".COM;.EXE;.BAT;.CMD");
-                if (sel d_r.err) { ret res[str, fail.Fail].err{fail.message("out of memory")}; }
+                if (sel d_r.err) { ret res[str, fail.Fail].err{fail.str_refused(d_r.err)}; }
                 exts     = d_r.ok;
                 own_exts = true;
             }

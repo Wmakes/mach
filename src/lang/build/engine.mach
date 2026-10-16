@@ -86,7 +86,6 @@ use std.print;
 use std.process.env;
 #[testing]
 use std.process.exec;
-#[testing]
 use std.system.panic.panic;
 #[testing]
 use std.text.string.str_dup;
@@ -199,7 +198,7 @@ pub fun execute(bp: *build_plan.BuildPlan, backing: *A.Allocator, oa: *A.Allocat
             readout.failure(sink, ?f, diagnostic.ORIGIN_BUILD);
             outcome.fold_fail(?bo, ?f);
             val pr: res[usize, A.Error] = collections_vector.push[str](?failed, unit.label);
-            if (sel pr.err) { ret res[outcome.BuildOutcome, fail.Fail].err{fail.message("out of memory")}; }
+            if (sel pr.err) { ret res[outcome.BuildOutcome, fail.Fail].err{fail.refused(pr.err)}; }
         }
         if (sel ur.ok) {
             var ubo:       outcome.BuildOutcome = ur.ok;
@@ -209,7 +208,7 @@ pub fun execute(bp: *build_plan.BuildPlan, backing: *A.Allocator, oa: *A.Allocat
             }
             if (ubo.severity != outcome.BUILD_OK) {
                 val fr: res[usize, A.Error] = collections_vector.push[str](?failed, unit.label);
-                if (sel fr.err) { ret res[outcome.BuildOutcome, fail.Fail].err{fail.message("out of memory")}; }
+                if (sel fr.err) { ret res[outcome.BuildOutcome, fail.Fail].err{fail.refused(fr.err)}; }
             }
             val mr: err[A.Error] = outcome.merge(?bo, ?ubo);
             if (sel mr.err) { ret res[outcome.BuildOutcome, fail.Fail].err{fail.message("failed to merge build outcome")}; }
@@ -621,6 +620,7 @@ fun plan_test_outputs(p: *project.Project) res[*str, fail.Fail] {
     ret res[*str, fail.Fail].ok{destinations};
 }
 
+# release the destination names `names`; a nil list owns nothing
 fun release_names(p: *project.Project, names: *str) {
     if (names == nil) { ret; }
     var i: usize = 0;
@@ -1439,7 +1439,7 @@ fun pcg_stable_err(p: *project.Project, msg: str) str {
 
 fun pcg_worker_main(arg: *u8) {
     val pc: *ParallelCodegen = arg::*ParallelCodegen;
-    if (pc == nil) { ret; }
+    if (pc == nil) { panic("a codegen worker started with no section"); }
     val wid_raw: i64 = atomic.fetch_add(?pc.worker_seq, 1::i64);
     if (wid_raw < 0 || wid_raw >= pc.nworkers::i64) { ret; }
     val wid: u32        = wid_raw::u32;

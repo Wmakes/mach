@@ -132,6 +132,8 @@ pub fun init(alloc: *A.Allocator) res[Set, fail.Fail];
 pub fun dnit(set: *Set);
 ```
 
+release an instance set; a nil set, or one never made, holds nothing
+
 ## fun count
 
 ```mach

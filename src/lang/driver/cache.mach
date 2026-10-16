@@ -942,6 +942,7 @@ fun warning_enter(raw: ptr, product: query.QueryKey) bool {
     ret product.kind.owner == query.KEY_MODULE && product.key == sink.key;
 }
 
+# the warnings a product kept; a product that kept no store has none
 fun warning_visit(raw: ptr, product: query.QueryKey, store: *diagnostic.DiagnosticStore) {
     val sink: *WarningSink = raw::*WarningSink;
     if (store == nil) { ret; }

@@ -34,6 +34,8 @@ the test declarations of one lowered module, in function order
 pub fun free(s: *session.Session, c: *Collected);
 ```
 
+release a collection; a nil collection holds nothing
+
 ## val MAIN_LINKAGE
 
 ```mach

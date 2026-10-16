@@ -268,14 +268,20 @@ fun lower_fun(ctx: *lower_context.LowerContext, did: ast_id.DeclId, d: *ast_decl
     ctx.m.functions[fn_index].extensions = exts.ok;
     ctx.m.functions[fn_index].section    = decl_section_of(ctx, d);
     ctx.m.functions[fn_index].stage      = decl_stage_of(ctx, d);
-    ctx.m.functions[fn_index].wg_x       = decl_workgroup_dim(ctx, d, 0);
-    ctx.m.functions[fn_index].wg_y       = decl_workgroup_dim(ctx, d, 1);
-    ctx.m.functions[fn_index].wg_z       = decl_workgroup_dim(ctx, d, 2);
+    var wg: [3]u32;
     var wi: u32 = 0;
     for (wi < 3) {
-        ctx.m.functions[fn_index].wg_spec[wi] = decl_workgroup_spec(ctx, d, wi);
+        val dim: res[u32, fail.Fail] = decl_workgroup_dim(ctx, d, wi);
+        if (sel dim.err) { ret err[fail.Fail].err{dim.err}; }
+        wg[wi] = dim.ok;
+        val spec: res[intern.StrId, fail.Fail] = decl_workgroup_spec(ctx, d, wi);
+        if (sel spec.err) { ret err[fail.Fail].err{spec.err}; }
+        ctx.m.functions[fn_index].wg_spec[wi] = spec.ok;
         wi                                    = wi + 1;
     }
+    ctx.m.functions[fn_index].wg_x   = wg[0];
+    ctx.m.functions[fn_index].wg_y   = wg[1];
+    ctx.m.functions[fn_index].wg_z   = wg[2];
     ctx.m.functions[fn_index].op_set = op_set;
     if (op_set != target_definition.NO_OP_SET) { ctx.m.functions[fn_index].op_code = op_code; }
 
@@ -477,7 +483,8 @@ fun lower_global(ctx: *lower_context.LowerContext, did: ast_id.DeclId, d: *ast_d
     if (sel debug_type.err) { ret err[fail.Fail].err{debug_type.err}; }
     g.debug_type = debug_type.ok;
     g.decl_loc   = lang_source.location(ctx.scope.a.file_id, d.data.bind.name);
-    fill_iface_role(ctx, d, ?g);
+    val role: err[fail.Fail] = fill_iface_role(ctx, d, ?g);
+    if (sel role.err) { ret role; }
 
     val res_idx: res[u32, fail.Fail] = append_global(ctx, g);
     if (sel res_idx.err) { ret err[fail.Fail].err{res_idx.err}; }
@@ -1110,53 +1117,65 @@ fun decorator_fn_flags(ctx: *lower_context.LowerContext, d: *ast_decl.Decl) u32 
     ret flags;
 }
 
-fun fill_iface_role(ctx: *lower_context.LowerContext, d: *ast_decl.Decl, g: *me_ir.Global) {
+fun fill_iface_role(ctx: *lower_context.LowerContext, d: *ast_decl.Decl, g: *me_ir.Global) err[fail.Fail] {
+    var role: decorator.Id = decorator.SHARED;
+    var a_n:  u32          = 0;
+    var b_n:  u32          = 0;
     if (decorator.has(ctx.scope.a, d, decorator.INPUT)) {
-        g.iface   = me_ir.IFACE_INPUT;
-        g.iface_a = decorator_uint(ctx, d, decorator.INPUT, 0, 0);
-        ret;
+        g.iface = me_ir.IFACE_INPUT;
+        role    = decorator.INPUT;
+        a_n     = 1;
     }
-    if (decorator.has(ctx.scope.a, d, decorator.OUTPUT)) {
-        g.iface   = me_ir.IFACE_OUTPUT;
-        g.iface_a = decorator_uint(ctx, d, decorator.OUTPUT, 0, 0);
-        ret;
+    or (decorator.has(ctx.scope.a, d, decorator.OUTPUT)) {
+        g.iface = me_ir.IFACE_OUTPUT;
+        role    = decorator.OUTPUT;
+        a_n     = 1;
     }
-    if (decorator.has(ctx.scope.a, d, decorator.BUILTIN)) {
+    or (decorator.has(ctx.scope.a, d, decorator.BUILTIN)) {
         g.iface   = me_ir.IFACE_BUILTIN;
         g.iface_a = decl_builtin_of(ctx, d);
-        ret;
     }
-    if (decorator.has(ctx.scope.a, d, decorator.UNIFORM)) {
-        g.iface   = me_ir.IFACE_UNIFORM;
-        g.iface_a = decorator_uint(ctx, d, decorator.UNIFORM, 0, 0);
-        g.iface_b = decorator_uint(ctx, d, decorator.UNIFORM, 1, 0);
-        ret;
+    or (decorator.has(ctx.scope.a, d, decorator.UNIFORM)) {
+        g.iface = me_ir.IFACE_UNIFORM;
+        role    = decorator.UNIFORM;
+        a_n     = 1;
+        b_n     = 1;
     }
-    if (decorator.has(ctx.scope.a, d, decorator.STORAGE)) {
+    or (decorator.has(ctx.scope.a, d, decorator.STORAGE)) {
         g.iface       = me_ir.IFACE_STORAGE;
-        g.iface_a     = decorator_uint(ctx, d, decorator.STORAGE, 0, 0);
-        g.iface_b     = decorator_uint(ctx, d, decorator.STORAGE, 1, 0);
         g.iface_flags = decl_storage_flags(ctx, d);
-        ret;
+        role          = decorator.STORAGE;
+        a_n           = 1;
+        b_n           = 1;
     }
-    if (decorator.has(ctx.scope.a, d, decorator.PUSH)) {
+    or (decorator.has(ctx.scope.a, d, decorator.PUSH)) {
         g.iface       = me_ir.IFACE_PUSH;
         g.iface_flags = me_ir.IFACE_FLAG_READONLY;
-        ret;
     }
-    if (decorator.has(ctx.scope.a, d, decorator.SAMPLER)) {
-        g.iface   = me_ir.IFACE_SAMPLER;
-        g.iface_a = decorator_uint(ctx, d, decorator.SAMPLER, 0, 0);
-        g.iface_b = decorator_uint(ctx, d, decorator.SAMPLER, 1, 0);
-        ret;
+    or (decorator.has(ctx.scope.a, d, decorator.SAMPLER)) {
+        g.iface = me_ir.IFACE_SAMPLER;
+        role    = decorator.SAMPLER;
+        a_n     = 1;
+        b_n     = 1;
     }
-    if (decorator.has(ctx.scope.a, d, decorator.SPEC)) {
+    or (decorator.has(ctx.scope.a, d, decorator.SPEC)) {
         g.iface       = me_ir.IFACE_SPEC;
-        g.iface_a     = decorator_uint(ctx, d, decorator.SPEC, 0, 0);
         g.iface_flags = me_ir.IFACE_FLAG_READONLY;
-        ret;
+        role          = decorator.SPEC;
+        a_n           = 1;
     }
-    if (decorator.has(ctx.scope.a, d, decorator.SHARED)) { g.iface = me_ir.IFACE_SHARED; }
+    or (decorator.has(ctx.scope.a, d, decorator.SHARED)) { g.iface = me_ir.IFACE_SHARED; }
+    if (a_n > 0) {
+        val ia: res[u32, fail.Fail] = decorator_uint(ctx, d, role, 0, 0);
+        if (sel ia.err) { ret err[fail.Fail].err{ia.err}; }
+        g.iface_a = ia.ok;
+    }
+    if (b_n > 0) {
+        val ib: res[u32, fail.Fail] = decorator_uint(ctx, d, role, 1, 0);
+        if (sel ib.err) { ret err[fail.Fail].err{ib.err}; }
+        g.iface_b = ib.ok;
+    }
+    ret err[fail.Fail].ok{};
 }
 
 fun decl_storage_flags(ctx: *lower_context.LowerContext, d: *ast_decl.Decl) u32 {
@@ -1207,18 +1226,32 @@ fun decorator_string(ctx: *lower_context.LowerContext, d: *ast_decl.Decl, id: de
     ret decorator.string_of(?ctx.s.interner, ctx.scope.ctx, ctx.scope.a, dec.some, ord);
 }
 
-fun decorator_uint(ctx: *lower_context.LowerContext, d: *ast_decl.Decl, id: decorator.Id, ord: u32, dflt: u32) u32 {
+# argument `ord` of decorator `id` on `d` as a u32, `dflt` when the decorator gives none
+fun decorator_uint(ctx: *lower_context.LowerContext, d: *ast_decl.Decl, id: decorator.Id, ord: u32, dflt: u32) res[u32, fail.Fail] {
     val opt_arg: opt[ast_id.ExprId] = decorator_arg_eid(ctx, d, id, ord);
-    if (sel opt_arg.none) { ret dflt; }
+    if (sel opt_arg.none) { ret res[u32, fail.Fail].ok{dflt}; }
+    ret constant_u32(ctx, opt_arg.some, 0);
+}
+
+# the integer constant `arg` folds to, which sema admitted as an integer: one below `least` or
+# past a u32 is refused where it is written
+fun constant_u32(ctx: *lower_context.LowerContext, arg: ast_id.ExprId, least: u64) res[u32, fail.Fail] {
     val res_u64: res[ir_type.IrTypeId, fail.Fail] = ir_type.intern_int(?ctx.m.types, 64);
-    if (sel res_u64.err) { ret dflt; }
-    val u64t:     ir_type.IrTypeId            = res_u64.ok;
-    val res_fold: res[value.Value, fail.Fail] = fold_global_init(ctx, ast_id.DECL_NIL, opt_arg.some, u64t, intern.STR_NIL);
-    if (sel res_fold.err) { ret dflt; }
+    if (sel res_u64.err) { ret res[u32, fail.Fail].err{res_u64.err}; }
+    val res_fold: res[value.Value, fail.Fail] = fold_global_init(ctx, ast_id.DECL_NIL, arg, res_u64.ok, intern.STR_NIL);
+    if (sel res_fold.err) { ret res[u32, fail.Fail].err{res_fold.err}; }
     val v: value.Value = res_fold.ok;
-    if (v.kind != value.VAL_CONST_INT) { ret dflt; }
-    if (v.data.int_lit > 0xFFFFFFFF)   { ret dflt; }
-    ret v.data.int_lit::u32;
+    if (v.kind != value.VAL_CONST_INT)                         { ret res[u32, fail.Fail].err{fail.message("lower: a decorator argument sema admitted as an integer did not fold to one")}; }
+    if (v.data.int_lit < least || v.data.int_lit > 0xFFFFFFFF) { ret range_refused(ctx, arg, least); }
+    ret res[u32, fail.Fail].ok{v.data.int_lit::u32};
+}
+
+fun range_refused(ctx: *lower_context.LowerContext, arg: ast_id.ExprId, least: u64) res[u32, fail.Fail] {
+    fail.reject(?ctx.status);
+    val text: res[str, fail.Fail] = fail.format(ctx.s.alloc, "this decorator argument must lie in {} to 4294967295", least);
+    if (sel text.err) { ret res[u32, fail.Fail].err{text.err}; }
+    val loc: lang_source.Location = lang_source.location(ctx.scope.a.file_id, lower_expr.expr_span_of(ctx, arg));
+    ret res[u32, fail.Fail].err{diagnostic.reject(ctx.diags, diagnostic_kind.DECORATOR_ARGUMENT, loc, text.ok)};
 }
 
 fun decl_stage_of(ctx: *lower_context.LowerContext, d: *ast_decl.Decl) u8 {
@@ -1230,52 +1263,47 @@ fun decl_stage_of(ctx: *lower_context.LowerContext, d: *ast_decl.Decl) u8 {
     ret me_ir.STAGE_NONE;
 }
 
-fun decl_workgroup_dim(ctx: *lower_context.LowerContext, d: *ast_decl.Decl, ord: u32) u32 {
+# dimension `ord` of a function's `#[workgroup]`, 1 without one; a `#[spec]` var sizes it by its
+# default until the host supplies another
+fun decl_workgroup_dim(ctx: *lower_context.LowerContext, d: *ast_decl.Decl, ord: u32) res[u32, fail.Fail] {
     val opt_arg: opt[ast_id.ExprId] = decorator_arg_eid(ctx, d, decorator.WORKGROUP, ord);
-    if (sel opt_arg.none)                                     { ret 1; }
-    if (!intern.str_is_nil(decl_workgroup_spec(ctx, d, ord))) { ret spec_default(ctx, opt_arg.some); }
-    val res_u64: res[ir_type.IrTypeId, fail.Fail] = ir_type.intern_int(?ctx.m.types, 64);
-    if (sel res_u64.err) { ret 1; }
-    val u64t:     ir_type.IrTypeId            = res_u64.ok;
-    val res_fold: res[value.Value, fail.Fail] = fold_global_init(ctx, ast_id.DECL_NIL, opt_arg.some, u64t, intern.STR_NIL);
-    if (sel res_fold.err) { ret 1; }
-    val v: value.Value = res_fold.ok;
-    if (v.kind != value.VAL_CONST_INT)                      { ret 1; }
-    if (v.data.int_lit == 0 || v.data.int_lit > 0xFFFFFFFF) { ret 1; }
-    ret v.data.int_lit::u32;
+    if (sel opt_arg.none) { ret res[u32, fail.Fail].ok{1}; }
+    val spec: res[intern.StrId, fail.Fail] = decl_workgroup_spec(ctx, d, ord);
+    if (sel spec.err)                { ret res[u32, fail.Fail].err{spec.err}; }
+    if (!intern.str_is_nil(spec.ok)) { ret spec_default(ctx, opt_arg.some); }
+    ret constant_u32(ctx, opt_arg.some, 1);
 }
 
 # the default the `#[spec]` var `arg` names declares, which sizes the workgroup until the host
-# supplies another; read from its declaration, since a var binds no constant
-fun spec_default(ctx: *lower_context.LowerContext, arg: ast_id.ExprId) u32 {
+# supplies another; read from its declaration, since a var binds no constant. sema admits only
+# a `#[spec]` var with an integer default here
+fun spec_default(ctx: *lower_context.LowerContext, arg: ast_id.ExprId) res[u32, fail.Fail] {
     val opt_sym: opt[*resolve.Symbol] = lower_context.symbol_of(ctx, lower_context.expr_symbol_of(ctx, arg));
-    if (sel opt_sym.none) { ret 1; }
+    if (sel opt_sym.none) { ret res[u32, fail.Fail].err{fail.message("lower: a workgroup `#[spec]` var names no symbol")}; }
     val found: res[lower_context.Declared, fail.Fail] = lower_context.declared(ctx, opt_sym.some);
-    if (sel found.err) { ret 1; }
+    if (sel found.err) { ret res[u32, fail.Fail].err{found.err}; }
     val d: *fe_sema.interface.Declaration = found.ok.declaration;
-    if (d.kind != resolve.SYM_VAR || d.value == fe_sema.interface.NONE) { ret 1; }
+    if (d.kind != resolve.SYM_VAR || d.value == fe_sema.interface.NONE) { ret res[u32, fail.Fail].err{fail.message("lower: a workgroup `#[spec]` var declares no default")}; }
     val v: res[comptime.CTValue, comptime.EvalFail] = comptime_deep.value(?found.ok.iface.values, ?ctx.s.interner, d.value);
-    if (!sel v.ok) { ret 1; }
+    if (!sel v.ok) { ret res[u32, fail.Fail].err{fail.message("lower: a workgroup `#[spec]` var's default does not read back")}; }
     val n: opt[u64] = comptime.ct_int_u64(v.ok);
-    if (!sel n.some)                        { ret 1; }
-    if (n.some == 0 || n.some > 0xFFFFFFFF) { ret 1; }
-    ret n.some::u32;
+    if (!sel n.some)                        { ret res[u32, fail.Fail].err{fail.message("lower: a workgroup `#[spec]` var's default is not an integer")}; }
+    if (n.some == 0 || n.some > 0xFFFFFFFF) { ret range_refused(ctx, arg, 1); }
+    ret res[u32, fail.Fail].ok{n.some::u32};
 }
 
 # the linkage name of the module `var` a workgroup dimension names, nil for a constant
 # dimension. sema admits only a `#[spec]` var there, and the back end holds it to that
-fun decl_workgroup_spec(ctx: *lower_context.LowerContext, d: *ast_decl.Decl, ord: u32) intern.StrId {
+fun decl_workgroup_spec(ctx: *lower_context.LowerContext, d: *ast_decl.Decl, ord: u32) res[intern.StrId, fail.Fail] {
     val opt_arg: opt[ast_id.ExprId] = decorator_arg_eid(ctx, d, decorator.WORKGROUP, ord);
-    if (sel opt_arg.none) { ret intern.STR_NIL; }
+    if (sel opt_arg.none) { ret res[intern.StrId, fail.Fail].ok{intern.STR_NIL}; }
     val opt_sym: opt[*resolve.Symbol] = lower_context.symbol_of(ctx, lower_context.expr_symbol_of(ctx, opt_arg.some));
-    if (sel opt_sym.none) { ret intern.STR_NIL; }
+    if (sel opt_sym.none) { ret res[intern.StrId, fail.Fail].ok{intern.STR_NIL}; }
     val sym: *resolve.Symbol = opt_sym.some;
     if (sym.kind != resolve.SYM_VAR && !(sym.kind == resolve.SYM_IMPORTED && sym.definition_kind == resolve.SYM_VAR)) {
-        ret intern.STR_NIL;
+        ret res[intern.StrId, fail.Fail].ok{intern.STR_NIL};
     }
-    val name: intern.StrId = lower_expr.symbol_linkage_name(ctx, opt_arg.some);
-    if (intern.str_is_nil(name)) { ret intern.STR_NIL; }
-    ret name;
+    ret lower_expr.symbol_linkage_name(ctx, opt_arg.some);
 }
 
 fun decl_section_of(ctx: *lower_context.LowerContext, d: *ast_decl.Decl) intern.StrId {

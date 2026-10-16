@@ -17,6 +17,7 @@ use collections_vector: std.collections.vector;
 use std.collections.vector.Vector;
 use std_format: std.format;
 use std.memory;
+use std.system.panic.panic;
 use std.text.string.str_dup;
 use std.text.string.str_free;
 use std.types.bool.bool;
@@ -87,7 +88,8 @@ pub def ComputeFn: fun(ptr, *Kind, u64, *A.Allocator, *diagnostic.DiagnosticStor
 # owner:    what the kind's keys name
 # origin:   the phase a derived product's diagnostics belong to
 # compute:  a derived product's computation; an input has none
-# finalize: releases what an owned derived product's bytes hold; nil when the bytes own nothing
+# finalize: releases what an owned derived product's bytes hold, called only on bytes its own
+#           computation published; nil when the bytes own nothing
 # equal:    whether two owned products are the same, so an equal recomputation keeps the revision;
 #           requires finalize
 # replay:   the product lowers or generates a module's object, so a restored object replays its
@@ -747,6 +749,8 @@ rec RetireEdge {
     next:      usize;
 }
 
+# release a retirement that was prepared and not committed; one already committed or
+# discarded owns nothing
 pub fun discard_retirement(prepared: *PreparedRetirement) {
     if (prepared.owner == nil) { ret; }
     collections_vector.dnit[Slot](?prepared.keys);
@@ -1861,14 +1865,19 @@ fun key_of(db: *QueryDb, slot: Slot) QueryKey {
     ret QueryKey{kind: db.storage[slot.kind::u32].spec, key: slot.key};
 }
 
+# the entry stored under `key`, nil when there is none. the key index and the
+# entry table change together, so the read is total: a handle the index holds
+# and the table refuses is a broken invariant of this module, and it stops the
+# compiler
 fun entry_find(sh: *QueryShard, key: u64) *QueryEntry {
     var k:    u64                                     = key;
     val id_r: opt[*handle.HandleId[QueryEntryDomain]] = map.get[u64, handle.HandleId[QueryEntryDomain]](?sh.by_key, ?k);
     if (sel id_r.none) { ret nil; }
     val id:  handle.HandleId[QueryEntryDomain] = @id_r.some;
     val e_r: res[*QueryEntry, handle.Error]    = handle.get[QueryEntry, QueryEntryDomain](?sh.entries, id);
-    if (sel e_r.err) { ret nil; }
-    ret e_r.ok;
+    if (sel e_r.ok) { ret e_r.ok; }
+    panic("query: the key index holds a handle its entry table refuses\n");
+    ret nil;
 }
 
 fun entry_append(db: *QueryDb, sh: *QueryShard, key: u64) res[*QueryEntry, fail.Fail] {

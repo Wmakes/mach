@@ -483,7 +483,7 @@ fun case_id(sc: *sema_context.SemaContext, span: lang_source.Span) intern.StrId 
 }
 
 fun place_type(sc: *sema_context.SemaContext, eid: ast_id.ExprId) type.TypeId {
-    if (sc.view.expr_type == nil || ast_id.expr_index(eid) >= sc.view.a.exprs.len::u32) { ret type.TYPE_ERROR; }
+    if (sc.view.expr_type == nil || ast_id.expr_is_nil(eid) || !sema_context.expr_in_view(sc, eid)) { ret type.TYPE_ERROR; }
     ret sc.view.expr_type[ast_id.expr_index(eid)];
 }
 

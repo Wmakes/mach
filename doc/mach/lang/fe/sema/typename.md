@@ -12,6 +12,8 @@ pub fun type_to_str(s: *session.Session, t: type.TypeId) res[str, fail.Fail];
 pub fun type_str_free(s: *session.Session, owned: str);
 ```
 
+release a spelled type; a nil spelling owns nothing
+
 ## fun name_str
 
 ```mach

@@ -175,6 +175,7 @@ pub fun init(a: *A.Allocator) SourceMap {
     ret m;
 }
 
+# release a source map and its files; a nil map holds nothing
 pub fun dnit(m: *SourceMap) {
     if (m == nil) { ret; }
 
@@ -373,6 +374,8 @@ pub fun prepare_load(m: *SourceMap, interner: *intern.Interner, path: str, text:
     ret res[PreparedLoad, Error].ok{prepared};
 }
 
+# release a load that was prepared and not committed; one already committed or discarded
+# owns nothing
 pub fun discard_load(prepared: *PreparedLoad) {
     if (prepared.owner == nil) { ret; }
     val m: *SourceMap = prepared.owner;

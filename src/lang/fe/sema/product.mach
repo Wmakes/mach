@@ -48,6 +48,7 @@ pub rec SemaResult {
     interface: interface.Interface;
 }
 
+# release a semantic result; a nil result holds nothing
 pub fun result_dnit(r: *SemaResult) {
     if (r == nil) { ret; }
     fields.dnit(?r.field_graph);
@@ -174,6 +175,7 @@ pub fun reader_init(ctx: ptr, read: fun(ptr, session.ModuleId, DefinitionPhase) 
     ret DefinitionReader{ctx: ctx, read: read, acquired: collections_vector.init[AcquiredDefinition](a)};
 }
 
+# release a reader; a nil reader holds nothing
 pub fun reader_dnit(reader: *DefinitionReader) {
     if (reader == nil) { ret; }
     collections_vector.dnit[AcquiredDefinition](?reader.acquired);

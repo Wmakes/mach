@@ -172,7 +172,7 @@ pub fun goal_from_emit_name(name: str) opt[BuildGoal];
 pub fun goal_emit_name(goal: BuildGoal) str;
 ```
 
-the name `--emit` gives the goal, "" for a goal it does not name
+the name `--emit` gives a catalogued goal, "" for one it does not name
 
 ## fun goal_name
 
@@ -180,11 +180,15 @@ the name `--emit` gives the goal, "" for a goal it does not name
 pub fun goal_name(goal: BuildGoal) str;
 ```
 
+the name a catalogued goal is displayed by
+
 ## fun goal_verb
 
 ```mach
 pub fun goal_verb(goal: BuildGoal) str;
 ```
+
+the verb a catalogued goal's unit is announced with
 
 ## fun validate
 

@@ -88,6 +88,8 @@ pub fun init(alloc: *A.Allocator) Interface;
 pub fun dnit(iface: *Interface);
 ```
 
+release an interface; a nil one, or one never made, holds nothing
+
 ## fun declaration_add
 
 ```mach

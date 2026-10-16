@@ -109,19 +109,18 @@ pub fun token_resolve(a: *A.Allocator, tgt: *binding.Binding, dirs: *Vector[str]
         ret res[Input, fail.Fail].err{fail.formatted_user(a, diagnostic_kind.LINK_INPUT_FORMAT,
             "'{}' cannot be linked: the target's object format takes no link inputs", tok::str)};
     }
-    val naming: *target_of.InputNaming = tgt.of.inputs;
-    var buf:    [PATH_CAP]u8;
-    var found:  bool                   = false;
-    if (token_is_path(tok)) {
-        found = path_locate(a, tok, root, ?buf[0]);
-    }
-    or {
-        found = static_search(naming, dirs, tok, ?buf[0]);
-        if (!found && naming.shared != nil && naming.shared.candidate != nil) {
-            val shared: res[opt[Input], fail.Fail] = shared_search(a, tgt, naming.shared, dirs, tok);
-            if (sel shared.err)     { ret res[Input, fail.Fail].err{shared.err}; }
-            if (sel shared.ok.some) { ret res[Input, fail.Fail].ok{shared.ok.some}; }
-        }
+    val naming:   *target_of.InputNaming = tgt.of.inputs;
+    var buf:      [PATH_CAP]u8;
+    val by_path:  bool                   = token_is_path(tok);
+    var searched: res[bool, fail.Fail]   = res[bool, fail.Fail].ok{false};
+    if (by_path)          { searched = path_locate(a, tok, root, ?buf[0]); }
+    or                    { searched = static_search(a, naming, dirs, tok, ?buf[0]); }
+    if (sel searched.err) { ret res[Input, fail.Fail].err{searched.err}; }
+    val found: bool = searched.ok;
+    if (!by_path && !found && naming.shared != nil && naming.shared.candidate != nil) {
+        val shared: res[opt[Input], fail.Fail] = shared_search(a, tgt, naming.shared, dirs, tok);
+        if (sel shared.err)     { ret res[Input, fail.Fail].err{shared.err}; }
+        if (sel shared.ok.some) { ret res[Input, fail.Fail].ok{shared.ok.some}; }
     }
     if (!found) {
         ret res[Input, fail.Fail].err{fail.formatted_user(a, diagnostic_kind.LINK_INPUT_NOT_FOUND, "cannot find link input '{}'", tok::str)};
@@ -155,8 +154,10 @@ fun shared_path_resolve(a: *A.Allocator, tgt: *binding.Binding, vt: *target_of.O
         ret res[Input, fail.Fail].err{fail.formatted_user(a, diagnostic_kind.LINK_INPUT_FORMAT,
             "'{}' is {}; {} inputs require {}", tok::str, shared.noun, vt.shared_input_ext, shared.requires)};
     }
-    var buf: [PATH_CAP]u8;
-    if (path_locate(a, tok, root, ?buf[0])) {
+    var buf:     [PATH_CAP]u8;
+    val located: res[bool, fail.Fail] = path_locate(a, tok, root, ?buf[0]);
+    if (sel located.err) { ret res[Input, fail.Fail].err{located.err}; }
+    if (located.ok) {
         var name:       [PATH_CAP]u8;
         val identified: res[bool, fail.Fail] = shared_identify(a, shared, tgt.target.arch_id, ?buf[0], ?name[0]);
         if (sel identified.err) { ret res[Input, fail.Fail].err{identified.err}; }
@@ -193,35 +194,52 @@ fun shared_identify(a: *A.Allocator, shared: *target_of.SharedNaming, arch_id: u
     ret res[bool, fail.Fail].ok{ok};
 }
 
-# the file a path token names, as written or under `root` when relative,
-# written to `buf`
-fun path_locate(a: *A.Allocator, tok: *u8, root: str, buf: *u8) bool {
-    var parts: [1]str = [1]str{tok::str};
-    if (target_of.path_write(buf, PATH_CAP, nil, ?parts[0], 1) && file_present(buf)) { ret true; }
-    if (types_path.is_abs(tok::str))                                                 { ret false; }
+# whether the file a path token names exists, as written or under `root` when
+# relative, its path written to `buf`
+fun path_locate(a: *A.Allocator, tok: *u8, root: str, buf: *u8) res[bool, fail.Fail] {
+    var parts:   [1]str               = [1]str{tok::str};
+    val written: res[bool, fail.Fail] = candidate_present(a, tok, buf, nil, ?parts[0], 1);
+    if (sel written.err)             { ret written; }
+    if (written.ok)                  { ret written; }
+    if (types_path.is_abs(tok::str)) { ret written; }
     val joined: res[str, A.Error] = types_path.join(a, root, tok::str);
-    if (sel joined.err) { ret false; }
+    if (sel joined.err) { ret res[bool, fail.Fail].err{fail.refused(joined.err)}; }
     parts[0] = joined.ok;
-    ret target_of.path_write(buf, PATH_CAP, nil, ?parts[0], 1) && file_present(buf);
+    ret candidate_present(a, tok, buf, nil, ?parts[0], 1);
 }
 
-# a static input a bare name finds on `dirs` and then the working directory:
-# each suffix the format searches, with the library prefix and then without
-fun static_search(naming: *target_of.InputNaming, dirs: *Vector[str], name: *u8, buf: *u8) bool {
+# whether a static input a bare name finds on `dirs` and then the working
+# directory: each suffix the format searches, with the library prefix and then
+# without, its path written to `buf`
+fun static_search(a: *A.Allocator, naming: *target_of.InputNaming, dirs: *Vector[str], name: *u8, buf: *u8) res[bool, fail.Fail] {
     var i: usize = 0;
     for (i <= dirs.len) {
         var dir: *u8 = nil;
         if (i < dirs.len) { dir = dirs.data[i]::*u8; }
         var s: u32 = 0;
         for (s < naming.static_suffix_count) {
-            var prefixed: [4]str = [4]str{naming.library_prefix, name::str, ".", naming.static_suffixes[s]};
-            if (target_of.path_write(buf, PATH_CAP, dir, ?prefixed[0], 4) && file_present(buf)) { ret true; }
-            if (target_of.path_write(buf, PATH_CAP, dir, ?prefixed[1], 3) && file_present(buf)) { ret true; }
+            var prefixed: [4]str               = [4]str{naming.library_prefix, name::str, ".", naming.static_suffixes[s]};
+            val with:     res[bool, fail.Fail] = candidate_present(a, name, buf, dir, ?prefixed[0], 4);
+            if (sel with.err) { ret with; }
+            if (with.ok)      { ret with; }
+            val bare: res[bool, fail.Fail] = candidate_present(a, name, buf, dir, ?prefixed[1], 3);
+            if (sel bare.err) { ret bare; }
+            if (bare.ok)      { ret bare; }
             s = s + 1;
         }
         i = i + 1;
     }
-    ret false;
+    ret res[bool, fail.Fail].ok{false};
+}
+
+# whether `dir` and the concatenated `parts`, written to `buf`, name a file; a
+# path longer than a link input's path can be is refused, naming the input `tok`
+fun candidate_present(a: *A.Allocator, tok: *u8, buf: *u8, dir: *u8, parts: *str, count: u32) res[bool, fail.Fail] {
+    if (!target_of.path_write(buf, PATH_CAP, dir, parts, count)) {
+        ret res[bool, fail.Fail].err{fail.formatted_user(a, diagnostic_kind.LINK_INPUT_NOT_FOUND,
+            "a path searched for link input '{}' is longer than {} bytes", tok::str, PATH_CAP)};
+    }
+    ret file_present(a, buf);
 }
 
 # the shared library a bare name finds on `dirs` and then the system's library
@@ -254,7 +272,9 @@ fun shared_search_in(a: *A.Allocator, tgt: *binding.Binding, shared: *target_of.
     var index:     u32 = 0;
     for (shared.candidate(dir, name, index, ?candidate[0], PATH_CAP)) {
         index = index + 1;
-        if (!file_present(?candidate[0])) { cnt; }
+        val present: res[bool, fail.Fail] = file_present(a, ?candidate[0]);
+        if (sel present.err) { ret res[opt[Input], fail.Fail].err{present.err}; }
+        if (!present.ok)     { cnt; }
         var loader:     [PATH_CAP]u8;
         val identified: res[bool, fail.Fail] = shared_identify(a, shared, tgt.target.arch_id, ?candidate[0], ?loader[0]);
         if (sel identified.err) { ret res[opt[Input], fail.Fail].err{identified.err}; }
@@ -358,9 +378,15 @@ pub fun framework_resolve(a: *A.Allocator, tgt: *binding.Binding, name: *u8) res
     ret res[Input, fail.Fail].ok{input};
 }
 
-fun file_present(p: *u8) bool {
+# whether `p` names a regular file; a query the system refuses, other than for
+# a path that does not exist, is a failure
+fun file_present(a: *A.Allocator, p: *u8) res[bool, fail.Fail] {
     val r: res[bool, io_error.Error] = fs.is_file(p);
-    ret sel r.ok && r.ok;
+    if (sel r.err) {
+        ret res[bool, fail.Fail].err{fail.formatted_user(a, diagnostic_kind.LINK_INPUT_UNREADABLE,
+            "cannot inspect link input '{}': {}", p::str, fail.io_text(r.err))};
+    }
+    ret res[bool, fail.Fail].ok{r.ok};
 }
 
 fun unreadable(a: *A.Allocator, path: *u8, e: fs.FsError) fail.Fail {

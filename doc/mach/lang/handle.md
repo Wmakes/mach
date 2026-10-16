@@ -46,6 +46,8 @@ pub fun chunk_init[T](a: *A.Allocator) StableChunks[T];
 pub fun chunk_dnit[T](s: *StableChunks[T]);
 ```
 
+release a store and its chunks; a nil store holds nothing
+
 ## fun chunk_count
 
 ```mach
@@ -71,6 +73,8 @@ pub fun chunk_editor[T](s: *StableChunks[T]) res[ChunkEditor[T], Error];
 ```mach
 pub fun chunk_editor_finish[T](e: *ChunkEditor[T]);
 ```
+
+end an edit of a store; an editor that opened no store ends nothing
 
 ## fun chunk_grow
 
@@ -114,6 +118,8 @@ pub fun table_init[T, Domain](a: *A.Allocator) res[HandleTable[T, Domain], Error
 pub fun table_dnit[T, Domain](t: *HandleTable[T, Domain]);
 ```
 
+release a table and its slots; a nil table holds nothing
+
 ## fun get
 
 ```mach
@@ -131,6 +137,8 @@ pub fun edit[T, Domain](t: *HandleTable[T, Domain]) res[HandleEditor[T, Domain],
 ```mach
 pub fun editor_finish[T, Domain](e: *HandleEditor[T, Domain]);
 ```
+
+end an edit of a table; an editor that opened no table ends nothing
 
 ## fun editor_insert
 

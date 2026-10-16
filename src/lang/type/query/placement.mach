@@ -7,7 +7,9 @@
 # a parameter that only flows into parameters that sit nowhere reaches no byte at all, so
 # two instances that differ only there lay out and classify the same storage. the places
 # are a least fixpoint over the declaration graph: every set starts empty and only grows,
-# so passes repeat until one adds nothing
+# so passes repeat until one adds nothing. beside its places, a parameter is reached when its
+# argument appears anywhere an instance's fields lead, an empty array's element included,
+# which is what a question about what a type contains reads
 use std.collections.map;
 use collections_vector: std.collections.vector;
 use std.collections.vector.Vector;
@@ -74,10 +76,11 @@ rec Entry {
 
 # one parameter's places, linked from its entry
 rec Param {
-    index: u32;
-    bits:  u8;
-    via:   [4]u32;
-    next:  u32;
+    index:   u32;
+    bits:    u8;
+    reached: bool;
+    via:     [4]u32;
+    next:    u32;
 }
 
 pub rec Places {
@@ -128,6 +131,13 @@ pub fun bits(p: *Places, generic: type.TypeId, param: u32) u8 {
     val at: u32 = param_at(p, generic, param);
     if (at == NO_ENTRY) { ret 0; }
     ret p.params.data[at].bits;
+}
+
+# whether parameter `param` of a settled generic is reached, through storage or not
+pub fun reached(p: *Places, generic: type.TypeId, param: u32) bool {
+    val at: u32 = param_at(p, generic, param);
+    if (at == NO_ENTRY) { ret false; }
+    ret p.params.data[at].reached;
 }
 
 # the field of `generic` through which `param` first took place `place`, which it must take
@@ -185,14 +195,17 @@ fun entry_of(p: *Places, nominal: type.TypeId) u32 {
     ret ix;
 }
 
-fun add(p: *Places, ix: u32, param: u32, place: Place, field: u32) {
+# the record of parameter `param` of entry `ix`, made on first sight; NO_ENTRY with the
+# refusal recorded when it cannot be made
+fun param_link(p: *Places, ix: u32, param: u32) u32 {
     val nominal: type.TypeId = p.entries.data[ix].nominal;
     var at:      u32         = param_at(p, nominal, param);
     if (at == NO_ENTRY) {
         var link: Param;
-        link.index = param;
-        link.bits  = 0;
-        link.next  = p.entries.data[ix].first;
+        link.index   = param;
+        link.bits    = 0;
+        link.reached = false;
+        link.next    = p.entries.data[ix].first;
         var k: u32 = 0;
         for (k < PLACE_COUNT) {
             link.via[k] = NO_FIELD;
@@ -202,10 +215,26 @@ fun add(p: *Places, ix: u32, param: u32, place: Place, field: u32) {
         val pushed: res[usize, A.Error] = collections_vector.push[Param](?p.params, link);
         if (sel pushed.err) {
             type_query.refused(p.q, pushed.err);
-            ret;
+            ret NO_ENTRY;
         }
         p.entries.data[ix].first = at;
     }
+    ret at;
+}
+
+# parameter `param` of entry `ix` is reached
+fun reach(p: *Places, ix: u32, param: u32) {
+    val at: u32 = param_link(p, ix, param);
+    if (at == NO_ENTRY || p.params.data[at].reached) { ret; }
+    p.params.data[at].reached = true;
+    p.grew                    = true;
+}
+
+# parameter `param` of entry `ix` takes `place`, first through `field`, and is reached
+fun add(p: *Places, ix: u32, param: u32, place: Place, field: u32) {
+    reach(p, ix, param);
+    val at: u32 = param_link(p, ix, param);
+    if (at == NO_ENTRY)                            { ret; }
     if ((p.params.data[at].bits & place::u8) != 0) { ret; }
     p.params.data[at].bits             = p.params.data[at].bits | place::u8;
     p.params.data[at].via[slot(place)] = field;
@@ -221,14 +250,19 @@ fun entry_walk(p: *Places, ix: u32) {
     var f:          u32 = 0;
     for (f < fields_len) {
         val entry: opt[*type.FieldEntry] = type.field_at(p.q.types, nominal, f);
-        if (sel entry.some) { walk(p, ix, entry.some.ty, LAID, f); }
+        if (!sel entry.some) {
+            fail.internal(p.q.status, "placement: a field table runs past its fields");
+            ret;
+        }
+        walk(p, ix, entry.some.ty, LAID, true, f);
         f = f + 1;
     }
 }
 
 # records where the parameters of entry `ix` that `tid` mentions sit, `tid` itself sitting
-# at `place` inside field `field` of the entry
-fun walk(p: *Places, ix: u32, tid: type.TypeId, place: Place, field: u32) {
+# at `place` inside field `field` of the entry; under an empty array, `stored` false, they
+# are only reached
+fun walk(p: *Places, ix: u32, tid: type.TypeId, place: Place, stored: bool, field: u32) {
     if (type.is_nil(tid) || type.is_error(tid)) { ret; }
     if (!type_query.descend(p.q))               { ret; }
     val opt_type: opt[*type.Type] = type.get(p.q.types, tid);
@@ -239,31 +273,36 @@ fun walk(p: *Places, ix: u32, tid: type.TypeId, place: Place, field: u32) {
     val t: *type.Type = opt_type.some;
 
     if (t.kind == type.TYPE_SECRET) {
-        walk(p, ix, t.data.secret.base, secret_of(place), field);
+        walk(p, ix, t.data.secret.base, secret_of(place), stored, field);
         ret;
     }
     if (t.kind == type.TYPE_ARRAY) {
-        # an empty array holds no copy of its element
-        if (t.data.array.count != 0) { walk(p, ix, t.data.array.base, place, field); }
+        # an empty array holds no copy of its element, which it still reaches
+        walk(p, ix, t.data.array.base, place, stored && t.data.array.count != 0, field);
         ret;
     }
     if (t.kind == type.TYPE_POINTER) {
-        walk(p, ix, t.data.pointer.base, POINTEE, field);
+        walk(p, ix, t.data.pointer.base, POINTEE, stored, field);
         ret;
     }
     if (t.kind == type.TYPE_FUN) {
-        walk(p, ix, t.data.fn.ret_type, POINTEE, field);
+        walk(p, ix, t.data.fn.ret_type, POINTEE, stored, field);
         var pi: u32 = 0;
         for (pi < t.data.fn.params_len) {
             val pp: opt[type.TypeId] = type.get_param(p.q.types, t.data.fn.params_start + pi);
-            if (sel pp.some) { walk(p, ix, pp.some, POINTEE, field); }
+            if (!sel pp.some) {
+                fail.internal(p.q.status, "placement: a parameter list runs past the store");
+                ret;
+            }
+            walk(p, ix, pp.some, POINTEE, stored, field);
             pi = pi + 1;
         }
         ret;
     }
     if (t.kind == type.TYPE_GENERIC_PARAM) {
         if (type.param_owned_by(?t.data.generic_param, ?p.entries.data[ix].owner)) {
-            add(p, ix, t.data.generic_param.index, place, field);
+            if (stored) { add(p, ix, t.data.generic_param.index, place, field); }
+            or          { reach(p, ix, t.data.generic_param.index); }
         }
         ret;
     }
@@ -274,15 +313,18 @@ fun walk(p: *Places, ix: u32, tid: type.TypeId, place: Place, field: u32) {
         var j:      u32         = 0;
         for (j < t.data.instance.args_len) {
             val arg: opt[type.TypeId] = type.get_param(p.q.types, t.data.instance.args_start + j);
-            if (sel arg.some) {
-                val held: u8  = bits(p, target, j);
-                var b:    u32 = 0;
-                for (b < PLACE_COUNT) {
-                    val at: Place = place_at(b);
-                    if ((held & at::u8) != 0) { walk(p, ix, arg.some, compose(place, at), field); }
-                    b = b + 1;
-                }
+            if (!sel arg.some) {
+                fail.internal(p.q.status, "placement: an argument list runs past the store");
+                ret;
             }
+            val held: u8  = bits(p, target, j);
+            var b:    u32 = 0;
+            for (b < PLACE_COUNT) {
+                val at: Place = place_at(b);
+                if ((held & at::u8) != 0) { walk(p, ix, arg.some, compose(place, at), stored, field); }
+                b = b + 1;
+            }
+            if (held == 0 && reached(p, target, j)) { walk(p, ix, arg.some, place, false, field); }
             j = j + 1;
         }
         ret;
@@ -298,7 +340,11 @@ fun walk(p: *Places, ix: u32, tid: type.TypeId, place: Place, field: u32) {
         var f:     u32   = 0;
         for (f < n) {
             val entry: opt[*type.FieldEntry] = type.field_at(p.q.types, tid, f);
-            if (sel entry.some) { walk(p, ix, entry.some.ty, inner, field); }
+            if (!sel entry.some) {
+                fail.internal(p.q.status, "placement: a field table runs past its fields");
+                ret;
+            }
+            walk(p, ix, entry.some.ty, inner, stored, field);
             f = f + 1;
         }
     }

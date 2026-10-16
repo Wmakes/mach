@@ -337,6 +337,7 @@ pub fun init(ti: *TypeInterner, a: *A.Allocator) err[fail.Fail] {
     ret err[fail.Fail].ok{};
 }
 
+# release a type store; a nil store holds nothing
 pub fun dnit(ti: *TypeInterner) {
     if (ti == nil) { ret; }
 

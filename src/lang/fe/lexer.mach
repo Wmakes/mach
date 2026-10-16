@@ -224,6 +224,7 @@ fun scan_ident(source: str, start: usize) token.Token {
     ret token.make(token.KIND_IDENT, start, pos - start);
 }
 
+# release a token stream; a nil stream holds nothing
 pub fun dnit(stream: *TokenStream, alloc: *A.Allocator) {
     if (stream == nil) { ret; }
     if (stream.tokens != nil && stream.cap > 0) {

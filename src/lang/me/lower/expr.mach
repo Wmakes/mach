@@ -336,21 +336,20 @@ fun reference_linkage_name(ctx: *lower_context.LowerContext, sym: *resolve.Symbo
     ret mangle.linkage_name(ctx.s, session.module_fqn(ctx.s, resolve.origin_of(ctx.s, sym)), sym.canon, intern.STR_NIL);
 }
 
-pub fun symbol_linkage_name(ctx: *lower_context.LowerContext, eid: ast_id.ExprId) intern.StrId {
+# the linkage name of the module-level binding `eid` names, nil when it names a binding with
+# none
+pub fun symbol_linkage_name(ctx: *lower_context.LowerContext, eid: ast_id.ExprId) res[intern.StrId, fail.Fail] {
     val sid:     resolve.SymbolId     = lower_context.expr_symbol_of(ctx, eid);
     val opt_sym: opt[*resolve.Symbol] = lower_context.symbol_of(ctx, sid);
-    if (sel opt_sym.none) { ret intern.STR_NIL; }
+    if (sel opt_sym.none) { ret res[intern.StrId, fail.Fail].ok{intern.STR_NIL}; }
     val sym: *resolve.Symbol = opt_sym.some;
 
     # a binding has a linkage name only at module level
     val is_addressable: bool = sym.kind == resolve.SYM_FUN
         || ((sym.kind == resolve.SYM_VAL || sym.kind == resolve.SYM_VAR) && (sym.flags & resolve.SYM_FLAG_MODULE) != 0)
         || sym.kind == resolve.SYM_IMPORTED;
-    if (!is_addressable) { ret intern.STR_NIL; }
-
-    val res_ln: res[intern.StrId, fail.Fail] = reference_linkage_name(ctx, sym);
-    if (sel res_ln.err) { ret intern.STR_NIL; }
-    ret res_ln.ok;
+    if (!is_addressable) { ret res[intern.StrId, fail.Fail].ok{intern.STR_NIL}; }
+    ret reference_linkage_name(ctx, sym);
 }
 
 fun symbol_reference(ctx: *lower_context.LowerContext, eid: ast_id.ExprId, sid: resolve.SymbolId) res[value.Value, fail.Fail] {
@@ -1392,9 +1391,12 @@ fun callee_declared(ctx: *lower_context.LowerContext, callee: ast_id.ExprId) opt
     ret opt[lower_context.Declared].some{found.ok};
 }
 
-fun expr_span_of(ctx: *lower_context.LowerContext, eid: ast_id.ExprId) lang_source.Span {
+# where expression `eid` is written; an expression its syntax lacks records an internal failure
+# and has the empty span
+pub fun expr_span_of(ctx: *lower_context.LowerContext, eid: ast_id.ExprId) lang_source.Span {
     val opt_e: res[ast_expr.Expr, fail.Fail] = lower_context.expression(ctx, eid);
-    if (sel opt_e.ok) { ret opt_e.ok.span; }
+    if (sel opt_e.ok)  { ret opt_e.ok.span; }
+    if (sel opt_e.err) { fail.internal(?ctx.status, fail.describe(opt_e.err)); }
     var s: lang_source.Span;
     s.offset = 0;
     s.len    = 0;
@@ -3202,10 +3204,15 @@ fun is_aggregate_ir(ctx: *lower_context.LowerContext, ity: ir_type.IrTypeId) boo
     ret ir_type.is_aggregate(?ctx.m.types, ity);
 }
 
+# the index of the member `name` names in `rec_ty`; a name sema bound that names no member, or
+# one that cannot be interned, records an internal failure and answers 0
 fun field_index_in_type(ctx: *lower_context.LowerContext, rec_ty: type.TypeId, name: lang_source.Span) u32 {
     val src_text: str                        = lower_context.module_source(ctx);
     val res_want: res[intern.StrId, A.Error] = intern.range_add(?ctx.s.interner, src_text, name.offset, name.len);
-    if (sel res_want.err) { ret 0; }
+    if (sel res_want.err) {
+        fail.internal(?ctx.status, fail.describe(fail.refused(res_want.err)));
+        ret 0;
+    }
     val want: intern.StrId = res_want.ok;
 
     val fields_len: u32 = type.field_count(?ctx.s.types, rec_ty);
@@ -3213,7 +3220,6 @@ fun field_index_in_type(ctx: *lower_context.LowerContext, rec_ty: type.TypeId, n
     for (i < fields_len) {
         val opt_fe: opt[*type.FieldEntry] = type.field_at(?ctx.s.types, rec_ty, i);
         if (sel opt_fe.some) {
-            if (sel opt_fe.none)                         { ret i; }
             if (intern.str_same(opt_fe.some.name, want)) { ret i; }
         }
         i = i + 1;

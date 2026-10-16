@@ -86,7 +86,8 @@ pub fun syntax(p: *project.Project, m: *project.ModuleEntry) *ast.Ast;
 
 a module's syntax tree: inside an operation the parse it acquires, which a computation reading
 it depends on, and between operations the one this project's operations last published. nil
-when the module has none
+when the module has none, and inside an operation when the parse could not be acquired: the
+operation keeps that failure and ends with it, so nothing built on the nil is published
 
 ## fun parsed
 

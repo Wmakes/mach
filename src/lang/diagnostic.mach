@@ -9,6 +9,7 @@ use std_format: std.format;
 use std.memory;
 #[testing]
 use std.print;
+use std.system.panic.panic;
 use std.text.string.str_dup;
 use std.text.string.str_free;
 use std.types.bool.bool;
@@ -237,7 +238,8 @@ fun is_expected(store: *DiagnosticStore, k: diagnostic_kind.Kind, loc: lang_sour
 # to raise the warning. the judgement is type checking's, whatever the store
 # stamps otherwise
 pub fun report_unfulfilled(store: *DiagnosticStore) {
-    if (store == nil || store.error_count > 0) { ret; }
+    live(store);
+    if (store.error_count > 0) { ret; }
     val stamped: Origin = store.origin;
     store.origin = ORIGIN_SEMA;
     fin { store.origin = stamped; }
@@ -370,6 +372,8 @@ pub fun drop_file(store: *DiagnosticStore, file_id: lang_source.FileId) {
     }
 }
 
+# release a store and every diagnostic it holds; a nil store holds nothing and releases
+# nothing
 pub fun store_dnit(store: *DiagnosticStore) {
     if (store == nil) { ret; }
     var zero: DiagMark;
@@ -383,6 +387,7 @@ pub fun store_dnit(store: *DiagnosticStore) {
     store.lost        = 0;
 }
 
+# how many diagnostics `store` holds; a nil store, as a walk that reports nowhere has, holds none
 pub fun len(store: *DiagnosticStore) usize {
     if (store == nil) { ret 0; }
     ret store.items.len;
@@ -400,6 +405,7 @@ pub fun has_errors(store: *DiagnosticStore) bool {
     ret store != nil && store.error_count > 0;
 }
 
+# how many errors `store` counts; a nil store counts none
 pub fun error_count(store: *DiagnosticStore) usize {
     if (store == nil) { ret 0; }
     ret store.error_count;
@@ -588,6 +594,8 @@ fun builder_owning(a: *A.Allocator, k: diagnostic_kind.Kind, file_id: lang_sourc
     ret b;
 }
 
+# release what a builder owns; a nil builder, or one already committed or released, owns
+# nothing
 pub fun builder_dnit(b: *DiagnosticBuilder) {
     if (b == nil || !b.live) { ret; }
 
@@ -895,9 +903,10 @@ pub fun reportf(store: *DiagnosticStore, k: diagnostic_kind.Kind, file_id: lang_
 }
 
 # a diagnostic of kind `k` reported where the reporter has no failure to
-# return: one the store cannot take is counted lost, which fails the build
+# return: one the store cannot take is counted lost, which fails the build. the
+# store is live, as `live` holds
 pub fun record(store: *DiagnosticStore, k: diagnostic_kind.Kind, file_id: lang_source.FileId, span: lang_source.Span, message: str) {
-    if (store == nil) { ret; }
+    live(store);
     val r: err[fail.Fail] = report(store, k, file_id, span, message);
     if (sel r.err) { note_lost(store); }
 }
@@ -920,12 +929,21 @@ pub fun reject(store: *DiagnosticStore, k: diagnostic_kind.Kind, loc: lang_sourc
     ret fail.reported();
 }
 
+# count a diagnostic `store` could not take, which fails the build; the store is live, as `live`
+# holds
 pub fun note_lost(store: *DiagnosticStore) {
-    if (store == nil) { ret; }
+    live(store);
     store.lost        = store.lost + 1;
     store.error_count = store.error_count + 1;
 }
 
+# a store wired as nil where a diagnostic must land is a compiler defect, and a diagnostic with
+# nowhere to go and no failure to carry it would vanish, so it stops the compiler
+fun live(store: *DiagnosticStore) {
+    if (store == nil) { panic("a diagnostic was reported to a nil store"); }
+}
+
+# how many diagnostics `store` could not take; a nil store lost none
 pub fun lost_count(store: *DiagnosticStore) usize {
     if (store == nil) { ret 0; }
     ret store.lost;

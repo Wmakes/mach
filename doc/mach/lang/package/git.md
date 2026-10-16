@@ -174,6 +174,9 @@ rel: str, subject: str) err[fail.Fail];
 ## fun is_work_tree
 
 ```mach
-pub fun is_work_tree(alloc: *A.Allocator, gi: *Inspector, dir: str) bool;
+pub fun is_work_tree(alloc: *A.Allocator, gi: *Inspector, dir: str) res[bool, fail.Fail];
 ```
+
+whether `dir` lies inside a git work tree: git answers by its exit, so a refusing exit is
+false, and a failure to run git or read its answer is the failure
 

@@ -235,6 +235,7 @@ pub fun hold_failure(s: *Session, failure: fail.Fail, lost: *bool) fail.Fail {
     ret held;
 }
 
+# release a session and everything it owns; a nil session holds nothing
 pub fun dnit(s: *Session) {
     if (s == nil) { ret; }
 
@@ -467,6 +468,8 @@ pub fun prepare_overlay(s: *Session, path: str, text: str, remove: bool) res[Pre
     ret res[PreparedOverlay, fail.Fail].ok{prepared};
 }
 
+# release an overlay that was prepared and not committed; one already committed or
+# discarded owns nothing
 pub fun discard_overlay(prepared: *PreparedOverlay) {
     if (prepared.owner == nil) { ret; }
     str_free(prepared.owner.alloc, prepared.key);

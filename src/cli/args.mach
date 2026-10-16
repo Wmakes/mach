@@ -331,7 +331,7 @@ pub val RELATION_REQUIRES: RelationKind = 1;
 pub val RELATION_IMPLIES: RelationKind = 2;
 
 # one constraint between two option rows. the parser enforces it and help
-# renders it, from relation_text, so the refusal and the help line are one text
+# renders it, from relation_sentence, so the refusal and the help line are one text
 # ---
 # kind:  the RELATION_* value
 # row:   the canonical row the relation is declared on
@@ -589,17 +589,32 @@ pub fun relation_active(command: *CommandSpec, action: *ActionSpec, rel: *Relati
     ret schema_accepts(command, action, rel.row) && schema_accepts(command, action, rel.other);
 }
 
+# the sentence a relation reads as, `{row}{joint}{other}{tail}`, in its parts
+pub rec Sentence {
+    row:   str;
+    joint: str;
+    other: str;
+    tail:  str;
+}
+
 # the sentence a relation reads as, both in help and in the refusal of an invocation that breaks it
+# ---
+# rel: the relation
+# ret: its parts, all empty for RELATION_IMPLIES, which nothing breaks
+pub fun relation_sentence(rel: *Relation) Sentence {
+    if (rel.kind == RELATION_CONFLICTS) { ret Sentence{row: rel.row.name, joint: " and ", other: rel.other.name, tail: " cannot be combined"}; }
+    if (rel.kind == RELATION_REQUIRES)  { ret Sentence{row: rel.row.name, joint: " is valid only with ", other: rel.other.name, tail: ""}; }
+    ret Sentence{row: "", joint: "", other: "", tail: ""};
+}
+
+# a relation's sentence as one text
 # ---
 # a:   owns the text
 # rel: the relation
-# ret: the text, empty for RELATION_IMPLIES, which nothing breaks
-pub fun relation_text(a: *A.Allocator, rel: *Relation) res[str, fail.Fail] {
-    var said: res[str, std_format.FormatError] = res[str, std_format.FormatError].ok{""};
-    if (rel.kind == RELATION_CONFLICTS) { said = std_format.sprint(a, "{} and {} cannot be combined", rel.row.name, rel.other.name); }
-    or (rel.kind == RELATION_REQUIRES)  { said = std_format.sprint(a, "{} is valid only with {}", rel.row.name, rel.other.name); }
-    if (sel said.err)                   { ret res[str, fail.Fail].err{fail.message("out of memory")}; }
-    ret res[str, fail.Fail].ok{said.ok};
+# ret: the text, or the refusal to format it
+fun relation_text(a: *A.Allocator, rel: *Relation) res[str, std_format.FormatError] {
+    val said: Sentence = relation_sentence(rel);
+    ret std_format.sprint(a, "{}{}{}{}", said.row, said.joint, said.other, said.tail);
 }
 
 fun spelling_count(tables: *TableRef, table_n: usize, name: str) usize {
@@ -1012,12 +1027,18 @@ fun invocation_init(argc: usize) ParsedInvocation {
     ret inv;
 }
 
-# `mach <command>`, or `mach <command> <action>` once an action is read, as messages name it
-fun usage_name(a: *A.Allocator, inv: *ParsedInvocation) str {
-    var said: res[str, std_format.FormatError] = std_format.sprint(a, "mach {}", inv.command.name);
-    if (inv.action != nil) { said = std_format.sprint(a, "mach {} {}", inv.command.name, inv.action.name); }
-    if (sel said.err)      { ret "mach"; }
-    ret said.ok;
+# the words after `mach` that name the command, and its action once one is read, as messages
+# name them: `mach {command}{gap}{action}`, the gap a space before an action and empty without
+# one
+rec Usage {
+    command: str;
+    gap:     str;
+    action:  str;
+}
+
+fun usage_of(inv: *ParsedInvocation) Usage {
+    if (inv.action == nil) { ret Usage{command: inv.command.name, gap: "", action: ""}; }
+    ret Usage{command: inv.command.name, gap: " ", action: inv.action.name};
 }
 
 fun refuse_once(inv: *ParsedInvocation, f: fail.Fail) {
@@ -1027,7 +1048,7 @@ fun refuse_once(inv: *ParsedInvocation, f: fail.Fail) {
 
 fun refuse_said(inv: *ParsedInvocation, k: diagnostic_kind.Kind, said: res[str, std_format.FormatError]) {
     if (sel said.err) {
-        refuse_once(inv, fail.message("out of memory"));
+        refuse_once(inv, fail.format_refused(said.err));
         ret;
     }
     refuse_once(inv, fail.user(k, said.ok));
@@ -1038,18 +1059,29 @@ fun refuse_said(inv: *ParsedInvocation, k: diagnostic_kind.Kind, said: res[str, 
 # ---
 # a:       owns the text
 # command: the command
-# ret:     the names; what was listed before an allocation failed
-pub fun action_list(a: *A.Allocator, command: *CommandSpec) str {
+# ret:     the names, or the refusal to format them
+pub fun action_list(a: *A.Allocator, command: *CommandSpec) res[str, std_format.FormatError] {
     var text: str   = "";
     var i:    usize = 0;
     for (i < command.action_n) {
         var said: res[str, std_format.FormatError] = std_format.sprint(a, "{}, {}", text, command.actions[i].name);
         if (i == 0)       { said = std_format.sprint(a, "{}", command.actions[i].name); }
-        if (sel said.err) { ret text; }
+        if (sel said.err) { ret said; }
         text = said.ok;
         i    = i + 1;
     }
-    ret text;
+    ret res[str, std_format.FormatError].ok{text};
+}
+
+# the refusal `fmt` makes of `command` and `word`, which ends naming the command's actions
+fun refuse_listing(a: *A.Allocator, inv: *ParsedInvocation, k: diagnostic_kind.Kind, fmt: str, command: *CommandSpec, word: str) {
+    val listed: res[str, std_format.FormatError] = action_list(a, command);
+    if (sel listed.err) {
+        refuse_said(inv, k, listed);
+        ret;
+    }
+    if (word == nil) { refuse_said(inv, k, std_format.sprint(a, fmt, command.name, listed.ok)); }
+    or               { refuse_said(inv, k, std_format.sprint(a, fmt, command.name, word, listed.ok)); }
 }
 
 fun refuse_relations(a: *A.Allocator, inv: *ParsedInvocation, rels: *Relation, rel_n: usize, shared: bool) {
@@ -1065,9 +1097,7 @@ fun refuse_relations(a: *A.Allocator, inv: *ParsedInvocation, rels: *Relation, r
         if ((rel.kind == RELATION_CONFLICTS && both) || (rel.kind == RELATION_REQUIRES && orphan)) {
             var k: diagnostic_kind.Kind = diagnostic_kind.CLI_FLAG_CONFLICT;
             if (rel.kind == RELATION_REQUIRES) { k = diagnostic_kind.CLI_FLAG_INAPPLICABLE; }
-            val text: res[str, fail.Fail] = relation_text(a, rel);
-            if (sel text.ok) { refuse_once(inv, fail.user(k, text.ok)); }
-            or               { refuse_once(inv, fail.message("out of memory")); }
+            refuse_said(inv, k, relation_text(a, rel));
             ret;
         }
         i = i + 1;
@@ -1105,7 +1135,7 @@ fun parse_from(a: *A.Allocator, command: *CommandSpec, first: usize, argc: usize
         or {
             inv.action = action_for(command, argv[first]::str);
             if (inv.action == nil) {
-                refuse_said(?inv, diagnostic_kind.CLI_UNKNOWN_ACTION, std_format.sprint(a, "unknown {} action '{}'; the actions are {}", command.name, argv[first]::str, action_list(a, command)));
+                refuse_listing(a, ?inv, diagnostic_kind.CLI_UNKNOWN_ACTION, "unknown {} action '{}'; the actions are {}", command, argv[first]::str);
                 ret res[ParsedInvocation, fail.Fail].ok{inv};
             }
             scan_start = first + 1;
@@ -1156,7 +1186,8 @@ fun parse_from(a: *A.Allocator, command: *CommandSpec, first: usize, argc: usize
                     refuse_said(?inv, diagnostic_kind.CLI_FLAG_INAPPLICABLE, std_format.sprint(a, "option '{}' is not applicable to '{}'; {}", tok, command.name, command.refusal));
                 }
                 or {
-                    refuse_said(?inv, diagnostic_kind.CLI_FLAG_UNKNOWN, std_format.sprint(a, "unknown flag '{}' for '{}'", tok, usage_name(a, ?inv)));
+                    val u: Usage = usage_of(?inv);
+                    refuse_said(?inv, diagnostic_kind.CLI_FLAG_UNKNOWN, std_format.sprint(a, "unknown flag '{}' for 'mach {}{}{}'", tok, u.command, u.gap, u.action));
                 }
             }
             or {
@@ -1172,7 +1203,8 @@ fun parse_from(a: *A.Allocator, command: *CommandSpec, first: usize, argc: usize
         }
 
         if (!hit.row.repeatable && occurred(?inv, hit.row)) {
-            refuse_said(?inv, diagnostic_kind.CLI_FLAG_REPEATED, std_format.sprint(a, "option '{}' for '{}' cannot be repeated", tok, usage_name(a, ?inv)));
+            val u: Usage = usage_of(?inv);
+            refuse_said(?inv, diagnostic_kind.CLI_FLAG_REPEATED, std_format.sprint(a, "option '{}' for 'mach {}{}{}' cannot be repeated", tok, u.command, u.gap, u.action));
         }
         marks[i] = true;
         val o: *Occurrence = ?occ[inv.occ_len];
@@ -1196,7 +1228,8 @@ fun parse_from(a: *A.Allocator, command: *CommandSpec, first: usize, argc: usize
                 i           = i + 1;
             }
             or {
-                refuse_said(?inv, diagnostic_kind.CLI_FLAG_VALUE, std_format.sprint(a, "option '{}' for '{}' requires a value", tok, usage_name(a, ?inv)));
+                val u: Usage = usage_of(?inv);
+                refuse_said(?inv, diagnostic_kind.CLI_FLAG_VALUE, std_format.sprint(a, "option '{}' for 'mach {}{}{}' requires a value", tok, u.command, u.gap, u.action));
             }
         }
     }
@@ -1207,7 +1240,7 @@ fun parse_from(a: *A.Allocator, command: *CommandSpec, first: usize, argc: usize
     }
     if (action_missing) {
         inv.refusal = opt[fail.Fail].none{};
-        refuse_said(?inv, diagnostic_kind.CLI_OPERAND, std_format.sprint(a, "missing {} action; the actions are {}", command.name, action_list(a, command)));
+        refuse_listing(a, ?inv, diagnostic_kind.CLI_OPERAND, "missing {} action; the actions are {}", command, nil);
         ret res[ParsedInvocation, fail.Fail].ok{inv};
     }
     if (sel inv.refusal.some) { ret res[ParsedInvocation, fail.Fail].ok{inv}; }
@@ -1226,7 +1259,8 @@ fun parse_from(a: *A.Allocator, command: *CommandSpec, first: usize, argc: usize
         grammar     = inv.action.grammar;
     }
     if (inv.positional_count < operand_min || inv.positional_count > operand_max) {
-        refuse_said(?inv, diagnostic_kind.CLI_OPERAND, std_format.sprint(a, "usage: {}{}", usage_name(a, ?inv), grammar));
+        val u: Usage = usage_of(?inv);
+        refuse_said(?inv, diagnostic_kind.CLI_OPERAND, std_format.sprint(a, "usage: mach {}{}{}{}", u.command, u.gap, u.action, grammar));
     }
     ret res[ParsedInvocation, fail.Fail].ok{inv};
 }

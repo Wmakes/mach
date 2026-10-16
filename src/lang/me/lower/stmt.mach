@@ -657,6 +657,7 @@ fun asm_binds_add(ctx: *lower_context.LowerContext, sid: ast_id.StmtId, payload:
     ret err[fail.Fail].ok{};
 }
 
+# release an asm payload's bindings; a payload with none owns nothing
 fun asm_payload_free(ctx: *lower_context.LowerContext, payload: *me_ir.IrAsm) {
     if (payload.binds == nil) { ret; }
     A.deallocate[me_ir.IrAsmBind](ctx.m.alloc, payload.binds, payload.bind_cap::usize);

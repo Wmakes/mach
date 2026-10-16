@@ -2,8 +2,6 @@
 # the declarations so a generic that grows through a pointer still has a finite answer
 use std.allocator.page;
 use std.collections.map;
-use collections_vector: std.collections.vector;
-use std.collections.vector.Vector;
 use std.types.bool.bool;
 use std.types.bool.false;
 use std.types.bool.true;
@@ -15,10 +13,16 @@ use std.types.size.usize;
 use A: std.allocator;
 
 use mach.lang.fail;
+#[testing]
+use mach.lang.intern;
+#[testing]
+use mach.lang.module;
 use mach.lang.session;
+#[testing]
+use lang_source: mach.lang.source;
 use mach.lang.type;
 use type_query: mach.lang.type.query;
-use mach.lang.type.query.mention;
+use mach.lang.type.query.placement;
 
 # the kinds that carry no secret of their own; false for every other kind, which a
 # walk descends (a partition, enumerated by its test)
@@ -60,160 +64,69 @@ def DeepProp: u8;
 val DEEP_SECRET: DeepProp = 0;
 val DEEP_FLOAT:  DeepProp = 1;
 
-val DEEP_NONE: u32 = 0xFFFFFFFF;
-
-# one nominal's answer over the declaration graph, never the instance graph: a
-# generic reached through a pointer can mint a fresh instance at every level
-# (`rec L[T] { next: *L[*T]; }`), so the instances are unbounded but the
-# declarations are not. `found` is the property reached by the fields on their
-# own, and `reach` lists the owner's parameters the fields reach, so an instance
-# answers `found`, or any reached parameter's argument answering
-rec DeepEntry {
-    nominal: type.TypeId;
-    found:   bool;
-    owned:   bool;
-    owner:   type.GenericOwner;
-    reach:   u32;
-}
-
-rec DeepReach {
-    param: u32;
-    next:  u32;
-}
-
+# one walk over the declaration graph, never the instance graph: a generic reached through
+# a pointer can mint a fresh instance at every level (`rec L[T] { next: *L[*T]; }`), so the
+# instances are unbounded but the declarations are not. a nominal's own fields are walked
+# once with its parameters reaching nothing, and an instance adds the arguments of the
+# parameters its generic reaches anywhere, which the placement fixpoint settles. a nominal
+# or instance met again adds nothing, so the walk is a plain reachability search
 rec DeepQuery {
-    q:       *type_query.Query;
-    prop:    DeepProp;
-    index:   map.Map[type.TypeId, u32];
-    entries: Vector[DeepEntry];
-    reach:   Vector[DeepReach];
-    # a pass changed an answer or met a new nominal, so another pass is owed
-    grew: bool;
+    q:      *type_query.Query;
+    prop:   DeepProp;
+    seen:   map.Map[type.TypeId, bool];
+    places: placement.Places;
 }
 
-# the summaries are a least fixpoint: every answer starts false and only turns
-# true, so passes repeat until one changes nothing, and the root's answer from
-# that pass is final
 fun query_run(q: *type_query.Query, prop: DeepProp, tid: type.TypeId) bool {
     var dq: DeepQuery;
-    dq.q       = q;
-    dq.prop    = prop;
-    dq.index   = map.init[type.TypeId, u32](q.types.a);
-    dq.entries = collections_vector.init[DeepEntry](q.types.a);
-    dq.reach   = collections_vector.init[DeepReach](q.types.a);
-    dq.grew    = false;
-
-    var found: bool                = true;
-    val room:  res[usize, A.Error] = collections_vector.reserve[DeepEntry](?dq.entries, 8);
-    if (sel room.err) { type_query.refused(q, room.err); }
-    or {
-        for (true) {
-            dq.grew = false;
-            if (deep_eval(?dq, tid, DEEP_NONE)) { brk; }
-            var i: usize = 0;
-            for (i < dq.entries.len) {
-                deep_settle(?dq, i::u32);
-                i = i + 1;
-            }
-            if (sel q.status.kind.internal) { brk; }
-            if (!dq.grew) {
-                found = false;
-                brk;
-            }
-        }
-    }
-
-    map.dnit[type.TypeId, u32](?dq.index);
-    collections_vector.dnit[DeepEntry](?dq.entries);
-    collections_vector.dnit[DeepReach](?dq.reach);
+    dq.q      = q;
+    dq.prop   = prop;
+    dq.seen   = map.init[type.TypeId, bool](q.types.a);
+    dq.places = placement.init(q);
+    val found: bool = deep_eval(?dq, tid);
+    map.dnit[type.TypeId, bool](?dq.seen);
+    placement.dnit(?dq.places);
     ret found;
 }
 
-# the summary slot of `nominal`, opened on first sight; DEEP_NONE when out of memory
-fun deep_entry(dq: *DeepQuery, nominal: type.TypeId) u32 {
-    val have: opt[*u32] = map.get[type.TypeId, u32](?dq.index, ?nominal);
-    if (sel have.some) { ret @have.some; }
-
-    var e: DeepEntry;
-    e.nominal = nominal;
-    e.found   = false;
-    e.owned   = false;
-    e.reach   = DEEP_NONE;
-    # a nominal with no field table cannot be shown clear
-    val table: opt[*type.FieldTable] = type.field_table_for(dq.q.types, nominal);
-    if (!sel table.some) { e.found = true; }
-    or {
-        val of: opt[type.GenericOwner] = mention.owner(dq.q, nominal);
-        if (sel of.some) {
-            e.owned = true;
-            e.owner = of.some;
-        }
+# whether the walk meets `tid` for the first time; a mark that cannot be recorded is a
+# failure, recorded, and reads as already met
+fun first_sight(dq: *DeepQuery, tid: type.TypeId) bool {
+    if (map.contains[type.TypeId, bool](?dq.seen, ?tid)) { ret false; }
+    val marked: res[bool, A.Error] = map.insert[type.TypeId, bool](?dq.seen, tid, true);
+    if (sel marked.err) {
+        type_query.refused(dq.q, marked.err);
+        ret false;
     }
-    if (sel dq.q.status.kind.internal) { ret DEEP_NONE; }
-
-    val ix:     u32                 = dq.entries.len::u32;
-    val pushed: res[usize, A.Error] = collections_vector.push[DeepEntry](?dq.entries, e);
-    if (sel pushed.err) {
-        type_query.refused(dq.q, pushed.err);
-        ret DEEP_NONE;
-    }
-    val indexed: res[bool, A.Error] = map.insert[type.TypeId, u32](?dq.index, nominal, ix);
-    if (sel indexed.err) {
-        type_query.refused(dq.q, indexed.err);
-        ret DEEP_NONE;
-    }
-    dq.grew = true;
-    ret ix;
+    ret true;
 }
 
-fun deep_reaches(dq: *DeepQuery, ix: u32, param: u32) bool {
-    var r: u32 = dq.entries.data[ix].reach;
-    for (r != DEEP_NONE) {
-        if (dq.reach.data[r].param == param) { ret true; }
-        r = dq.reach.data[r].next;
+# whether the fields of `nominal` reach the property, its own parameters reaching nothing; a
+# nominal with no field table cannot be shown clear
+fun fields_reach(dq: *DeepQuery, nominal: type.TypeId) bool {
+    val table: opt[*type.FieldTable] = type.field_table_for(dq.q.types, nominal);
+    if (!sel table.some) { ret true; }
+    val fields_len: u32 = table.some.fields_len;
+    var f:          u32 = 0;
+    for (f < fields_len) {
+        val entry: opt[*type.FieldEntry] = type.field_at(dq.q.types, nominal, f);
+        if (!sel entry.some) {
+            fail.internal(dq.q.status, "deep query: a field table runs past its fields");
+            ret true;
+        }
+        if (deep_eval(dq, entry.some.ty)) { ret true; }
+        f = f + 1;
     }
     ret false;
 }
 
-fun deep_add_reach(dq: *DeepQuery, ix: u32, param: u32) {
-    if (deep_reaches(dq, ix, param)) { ret; }
-    var link: DeepReach;
-    link.param = param;
-    link.next  = dq.entries.data[ix].reach;
-    val at:     u32                 = dq.reach.len::u32;
-    val pushed: res[usize, A.Error] = collections_vector.push[DeepReach](?dq.reach, link);
-    if (sel pushed.err) {
-        type_query.refused(dq.q, pushed.err);
-        ret;
-    }
-    dq.entries.data[ix].reach = at;
-    dq.grew                   = true;
-}
-
-fun deep_settle(dq: *DeepQuery, ix: u32) {
-    if (dq.entries.data[ix].found) { ret; }
-    val nominal: type.TypeId           = dq.entries.data[ix].nominal;
-    val table:   opt[*type.FieldTable] = type.field_table_for(dq.q.types, nominal);
-    if (!sel table.some) { ret; }
-    val fields_len: u32 = table.some.fields_len;
-
-    var f: u32 = 0;
-    for (f < fields_len) {
-        val entry: opt[*type.FieldEntry] = type.field_at(dq.q.types, nominal, f);
-        if (sel entry.some && deep_eval(dq, entry.some.ty, ix)) {
-            dq.entries.data[ix].found = true;
-            dq.grew                   = true;
-            ret;
-        }
-        f = f + 1;
-    }
-}
-
-# whether `tid` reaches the property under the current summaries; inside the
-# fields of entry `ctx`, a parameter of its owner is recorded as reached instead
-fun deep_eval(dq: *DeepQuery, tid: type.TypeId, ctx: u32) bool {
+# whether `tid` reaches the property; a type parameter reaches nothing on its own, its
+# argument being walked where an instance supplies it. once the query has failed every
+# answer is true, so no walk goes on past the failure
+fun deep_eval(dq: *DeepQuery, tid: type.TypeId) bool {
     if (type.is_nil(tid) || type.is_error(tid)) { ret false; }
     if (sel dq.q.status.kind.internal)          { ret true; }
+    if (!type_query.descend(dq.q))              { ret true; }
 
     val opt_type: opt[*type.Type] = type.get(dq.q.types, tid);
     if (!sel opt_type.some) {
@@ -227,70 +140,55 @@ fun deep_eval(dq: *DeepQuery, tid: type.TypeId, ctx: u32) bool {
     }
     or {
         if (type.prim_desc(t.kind).class == type.PRIM_CLASS_FLOAT) { ret true; }
-        if (t.kind == type.TYPE_SECRET)                            { ret deep_eval(dq, t.data.secret.base, ctx); }
+        if (t.kind == type.TYPE_SECRET)                            { ret deep_eval(dq, t.data.secret.base); }
         if (t.kind == type.TYPE_VECTOR)                            { ret type.prim_desc(t.data.vector.element).class == type.PRIM_CLASS_FLOAT; }
     }
-    if (t.kind == type.TYPE_POINTER) { ret deep_eval(dq, t.data.pointer.base, ctx); }
-    if (t.kind == type.TYPE_ARRAY)   { ret deep_eval(dq, t.data.array.base, ctx); }
+    if (t.kind == type.TYPE_POINTER) { ret deep_eval(dq, t.data.pointer.base); }
+    if (t.kind == type.TYPE_ARRAY)   { ret deep_eval(dq, t.data.array.base); }
 
     if (t.kind == type.TYPE_FUN) {
-        if (deep_eval(dq, t.data.fn.ret_type, ctx)) { ret true; }
+        if (deep_eval(dq, t.data.fn.ret_type)) { ret true; }
         var pi: u32 = 0;
         for (pi < t.data.fn.params_len) {
             val pp: opt[type.TypeId] = type.get_param(dq.q.types, t.data.fn.params_start + pi);
-            if (sel pp.some && deep_eval(dq, pp.some, ctx)) { ret true; }
+            if (sel pp.some && deep_eval(dq, pp.some)) { ret true; }
             pi = pi + 1;
         }
         ret false;
     }
 
-    if (t.kind == type.TYPE_GENERIC_PARAM) {
-        if (ctx != DEEP_NONE && dq.entries.data[ctx].owned
-            && type.param_owned_by(?t.data.generic_param, ?dq.entries.data[ctx].owner)) {
-            deep_add_reach(dq, ctx, t.data.generic_param.index);
-        }
-        ret false;
-    }
+    if (t.kind == type.TYPE_GENERIC_PARAM) { ret false; }
 
     if (t.kind == type.TYPE_INSTANCE) {
-        val ix: u32 = deep_entry(dq, t.data.instance.nominal);
-        if (ix == DEEP_NONE)           { ret true; }
-        if (dq.entries.data[ix].found) { ret true; }
+        if (!first_sight(dq, tid)) { ret sel dq.q.status.kind.internal; }
+        val generic: type.TypeId = t.data.instance.nominal;
+        if (first_sight(dq, generic) && fields_reach(dq, generic)) { ret true; }
+        if (sel dq.q.status.kind.internal)                         { ret true; }
+        # a generic whose places cannot be settled reaches a nominal with no field table,
+        # which cannot be shown clear
+        if (!placement.settle(?dq.places, generic)) { ret true; }
         val args_start: u32 = t.data.instance.args_start;
         val args_len:   u32 = t.data.instance.args_len;
-        var r:          u32 = dq.entries.data[ix].reach;
-        for (r != DEEP_NONE) {
-            val param: u32 = dq.reach.data[r].param;
-            r = dq.reach.data[r].next;
-            if (param < args_len) {
-                val arg: opt[type.TypeId] = type.get_param(dq.q.types, args_start + param);
+        var j:          u32 = 0;
+        for (j < args_len) {
+            if (placement.reached(?dq.places, generic, j)) {
+                val arg: opt[type.TypeId] = type.get_param(dq.q.types, args_start + j);
                 if (!sel arg.some) {
                     fail.internal(dq.q.status, "deep query: an argument list runs past the store");
                     ret true;
                 }
-                if (deep_eval(dq, arg.some, ctx)) { ret true; }
+                if (deep_eval(dq, arg.some)) { ret true; }
             }
+            j = j + 1;
         }
         ret false;
     }
 
-    # a bare nominal mentioning parameters is an anonymous aggregate inside a
-    # generic: its parameters are the enclosing declaration's, so what it
-    # reaches is reached by the fields that hold it, under that same owner
+    # a bare nominal, named or an anonymous aggregate inside a generic, whose parameters
+    # are the enclosing declaration's and reach nothing here
     if (t.kind == type.TYPE_REC || t.kind == type.TYPE_UNI || t.kind == type.TYPE_TAG) {
-        val ix: u32 = deep_entry(dq, tid);
-        if (ix == DEEP_NONE)           { ret true; }
-        if (dq.entries.data[ix].found) { ret true; }
-        if (ctx != DEEP_NONE && dq.entries.data[ix].owned && dq.entries.data[ctx].owned
-            && type.generic_owner_equals(?dq.entries.data[ix].owner, ?dq.entries.data[ctx].owner)) {
-            var r: u32 = dq.entries.data[ix].reach;
-            for (r != DEEP_NONE) {
-                val param: u32 = dq.reach.data[r].param;
-                r = dq.reach.data[r].next;
-                deep_add_reach(dq, ctx, param);
-            }
-        }
-        ret false;
+        if (!first_sight(dq, tid)) { ret sel dq.q.status.kind.internal; }
+        ret fields_reach(dq, tid);
     }
 
     if (public_leaf(t.kind)) { ret false; }
@@ -363,5 +261,77 @@ test contains_float__finds_a_float_through_an_array {
     fin { session.dnit(?s); }
     if (t_array_holds_float(?s, type.TYPE_F32) != 1) { ret 2; }
     if (t_array_holds_float(?s, type.TYPE_U32) != 0) { ret 3; }
+    ret 0;
+}
+
+# a record `name` owned by `at` with the single field `field`
+#[testing]
+fun t_record(types: *type.TypeInterner, at: type.TypeOwner, name: u32, field: type.TypeId) res[type.TypeId, fail.Fail] {
+    val made: res[type.TypeId, fail.Fail] = type.intern_nominal(types, intern.str_id(name), at, type.TYPE_REC);
+    if (sel made.err) { ret made; }
+    val staged: res[u32, fail.Fail] = type.field_table_stage(types, 1);
+    if (sel staged.err) { ret res[type.TypeId, fail.Fail].err{staged.err}; }
+    val pushed: err[fail.Fail] = type.field_table_stage_push(types, intern.str_id(name + 1), field);
+    if (sel pushed.err) { ret res[type.TypeId, fail.Fail].err{pushed.err}; }
+    val published: err[fail.Fail] = type.field_table_publish(types, made.ok, staged.ok, 1);
+    if (sel published.err) { ret res[type.TypeId, fail.Fail].err{published.err}; }
+    ret made;
+}
+
+# 1 when `[0]` of a record holding `leaf`, and the instance of `rec G[T] { a: [0]T; }` over
+# that record, both answer `prop`; 0 when neither does; -1 when they disagree or fail
+#[testing]
+fun t_empty_array_reaches(s: *session.Session, leaf: type.TypeId, prop: DeepProp, base: u32) i32 {
+    val at:     type.TypeOwner              = type.TypeOwner{module: module.stable_id(3), file: lang_source.file_id(1)};
+    val holder: res[type.TypeId, fail.Fail] = t_record(?s.types, at, base, leaf);
+    if (sel holder.err) { ret -1; }
+    val empty: res[type.TypeId, fail.Fail] = type.intern_array(?s.types, holder.ok, 0);
+    if (sel empty.err) { ret -1; }
+    val concrete: res[type.TypeId, fail.Fail] = t_record(?s.types, at, base + 2, empty.ok);
+    if (sel concrete.err) { ret -1; }
+
+    val param: res[type.TypeId, fail.Fail] = type.intern_generic_param(?s.types, intern.str_id(base + 5), at, intern.str_id(base + 4), type.TYPE_REC, 0);
+    if (sel param.err) { ret -1; }
+    val of_param: res[type.TypeId, fail.Fail] = type.intern_array(?s.types, param.ok, 0);
+    if (sel of_param.err) { ret -1; }
+    val generic: res[type.TypeId, fail.Fail] = t_record(?s.types, at, base + 4, of_param.ok);
+    if (sel generic.err) { ret -1; }
+    var arg: [1]type.TypeId;
+    arg[0] = holder.ok;
+    val inst: res[type.TypeId, fail.Fail] = type.intern_instance(?s.types, generic.ok, ?arg[0], 1);
+    if (sel inst.err) { ret -1; }
+
+    var c: res[bool, fail.Fail] = contains_secret(s, concrete.ok);
+    var g: res[bool, fail.Fail] = contains_secret(s, inst.ok);
+    if (prop == DEEP_FLOAT) {
+        c = contains_float(s, concrete.ok);
+        g = contains_float(s, inst.ok);
+    }
+    if (!sel c.ok)    { ret -1; }
+    if (!sel g.ok)    { ret -1; }
+    if (c.ok != g.ok) { ret -1; }
+    if (c.ok)         { ret 1; }
+    ret 0;
+}
+
+# an empty array's element is reached whatever the length, in a concrete record and through a
+# generic's parameter alike, for a secret and a float
+test deep__an_empty_array_reaches_its_element {
+    var alloc: A.Allocator;
+    page.make(?alloc);
+    val sr: res[session.Session, fail.Fail] = session.init(?alloc);
+    if (sel sr.err) { ret 1; }
+    var s: session.Session = sr.ok;
+    fin { session.dnit(?s); }
+    val u: opt[type.TypeId] = type.prim(?s.types, type.TYPE_U32);
+    val f: opt[type.TypeId] = type.prim(?s.types, type.TYPE_F32);
+    if (!sel u.some) { ret 2; }
+    if (!sel f.some) { ret 2; }
+    val secret: res[type.TypeId, fail.Fail] = type.intern_secret(?s.types, u.some);
+    if (sel secret.err)                                              { ret 2; }
+    if (t_empty_array_reaches(?s, secret.ok, DEEP_SECRET, 100) != 1) { ret 3; }
+    if (t_empty_array_reaches(?s, f.some, DEEP_FLOAT, 200) != 1)     { ret 4; }
+    if (t_empty_array_reaches(?s, u.some, DEEP_SECRET, 300) != 0)    { ret 5; }
+    if (t_empty_array_reaches(?s, u.some, DEEP_FLOAT, 400) != 0)     { ret 6; }
     ret 0;
 }

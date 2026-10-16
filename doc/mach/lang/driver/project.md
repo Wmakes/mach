@@ -186,6 +186,8 @@ release the scope lowering bound a module's constants in
 pub fun dnit_project(p: *Project);
 ```
 
+release a project and everything it owns; a nil project holds nothing
+
 ## fun set_origin
 
 ```mach
@@ -206,6 +208,9 @@ pub fun init_project(p: *Project, s: *session.Session);
 ```mach
 pub fun free_dep_entries(alloc: *A.Allocator, deps: *DepEntry, count: u32, capacity: usize);
 ```
+
+release `count` dependency entries and their array of `capacity`; a nil array owns
+nothing
 
 ## fun module_count
 

@@ -341,6 +341,7 @@ pub fun request(
     if (malloc == nil) { ret res[LowerRequest, fail.Fail].err{fail.message("lower: a lowering request requires an allocator")}; }
 
     if (interfaces.read == nil) { ret res[LowerRequest, fail.Fail].err{fail.message("lower: a lowering request requires a reader of imported interfaces")}; }
+    if (diags == nil)           { ret res[LowerRequest, fail.Fail].err{fail.message("lower: a lowering request requires a diagnostic store")}; }
     val sr: res[ModuleScope, fail.Fail] = module_scope(s, own_module, a, fqn, sema_result, rr, ctx);
     if (sel sr.err) { ret res[LowerRequest, fail.Fail].err{sr.err}; }
 
@@ -483,6 +484,7 @@ pub fun init_context(lc: *LowerContext, req: *LowerRequest, m: *me_ir.Module) er
     ret err[fail.Fail].ok{};
 }
 
+# release a lowering context; a nil context holds nothing
 pub fun dnit_context(lc: *LowerContext) {
     if (lc == nil) { ret; }
     map.dnit[resolve.SymbolId, LocalBinding](?lc.locals);
@@ -722,6 +724,8 @@ fun comptime_expression(lc: *LowerContext, a: *ast.Ast, eid: ast_id.ExprId) res[
     ret res[ast_expr.Expr, comptime.EvalFail].ok{result.ok};
 }
 
+# a lowering capability; a nil context, which the capability check refuses before any call,
+# answers as an evaluation with no lowering would
 pub fun resolve_module_member_const(lc: *LowerContext, eid: ast_id.ExprId) res[opt[comptime.CTValue], comptime.EvalFail] {
     if (lc == nil) { ret res[opt[comptime.CTValue], comptime.EvalFail].ok{opt[comptime.CTValue].none{}}; }
     val rr: *resolve.ResolveResult = lc.scope.rr;
@@ -755,6 +759,8 @@ pub fun resolve_module_member_const(lc: *LowerContext, eid: ast_id.ExprId) res[o
     ret res[opt[comptime.CTValue], comptime.EvalFail].ok{scalar};
 }
 
+# a lowering capability; a nil context, which the capability check refuses before any call,
+# answers as an evaluation with no lowering would
 pub fun comptime_ident_is_runtime(lc: *LowerContext, eid: ast_id.ExprId) bool {
     if (lc == nil) { ret false; }
     ret resolve.expr_is_runtime(lc.scope.rr, eid);
@@ -774,6 +780,8 @@ fun resolve_scalar_cast(lc: *LowerContext, eid: ast_id.ExprId, value: comptime.C
         expr_type_of(lc, node.data.cast.value), type_resolved_of(lc, node.data.cast.ty), node.data.cast.reinterpret);
 }
 
+# a lowering capability; a nil context, which the capability check refuses before any call,
+# answers as an evaluation with no lowering would
 pub fun resolve_type_comparison_operand(lc: *LowerContext, eid: ast_id.ExprId) res[opt[u32], comptime.EvalFail] {
     if (lc == nil) { ret res[opt[u32], comptime.EvalFail].ok{opt[u32].none{}}; }
     val t: type.TypeId = expr_type_of(lc, eid);
@@ -787,11 +795,15 @@ pub fun resolve_type_comparison_operand(lc: *LowerContext, eid: ast_id.ExprId) r
     ret res[opt[u32], comptime.EvalFail].ok{opt[u32].some{t::u32}};
 }
 
+# a lowering capability; a nil context, which the capability check refuses before any call,
+# answers as an evaluation with no lowering would
 pub fun resolve_type_query(lc: *LowerContext, tid: u32, which: u8) res[opt[comptime.CTValue], comptime.EvalFail] {
     if (lc == nil) { ret res[opt[comptime.CTValue], comptime.EvalFail].ok{opt[comptime.CTValue].none{}}; }
     ret sema_declared.answer_type_query(lc.s, tid, which);
 }
 
+# a lowering capability; a nil context, which the capability check refuses before any call,
+# answers as an evaluation with no lowering would
 pub fun resolve_layout_intrinsic(lc: *LowerContext, eid: u32) res[opt[comptime.CTValue], comptime.EvalFail] {
     if (lc == nil) { ret res[opt[comptime.CTValue], comptime.EvalFail].ok{opt[comptime.CTValue].none{}}; }
     val e:         ast_id.ExprId = eid::ast_id.ExprId;
@@ -2041,20 +2053,22 @@ test request__refuses_a_module_product_that_does_not_correspond {
 
     var code: i32 = 0;
 
-    val good: res[LowerRequest, fail.Fail] = request(?s, ?l, ?tgt, ?alloc, ?f.a1, f.fqn, f.mid, ?f.sm1, ?f.rr1, ?f.cc1, nil, false, false, true, nil, reader);
+    val good: res[LowerRequest, fail.Fail] = request(?s, ?l, ?tgt, ?alloc, ?f.a1, f.fqn, f.mid, ?f.sm1, ?f.rr1, ?f.cc1, nil, false, false, true, ?s.diags, reader);
     if (sel good.err) { ret 1; }
     val req: LowerRequest = good.ok;
     if (req.module.a != ?f.a1 || !module.same(req.module.own_module, f.mid)) { code = 1; }
     if (req.instances != ?f.sm1.instances)                                   { code = 1; }
 
-    val r_2066: res[LowerRequest, fail.Fail] = request(?s, ?l, nil, ?alloc, ?f.a1, f.fqn, f.mid, ?f.sm1, ?f.rr1, ?f.cc1, nil, false, false, true, nil, reader);
+    val r_2066: res[LowerRequest, fail.Fail] = request(?s, ?l, nil, ?alloc, ?f.a1, f.fqn, f.mid, ?f.sm1, ?f.rr1, ?f.cc1, nil, false, false, true, ?s.diags, reader);
     if (sel r_2066.ok) { code = 1; }
-    val r_2067: res[LowerRequest, fail.Fail] = request(?s, ?l, ?tgt, nil, ?f.a1, f.fqn, f.mid, ?f.sm1, ?f.rr1, ?f.cc1, nil, false, false, true, nil, reader);
+    val r_2067: res[LowerRequest, fail.Fail] = request(?s, ?l, ?tgt, nil, ?f.a1, f.fqn, f.mid, ?f.sm1, ?f.rr1, ?f.cc1, nil, false, false, true, ?s.diags, reader);
     if (sel r_2067.ok) { code = 1; }
-    val r_2068: res[LowerRequest, fail.Fail] = request(?s, ?l, ?tgt, ?alloc, ?f.a2, f.fqn, f.mid, ?f.sm1, ?f.rr1, ?f.cc1, nil, false, false, true, nil, reader);
+    val r_2068: res[LowerRequest, fail.Fail] = request(?s, ?l, ?tgt, ?alloc, ?f.a2, f.fqn, f.mid, ?f.sm1, ?f.rr1, ?f.cc1, nil, false, false, true, ?s.diags, reader);
     if (sel r_2068.ok) { code = 1; }
-    val r_2069: res[LowerRequest, fail.Fail] = request(?s, ?l, ?tgt, ?alloc, ?f.a1, f.fqn, f.mid, ?f.sm1, ?f.rr1, ?f.cc1, nil, false, false, true, nil, unread);
+    val r_2069: res[LowerRequest, fail.Fail] = request(?s, ?l, ?tgt, ?alloc, ?f.a1, f.fqn, f.mid, ?f.sm1, ?f.rr1, ?f.cc1, nil, false, false, true, ?s.diags, unread);
     if (sel r_2069.ok) { code = 1; }
+    val no_store: res[LowerRequest, fail.Fail] = request(?s, ?l, ?tgt, ?alloc, ?f.a1, f.fqn, f.mid, ?f.sm1, ?f.rr1, ?f.cc1, nil, false, false, true, nil, reader);
+    if (sel no_store.ok) { code = 1; }
 
     ret code;
 }

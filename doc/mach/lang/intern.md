@@ -78,6 +78,8 @@ whether `itn` answers every id `base` has issued: it is `base`, or layered over 
 pub fun dnit(itn: *Interner);
 ```
 
+release an interner and its strings; a nil interner holds nothing
+
 ## fun text
 
 ```mach
@@ -137,6 +139,8 @@ pub rec Remap;
 ```mach
 pub fun remap_dnit(alloc: *A.Allocator, remap: *Remap);
 ```
+
+release a remap; a nil remap holds nothing
 
 ## fun child_reintern
 

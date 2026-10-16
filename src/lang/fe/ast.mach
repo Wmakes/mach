@@ -72,6 +72,7 @@ pub fun init(a: *A.Allocator, file_id: lang_source.FileId) Ast {
     ret ast;
 }
 
+# release a tree; a nil tree holds nothing
 pub fun dnit(a: *Ast) {
     if (a == nil) { ret; }
     collections_vector.dnit[ast_module.Module](?a.modules);

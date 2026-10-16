@@ -103,6 +103,8 @@ ret: the failure as the session holds it
 pub fun dnit(s: *Session);
 ```
 
+release a session and everything it owns; a nil session holds nothing
+
 ## fun reset_module_registry
 
 ```mach
@@ -214,6 +216,9 @@ the caller exclusively borrows overlay state through commit or discard
 ```mach
 pub fun discard_overlay(prepared: *PreparedOverlay);
 ```
+
+release an overlay that was prepared and not committed; one already committed or
+discarded owns nothing
 
 ## fun commit_overlay
 

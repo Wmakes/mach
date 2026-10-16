@@ -125,10 +125,8 @@ fun pow2_steps(p: *DivPlan, k: u32, neg: bool, rem: bool) {
 # the largest dividend below 2^n that leaves the remainder d - 1: the one
 # whose rounding error is the largest (Hacker's Delight, 10-9)
 fun worst_dividend(d: wide.Wide, n: u32) wide.Wide {
-    var q: wide.Wide;
-    var r: wide.Wide;
-    wide.divmod_u(pow2(n), d, ?q, ?r);
-    ret wide.sub(wide.sub(pow2(n), one()), r);
+    val qr: wide.QuotRem = wide.quot_rem_u(pow2(n), d);
+    ret wide.sub(wide.sub(pow2(n), one()), qr.r);
 }
 
 # the smallest shift p >= floor with m = ceil(2^p / d) exact for every
@@ -139,11 +137,11 @@ fun unsigned_magic(d: wide.Wide, n: u32, floor: u32, m_out: *wide.Wide) u32 {
     val nc: wide.Wide = worst_dividend(d, n);
     var p:  u32       = floor;
     for (p < 128) {
-        var q: wide.Wide;
-        var r: wide.Wide;
-        wide.divmod_u(pow2(p), d, ?q, ?r);
-        var m: wide.Wide = q;
-        var e: wide.Wide = wide.zero();
+        val qr: wide.QuotRem = wide.quot_rem_u(pow2(p), d);
+        val q:  wide.Wide    = qr.q;
+        val r:  wide.Wide    = qr.r;
+        var m:  wide.Wide    = q;
+        var e:  wide.Wide    = wide.zero();
         if (!wide.is_zero(r)) {
             m = wide.add(q, one());
             e = wide.sub(d, r);
@@ -167,10 +165,9 @@ fun signed_magic(a: wide.Wide, n: u32, m_out: *wide.Wide) u32 {
     val nc: wide.Wide = worst_dividend(a, n - 1);
     var p:  u32       = n;
     for (p < 128) {
-        var q: wide.Wide;
-        var r: wide.Wide;
-        wide.divmod_u(pow2(p), a, ?q, ?r);
-        val e: wide.Wide = wide.sub(a, r);
+        val qr: wide.QuotRem = wide.quot_rem_u(pow2(p), a);
+        val q:  wide.Wide    = qr.q;
+        val e:  wide.Wide    = wide.sub(a, qr.r);
         if (wide.lt_u(wide.mul(e, nc), pow2(p))) {
             @m_out = wide.add(q, one());
             ret p;
@@ -316,12 +313,10 @@ fun eval(p: *DivPlan, x: wide.Wide) wide.Wide {
 # zero when signed
 #[testing]
 fun t_ref(x: wide.Wide, d: wide.Wide, bits: u32, signed: bool, rem: bool) wide.Wide {
-    var q: wide.Wide;
-    var r: wide.Wide;
-    if (signed) { wide.divmod_s(wide.sext(x, bits), wide.sext(d, bits), ?q, ?r); }
-    or          { wide.divmod_u(wide.trunc(x, bits), wide.trunc(d, bits), ?q, ?r); }
-    if (rem)    { ret wide.trunc(r, bits); }
-    ret wide.trunc(q, bits);
+    var qr: wide.QuotRem = wide.quot_rem_u(wide.trunc(x, bits), wide.trunc(d, bits));
+    if (signed) { qr = wide.quot_rem_s(wide.sext(x, bits), wide.sext(d, bits)); }
+    if (rem)    { ret wide.trunc(qr.r, bits); }
+    ret wide.trunc(qr.q, bits);
 }
 
 # the plan's answer for x, compared with the division; true when they agree
@@ -489,10 +484,8 @@ fun t_check_wide(p: *DivPlan, d: u64, bits: u32, rem: bool, s: *u64) bool {
         top = wide.shr_u(mask, 1);
         if (wide.is_negative(wide.sext(dw, bits))) { a = wide.trunc(wide.neg(wide.sext(dw, bits)), bits + 1); }
     }
-    var q: wide.Wide;
-    var r: wide.Wide;
-    wide.divmod_u(wide.add(top, one()), a, ?q, ?r);
-    val worst: wide.Wide = wide.sub(wide.sub(wide.add(top, one()), r), one());
+    val qr:    wide.QuotRem = wide.quot_rem_u(wide.add(top, one()), a);
+    val worst: wide.Wide    = wide.sub(wide.sub(wide.add(top, one()), qr.r), one());
     var edge:  [14]wide.Wide;
     edge[0]  = wide.zero();
     edge[1]  = one();

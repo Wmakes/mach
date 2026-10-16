@@ -317,7 +317,8 @@ fun rekeyed(f: Fail, k: Keyed) Fail {
     ret f;
 }
 
-# free the paths of `also`'s places and its array, allocated `cap` places long
+# free the paths of `also`'s places and its array, allocated `cap` places long;
+# a related list naming no places owns nothing
 fun related_dnit(a: *A.Allocator, also: Related, cap: usize) {
     if (also.items == nil) { ret; }
     var i: usize = 0;
@@ -528,7 +529,8 @@ fun fix_retain(a: *A.Allocator, fx: Fix) res[Fix, A.Error] {
     ret res[Fix, A.Error].ok{out};
 }
 
-# release the places a failure owns through `a`, as `places_retain` made them
+# release the places a failure owns through `a`, as `places_retain` made them;
+# a failure carrying no fix owns no fix text
 pub fun places_dnit(a: *A.Allocator, f: Fail) {
     val k_o: opt[Keyed] = keyed(f);
     if (sel k_o.none)            { ret; }
@@ -668,6 +670,13 @@ pub fun message_of(made: res[str, Fail]) Fail {
 pub fun user_of(k: diagnostic_kind.Kind, made: res[str, Fail]) Fail {
     if (sel made.err) { ret made.err; }
     ret user(k, made.ok);
+}
+
+# the environment failure under `k` carrying a made text, or the failure that
+# refused to make it
+pub fun environment_of(k: diagnostic_kind.Kind, made: res[str, Fail]) Fail {
+    if (sel made.err) { ret made.err; }
+    ret environment(k, made.ok);
 }
 
 # the interner's copy of a borrowed `text`, which outlives the storage `text`

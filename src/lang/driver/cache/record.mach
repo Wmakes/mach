@@ -55,6 +55,7 @@ pub rec Record {
     image: target_of.ObjectImage;
 }
 
+# release recorded facts; nil facts hold nothing
 pub fun facts_dnit(alloc: *A.Allocator, f: *Facts) {
     if (f == nil)                                                 { ret; }
     if (f.tests != nil && f.test_count != 0 && alloc != nil)      { A.deallocate[TestFact](alloc, f.tests, f.test_count::usize); }
@@ -65,6 +66,7 @@ pub fun facts_dnit(alloc: *A.Allocator, f: *Facts) {
     f.test_count   = 0;
 }
 
+# release a record; a nil record holds nothing
 pub fun record_dnit(alloc: *A.Allocator, r: *Record) {
     if (r == nil) { ret; }
     facts_dnit(alloc, ?r.facts);

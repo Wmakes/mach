@@ -290,7 +290,7 @@ fun parent_escapes(alloc: *A.Allocator, root: str, dir: str) res[bool, fail.Fail
         for (end < len && dir[end] != '/'::u8) { end = end + 1; }
         if (end > from) {
             val prefix_r: res[str, types_string.StrError] = types_string.str_copy_slice(alloc, dir, 0, end);
-            if (sel prefix_r.err) { ret res[bool, fail.Fail].err{fail.message("out of memory")}; }
+            if (sel prefix_r.err) { ret res[bool, fail.Fail].err{fail.str_refused(prefix_r.err)}; }
             val prefix:   str                           = prefix_r.ok;
             val joined_r: res[types_path.Path, A.Error] = types_path.join(alloc, root, prefix);
             str_free(alloc, prefix);

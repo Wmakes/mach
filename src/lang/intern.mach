@@ -111,6 +111,7 @@ pub fun descends(itn: *Interner, base: *Interner) bool {
     ret false;
 }
 
+# release an interner and its strings; a nil interner holds nothing
 pub fun dnit(itn: *Interner) {
     if (itn == nil) { ret; }
 
@@ -245,6 +246,7 @@ pub rec Remap {
     len:      usize;
 }
 
+# release a remap; a nil remap holds nothing
 pub fun remap_dnit(alloc: *A.Allocator, remap: *Remap) {
     if (remap == nil) { ret; }
     if (remap.ids != nil && remap.len > 0) {
