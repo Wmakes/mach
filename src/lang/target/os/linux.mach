@@ -1,4 +1,5 @@
 use mach.lang.fail;
+use mink_linux: mink.catalog.os.linux;
 use std.types.bool.bool;
 use std.types.bool.false;
 use std.types.bool.true;
@@ -85,7 +86,7 @@ val ISA_ROWS: [3]lang_target_os.IsaRow = [3]lang_target_os.IsaRow{
 
 pub val VTABLE: lang_target_os.OsVTable = lang_target_os.OsVTable{
     id:                 catalog_os.LINUX,
-    name:               "linux",
+    name:               mink_linux.LINUX.name,
     default_of:         "elf",
     supported_ofs:      ?SUPPORTED_OFS[0],
     supported_of_count: 1,

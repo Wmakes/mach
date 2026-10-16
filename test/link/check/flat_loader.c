@@ -3,7 +3,7 @@
  *
  * usage: flat_loader <image>
  *
- * the image is an `os=freestanding, of=raw` build: a container-free binary entered
+ * the image is an `os=freestanding, of=flat` build: a container-free binary entered
  * at its base, position-independent, that exits through a raw `exit` syscall. mmap
  * it into an executable page and call it; the call never returns (the image exits
  * the process with its computed code), so this process's exit status is the image's.

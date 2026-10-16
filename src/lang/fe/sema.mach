@@ -2819,7 +2819,7 @@ test generic_param_type_for__respects_the_declaring_module {
 #[testing]
 fun spirv_says(text: str, needle: str) bool {
     var src: resolve.Sources = resolve.sources("t.main", text);
-    resolve.sources_target(?src, "spirv", "freestanding", "spirv", nil, 0);
+    resolve.sources_target(?src, "spirv", "vulkan", "spirv", nil, 0);
     ret sema_checked.probe_says(?src, needle);
 }
 

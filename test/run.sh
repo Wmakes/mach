@@ -74,9 +74,9 @@ riscv64zfh-linux   rv64gc_zfh  linux         lp64d    -    bin     hosted  qemu-
 x86_64-windows     x86_64      windows       win64    -    bin     hosted  -             -          -
 x86_64-darwin      x86_64      darwin        sysv64   -    bin     hosted  -             -          -
 aarch64-darwin     aarch64     darwin        aapcs64  -    bin     hosted  -             -          -
-spirv              spirv       freestanding  spirv    -    bin     direct  -             -          -
-spirv-vk12         spirv       freestanding  spirv    -    bin     direct  -             vulkan1.2  int8,int16,int64,float64,float16,storage_buffer_8bit_access,storage_buffer_16bit_access
-spirv-vk13         spirv       freestanding  spirv    -    bin     direct  -             vulkan1.3  int8,int16,int64,float64,float16,storage_buffer_8bit_access,storage_buffer_16bit_access
+spirv              spirv       vulkan        spirv    -    bin     direct  -             -          -
+spirv-vk12         spirv       vulkan        spirv    -    bin     direct  -             vulkan1.2  int8,int16,int64,float64,float16,storage_buffer_8bit_access,storage_buffer_16bit_access
+spirv-vk13         spirv       vulkan        spirv    -    bin     direct  -             vulkan1.3  int8,int16,int64,float64,float16,storage_buffer_8bit_access,storage_buffer_16bit_access
 riscv32            rv32imafdc  freestanding  ilp32d   elf  static  direct  qemu-riscv32  -          -
 '
 # where a run bin is based: above the host's mmap floor with a page for its headers

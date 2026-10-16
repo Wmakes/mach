@@ -1014,7 +1014,7 @@ fun union_native_text(alloc: *A.Allocator, text: str) res[str, fail.Fail] {
 # `shaded` embeds
 #[testing]
 fun manifest_lessons() str {
-    ret "[project]\nmach = \">=5\"\nid = \"lessons\"\nversion = \"0.1.0\"\nsrc = \"src\"\nwork = \"out\"\n\n[target.spirv]\nisa = \"spirv\"\nos = \"freestanding\"\nabi = \"spirv\"\nenv = \"vulkan1.0\"\n\n[target.linux-x86_64]\nisa = \"x86_64\"\nos = \"linux\"\nabi = \"sysv64\"\n\n[profile.debug]\ndefault = true\noptimize = false\ndebug = true\nsimd = \"scalarize\"\n\n[artifact.hello]\ndefault = true\nkind = \"bin\"\nentry = \"hello.mach\"\nout = \"{project.work}/bin/hello\"\ntargets = [\"*\"]\nlink = []\nneed = []\n\n[artifact.shaded]\nkind = \"bin\"\nentry = \"shaded.mach\"\nout = \"{project.work}/bin/shaded\"\ntargets = [\"*\"]\nlink = []\nneed = [\"artifact.shader-*\"]\n\n[artifact.shader-vert]\nkind = \"bin\"\nentry = \"shaders/vert.mach\"\nout = \"{project.work}/spv/vert{artifact.suffix}\"\ntargets = [\"spirv\"]\nlink = []\nneed = []\n";
+    ret "[project]\nmach = \">=5\"\nid = \"lessons\"\nversion = \"0.1.0\"\nsrc = \"src\"\nwork = \"out\"\n\n[target.spirv]\nisa = \"spirv\"\nos = \"vulkan\"\nabi = \"spirv\"\nenv = \"vulkan1.0\"\n\n[target.linux-x86_64]\nisa = \"x86_64\"\nos = \"linux\"\nabi = \"sysv64\"\n\n[profile.debug]\ndefault = true\noptimize = false\ndebug = true\nsimd = \"scalarize\"\n\n[artifact.hello]\ndefault = true\nkind = \"bin\"\nentry = \"hello.mach\"\nout = \"{project.work}/bin/hello\"\ntargets = [\"*\"]\nlink = []\nneed = []\n\n[artifact.shaded]\nkind = \"bin\"\nentry = \"shaded.mach\"\nout = \"{project.work}/bin/shaded\"\ntargets = [\"*\"]\nlink = []\nneed = [\"artifact.shader-*\"]\n\n[artifact.shader-vert]\nkind = \"bin\"\nentry = \"shaders/vert.mach\"\nout = \"{project.work}/spv/vert{artifact.suffix}\"\ntargets = [\"spirv\"]\nlink = []\nneed = []\n";
 }
 
 # the fixture on disk, with the shader entry under `src/shaders`
@@ -7762,7 +7762,7 @@ test comptime_arm__does_not_mask_a_cross_module_import_conflict {
 # a manifest for a test's shader project: the bin `uniontest`, its entry `main.mach`, on the
 # logical spirv target
 #[testing]
-val SPIRV_MANIFEST: str = "[project]\nmach = \">=5\"\nid = \"uniontest\"\nversion = \"0.0.0\"\nsrc = \"src\"\nwork = \"out/{target.name}/{profile.name}\"\n\n[target.spirv]\nisa = \"spirv\"\nos = \"freestanding\"\nabi = \"spirv\"\n\n[artifact.uniontest]\nkind = \"bin\"\nentry = \"main.mach\"\nout = \"{project.work}/bin/uniontest\"\ntargets = [\"*\"]\nlink = []\nneed = []\n[profile.debug]\ndefault = true\noptimize = false\ndebug = false\nsimd = \"scalarize\"\n";
+val SPIRV_MANIFEST: str = "[project]\nmach = \">=5\"\nid = \"uniontest\"\nversion = \"0.0.0\"\nsrc = \"src\"\nwork = \"out/{target.name}/{profile.name}\"\n\n[target.spirv]\nisa = \"spirv\"\nos = \"vulkan\"\nabi = \"spirv\"\n\n[artifact.uniontest]\nkind = \"bin\"\nentry = \"main.mach\"\nout = \"{project.work}/bin/uniontest\"\ntargets = [\"*\"]\nlink = []\nneed = []\n[profile.debug]\ndefault = true\noptimize = false\ndebug = false\nsimd = \"scalarize\"\n";
 
 # zero when sema over the entry of a shader project of `text` either reports or fails at every
 # allocation it refuses, never accepting the module silently
@@ -7869,7 +7869,7 @@ test test_goal__leaves_out_another_targets_modules {
     var s: session.Session = sr.ok;
     fin { session.dnit(?s); }
 
-    val mtext: str    = "[project]\nmach = \">=5\"\nid = \"split\"\nversion = \"0.0.0\"\nsrc = \"src\"\nwork = \"out/{target.name}/{profile.name}\"\n\n[target.host]\nisa = \"x86_64\"\nos = \"linux\"\nabi = \"sysv64\"\n\n[target.gpu]\nisa = \"spirv\"\nos = \"freestanding\"\nabi = \"spirv\"\n\n[profile.debug]\ndefault = true\noptimize = false\ndebug = false\nsimd = \"scalarize\"\n\n[artifact.app]\nkind = \"static\"\nentry = \"main.mach\"\nout = \"{project.work}/lib/app\"\ntargets = [\"host\"]\nlink = []\nneed = []\n\n[artifact.shader]\nkind = \"bin\"\nentry = \"frag.mach\"\nout = \"{project.work}/spv/frag.spv\"\ntargets = [\"gpu\"]\nlink = []\nneed = []\n";
+    val mtext: str    = "[project]\nmach = \">=5\"\nid = \"split\"\nversion = \"0.0.0\"\nsrc = \"src\"\nwork = \"out/{target.name}/{profile.name}\"\n\n[target.host]\nisa = \"x86_64\"\nos = \"linux\"\nabi = \"sysv64\"\n\n[target.gpu]\nisa = \"spirv\"\nos = \"vulkan\"\nabi = \"spirv\"\n\n[profile.debug]\ndefault = true\noptimize = false\ndebug = false\nsimd = \"scalarize\"\n\n[artifact.app]\nkind = \"static\"\nentry = \"main.mach\"\nout = \"{project.work}/lib/app\"\ntargets = [\"host\"]\nlink = []\nneed = []\n\n[artifact.shader]\nkind = \"bin\"\nentry = \"frag.mach\"\nout = \"{project.work}/spv/frag.spv\"\ntargets = [\"gpu\"]\nlink = []\nneed = []\n";
     var names: [4]str = [4]str{"main.mach", "frag.mach", "shaderlib.mach", "shared.mach"};
     var texts: [4]str = [4]str{
         "use split.shared;\n\ntest host { ret 0; }\n",

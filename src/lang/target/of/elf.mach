@@ -1,6 +1,7 @@
 use diagnostic_kind: mach.lang.diagnostic.kind;
 use mach.lang.fail;
 use output_testing: mach.lang.output.testing;
+use mink_format:    mink.catalog.format;
 use std.allocator.arena;
 use std.allocator.page;
 use std.collections.vector.Vector;
@@ -1768,7 +1769,7 @@ fun segment_tables(img: *target_of.LinkedImage, tables: *target_of.TableList) er
 pub val VTABLE: target_of.OfVTable = target_of.OfVTable{
     id:                      target_of.ELF,
     fingerprint_tag:         1,
-    name:                    "elf",
+    name:                    mink_format.ELF.name,
     links_from_image:        true,
     debug_offset_kind:       target_of.RK_ABS32,
     object_suffix:           ".o",

@@ -1949,7 +1949,7 @@ test plan__a_finished_modules_target_delivers_the_entry_module_at_out {
     var alloc: A.Allocator;
     var itn:   intern.Interner;
     var m:     manifest.Manifest;
-    if (!ut_scaffold_src(?alloc, ?itn, ?m, "[project]\nmach = \">=5\"\nid = \"p\"\nversion = \"0.1.0\"\nsrc = \"src\"\nwork = \"out/{target.name}/{profile.name}\"\n[target.gpu]\nisa = \"spirv\"\nos = \"freestanding\"\nabi = \"spirv\"\n[profile.debug]\noptimize = false\ndebug = false\nsimd = \"scalarize\"\n[artifact.appa]\nkind = \"bin\"\nentry = \"main.mach\"\nout = \"{project.work}/bin/appa\"\ntargets = [\"*\"]\nlink = []\nneed = []\n")) { ret 1; }
+    if (!ut_scaffold_src(?alloc, ?itn, ?m, "[project]\nmach = \">=5\"\nid = \"p\"\nversion = \"0.1.0\"\nsrc = \"src\"\nwork = \"out/{target.name}/{profile.name}\"\n[target.gpu]\nisa = \"spirv\"\nos = \"vulkan\"\nabi = \"spirv\"\n[profile.debug]\noptimize = false\ndebug = false\nsimd = \"scalarize\"\n[artifact.appa]\nkind = \"bin\"\nentry = \"main.mach\"\nout = \"{project.work}/bin/appa\"\ntargets = [\"*\"]\nlink = []\nneed = []\n")) { ret 1; }
 
     var rq: request.BuildRequest = request.defaults();
     rq.project_root = "/r";
@@ -2029,7 +2029,7 @@ test plan__a_finished_modules_sole_target_pins_and_a_host_build_needing_it_plans
     var m:     manifest.Manifest;
     val made:  err[A.Error] = page.make(?alloc);
     if (sel made.err) { ret 1; }
-    val arts: str                             = "[target.gpu]\nisa = \"spirv\"\nos = \"freestanding\"\nabi = \"spirv\"\n[profile.debug]\noptimize = false\ndebug = false\nsimd = \"scalarize\"\n[artifact.app]\nkind = \"bin\"\nentry = \"main.mach\"\nout = \"{project.work}/bin/app\"\ntargets = [\"h\"]\nlink = []\nneed = [\"artifact.shader\"]\n[artifact.shader]\nkind = \"bin\"\nentry = \"shader.mach\"\nout = \"{project.work}/spv/shader\"\ntargets = [\"gpu\"]\nlink = []\nneed = []\n";
+    val arts: str                             = "[target.gpu]\nisa = \"spirv\"\nos = \"vulkan\"\nabi = \"spirv\"\n[profile.debug]\noptimize = false\ndebug = false\nsimd = \"scalarize\"\n[artifact.app]\nkind = \"bin\"\nentry = \"main.mach\"\nout = \"{project.work}/bin/app\"\ntargets = [\"h\"]\nlink = []\nneed = [\"artifact.shader\"]\n[artifact.shader]\nkind = \"bin\"\nentry = \"shader.mach\"\nout = \"{project.work}/spv/shader\"\ntargets = [\"gpu\"]\nlink = []\nneed = []\n";
     val src:  res[str, types_string.StrError] = str_join(?alloc, "[project]\nmach = \">=5\"\nid = \"p\"\nversion = \"0.1.0\"\nsrc = \"src\"\nwork = \"out/{target.name}/{profile.name}\"\n", host_target_table(?alloc, "h"), arts);
     if (sel src.err)                                { ret 1; }
     if (!ut_scaffold_src(?alloc, ?itn, ?m, src.ok)) { ret 1; }

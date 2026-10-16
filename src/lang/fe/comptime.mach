@@ -1374,7 +1374,7 @@ test tag_for__registry_names_are_the_only_names {
         if (r.ok == catalog_os.UNKNOWN)          { ret 1; }
         i = i + 1;
     }
-    if (catalog_os.count() != 4) { ret 1; }
+    if (catalog_os.count() != 5) { ret 1; }
 
     val arch_tag_for_1: res[u32, fail.Fail] = comptime_path.arch_tag_for(t_view("spirv"));
     if (sel arch_tag_for_1.err) { ret 1; }

@@ -10,7 +10,7 @@ work = "out/link"
 # attribute the result to the right files and lines
 [target.spirv]
 isa = "spirv"
-os  = "freestanding"
+os  = "vulkan"
 abi = "spirv"
 
 [profile.debug]

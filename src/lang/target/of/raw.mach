@@ -1,6 +1,7 @@
 use diagnostic_kind: mach.lang.diagnostic.kind;
 use mach.lang.fail;
 use output_testing: mach.lang.output.testing;
+use mink_format:    mink.catalog.format;
 use std.allocator.page;
 use collections_vector: std.collections.vector;
 use std.collections.vector.Vector;
@@ -110,7 +111,7 @@ val INPUT_NAMING: target_of.InputNaming = target_of.InputNaming{
 pub val VTABLE: target_of.OfVTable = target_of.OfVTable{
     id:                      target_of.RAW,
     fingerprint_tag:         4,
-    name:                    "raw",
+    name:                    mink_format.FLAT.name,
     produces_image:          true,
     links_from_image:        true,
     debug_offset_kind:       target_of.RK_ABS32,

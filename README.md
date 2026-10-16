@@ -146,7 +146,7 @@ abi = "ilp32"
 
 [target.gpu]
 isa = "spirv"
-os  = "freestanding"
+os  = "vulkan"
 abi = "spirv"
 env = "vulkan1.3"
 ```

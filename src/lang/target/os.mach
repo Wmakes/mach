@@ -412,10 +412,10 @@ val T_POLICY_OVERFLOW: catalog_os.FsPolicy = catalog_os.FsPolicy{libdir_len: cat
 val T_POLICY_EMPTY_DIR: catalog_os.FsPolicy = catalog_os.FsPolicy{libdirs: [catalog_os.LIBDIR_MAX]str{"", "", "", "", "", "", "", ""}, libdir_len: 1};
 
 #[testing]
-val T_RAW: [1]str = [1]str{"raw"};
+val T_RAW: [1]str = [1]str{"flat"};
 
 #[testing]
-val T_RAW_TWICE: [2]str = [2]str{"raw", "raw"};
+val T_RAW_TWICE: [2]str = [2]str{"flat", "flat"};
 
 #[testing]
 val T_EMPTY_FORMAT: [1]str = [1]str{""};
@@ -429,7 +429,7 @@ fun test_os_vtable(id: u32, name: str) OsVTable {
     ret OsVTable{
         id:                 id,
         name:               name,
-        default_of:         "raw",
+        default_of:         "flat",
         page_size:          4096,
         isa_any:            ?T_ANY,
         supported_ofs:      ?T_RAW[0],

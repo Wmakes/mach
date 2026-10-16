@@ -13,7 +13,7 @@ work = "out/link"
 # SPIR-V module on its own.
 [target.spirv]
 isa = "spirv"
-os  = "freestanding"
+os  = "vulkan"
 abi = "spirv"
 
 [profile.debug]

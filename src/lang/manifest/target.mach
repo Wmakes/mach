@@ -17,6 +17,7 @@ use A: std.allocator;
 
 use diagnostic_kind: mach.lang.diagnostic.kind;
 use mach.lang.intern;
+use lang_source:  mach.lang.source;
 use lang_target:  mach.lang.target;
 use catalog_abi:  mach.lang.target.catalog.abi;
 use catalog_arch: mach.lang.target.catalog.arch;
@@ -134,16 +135,65 @@ pub fun parse_targets(alloc: *A.Allocator, itn: *intern.Interner, t: *toml.Table
     ret err[fail.Fail].ok{};
 }
 
+# a spelling a target key no longer takes, and mink's name for the row it meant
+# ---
+# key: the target key
+# old: the retired spelling
+# new: the spelling that replaces it, mink's name for the row
+# isa: the isa the spelling is retired under, "" under every isa
+rec Retired {
+    key: str;
+    old: str;
+    new: str;
+    isa: str;
+}
+
+# raw and spv were mach's own names for mink's flat and spirv formats, and a spir-v
+# module's system is vulkan, never freestanding
+val RETIRED_COUNT: usize                  = 3;
+val RETIRED:       [RETIRED_COUNT]Retired = [RETIRED_COUNT]Retired{
+    Retired{key: "of", old: "raw", new: "flat", isa: ""},
+    Retired{key: "of", old: "spv", new: "spirv", isa: ""},
+    Retired{key: "os", old: "freestanding", new: "vulkan", isa: "spirv"},
+};
+
+# the refusal of a retired spelling the target table `sub` writes, carrying the
+# rewrite to the new one
+fun refuse_retired(alloc: *A.Allocator, sub: *toml.Table, label: str) err[fail.Fail] {
+    var i: usize = 0;
+    for (i < RETIRED_COUNT) {
+        val r: *Retired         = ?RETIRED[i];
+        val v: opt[*toml.Value] = toml.get(sub, r.key);
+        if (sel v.some) {
+            val written: str = key_text(sub, r.key);
+            if (str_equals(written, r.old) && (str_len(r.isa) == 0 || str_equals(key_text(sub, "isa"), r.isa))) {
+                val f: fail.Fail = refuse(alloc, diagnostic_kind.TARGET_RETIRED_SPELLING,
+                    "mach.toml: {}.{} = \"{}\" is a retired spelling; write \"{}\", mink's name for it", label, r.key, r.old, r.new);
+                val fix: res[str, fail.Fail] = sfmt(alloc, "\"{}\"", r.new);
+                if (sel fix.err) { ret err[fail.Fail].err{fix.err}; }
+                val what: res[str, fail.Fail] = sfmt(alloc, "write `{} = \"{}\"`", r.key, r.new);
+                if (sel what.err) { ret err[fail.Fail].err{what.err}; }
+                val at: lang_source.Span = lang_source.span(v.some.span.at, v.some.span.len);
+                ret fail_at(fail.with_fix(f, what.ok, opt[lang_source.Span].some{at}, fix.ok), v.some.span);
+            }
+        }
+        i = i + 1;
+    }
+    ret err[fail.Fail].ok{};
+}
+
 # the target table at entry `i` of `[target]`, labelled `label`
 fun target_decode(alloc: *A.Allocator, itn: *intern.Interner, tab: *toml.Table, i: usize, label: str, d: *TargetDef) err[fail.Fail] {
     val v_o: opt[*toml.Value] = toml.table_value(tab, i);
     val k_o: opt[str]         = toml.table_key(tab, i);
     if (sel v_o.none) { ret err[fail.Fail].err{fail.message("internal: a [target] entry index is outside its table")}; }
     if (sel k_o.none) { ret err[fail.Fail].err{fail.message("internal: a [target] entry index is outside its table")}; }
-    val sub:   *toml.Table = ?v_o.some.data.table;
+    val sub:     *toml.Table    = ?v_o.some.data.table;
+    val retired: err[fail.Fail] = refuse_retired(alloc, sub, label);
+    if (sel retired.err) { ret retired; }
     var ids:   [7]intern.StrId;
-    var texts: [7]str      = [7]str{k_o.some, key_text(sub, "isa"), key_text(sub, "os"), key_text(sub, "abi"), key_text(sub, "of"), key_text(sub, "platform"), key_text(sub, "env")};
-    var k:     usize       = 0;
+    var texts: [7]str = [7]str{k_o.some, key_text(sub, "isa"), key_text(sub, "os"), key_text(sub, "abi"), key_text(sub, "of"), key_text(sub, "platform"), key_text(sub, "env")};
+    var k:     usize  = 0;
     for (k < 7) {
         var r: res[intern.StrId, fail.Fail];
         if (k < 4)     { r = id_of(itn, texts[k]); }

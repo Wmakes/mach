@@ -3319,7 +3319,7 @@ test emit_module_image__carries_what_a_whole_module_emitter_writes {
     if (sel sr.err) { ret 1; }
     var s: session.Session = sr.ok;
     fin { session.dnit(?s); }
-    val selected: res[lang_target.Binding, fail.Fail] = lang_target.t_select("spirv", "freestanding", "spirv");
+    val selected: res[lang_target.Binding, fail.Fail] = lang_target.t_select("spirv", "vulkan", "spirv");
     if (sel selected.err) { ret 2; }
     var tgt: lang_target.Binding = selected.ok;
 

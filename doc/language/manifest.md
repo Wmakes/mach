@@ -491,10 +491,26 @@ such an image is refused at link rather than silently dropped.
 | Axis  | Values |
 |-------|--------|
 | `isa` | `x86_64`, `aarch64`, `riscv64`, `riscv32`, `spirv` |
-| `os`  | `linux`, `windows`, `darwin`, `freestanding` |
+| `os`  | `linux`, `windows`, `darwin`, `freestanding`, `vulkan` |
 | `abi` | `sysv64`, `win64`, `aapcs64`, `lp64`, `lp64f`, `lp64d`, `ilp32`, `ilp32f`, `ilp32d`, `spirv` |
-| `of`  | `elf`, `macho`, `coff`, `raw`, `spv` |
+| `of`  | `elf`, `macho`, `coff`, `flat`, `spirv` |
 | `env` | `vulkan1.0`, `vulkan1.1`, `vulkan1.2`, `vulkan1.3` |
+
+Each `isa`, `os` and `of` value is the name of a row of mink's catalog: `isa` an
+architecture, `os` a system and `of` a format. mach reads the spelling from that row,
+and the catalog's rows mach has no target for (`x86`, `wasm32`, `uefi`, `wasi`, ...)
+are not values here. A spelling mink names otherwise is refused where it is written,
+naming the new spelling and carrying the rewrite `mach migrate` applies:
+
+| Key | Retired | Written now |
+|-----|---------|-------------|
+| `of` | `raw` | `flat` |
+| `of` | `spv` | `spirv` |
+| `os` (on `isa = "spirv"`) | `freestanding` | `vulkan` |
+
+```
+error[target.retired_spelling]: mach.toml: [target.metal].of = "raw" is a retired spelling; write "flat", mink's name for it
+```
 
 `isa` also takes a canonical RISC-V extension string such as `rv32imc`, described
 below. `env` is defined only by `spirv`.
@@ -579,28 +595,28 @@ caught rather than silently never matching.
 ### Object-format override
 
 `of` overrides the object format a target implies. Each os has a default format —
-`linux` → `elf`, `windows` → `coff`, `darwin` → `macho`, `freestanding` → `raw` —
-and `of` names a different one from the same closed set: `elf`,
-`coff`, `macho`, `raw`, `spv`. `of` is optional; omit it to
+`linux` → `elf`, `windows` → `coff`, `darwin` → `macho`, `freestanding` → `flat`,
+`vulkan` → `spirv` — and `of` names a different one from the same closed set: `elf`,
+`coff`, `macho`, `flat`, `spirv`. `of` is optional; omit it to
 take the default. An os accepts only the formats it can load, so an override the
 os cannot enter is refused.
 
 ```toml
 [target.metal]
 isa = "x86_64"
-os  = "freestanding"   # os default object format is "raw"
+os  = "freestanding"   # os default object format is "flat"
 abi = "sysv64"
 of  = "elf"            # override: emit an ELF object instead
 ```
 
 The default is a function of the whole tuple, not the os alone. An os default
 carries relocatable machine text, which a whole-module emitter does not produce,
-so a `spirv` target resolves to `spv` — the format that carries a finished
-module — regardless of the os it names.
+so a `spirv` target resolves to `spirv`, the format that carries a finished
+module, which is also the only format `vulkan` accepts.
 
 An `of` naming a format whose emission shape does not match the instruction set's
 is refused at composition (`instruction set 'spirv' emits finished modules, but
-object format 'raw' carries linkable objects`), so the override cannot compose a
+object format 'flat' carries linkable objects`), so the override cannot compose a
 tuple that would emit nothing.
 
 The page an image is laid out at is a function of the same tuple. A format a
@@ -610,8 +626,8 @@ page where the os declares one (`linux` on `aarch64` lays out at 64 KiB, the
 largest page a kernel may use, `darwin` on `aarch64` at 16 KiB, 4 KiB elsewhere),
 and the instruction set's hardware page (4 KiB on `x86_64`, `aarch64`, `riscv64`
 and `riscv32`) where the os has no loader of its own, which is what `freestanding`
-with `of = "elf"` gives a bootloader such as Limine or GRUB. A flat image (`raw`)
-and a finished module (`spv`) have no page and are laid out byte-tight.
+with `of = "elf"` gives a bootloader such as Limine or GRUB. A flat image (`flat`)
+and a finished module (`spirv`) have no page and are laid out byte-tight.
 
 ### Finished-module targets
 
@@ -625,7 +641,7 @@ linker: the build publishes the entry module at the artifact's resolved `out` (o
 ```toml
 [target.gpu]
 isa = "spirv"
-os  = "freestanding"
+os  = "vulkan"
 abi = "spirv"
 # no `of`: the finished-module format resolves on its own
 ```
@@ -772,7 +788,7 @@ class, which the 8-bit feature does not reach.
 ```toml
 [target.gpu]
 isa        = "spirv"
-os         = "freestanding"
+os         = "vulkan"
 abi        = "spirv"
 env        = "vulkan1.0"
 extensions = ["int16", "int64", "float64"]
@@ -799,7 +815,7 @@ appendix's required version: 1.0, 1.3, 1.5 and 1.6.
 ```toml
 [target.gpu]
 isa = "spirv"
-os  = "freestanding"
+os  = "vulkan"
 abi = "spirv"
 env = "vulkan1.2"
 ```
@@ -825,7 +841,7 @@ os       = "freestanding"
 abi      = "sysv64"
 base     = 0xFFFF800000000000   # BareMetal copies the flat image here and calls it
 platform = "bmos"               # selects the mach-bmos backend
-# no `of`: freestanding's default object format is "raw"
+# no `of`: freestanding's default object format is "flat"
 ```
 
 - The artifact is a **flat binary** — no header, no sections, no entry record.
@@ -1180,7 +1196,7 @@ any of them (see [test.md](test.md#which-tests-run)).
   whose `SONAME` is its file name. mach writes no Mach-O `.dylib` or PE `.dll`,
   so a `darwin` or `windows` target refuses with `link: object format cannot
   write shared libraries`. A `freestanding` target never
-  writes one: its default `raw` format refuses with `a flat-image object format
+  writes one: its default `flat` format refuses with `a flat-image object format
   produces only executables`, and setting `of = "elf"` moves the refusal to the
   link, `link: a shared library needs a loader to map it, and os =
   "freestanding" has none`, because a shared library only exists to be mapped by
@@ -1209,7 +1225,7 @@ any of them (see [test.md](test.md#which-tests-run)).
     link: shared library '<artifact>' exports nothing: a shared library needs at least one `pub` declaration in the project, or a `fwd` re-export of one
     ```
 
-    A `freestanding` target is refused as well. With its default `raw` format
+    A `freestanding` target is refused as well. With its default `flat` format
     the artifact fails naming (`artifact naming: this object format has no
     shared-library form`), and with `of = "elf"` the link refuses with
     `link: a shared library needs a loader to map it, and os = "freestanding"

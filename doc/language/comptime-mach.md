@@ -223,6 +223,7 @@ $mach.os.linux
 $mach.os.darwin
 $mach.os.windows
 $mach.os.freestanding           # no OS / bare metal
+$mach.os.vulkan                 # a spir-v module's system
 $mach.arch.x86_64
 $mach.arch.aarch64
 $mach.arch.riscv64

@@ -1073,7 +1073,7 @@ val CT_WIDTHS: [4]u8 = [4]u8{8, 16, 32, 64};
 fun ct_mul_manifest(alloc: *A.Allocator, isa_name: str, os_name: str, abi_name: str, of_name: str) str {
     var kind: str = "static";
     var out:  str = "lib/ctmul.a";
-    if (str_equals(of_name, "spv")) {
+    if (str_equals(of_name, "spirv")) {
         kind = "bin";
         out  = "bin/ctmul";
     }
@@ -1298,7 +1298,7 @@ test ct_mul_query__agrees_with_the_lowering_gate {
         CtTuple{isa_name: "aarch64", os_name: "freestanding", abi_name: "aapcs64", of_name: "elf"},
         CtTuple{isa_name: "rv64gc_zkt", os_name: "linux", abi_name: "lp64d", of_name: "elf"},
         CtTuple{isa_name: "rv64gc", os_name: "linux", abi_name: "lp64d", of_name: "elf"},
-        CtTuple{isa_name: "spirv", os_name: "freestanding", abi_name: "spirv", of_name: "spv"}
+        CtTuple{isa_name: "spirv", os_name: "vulkan", abi_name: "spirv", of_name: "spirv"}
     };
     var ti: usize = 0;
     for (ti < 5) {
@@ -1680,7 +1680,7 @@ test ct_mul__refuses_every_undeclared_isa_os_and_condition {
     if (sel make_r.err) { ret 1; }
     var bad: i32 = 0;
     if (ct_mul_refused(?alloc, "rv32imac_zkt", "freestanding", "ilp32", "elf") != 0)      { bad = bad | 1; }
-    if (ct_mul_refused(?alloc, "spirv", "freestanding", "spirv", "spv") != 0)             { bad = bad | 2; }
+    if (ct_mul_refused(?alloc, "spirv", "vulkan", "spirv", "spirv") != 0)                 { bad = bad | 2; }
     if (ct_mul_refused(?alloc, "rv64gc", "linux", "lp64d", "elf") != 0)                   { bad = bad | 4; }
     if (ct_mul_refused(?alloc, "rv64imafd_zicsr_zifencei", "linux", "lp64d", "elf") != 0) { bad = bad | 8; }
     if (ct_mul_refused(?alloc, "rv64i_zkt", "linux", "lp64", "elf") != 0)                 { bad = bad | 16; }

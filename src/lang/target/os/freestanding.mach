@@ -1,3 +1,4 @@
+use mink_freestanding: mink.catalog.os.freestanding;
 use std.types.bool.false;
 use std.types.bool.true;
 use std.types.string.str;
@@ -21,7 +22,7 @@ val FS_POLICY: catalog_os.FsPolicy = catalog_os.FsPolicy{
     libdir_len:          0,
 };
 
-val SUPPORTED_OFS: [3]str = [3]str{"raw", "elf", "spv"};
+val SUPPORTED_OFS: [2]str = [2]str{"flat", "elf"};
 
 # no runtime calls a platform, so every convention the isa covers is accepted;
 # the named one is only the default `mach init` scaffolds. no kernel, so nobody
@@ -62,10 +63,10 @@ val ISA_ANY: lang_target_os.IsaRow = lang_target_os.IsaRow{
 
 pub val VTABLE: lang_target_os.OsVTable = lang_target_os.OsVTable{
     id:                 catalog_os.FREESTANDING,
-    name:               "freestanding",
-    default_of:         "raw",
+    name:               mink_freestanding.FREESTANDING.name,
+    default_of:         "flat",
     supported_ofs:      ?SUPPORTED_OFS[0],
-    supported_of_count: 3,
+    supported_of_count: 2,
     isa_rows:           ?ISA_ROWS[0],
     isa_row_count:      4,
     isa_any:            ?ISA_ANY,

@@ -62,7 +62,7 @@ val NAMED:       [NAMED_COUNT]Named = [NAMED_COUNT]Named{
     Named{os: catalog_os.FREESTANDING, arch: catalog_arch.AARCH64, abi: catalog_abi.AAPCS64, system: "freestanding", architecture: "aarch64", convention: "", baseline: ""},
     Named{os: catalog_os.LINUX, arch: catalog_arch.RISCV64, abi: catalog_abi.LP64D, system: "linux", architecture: "riscv64", convention: "lp64d", baseline: "rv64gc"},
     Named{os: catalog_os.FREESTANDING, arch: catalog_arch.RISCV32, abi: catalog_abi.ILP32, system: "freestanding", architecture: "riscv32", convention: "ilp32", baseline: "rv32imac"},
-    Named{os: catalog_os.FREESTANDING, arch: catalog_arch.SPIRV, abi: catalog_abi.SPIRV, system: "vulkan", architecture: "spirv", convention: "", baseline: ""},
+    Named{os: catalog_os.VULKAN, arch: catalog_arch.SPIRV, abi: catalog_abi.SPIRV, system: "vulkan", architecture: "spirv", convention: "", baseline: ""},
 };
 
 fun view_of(s: str) View {

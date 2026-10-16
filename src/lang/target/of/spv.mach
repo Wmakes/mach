@@ -1,6 +1,7 @@
 use diagnostic_kind: mach.lang.diagnostic.kind;
 use mach.lang.fail;
 use output_testing: mach.lang.output.testing;
+use mink_format:    mink.catalog.format;
 use std.memory;
 use std.types.bool.bool;
 use std.types.bool.false;
@@ -132,7 +133,7 @@ val COVERS_ISAS: [1]u32 = [1]u32{catalog_arch.SPIRV};
 pub val VTABLE: target_of.OfVTable = target_of.OfVTable{
     id:                      target_of.SPV,
     fingerprint_tag:         5,
-    name:                    "spv",
+    name:                    mink_format.SPIRV.name,
     object_is_artifact:      true,
     debug_offset_kind:       target_of.RK_ABS32,
     object_suffix:           ".spv",

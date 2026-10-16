@@ -2703,7 +2703,7 @@ test debug_validate__a_module_model_declares_no_producer {
     var sections: DebugVTable = t_debug(DBG_DWARF, "dwarf", DEBUG_SHAPE_SECTIONS, t_debug_produce, t_debug_supports);
     if (debug_refused(?sections)) { ret 4; }
 
-    var spv: OfVTable = OfVTable{id: SPV, name: "spv", object_is_artifact: true};
+    var spv: OfVTable = OfVTable{id: SPV, name: "spirv", object_is_artifact: true};
     var elf: OfVTable = OfVTable{id: ELF, name: "elf", links_from_image: true};
     if (debug_shape_for(?spv) != DEBUG_SHAPE_MODULE)   { ret 6; }
     if (debug_shape_for(?elf) != DEBUG_SHAPE_SECTIONS) { ret 6; }

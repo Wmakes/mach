@@ -728,7 +728,7 @@ pub fun count_vector_typed_instrs(p: *project.Project) u32 {
 
 #[testing]
 fun manifest_spirv() str {
-    ret "[project]\nmach = \">=5\"\nid = \"uniontest\"\nversion = \"0.0.0\"\nsrc = \"src\"\nwork = \"out/{target.name}/{profile.name}\"\n\n[target.linux]\nisa = \"x86_64\"\nos = \"linux\"\nabi = \"sysv64\"\n\n[target.linux-arm64]\nisa = \"aarch64\"\nos = \"linux\"\nabi = \"aapcs64\"\n\n[target.linux-riscv64]\nisa = \"riscv64\"\nos = \"linux\"\nabi = \"lp64d\"\n\n[target.spirv]\nisa = \"spirv\"\nos = \"freestanding\"\nabi = \"spirv\"\n\n[artifact.uniontest]\nkind = \"bin\"\nentry = \"main.mach\"\nout = \"{project.work}/bin/uniontest\"\ntargets = [\"*\"]\nlink = []\nneed = []\n[profile.debug]\ndefault = true\noptimize = false\ndebug = true\nsimd = \"scalarize\"\n[profile.release]\noptimize = true\ndebug = false\nsimd = \"scalarize\"\n";
+    ret "[project]\nmach = \">=5\"\nid = \"uniontest\"\nversion = \"0.0.0\"\nsrc = \"src\"\nwork = \"out/{target.name}/{profile.name}\"\n\n[target.linux]\nisa = \"x86_64\"\nos = \"linux\"\nabi = \"sysv64\"\n\n[target.linux-arm64]\nisa = \"aarch64\"\nos = \"linux\"\nabi = \"aapcs64\"\n\n[target.linux-riscv64]\nisa = \"riscv64\"\nos = \"linux\"\nabi = \"lp64d\"\n\n[target.spirv]\nisa = \"spirv\"\nos = \"vulkan\"\nabi = \"spirv\"\n\n[artifact.uniontest]\nkind = \"bin\"\nentry = \"main.mach\"\nout = \"{project.work}/bin/uniontest\"\ntargets = [\"*\"]\nlink = []\nneed = []\n[profile.debug]\ndefault = true\noptimize = false\ndebug = true\nsimd = \"scalarize\"\n[profile.release]\noptimize = true\ndebug = false\nsimd = \"scalarize\"\n";
 }
 
 #[testing]
@@ -960,7 +960,7 @@ pub fun sema_rejects_with(text: str, needle: str) bool {
 
 #[testing]
 fun ct_edge_manifest() str {
-    ret "[project]\nmach = \">=5\"\nid = \"ct\"\nversion = \"0.0.0\"\nsrc = \"src\"\nwork = \"out/{target.name}/{profile.name}\"\n\n[target.x64]\nisa = \"x86_64\"\nos = \"linux\"\nabi = \"sysv64\"\n\n[target.spv]\nisa = \"spirv\"\nos = \"freestanding\"\nabi = \"spirv\"\n\n[target.rv32]\nisa = \"rv32imafdc\"\nos = \"freestanding\"\nabi = \"ilp32d\"\n\n[target.rv32f]\nisa = \"rv32imafdc\"\nos = \"freestanding\"\nabi = \"ilp32f\"\n\n[target.rv32s]\nisa = \"rv32imafdc\"\nos = \"freestanding\"\nabi = \"ilp32\"\n\n[target.rv32nf]\nisa = \"rv32imc\"\nos = \"freestanding\"\nabi = \"ilp32\"\n\n[profile.debug]\noptimize = false\ndebug = false\nsimd = \"scalarize\"\n\n[artifact.ct]\nkind = \"bin\"\nentry = \"main.mach\"\nout = \"{project.work}/bin/ct\"\ntargets = [\"*\"]\nlink = []\nneed = []\n";
+    ret "[project]\nmach = \">=5\"\nid = \"ct\"\nversion = \"0.0.0\"\nsrc = \"src\"\nwork = \"out/{target.name}/{profile.name}\"\n\n[target.x64]\nisa = \"x86_64\"\nos = \"linux\"\nabi = \"sysv64\"\n\n[target.spv]\nisa = \"spirv\"\nos = \"vulkan\"\nabi = \"spirv\"\n\n[target.rv32]\nisa = \"rv32imafdc\"\nos = \"freestanding\"\nabi = \"ilp32d\"\n\n[target.rv32f]\nisa = \"rv32imafdc\"\nos = \"freestanding\"\nabi = \"ilp32f\"\n\n[target.rv32s]\nisa = \"rv32imafdc\"\nos = \"freestanding\"\nabi = \"ilp32\"\n\n[target.rv32nf]\nisa = \"rv32imc\"\nos = \"freestanding\"\nabi = \"ilp32\"\n\n[profile.debug]\noptimize = false\ndebug = false\nsimd = \"scalarize\"\n\n[artifact.ct]\nkind = \"bin\"\nentry = \"main.mach\"\nout = \"{project.work}/bin/ct\"\ntargets = [\"*\"]\nlink = []\nneed = []\n";
 }
 
 #[testing]
@@ -1474,7 +1474,7 @@ pub fun pipeline_rejects_with(alloc: *A.Allocator, text: str, needle: str) bool 
 
 #[testing]
 pub fun spv_manifest(alloc: *A.Allocator, dep_alias: str) str {
-    val head: str = "[project]\nmach = \">=5\"\nid = \"spvcase\"\nversion = \"0.0.0\"\nsrc = \"src\"\nwork = \"out/{target.name}/{profile.name}\"\n\n[target.spirv]\nisa = \"spirv\"\nos = \"freestanding\"\nabi = \"spirv\"\n\n[profile.debug]\noptimize = false\ndebug = false\nsimd = \"scalarize\"\n\n[artifact.spvcase]\nkind = \"bin\"\nentry = \"main.mach\"\nout = \"{project.work}/bin/spvcase\"\ntargets = [\"*\"]\nlink = []\nneed = []\n";
+    val head: str = "[project]\nmach = \">=5\"\nid = \"spvcase\"\nversion = \"0.0.0\"\nsrc = \"src\"\nwork = \"out/{target.name}/{profile.name}\"\n\n[target.spirv]\nisa = \"spirv\"\nos = \"vulkan\"\nabi = \"spirv\"\n\n[profile.debug]\noptimize = false\ndebug = false\nsimd = \"scalarize\"\n\n[artifact.spvcase]\nkind = \"bin\"\nentry = \"main.mach\"\nout = \"{project.work}/bin/spvcase\"\ntargets = [\"*\"]\nlink = []\nneed = []\n";
     if (str_len(dep_alias) == 0::usize) { ret head; }
     val a: str = driver.joined(alloc, head, "\n[dep.", dep_alias);
     val b: str = driver.joined(alloc, a, "]\npath = \"", dep_alias);
@@ -1483,7 +1483,7 @@ pub fun spv_manifest(alloc: *A.Allocator, dep_alias: str) str {
 
 #[testing]
 fun spv_dep_manifest(alloc: *A.Allocator, id: str) str {
-    ret driver.joined(alloc, "[project]\nmach = \">=5\"\nid = \"", id, "\"\nversion = \"0.0.0\"\nsrc = \"src\"\nwork = \"out/{target.name}/{profile.name}\"\n\n[target.spirv]\nisa = \"spirv\"\nos = \"freestanding\"\nabi = \"spirv\"\n\n[profile.debug]\noptimize = false\ndebug = false\nsimd = \"scalarize\"\n");
+    ret driver.joined(alloc, "[project]\nmach = \">=5\"\nid = \"", id, "\"\nversion = \"0.0.0\"\nsrc = \"src\"\nwork = \"out/{target.name}/{profile.name}\"\n\n[target.spirv]\nisa = \"spirv\"\nos = \"vulkan\"\nabi = \"spirv\"\n\n[profile.debug]\noptimize = false\ndebug = false\nsimd = \"scalarize\"\n");
 }
 
 #[testing]

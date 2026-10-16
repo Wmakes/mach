@@ -20,8 +20,9 @@ use mach.lang.target.of.macho.object;
 use macho_parse: mach.lang.target.of.macho.parse;
 use mach.lang.target.of.macho.segment;
 use mach.lang.target.of.macho.unwind;
-use of_plan: mach.lang.target.of.plan;
-use A:       std.allocator;
+use of_plan:     mach.lang.target.of.plan;
+use mink_format: mink.catalog.format;
+use A:           std.allocator;
 use std.allocator.page;
 use std.collections.sort;
 use std.collections.vector.Vector;
@@ -191,7 +192,7 @@ fun image_emit(img: *target_of.LinkedImage, dst: *of_destination.Destination) er
 pub val VTABLE: target_of.OfVTable = target_of.OfVTable{
     id:                      target_of.MACHO,
     fingerprint_tag:         2,
-    name:                    "macho",
+    name:                    mink_format.MACHO.name,
     links_from_image:        true,
     debug_offset_kind:       target_of.RK_ABS32,
     object_suffix:           ".o",

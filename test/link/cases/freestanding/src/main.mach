@@ -2,7 +2,7 @@
 #
 # no OS and no std runtime: the entry symbol is defined here and the program
 # exits through a raw `exit` syscall. it proves the object-centric build path
-# reaches a flat image for an `os=freestanding, of=raw` target - codegen builds
+# reaches a flat image for an `os=freestanding, of=flat` target - codegen builds
 # an in-memory image per module, the driver links straight from those images (no
 # per-module `.o` round-trip, which a flat image has no parser for), and the raw
 # writer lays the single load segment out as a container-free binary entered at
