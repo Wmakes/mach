@@ -371,17 +371,14 @@ pub val UNIFORM_AND_STORAGE_BUFFER_8BIT_ACCESS: u64 = 0x10000000000000
 pub val STORAGE_PUSH_CONSTANT8: u64 = 0x20000000000000
 ```
 
-## val NAME_COUNT
+## val TABLE
 
 ```mach
-pub val NAME_COUNT: u32 = 54
+pub val TABLE: extension.Table = extension.Table;
 ```
 
-## val NAMES
-
-```mach
-pub val NAMES: [NAME_COUNT]extension.Extension = [NAME_COUNT]extension.Extension;
-```
+the vulkan device features a module enables, which masc's spir-v catalog does not
+state: it names spir-v capabilities, which these features admit
 
 ## val OPEN
 

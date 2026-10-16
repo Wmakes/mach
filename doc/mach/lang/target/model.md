@@ -918,7 +918,7 @@ the model's vocabulary, `, `-separated, or `none`; owned by `a`
 ## fun table_names
 
 ```mach
-pub fun table_names(a: *A.Allocator, table: *extension.Extension, count: u32) res[str, fail.Fail];
+pub fun table_names(a: *A.Allocator, table: *extension.Table) res[str, fail.Fail];
 ```
 
 the names of an extension table, `, `-separated; owned by `a`
@@ -938,6 +938,14 @@ only a target selects is never a decorator's, and `target_only` says why
 ```mach
 pub fun decorator_extension(vocabulary: *extension.Vocabulary, selected: ExtensionView, name: str, len: usize) DecoratorExtension;
 ```
+
+## fun vocabulary_sources
+
+```mach
+pub fun vocabulary_sources(a: *A.Allocator, vocabulary: *extension.Vocabulary) res[str, fail.Fail];
+```
+
+where every name of `vocabulary` is read from, `, `-separated; owned by `a`
 
 ## fun vocabulary_names
 

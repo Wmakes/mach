@@ -230,6 +230,22 @@ pub fun ct_negate(v: CTValue) res[CTValue, comptime_failure.EvalFail];
 magnitude, which only reads as unsigned; an unsigned magnitude past it has no
 negation
 
+## fun float_negated
+
+```mach
+pub fun float_negated(x: f64, w: float.FloatWidth) f64;
+```
+
+the negation of a float at width `w`, folded
+
+## fun complement
+
+```mach
+pub fun complement(x: wide.Wide) wide.Wide;
+```
+
+the bitwise complement of an integer, folded at comptime's width
+
 ## fun float_value
 
 ```mach

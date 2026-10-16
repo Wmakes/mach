@@ -1,7 +1,10 @@
 # mach.lang.target.catalog.arch
 
-the instruction set catalog: every architecture id, its spelling, its
-fingerprint tag and the selection syntax its names may carry
+the instruction set catalog: the architectures of mink's catalog mach has a
+target for, each with its id, its fingerprint tag and the selection syntax its
+names may carry. it is an explicit projection: a row names mink's architecture
+row and is spelled by it, and an architecture of mink's no row names (x86,
+arm64e, wasm32, ...) is no instruction set here and no `$mach.arch` tag
 
 ## val UNKNOWN
 
@@ -104,6 +107,14 @@ pub fun host_id() u32;
 
 the instruction set the compiler itself was built for, UNKNOWN when the
 catalog has no row for it
+
+## fun owner_of
+
+```mach
+pub fun owner_of(id: u32) *mink_arch.Arch;
+```
+
+mink's architecture row the instruction set `id` means, nil for an unknown id
 
 ## fun name_for
 

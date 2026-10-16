@@ -43,15 +43,9 @@ FEAT_FP16, half-precision arithmetic, comparison and integer conversion on
 the h registers (Armv8.2 optional). converting between half and single or
 double precision is the base FP and needs no extension
 
-## val NAME_COUNT
+## val TABLE
 
 ```mach
-pub val NAME_COUNT: u32 = 5
-```
-
-## val NAMES
-
-```mach
-pub val NAMES: [NAME_COUNT]extension.Extension = [NAME_COUNT]extension.Extension;
+pub val TABLE: extension.Table = extension.Table;
 ```
 

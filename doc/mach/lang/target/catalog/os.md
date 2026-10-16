@@ -1,7 +1,10 @@
 # mach.lang.target.catalog.os
 
-the operating system catalog: every os id, its spelling, its fingerprint tag
-and whether it can host a build, and the filesystem policy an os declares
+the operating system catalog: the systems of mink's catalog mach has a target
+for, each with its id, its fingerprint tag and whether it can host a build, and
+the filesystem policy an os declares. a row names mink's system row and is
+spelled by it, and a system of mink's no row names (uefi, wasi, opencl) is no
+os here and no `$mach.os` tag
 
 ## val UNKNOWN
 
@@ -33,11 +36,19 @@ pub val WINDOWS:      u32 = 3
 pub val FREESTANDING: u32 = 4
 ```
 
+## val VULKAN
+
+```mach
+pub val VULKAN:       u32 = 5
+```
+
 ## val VERSION
 
 ```mach
-pub val VERSION: u8 = 1
+pub val VERSION: u8 = 2
 ```
+
+version 2: vulkan is a row of its own, which spir-v targets name in place of freestanding
 
 ## fun id_for
 

@@ -57,6 +57,43 @@ pub val NODE_OPAQUE:    NodeKind = 7
 pub val NODE_TAG:       NodeKind = 8
 ```
 
+## val INTEGER_WIDTHS
+
+```mach
+pub val INTEGER_WIDTHS: [5]u32 = [5]u32;
+```
+
+the integer and float widths a primitive takes, the rows of `Scalars`
+
+## val FLOAT_WIDTHS
+
+```mach
+pub val FLOAT_WIDTHS:   [3]u32 = [3]u32;
+```
+
+## rec Scalars
+
+```mach
+pub rec Scalars;
+```
+
+the extents the target's owner lays each primitive out at: mirl's data layout of
+the target's row, read once when the target resolves. a machine that holds none,
+a target whose cell no owner has a row for yet (#4779) or a fixture, lays a scalar
+out at its size and a pointer at `ptr_width`
+
+held: whether the owner's extents are held
+integers: one per INTEGER_WIDTHS row
+floats: one per FLOAT_WIDTHS row
+pointer: a pointer of the default address space, none where the owner holds
+          pointers logically, with no representation in memory
+
+## fun scalars_none
+
+```mach
+pub fun scalars_none() Scalars;
+```
+
 ## rec Machine
 
 ```mach
@@ -72,6 +109,14 @@ before: 128 and 256 on x86-64 with avx
 ```mach
 pub fun machine(ptr_width: u32, vector_bits: u32, register_bits: u32) Machine;
 ```
+
+## fun with_scalars
+
+```mach
+pub fun with_scalars(m: Machine, s: Scalars) Machine;
+```
+
+`m` laying its primitives out at the owner's extents `s`
 
 ## rec Node
 

@@ -106,25 +106,10 @@ pub val DEFAULT64: u64 = G | C
 pub val ALL:       u64 = DEFAULT64 | ZKT | ZICOND | ZFHMIN | ZFH
 ```
 
-## val NAME_COUNT
+## val TABLE
 
 ```mach
-pub val NAME_COUNT: u32 = 12
-```
-
-the riscv extension vocabulary: the letters and z-extensions a selection
-string spells, each the same bit the string sets, so a manifest's
-`extensions` list and an `rv64imac` isa string feed one set. d brings f and
-f brings zicsr, as the string grammar has it. i is the baseline, c is a
-code-size selection mach never emits, and f and d select the float register
-file and the calling convention's float registers, so none of the four is a
-function's to admit alone. zkt is a timing promise about the whole machine
-the constant-time rows read, so it is the target's too
-
-## val NAMES
-
-```mach
-pub val NAMES: [NAME_COUNT]extension.Extension = [NAME_COUNT]extension.Extension;
+pub val TABLE: extension.Table = extension.Table;
 ```
 
 ## fun widen

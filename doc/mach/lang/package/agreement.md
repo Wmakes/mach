@@ -23,6 +23,16 @@ reqs: the realized closure
 out: receives the lines, owned by `op.a`; free with `free_lines`
 ret: err naming the first failure to read a manifest or a pin
 
+## fun refused
+
+```mach
+pub fun refused(op: *package_closure.Operation, lines: *Vector[str]) err[fail.Fail];
+```
+
+the refusal of a closure that pins a package at more than one commit, ok when `lines` is
+empty: every line past the first is reported to the operation's report and the first is the
+failure, so every command that walks a closure refuses a disagreement alike
+
 ## fun free_lines
 
 ```mach
