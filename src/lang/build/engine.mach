@@ -3022,7 +3022,7 @@ fun run_fixture(cwd: str, runner: str, program: str, argc: usize, inherited: exe
 
 # build the fixture `program` for one target and profile under the manifest `manifest_text`,
 # with the `root_count` files `root_names` holds written at the project root, and run it; the
-# fixture exits 0 when every check holds. a runner that is absent skips the arm
+# fixture exits 0 when every check holds. a runner that is absent skips the arm with 77
 #[testing]
 fun native_case_files(alloc: *A.Allocator, manifest_text: str, root_names: *str, root_texts: *str, root_count: u32,
     target_name: str, runner_name: str, release: bool, program: str, label: str) i32 {
@@ -3033,7 +3033,7 @@ fun native_case_files(alloc: *A.Allocator, manifest_text: str, root_names: *str,
             print.print("tag-native: runner absent, arm skipped: ");
             print.print(runner_name);
             print.print("\n");
-            ret 0;
+            ret 77;
         }
         runner = found.ok;
     }
@@ -3091,18 +3091,20 @@ fun native_case(alloc: *A.Allocator, target_name: str, runner_name: str, release
     ret native_case_files(alloc, native_manifest(), nil, nil, 0, target_name, runner_name, release, program, label);
 }
 
-# one fixture on the three native linux targets in both profiles
+# one fixture on the three native linux targets in both profiles; 77 when an arm skipped and none failed
 #[testing]
 fun native_all(alloc: *A.Allocator, program: str, label: str) i32 {
+    var skipped: bool = false;
     var release: bool = false;
     var pass:    u32  = 0;
     for (pass < 2) {
-        if (native_case(alloc, "linux-x86_64", "", release, program, label) != 0)              { ret 1; }
-        if (native_case(alloc, "linux-arm64", "qemu-aarch64", release, program, label) != 0)   { ret 2; }
-        if (native_case(alloc, "linux-riscv64", "qemu-riscv64", release, program, label) != 0) { ret 3; }
+        if (testrun.arm_failed(native_case(alloc, "linux-x86_64", "", release, program, label), ?skipped))              { ret 1; }
+        if (testrun.arm_failed(native_case(alloc, "linux-arm64", "qemu-aarch64", release, program, label), ?skipped))   { ret 2; }
+        if (testrun.arm_failed(native_case(alloc, "linux-riscv64", "qemu-riscv64", release, program, label), ?skipped)) { ret 3; }
         release = true;
         pass    = pass + 1;
     }
+    if (skipped) { ret 77; }
     ret 0;
 }
 
@@ -3435,7 +3437,7 @@ test tag_corpus__verdict_matches_across_profiles {
 }
 
 # zero when the trap fixture built for `target_name` in one profile traps on every guarded access
-# under debug and reads or writes through under release; a runner that is absent skips the arm
+# under debug and reads or writes through under release; a runner that is absent skips the arm with 77
 #[testing]
 fun trap_target(alloc: *A.Allocator, target_name: str, runner_name: str, release: bool) i32 {
     var runner: str = "";
@@ -3445,7 +3447,7 @@ fun trap_target(alloc: *A.Allocator, target_name: str, runner_name: str, release
             print.print("tag-trap: runner absent, arm skipped: ");
             print.print(runner_name);
             print.print("\n");
-            ret 0;
+            ret 77;
         }
         runner = found.ok;
     }
@@ -3582,18 +3584,22 @@ $if ($mach.build.os == $mach.os.linux && $mach.build.arch == $mach.arch.x86_64) 
     test tag_native__packed_and_aligned_storage_is_legal {
         var alloc: A.Allocator;
         page.make(?alloc);
-        if (native_all(?alloc, tag_packed_program(), "packed tags") != 0)                   { ret 1; }
-        if (native_all(?alloc, tag_aligned_program(), "aligned tags") != 0)                 { ret 2; }
-        if (native_all(?alloc, tag_packed_record_program(), "tags in packed records") != 0) { ret 3; }
+        var skipped: bool = false;
+        if (testrun.arm_failed(native_all(?alloc, tag_packed_program(), "packed tags"), ?skipped))                   { ret 1; }
+        if (testrun.arm_failed(native_all(?alloc, tag_aligned_program(), "aligned tags"), ?skipped))                 { ret 2; }
+        if (testrun.arm_failed(native_all(?alloc, tag_packed_record_program(), "tags in packed records"), ?skipped)) { ret 3; }
+        if (skipped)                                                                                                 { ret 77; }
         ret 0;
     }
 
     test tag_native__transfer_generics_and_payload_kinds_round_trip {
         var alloc: A.Allocator;
         page.make(?alloc);
-        if (native_all(?alloc, tag_abi_program(), "by-value transfer") != 0)   { ret 1; }
-        if (native_all(?alloc, tag_generic_program(), "generic nesting") != 0) { ret 2; }
-        if (native_all(?alloc, tag_payloads_program(), "payload kinds") != 0)  { ret 3; }
+        var skipped: bool = false;
+        if (testrun.arm_failed(native_all(?alloc, tag_abi_program(), "by-value transfer"), ?skipped))   { ret 1; }
+        if (testrun.arm_failed(native_all(?alloc, tag_generic_program(), "generic nesting"), ?skipped)) { ret 2; }
+        if (testrun.arm_failed(native_all(?alloc, tag_payloads_program(), "payload kinds"), ?skipped))  { ret 3; }
+        if (skipped)                                                                                    { ret 77; }
         ret 0;
     }
 
@@ -3609,20 +3615,22 @@ $if ($mach.build.os == $mach.os.linux && $mach.build.arch == $mach.arch.x86_64) 
         val found: res[str, exec.Error] = exec.resolve(?alloc, "clang");
         if (sel found.err) {
             print.print("tag-native: clang absent, C controls skipped\n");
-            ret 0;
+            ret 77;
         }
         var names:   [2]str = [2]str{"probe.c", "cc-probe.sh"};
         var texts:   [2]str = [2]str{tag_c_probe(), tag_cc_script()};
         var release: bool   = false;
         var pass:    u32    = 0;
+        var skipped: bool   = false;
         for (pass < 2) {
-            if (native_case_files(?alloc, tag_c_manifest(), ?names[0], ?texts[0], 2, "linux-x86_64", "", release, tag_c_program(), "C controls") != 0)              { ret 1; }
-            if (native_case_files(?alloc, tag_c_manifest(), ?names[0], ?texts[0], 2, "linux-arm64", "qemu-aarch64", release, tag_c_program(), "C controls") != 0)   { ret 2; }
-            if (native_case_files(?alloc, tag_c_manifest(), ?names[0], ?texts[0], 2, "linux-riscv64", "qemu-riscv64", release, tag_c_program(), "C controls") != 0) { ret 3; }
-            if (native_case_files(?alloc, tag_c_manifest(), ?names[0], ?texts[0], 2, "windows-x86_64", "wine", release, tag_c_program(), "C controls") != 0)        { ret 4; }
+            if (testrun.arm_failed(native_case_files(?alloc, tag_c_manifest(), ?names[0], ?texts[0], 2, "linux-x86_64", "", release, tag_c_program(), "C controls"), ?skipped))              { ret 1; }
+            if (testrun.arm_failed(native_case_files(?alloc, tag_c_manifest(), ?names[0], ?texts[0], 2, "linux-arm64", "qemu-aarch64", release, tag_c_program(), "C controls"), ?skipped))   { ret 2; }
+            if (testrun.arm_failed(native_case_files(?alloc, tag_c_manifest(), ?names[0], ?texts[0], 2, "linux-riscv64", "qemu-riscv64", release, tag_c_program(), "C controls"), ?skipped)) { ret 3; }
+            if (testrun.arm_failed(native_case_files(?alloc, tag_c_manifest(), ?names[0], ?texts[0], 2, "windows-x86_64", "wine", release, tag_c_program(), "C controls"), ?skipped))        { ret 4; }
             release = true;
             pass    = pass + 1;
         }
+        if (skipped) { ret 77; }
         ret 0;
     }
 
@@ -3696,13 +3704,15 @@ $if ($mach.build.os == $mach.os.linux && $mach.build.arch == $mach.arch.x86_64) 
         page.make(?alloc);
         var release: bool = false;
         var pass:    u32  = 0;
+        var skipped: bool = false;
         for (pass < 2) {
-            if (trap_target(?alloc, "linux-x86_64", "", release) != 0)              { ret 1; }
-            if (trap_target(?alloc, "linux-arm64", "qemu-aarch64", release) != 0)   { ret 2; }
-            if (trap_target(?alloc, "linux-riscv64", "qemu-riscv64", release) != 0) { ret 3; }
+            if (testrun.arm_failed(trap_target(?alloc, "linux-x86_64", "", release), ?skipped))              { ret 1; }
+            if (testrun.arm_failed(trap_target(?alloc, "linux-arm64", "qemu-aarch64", release), ?skipped))   { ret 2; }
+            if (testrun.arm_failed(trap_target(?alloc, "linux-riscv64", "qemu-riscv64", release), ?skipped)) { ret 3; }
             release = true;
             pass    = pass + 1;
         }
+        if (skipped) { ret 77; }
         ret 0;
     }
 

@@ -180,13 +180,14 @@ rec TestEnd {
 }
 
 # a test run ended: its results in collection order, the counts of passed,
-# failed and timed-out tests, the run's wall time, and the gate tally over every
-# result
+# failed, skipped and timed-out tests, the run's wall time, and the gate tally
+# over every result
 pub rec RunEnd {
     tests:     *TestResult;
     count:     u32;
     passed:    u32;
     failed:    u32;
+    skipped:   u32;
     timed_out: u32;
     wall:      chrono_duration.Duration;
     tally:     *testrun.GateTally;

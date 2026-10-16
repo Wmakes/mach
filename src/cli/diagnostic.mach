@@ -1123,25 +1123,28 @@ fun test_human(rd: *Readout, at: u32) {
 
 fun module_run_w(w: *io_writer.Writer, tests: *readout.TestResult, first: u32, last: u32, mod_w: usize, runner: str) {
     var ok:      u32                      = 0;
+    var skipped: u32                      = 0;
     var failed:  u32                      = 0;
     var elapsed: chrono_duration.Duration = 0;
     var j:       u32                      = first;
     for (j <= last) {
         if (tests[j].result.kind == testrun.RESULT_PASS) { ok = ok + 1; }
+        or (tests[j].result.kind == testrun.RESULT_SKIP) { skipped = skipped + 1; }
         or                                               { failed = failed + 1; }
         elapsed = elapsed + tests[j].elapsed;
         j       = j + 1;
     }
     col_w(w, tests[first].art.module, mod_w);
-    if (failed > 0) { std_format.format(w, "{:4} ok  {:4} FAIL", ok::i64, failed::i64); }
-    or              { std_format.format(w, "{:4} ok", ok::i64); }
+    std_format.format(w, "{:4} ok", ok::i64);
+    if (skipped > 0) { std_format.format(w, "  {:4} skip", skipped::i64); }
+    if (failed > 0)  { std_format.format(w, "  {:4} FAIL", failed::i64); }
     dur_w(w, elapsed);
     std_format.write_str(w, "\n");
     if (failed == 0) { ret; }
     j = first;
     for (j <= last) {
         val t: *readout.TestResult = ?tests[j];
-        if (t.result.kind != testrun.RESULT_PASS) {
+        if (failure(?t.result)) {
             std_format.format(w, "  FAIL  {}  {}:{}  ", t.art.name, t.art.file, t.art.line::i64);
             reason_w(w, t);
             std_format.write_str(w, "\n");
@@ -1153,8 +1156,9 @@ fun module_run_w(w: *io_writer.Writer, tests: *readout.TestResult, first: u32, l
 }
 
 fun test_line_w(w: *io_writer.Writer, t: *readout.TestResult, name_w: usize, runner: str) {
-    if (t.result.kind == testrun.RESULT_PASS) {
-        std_format.write_str(w, "ok    ");
+    if (!failure(?t.result)) {
+        if (t.result.kind == testrun.RESULT_SKIP) { std_format.write_str(w, "skip  "); }
+        or                                        { std_format.write_str(w, "ok    "); }
         col_w(w, t.art.name, name_w);
         dur_w(w, t.elapsed);
         std_format.write_str(w, "\n");
@@ -1256,7 +1260,7 @@ fun run_summary_w(w: *io_writer.Writer, ev: *readout.RunEnd) {
         var i: u32 = 0;
         for (i < ev.count) {
             val t: *readout.TestResult = ?ev.tests[i];
-            if (t.result.kind != testrun.RESULT_PASS) {
+            if (failure(?t.result)) {
                 std_format.format(w, "  {}  {}:{}  ", t.art.name, t.art.file, t.art.line::i64);
                 reason_w(w, t);
                 std_format.write_str(w, "\n");
@@ -1267,13 +1271,11 @@ fun run_summary_w(w: *io_writer.Writer, ev: *readout.RunEnd) {
     }
     var dbuf: [DUR_CAP]u8;
     val ds:   str = chrono_duration.format_duration(ev.wall, ?dbuf[0], DUR_CAP);
-    if (ev.timed_out > 0) {
-        std_format.format(w, "{} passed, {} failed ({} timed out), {} total  ({})\n",
-            ev.passed::i64, ev.failed::i64, ev.timed_out::i64, ev.count::i64, ds);
-    }
-    or {
-        std_format.format(w, "{} passed, {} failed, {} total  ({})\n", ev.passed::i64, ev.failed::i64, ev.count::i64, ds);
-    }
+    std_format.format(w, "{} passed, {} failed", ev.passed::i64, ev.failed::i64);
+    if (ev.timed_out > 0) { std_format.format(w, " ({} timed out)", ev.timed_out::i64); }
+    std_format.format(w, ", {} total", ev.count::i64);
+    if (ev.skipped > 0) { std_format.format(w, ", {} skipped", ev.skipped::i64); }
+    std_format.format(w, "  ({})\n", ds);
     val tally:       *testrun.GateTally = ev.tally;
     val extra_infra: u32                = tally.unsupported_input + tally.tool_unavailable
         + tally.resource_exhaustion + tally.invalid_injection;
@@ -1296,6 +1298,7 @@ fun run_end_record(w: *io_writer.Writer, ev: *readout.RunEnd) {
     record_begin(w, ?o, "run_end");
     json.field_i64(?o, "passed", ev.passed::i64);
     json.field_i64(?o, "failed", ev.failed::i64);
+    json.field_i64(?o, "skipped", ev.skipped::i64);
     json.field_i64(?o, "total", ev.count::i64);
     json.field_i64(?o, "duration_ns", chrono_duration.duration_nsec(ev.wall));
     json.field_i64(?o, "mismatch", ev.tally.semantic_mismatch::i64);
@@ -1317,10 +1320,16 @@ fun record_begin(w: *io_writer.Writer, o: *json.Object, record: *u8) {
     json.field_str(o, "record", record);
 }
 
-# the outcome a test record names: `pass`, `exit`, `signal`, `spawn`,
+# whether a result is a failure: anything but a pass or a skip
+fun failure(r: *testrun.GateResult) bool {
+    ret r.kind != testrun.RESULT_PASS && r.kind != testrun.RESULT_SKIP;
+}
+
+# the outcome a test record names: `pass`, `skip`, `exit`, `signal`, `spawn`,
 # `timeout`, or `other`
 fun result_name(r: *testrun.GateResult) *u8 {
     if (r.kind == testrun.RESULT_PASS)                                                                    { ret "pass"; }
+    if (r.kind == testrun.RESULT_SKIP)                                                                    { ret "skip"; }
     if (r.kind == testrun.RESULT_SEMANTIC_MISMATCH && r.cause == testrun.CAUSE_ORACLE_EXIT)               { ret "exit"; }
     if (r.kind == testrun.RESULT_SEMANTIC_MISMATCH && r.cause == testrun.CAUSE_ORACLE_SIGNAL)             { ret "signal"; }
     if (r.kind == testrun.RESULT_INFRASTRUCTURE_FAILURE && r.cause == testrun.CAUSE_ORACLE_SPAWN_FAILURE) { ret "spawn"; }
@@ -2063,19 +2072,20 @@ test readout__a_slow_test_holds_back_only_its_own_module {
     t_finish(?run[1], testrun.RESULT_SEMANTIC_MISMATCH, testrun.CAUSE_ORACLE_EXIT, 4);
     readout.test_end(?rd.sink, ?run[0], 1);
     if (fixture.sink_contains(?sink, "a  ")) { ret 4; }
-    t_finish(?run[0], testrun.RESULT_PASS, testrun.CAUSE_PASS, 0);
+    t_finish(?run[0], testrun.RESULT_SKIP, testrun.CAUSE_SKIP, 77);
     readout.test_end(?rd.sink, ?run[0], 0);
-    if (!fixture.sink_contains(?sink, "a                    1 ok     1 FAIL")) { ret 5; }
+    if (!fixture.sink_contains(?sink, "a                    0 ok     1 skip     1 FAIL")) { ret 5; }
 
     var a: A.Allocator;
     page.make(?a);
     var tally: testrun.GateTally = testrun.gate_tally_init(?a);
-    readout.run_end(?rd.sink, readout.RunEnd{tests: ?run[0], count: 3, passed: 1, failed: 2, timed_out: 0, wall: 0, tally: ?tally});
+    readout.run_end(?rd.sink, readout.RunEnd{tests: ?run[0], count: 3, passed: 0, failed: 2, skipped: 1, timed_out: 0, wall: 0, tally: ?tally});
     val listed: usize = fixture.sink_index(?sink, "failures:\n");
     val first:  usize = fixture.sink_index(?sink, "\n  a#fails  f.mach:2  (exit 4)\n");
     val second: usize = fixture.sink_index(?sink, "\n  b#fails  f.mach:3  (exit 3)\n");
     if (listed >= sink.len || first < listed || second < first || second >= sink.len) { ret 6; }
-    if (!fixture.sink_contains(?sink, "1 passed, 2 failed, 3 total"))                 { ret 7; }
+    if (fixture.sink_contains(?sink, "\n  a#slow "))                                  { ret 7; }
+    if (!fixture.sink_contains(?sink, "0 passed, 2 failed, 3 total, 1 skipped  ("))   { ret 8; }
     testrun.gate_tally_dnit(?tally);
     ret 0;
 }
@@ -2101,9 +2111,9 @@ test readout__under_v_each_test_prints_as_it_finishes {
     if (!fixture.sink_contains(?sink, "FAIL  a#fails "))                 { ret 1; }
     if (!fixture.sink_contains(?sink, "(signal 9)  f.mach:2\n"))         { ret 2; }
     if (!fixture.sink_contains(?sink, "    rerun: qemu dispatcher 1\n")) { ret 3; }
-    t_finish(?run[0], testrun.RESULT_PASS, testrun.CAUSE_PASS, 0);
+    t_finish(?run[0], testrun.RESULT_SKIP, testrun.CAUSE_SKIP, 77);
     readout.test_end(?rd.sink, ?run[0], 0);
-    if (!fixture.sink_contains(?sink, "ok    a#slow ")) { ret 4; }
+    if (!fixture.sink_contains(?sink, "skip  a#slow ")) { ret 4; }
     if (fixture.sink_contains(?sink, "b#fails"))        { ret 5; }
     ret 0;
 }
@@ -2133,7 +2143,7 @@ test readout__a_test_run_is_records_on_the_report {
     var a: A.Allocator;
     page.make(?a);
     var tally: testrun.GateTally = testrun.gate_tally_init(?a);
-    readout.run_end(?rd.sink, readout.RunEnd{tests: ?run[0], count: 3, passed: 0, failed: 1, timed_out: 0, wall: 0, tally: ?tally});
+    readout.run_end(?rd.sink, readout.RunEnd{tests: ?run[0], count: 3, passed: 0, failed: 1, skipped: 0, timed_out: 0, wall: 0, tally: ?tally});
     testrun.gate_tally_dnit(?tally);
     report_close(?rep, 1);
     val record: str = io_writer.memory_text(?rsink);
@@ -2141,7 +2151,7 @@ test readout__a_test_run_is_records_on_the_report {
     if (!str_contains(record, "{\"schema\":1,\"record\":\"test\",\"name\":\"b#fails\",\"module\":\"b\",\"file\":\"f.mach\",\"line\":3,")) { ret 2; }
     if (!str_contains(record, "\"outcome\":\"exit\",\"code\":3,"))                                                                        { ret 3; }
     if (!str_contains(record, "\"output\":\"logs/2.log\",\"origin\":\"test\"}\n"))                                                        { ret 4; }
-    if (!str_contains(record, "{\"schema\":1,\"record\":\"run_end\",\"passed\":0,\"failed\":1,\"total\":3,"))                             { ret 5; }
+    if (!str_contains(record, "{\"schema\":1,\"record\":\"run_end\",\"passed\":0,\"failed\":1,\"skipped\":0,\"total\":3,"))               { ret 5; }
     if (str_contains(record, "\"event\"") || !str_contains(io_writer.memory_text(?hsink), "b#fails"))                                     { ret 6; }
     ret 0;
 }
@@ -2202,6 +2212,8 @@ test result_name_and_has_capture__cover_every_classified_shape {
     var bad: i32                = 0;
     var r:   testrun.GateResult = testrun.gate_result(testrun.RESULT_PASS, testrun.CAUSE_PASS, nil);
     if (!str_equals(result_name(?r), "pass") || has_capture(?r)) { bad = 1; }
+    r = testrun.gate_result(testrun.RESULT_SKIP, testrun.CAUSE_SKIP, nil);
+    if (!str_equals(result_name(?r), "skip") || has_capture(?r)) { bad = 8; }
     r = testrun.gate_result(testrun.RESULT_SEMANTIC_MISMATCH, testrun.CAUSE_ORACLE_EXIT, nil);
     if (!str_equals(result_name(?r), "exit") || !has_capture(?r)) { bad = 2; }
     r = testrun.gate_result(testrun.RESULT_SEMANTIC_MISMATCH, testrun.CAUSE_ORACLE_SIGNAL, nil);

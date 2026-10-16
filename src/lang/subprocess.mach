@@ -1984,8 +1984,8 @@ $if ($mach.build.os == $mach.os.windows) {
 
 # an inheriting child receives a variable with no UTF-8 spelling unit for unit.
 # the test runs itself again as that child, which a marker variable tells apart
-test spawn__an_inheriting_child_receives_an_unspellable_variable_unchanged {
-    $if ($mach.build.os == $mach.os.windows) {
+$if ($mach.build.os == $mach.os.windows) {
+    test spawn__an_inheriting_child_receives_an_unspellable_variable_unchanged {
         if (t_is_set("M4707C")) {
             if (!t_holds_unspellable("M4707")) { ret 20; }
             ret 0;
@@ -2009,9 +2009,6 @@ test spawn__an_inheriting_child_receives_an_unspellable_variable_unchanged {
         dnit(?alloc, ?p);
         if (sel wr.err)                                    { ret 5; }
         if (wr.ok.kind != STATE_EXITED || wr.ok.code != 0) { ret 6; }
-        ret 0;
-    }
-    $or {
         ret 0;
     }
 }

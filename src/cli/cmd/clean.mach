@@ -317,8 +317,8 @@ test execute_entry__a_removal_refusal_is_an_error {
 
 # a clean target holding a name with no UTF-8 spelling, which only windows can
 # hold, is removed whole: the removal walks the tree in native units
-test execute_entry__removes_a_tree_holding_a_name_with_no_utf8_spelling {
-    $if ($mach.build.os == $mach.os.windows) {
+$if ($mach.build.os == $mach.os.windows) {
+    test execute_entry__removes_a_tree_holding_a_name_with_no_utf8_spelling {
         var r: cli_diagnostic.Report;
         cli_diagnostic.report_init(?r, cli_diagnostic.FORMAT_HUMAN);
         var a:      A.Allocator;
@@ -356,9 +356,6 @@ test execute_entry__removes_a_tree_holding_a_name_with_no_utf8_spelling {
         if (execute_entry(?r, ?a, root, ?target, ?removed, 0) != 0 || removed != 1) { ret 10; }
         val gone: res[bool, io_error.Error] = fs.exists(out_r.ok);
         if (!(sel gone.ok && !gone.ok)) { ret 11; }
-        ret 0;
-    }
-    $or {
         ret 0;
     }
 }

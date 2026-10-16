@@ -181,7 +181,7 @@ a `test` record per test in the order the tests finish, and closes with a
 ```json
 {"schema":1,"record":"run_start","tests":14}
 {"schema":1,"record":"test","name":"app.main#parses","module":"app.main","file":"src/main.mach","line":10,"index":4,"target":"linux","profile":"debug","outcome":"exit","code":3,"timeout_ns":0,"duration_ns":1204000,"exe":"out/linux/debug/test/app/app","output":"out/linux/debug/test/app/log/4.log","origin":"test"}
-{"schema":1,"record":"run_end","passed":13,"failed":1,"total":14,"duration_ns":61000000,"mismatch":1,"unsupported":0,"target_unavailable":0,"infrastructure_failure":0,"resource_exhaustion":0,"timed_out":0,"invalid_injection":0,"origin":"test"}
+{"schema":1,"record":"run_end","passed":13,"failed":1,"skipped":0,"total":14,"duration_ns":61000000,"mismatch":1,"unsupported":0,"target_unavailable":0,"infrastructure_failure":0,"resource_exhaustion":0,"timed_out":0,"invalid_injection":0,"origin":"test"}
 ```
 
 A `test` or `case` record names its test with these members:
@@ -200,7 +200,7 @@ A `test` record adds how it ended:
 
 | Member | Type | Meaning |
 |---|---|---|
-| `outcome` | string | `"pass"`, `"exit"`, `"signal"`, `"timeout"`, `"spawn"` or `"other"` |
+| `outcome` | string | `"pass"`, `"skip"`, `"exit"`, `"signal"`, `"timeout"`, `"spawn"` or `"other"` |
 | `code` | integer | its exit code, or `0` when it has none |
 | `timeout_ns` | integer | the `--timeout` bound in nanoseconds, `0` when unbounded |
 | `duration_ns` | integer | how long it ran, in nanoseconds |
@@ -210,8 +210,10 @@ A `test` record adds how it ended:
 
 A `case` record adds `object`, the test object that holds the test. A `skip`
 record carries `target`, `profile` and `reason`. `run_start` carries `tests`,
-the run's count, and `run_end` the run's totals: `passed`, `failed`, `total`,
-`duration_ns`, `timed_out` and the count of each failure class.
+the run's count, and `run_end` the run's totals: `passed`, `failed`, `skipped`,
+`total`, `duration_ns`, `timed_out` and the count of each failure class. A test
+that skipped (exit 77, see [test.md](test.md#semantics)) has the outcome
+`"skip"` and counts in `skipped`, neither passed nor failed.
 
 None of these records carries a `severity` or counts in a summary total; the
 summary's `outcome` and `exit_code` say whether a test failed.

@@ -398,7 +398,7 @@ $if ($mach.build.arch == $mach.arch.x86_64) {
     }
 
     test crypto__aes128_matches_fips_197 {
-        if (!has(25) || !has(9)) { ret 0; }
+        if (!has(25) || !has(9)) { ret 77; }
         var cipher: [16]u8;
         var back:   [16]u8;
         var sched:  [176]u8;
@@ -410,7 +410,7 @@ $if ($mach.build.arch == $mach.arch.x86_64) {
     }
 
     test crypto__pclmulqdq_gives_the_gcm_test_case_two_ghash {
-        if (!has(1)) { ret 0; }
+        if (!has(1)) { ret 77; }
         ret gcm_case_two(clmul_parts);
     }
 }
@@ -543,7 +543,7 @@ $or ($mach.build.arch == $mach.arch.aarch64) {
     }
 
     test crypto__aes128_matches_fips_197 {
-        if (aes_field() < 1) { ret 0; }
+        if (aes_field() < 1) { ret 77; }
         var cipher: [16]u8;
         var back:   [16]u8;
         aes128(?AES_ROUND_KEYS[0], ?AES_PLAIN[0], ?cipher[0], ?back[0]);
@@ -553,7 +553,7 @@ $or ($mach.build.arch == $mach.arch.aarch64) {
     }
 
     test crypto__pmull_gives_the_gcm_test_case_two_ghash {
-        if (aes_field() < 2) { ret 0; }
+        if (aes_field() < 2) { ret 77; }
         ret gcm_case_two(clmul_parts);
     }
 }

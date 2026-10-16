@@ -52,6 +52,8 @@ use catalog_subsystem: mach.lang.target.catalog.subsystem;
 use mach.lang.target.isa.riscv.refcore;
 use target_of: mach.lang.target.of;
 use mach.lang.target.resolved;
+#[testing]
+use mach.lang.testrun;
 
 #[testing]
 pub fun sema_rejects_at(src: str, needle: str, want_offset: usize, want_len: usize) bool {
@@ -1294,7 +1296,8 @@ pub fun tag_start_stub() str {
     ret "\n#[symbol(\"_start\")]\npub fun start() {\n    $if ($mach.build.arch == $mach.arch.x86_64) {\n        asm x86_64 {\n            mov rdi, [rsp]\n            and rsp, -16\n            call main\n            mov rdi, rax\n            mov rax, 60\n            syscall\n        }\n    }\n    $or ($mach.build.arch == $mach.arch.aarch64) {\n        asm aarch64 {\n            ldr x0, [sp]\n            bl main\n            mov x8, 93\n            svc 0\n        }\n    }\n    $or {\n        asm riscv64 {\n            ld a0, 0(sp)\n            call main\n            li a7, 93\n            ecall\n        }\n    }\n}\n";
 }
 
-# builds a freestanding tag fixture for one target and profile and runs it; the fixture exits 0 when every check holds
+# builds a freestanding tag fixture for one target and profile and runs it; the fixture exits 0 when every check holds,
+# and an absent runner skips the arm with 77
 #[testing]
 pub fun tag_native_case(alloc: *A.Allocator, target_name: str, runner_name: str, release: bool, program: str, label: str) i32 {
     ret tag_native_case_files(alloc, divide_manifest(), nil, nil, 0, target_name, runner_name, release, program, label);
@@ -1311,7 +1314,7 @@ pub fun tag_native_case_files(alloc: *A.Allocator, manifest_text: str, root_name
             print.print("tag-native: runner absent, arm skipped: ");
             print.print(runner_name);
             print.print("\n");
-            ret 0;
+            ret 77;
         }
         runner = rr.ok;
     }
@@ -1396,18 +1399,20 @@ pub fun tag_native_case_files(alloc: *A.Allocator, manifest_text: str, root_name
     ret bad;
 }
 
-# runs one fixture on the three native linux targets in both profiles
+# runs one fixture on the three native linux targets in both profiles; 77 when an arm skipped and none failed
 #[testing]
 pub fun tag_native_all(alloc: *A.Allocator, program: str, label: str) i32 {
+    var skipped: bool = false;
     var release: bool = false;
     var pass:    u32  = 0;
     for (pass < 2) {
-        if (tag_native_case(alloc, "linux-x86_64", "", release, program, label) != 0)              { ret 1; }
-        if (tag_native_case(alloc, "linux-arm64", "qemu-aarch64", release, program, label) != 0)   { ret 2; }
-        if (tag_native_case(alloc, "linux-riscv64", "qemu-riscv64", release, program, label) != 0) { ret 3; }
+        if (testrun.arm_failed(tag_native_case(alloc, "linux-x86_64", "", release, program, label), ?skipped))              { ret 1; }
+        if (testrun.arm_failed(tag_native_case(alloc, "linux-arm64", "qemu-aarch64", release, program, label), ?skipped))   { ret 2; }
+        if (testrun.arm_failed(tag_native_case(alloc, "linux-riscv64", "qemu-riscv64", release, program, label), ?skipped)) { ret 3; }
         release = true;
         pass    = pass + 1;
     }
+    if (skipped) { ret 77; }
     ret 0;
 }
 

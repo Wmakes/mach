@@ -1279,8 +1279,8 @@ test git_environment__inherited_configuration_keeps_first_native_name {
 # git runs while this process holds a variable with no UTF-8 spelling, and the
 # child receives it unit for unit. the test runs itself again in git's place,
 # which a marker variable tells apart
-test git_environment__carries_an_unspellable_inherited_variable {
-    $if ($mach.build.os == $mach.os.windows) {
+$if ($mach.build.os == $mach.os.windows) {
+    test git_environment__carries_an_unspellable_inherited_variable {
         if (subprocess.t_is_set("M4719GC")) {
             if (!subprocess.t_holds_unspellable("M4719G")) { ret 20; }
             ret 0;
@@ -1301,9 +1301,6 @@ test git_environment__carries_an_unspellable_inherited_variable {
         if (sel ran.err) { ret 5; }
         var out: Bytes = ran.ok;
         bytes_free(?alloc, ?out);
-        ret 0;
-    }
-    $or {
         ret 0;
     }
 }
