@@ -161,14 +161,6 @@ pub fun reconfigure(p: *project.Project, req: request.BuildRequest) err[fail.Fai
 a loaded project under another request from its host: the build context is frozen again, so
 what read the old one is computed again, and nothing reads a context no freeze captured
 
-## fun project_failure
-
-```mach
-pub fun project_failure(p: *project.Project, failure: fail.Fail) res[project.Project, fail.Fail];
-```
-
-a project that failed is released, its failure kept where the session presents it
-
 ## fun run_sema_pass
 
 ```mach
@@ -192,6 +184,9 @@ pub fun run_link_pass(p: *project.Project) res[bool, fail.Fail];
 ```mach
 pub fun build_project(s: *session.Session, project_root: str, selectors: *manifest.Selectors) res[project.Project, fail.Fail];
 ```
+
+load the manifest at `project_root`, begin the one cell `selectors` names in it and
+load its artifact's closure
 
 ## fun closure_locate
 

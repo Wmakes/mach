@@ -138,7 +138,7 @@ nonzero exit. json closes in report_close
 ## fun has_capture
 
 ```mach
-pub fun has_capture(r: *outcome.GateResult) bool;
+pub fun has_capture(r: *testrun.GateResult) bool;
 ```
 
 whether a result kept output worth pointing at
@@ -219,7 +219,7 @@ ret: the exit code `exit.of` maps the failure to
 ## fun report_case
 
 ```mach
-pub fun report_case(r: *Report, art: *outcome.TestArtifact);
+pub fun report_case(r: *Report, art: *testrun.TestArtifact);
 ```
 
 one collected test as a record under json, as `mach test --list` lists it; human text
