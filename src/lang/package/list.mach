@@ -103,13 +103,13 @@ fun put(out: *Vector[str], line: res[str, fail.Fail]) err[fail.Fail] {
 fun entry_line(op: *package_closure.Operation, key: str, t: *toml.Table) res[str, fail.Fail] {
     val a:      *A.Allocator        = op.a;
     val full_r: res[str, fail.Fail] = package.dep_full_of(a, op.root, key);
-    var state:  res[str, fail.Fail] = res[str, fail.Fail].ok{"missing"};
-    if (sel full_r.ok) {
-        val is_dir_r: res[bool, io_error.Error] = fs.is_dir(full_r.ok);
-        if (sel is_dir_r.err) { state = fail.format(a, "unreadable ({})", fail.io_text(is_dir_r.err)); }
-        or {
-            if (is_dir_r.ok) { state = res[str, fail.Fail].ok{"realized"}; }
-        }
+    if (sel full_r.err) { ret full_r; }
+    val full:     str                       = full_r.ok;
+    var state:    res[str, fail.Fail]       = res[str, fail.Fail].ok{"missing"};
+    val is_dir_r: res[bool, io_error.Error] = fs.is_dir(full);
+    if (sel is_dir_r.err) { state = fail.format(a, "unreadable ({})", fail.io_text(is_dir_r.err)); }
+    if (sel is_dir_r.ok) {
+        if (is_dir_r.ok) { state = res[str, fail.Fail].ok{"realized"}; }
     }
     var line:    res[str, fail.Fail] = fail.format(a, "  {}", key);
     val git_src: str                 = package_closure.key_text(t, "git");
@@ -126,15 +126,13 @@ fun entry_line(op: *package_closure.Operation, key: str, t: *toml.Table) res[str
             if (sel why.err) { ret why; }
             line = joined(a, line, "  pin=", why.ok);
         }
-        or {
+        if (sel pinned_r.ok) {
             val pinned_o: opt[str] = pinned_r.ok;
             if (sel pinned_o.some) { line = joined(a, line, "  pin=", pinned_o.some); }
         }
         var realized: bool = false;
-        if (sel state.ok) { realized = str_equals(state.ok, "realized"); }
-        if (sel full_r.ok) {
-            if (realized && !str_empty(version)) { state = range_state(op, key, full_r.ok, version); }
-        }
+        if (sel state.ok)                    { realized = str_equals(state.ok, "realized"); }
+        if (realized && !str_empty(version)) { state = range_state(op, key, full, version); }
     }
     if (sel state.err) { ret state; }
     ret joined(a, line, "  ", state.ok);
