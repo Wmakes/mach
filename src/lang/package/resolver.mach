@@ -19,6 +19,8 @@ use std.types.string.str_equals;
 use std.types.string.str_len;
 
 use A: std.allocator;
+#[testing]
+use T: std.allocator.testing;
 
 use diagnostic_kind: mach.lang.diagnostic.kind;
 use mach.lang.fail;
@@ -1052,8 +1054,9 @@ fun t_releases(ctx: ptr, url: str, out: *Vector[package_source.Release]) err[fai
         if (str_equals(src.rels[i].id, url)) {
             val v: res[manifest_version.Version, str] = manifest_version.parse_version(src.rels[i].version);
             if (sel v.ok) {
-                collections_vector.push[package_source.Release](out, package_source.Release{version: v.ok, text: src.rels[i].version,
+                val kept: res[usize, A.Error] = collections_vector.push[package_source.Release](out, package_source.Release{version: v.ok, text: src.rels[i].version,
                     tag: src.rels[i].version, commit: src.rels[i].id});
+                if (sel kept.err) { ret err[fail.Fail].err{fail.refused(kept.err)}; }
             }
         }
         i = i + 1;
@@ -1083,12 +1086,11 @@ fun t_needs(ctx: ptr, id: str, url: str, rel: *package_source.Release, out: *Rel
                 var end: usize = sp;
                 for (end < n && r.deps[end] != ';') { end = end + 1; }
                 val dep_id: res[str, A.Error] = str_dup_range(out.needs.a, r.deps, at, sp - at);
+                if (sel dep_id.err) { ret err[fail.Fail].err{fail.refused(dep_id.err)}; }
                 val dep_rg: res[str, A.Error] = str_dup_range(out.needs.a, r.deps, sp + 1, end - sp - 1);
-                if (sel dep_id.ok) {
-                    if (sel dep_rg.ok) {
-                        collections_vector.push[Need](?out.needs, Need{id: dep_id.ok, url: dep_id.ok, range: dep_rg.ok, who: ""});
-                    }
-                }
+                if (sel dep_rg.err) { ret err[fail.Fail].err{fail.refused(dep_rg.err)}; }
+                val kept: res[usize, A.Error] = collections_vector.push[Need](?out.needs, Need{id: dep_id.ok, url: dep_id.ok, range: dep_rg.ok, who: ""});
+                if (sel kept.err) { ret err[fail.Fail].err{fail.refused(kept.err)}; }
                 at = end + 1;
             }
         }
@@ -1187,6 +1189,42 @@ test resolve__picks_the_highest_release_every_requirement_and_the_compiler_accep
     var gneeds: [1]Need = [1]Need{Need{id: "g", url: "g", range: "^0.5", who: ""}};
     var g:      TRun    = t_solve(?a, ?src, ?gneeds[0], 1, false, nil, 0);
     if (!g.ok || !str_equals(t_picked(?g, "g"), "0.5.0")) { ret 10; }
+    ret 0;
+}
+
+# one solve under an allocator that refuses request `ordinal`, zero refusing none
+#[testing]
+fun t_refusal_attempt(ordinal: usize, attempts: *usize) i32 {
+    var t:    T.Testing;
+    val made: err[A.Error] = T.make(?t);
+    if (sel made.err) { ret 1; }
+    fin { T.dnit(?t); }
+    var src:   TSource = TSource{rels: ?T_RELS[0], count: 16, broken: ""};
+    var needs: [2]Need = [2]Need{Need{id: "a", url: "a", range: "^1", who: ""}, Need{id: "b", url: "b", range: "^1", who: ""}};
+    T.fail_at_ordinal(?t, ordinal);
+    val run: TRun = t_solve(T.allocator_of(?t), ?src, ?needs[0], 2, false, nil, 0);
+    @attempts = T.attempt_count(?t);
+    if (ordinal == 0) {
+        if (!run.ok || !str_equals(t_picked(?run, "a"), "1.0.0")) { ret 2; }
+        ret 0;
+    }
+    # the refusal itself, or a listing it cut short as the solver explains it
+    if (run.ok || !str_contains(run.failure, "out of memory")) { ret 3; }
+    ret 0;
+}
+
+# a refused allocation anywhere in a solve, its version sets among them, fails the solve with
+# that refusal rather than solving over a set it never made
+test resolve__a_refused_allocation_fails_the_solve {
+    var attempts: usize = 0;
+    if (t_refusal_attempt(0, ?attempts) != 0 || attempts == 0) { ret 1; }
+    val total:   usize = attempts;
+    var ordinal: usize = 1;
+    for (ordinal <= total) {
+        val code: i32 = t_refusal_attempt(ordinal, ?attempts);
+        if (code != 0) { ret code + 10; }
+        ordinal = ordinal + 1;
+    }
     ret 0;
 }
 

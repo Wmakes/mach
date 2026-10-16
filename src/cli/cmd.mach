@@ -694,6 +694,36 @@ test render__a_page_carries_its_grammar_and_only_the_rows_its_command_accepts {
     ret 0;
 }
 
+# a page the builder cannot finish fails with the builder's own refusal and writes nothing
+test render_page__a_refused_allocation_is_the_builders_own_refusal {
+    var t:    T.Testing;
+    val made: err[A.Error] = T.make(?t);
+    if (sel made.err) { ret 1; }
+    fin { T.dnit(?t); }
+    var out_sink: io_writer.Memory;
+    var out:      io_writer.Writer;
+    fixture.mem_writer(?out, ?out_sink);
+    fin { io_writer.memory_dnit(?out_sink); }
+    val a:     *A.Allocator   = T.allocator_of(?t);
+    val start: usize          = T.attempt_count(?t);
+    val whole: err[fail.Fail] = help.render_command_page_at(a, commands(), ?out, ?cmd_dep.COMMAND, 100);
+    if (sel whole.err) { ret 2; }
+    val total: usize = T.attempt_count(?t) - start;
+    if (total == 0) { ret 3; }
+    var k: usize = 1;
+    for (k <= total) {
+        out_sink.len = 0;
+        T.fail_at_ordinal(?t, T.attempt_count(?t) + k);
+        val r: err[fail.Fail] = help.render_command_page_at(a, commands(), ?out, ?cmd_dep.COMMAND, 100);
+        T.clear_failure(?t);
+        if (sel r.ok)                                                                { ret 4; }
+        if (!str_equals(fail.describe(r.err), "out of memory") || out_sink.len != 0) { ret 5; }
+        k = k + 1;
+    }
+    if (T.leaked(?t)) { ret 6; }
+    ret 0;
+}
+
 test render_page__a_failed_write_is_the_environment_and_a_partial_one_stops {
     var alloc:  A.Allocator;
     val make_r: err[A.Error] = page.make(?alloc);
