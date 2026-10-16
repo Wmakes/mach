@@ -221,6 +221,7 @@ pub fun native_text(a: *A.Allocator, text: str) res[NativeName, NativeTextError]
     ret res[NativeName, NativeTextError].ok{NativeName{units: units, length: length}};
 }
 
+# release a native text; an empty one owns no units
 pub fun native_text_free(a: *A.Allocator, name: *NativeName) {
     if (name.units == nil) { ret; }
     A.deallocate[Unit](a, name.units, name.length + 1);

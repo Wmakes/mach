@@ -133,6 +133,7 @@ pub fun init(alloc: *A.Allocator) res[Set, fail.Fail] {
     ret res[Set, fail.Fail].ok{set};
 }
 
+# release an instance set; a nil set, or one never made, holds nothing
 pub fun dnit(set: *Set) {
     if (set == nil || set.alloc == nil) { ret; }
     var i: usize = 0;

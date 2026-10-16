@@ -560,6 +560,7 @@ pub fun inst_worklist_new(alloc: *A.Allocator) res[*InstWorklist, fail.Fail] {
     ret res[*InstWorklist, fail.Fail].ok{wl};
 }
 
+# release an instance worklist; a nil list holds nothing
 fun inst_worklist_free(wl: *InstWorklist) {
     if (wl == nil) { ret; }
     sema_instance.dnit(?wl.set);

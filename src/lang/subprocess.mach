@@ -256,6 +256,7 @@ fun cstr_count(list: **u8) usize {
     ret n;
 }
 
+# release a nil-terminated list of strings; a nil list owns nothing
 fun free_cstr_list(a: *A.Allocator, list: **u8) {
     if (list == nil) { ret; }
     var n: usize = 0;

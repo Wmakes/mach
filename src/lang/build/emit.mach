@@ -134,6 +134,7 @@ pub rec LoadedImageOptions {
     manifest_path:  str;
 }
 
+# release loaded image options; nil options own nothing
 pub fun dnit_image_options(a: *A.Allocator, loaded: *LoadedImageOptions) {
     if (loaded == nil) { ret; }
     collections_vector.dnit[u8](?loaded.icon_bytes);
@@ -870,6 +871,7 @@ pub fun write_test_objects(p: *project.Project, destinations: *str) err[fail.Fai
     ret err[fail.Fail].ok{};
 }
 
+# release `n` object inputs and their array of `cap`; a nil array owns nothing
 pub fun free_inputs(a: *A.Allocator, inputs: *target_of.ObjectInput, n: u32, cap: u32) {
     if (inputs == nil) { ret; }
     var i: u32 = 0;

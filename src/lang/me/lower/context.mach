@@ -483,6 +483,7 @@ pub fun init_context(lc: *LowerContext, req: *LowerRequest, m: *me_ir.Module) er
     ret err[fail.Fail].ok{};
 }
 
+# release a lowering context; a nil context holds nothing
 pub fun dnit_context(lc: *LowerContext) {
     if (lc == nil) { ret; }
     map.dnit[resolve.SymbolId, LocalBinding](?lc.locals);

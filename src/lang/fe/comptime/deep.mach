@@ -87,6 +87,7 @@ pub fun init(alloc: *A.Allocator) Store {
     ret Store{nodes: collections_vector.init[Node](alloc), members: collections_vector.init[Member](alloc), zeros: map.init[type.TypeId, u32](alloc)};
 }
 
+# release a deep store; a nil store holds nothing
 pub fun dnit(s: *Store) {
     if (s == nil) { ret; }
     collections_vector.dnit[Node](?s.nodes);

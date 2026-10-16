@@ -100,6 +100,7 @@ pub fun init(alloc: *A.Allocator) Interface {
     };
 }
 
+# release an interface; a nil one, or one never made, holds nothing
 pub fun dnit(iface: *Interface) {
     if (iface == nil || iface.alloc == nil) { ret; }
     collections_vector.dnit[Declaration](?iface.declarations);

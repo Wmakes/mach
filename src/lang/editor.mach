@@ -593,6 +593,7 @@ pub fun init(s: *session.Session) EditorSession {
     ret es;
 }
 
+# release an editor session and every buffer it holds; a nil session holds nothing
 fun destroy(es: *EditorSession) {
     if (es == nil) { ret; }
     collections_vector.dnit[lang_source.FileId](?es.proj_edited);
@@ -1879,6 +1880,7 @@ fun ctx_seed(es: *EditorSession, b: *Buffer) err[fail.Fail] {
     ret err[fail.Fail].ok{};
 }
 
+# release a buffer's semantic result, when it holds one and owns it
 fun sema_drop(es: *EditorSession, b: *Buffer) {
     if (b.sr == nil) { ret; }
     if (b.owned) {
@@ -1888,6 +1890,7 @@ fun sema_drop(es: *EditorSession, b: *Buffer) {
     b.sr = nil;
 }
 
+# release a buffer's resolution and semantic results, when it holds them and owns them
 fun rr_drop(es: *EditorSession, b: *Buffer) {
     sema_drop(es, b);
     if (b.rr == nil) { ret; }

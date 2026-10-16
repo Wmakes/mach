@@ -585,7 +585,7 @@ fun deps_release(alloc: *A.Allocator, deps: *ResolveDeps, cap: u32) {
     deps.count   = 0;
 }
 
-# release what deps_of allocated
+# release what deps_of allocated; a list it left empty owns nothing
 pub fun deps_dnit(alloc: *A.Allocator, deps: *ResolveDeps) {
     if (deps.entries == nil) { ret; }
     var i: u32 = 0;
@@ -599,6 +599,7 @@ pub fun deps_dnit(alloc: *A.Allocator, deps: *ResolveDeps) {
     deps.count   = 0;
 }
 
+# release a resolution; a nil result holds nothing
 pub fun result_dnit(r: *ResolveResult) {
     if (r == nil) { ret; }
     if (r.symbols != nil && r.symbol_count > 0) {

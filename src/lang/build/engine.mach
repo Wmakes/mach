@@ -613,6 +613,7 @@ fun plan_test_outputs(p: *project.Project) res[*str, fail.Fail] {
     ret res[*str, fail.Fail].ok{destinations};
 }
 
+# release the destination names `names`; a nil list owns nothing
 fun release_names(p: *project.Project, names: *str) {
     if (names == nil) { ret; }
     var i: usize = 0;

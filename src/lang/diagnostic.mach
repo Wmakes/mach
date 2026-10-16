@@ -370,6 +370,8 @@ pub fun drop_file(store: *DiagnosticStore, file_id: lang_source.FileId) {
     }
 }
 
+# release a store and every diagnostic it holds; a nil store holds nothing and releases
+# nothing
 pub fun store_dnit(store: *DiagnosticStore) {
     if (store == nil) { ret; }
     var zero: DiagMark;
@@ -588,6 +590,8 @@ fun builder_owning(a: *A.Allocator, k: diagnostic_kind.Kind, file_id: lang_sourc
     ret b;
 }
 
+# release what a builder owns; a nil builder, or one already committed or released, owns
+# nothing
 pub fun builder_dnit(b: *DiagnosticBuilder) {
     if (b == nil || !b.live) { ret; }
 

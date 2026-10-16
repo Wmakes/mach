@@ -317,7 +317,8 @@ fun rekeyed(f: Fail, k: Keyed) Fail {
     ret f;
 }
 
-# free the paths of `also`'s places and its array, allocated `cap` places long
+# free the paths of `also`'s places and its array, allocated `cap` places long;
+# a related list naming no places owns nothing
 fun related_dnit(a: *A.Allocator, also: Related, cap: usize) {
     if (also.items == nil) { ret; }
     var i: usize = 0;
@@ -528,7 +529,8 @@ fun fix_retain(a: *A.Allocator, fx: Fix) res[Fix, A.Error] {
     ret res[Fix, A.Error].ok{out};
 }
 
-# release the places a failure owns through `a`, as `places_retain` made them
+# release the places a failure owns through `a`, as `places_retain` made them;
+# a failure carrying no fix owns no fix text
 pub fun places_dnit(a: *A.Allocator, f: Fail) {
     val k_o: opt[Keyed] = keyed(f);
     if (sel k_o.none)            { ret; }

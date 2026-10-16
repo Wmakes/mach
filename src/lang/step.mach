@@ -228,6 +228,7 @@ fun resolve_step_path(a: *A.Allocator, raw: str, project_work: str, v: *template
     ret res[StepPath, fail.Fail].ok{empty};
 }
 
+# release a list of strings; an empty list owns nothing
 fun step_strings_free(a: *A.Allocator, values: *StepStrings) {
     if (values.items == nil) { ret; }
     var i: u32 = 0;

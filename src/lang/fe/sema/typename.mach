@@ -53,6 +53,7 @@ fun type_str_free_sized(s: *session.Session, buf: str, len: usize) {
     A.deallocate[char](s.alloc, buf, len + 1);
 }
 
+# release a spelled type; a nil spelling owns nothing
 pub fun type_str_free(s: *session.Session, owned: str) {
     if (owned == nil) { ret; }
     A.deallocate[char](s.alloc, owned, str_len(owned) + 1);
