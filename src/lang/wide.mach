@@ -13,8 +13,6 @@ use std.types.size.usize;
 use std.types.string.str;
 use std.types.string.str_region_equals;
 
-use mach.lang.float;
-
 pub rec Wide {
     lo: u64;
     hi: u64;
@@ -329,78 +327,6 @@ pub fun mul_add_small(a: Wide, m: u64, d: u64, overflow: *bool) Wide {
         ret zero();
     }
     ret add_carry(mul(a, mw), from_u64(d), overflow);
-}
-
-pub fun to_f64_u(a: Wide) f64 {
-    val bl: u32 = bit_length(a);
-    if (bl == 0) { ret 0.0; }
-    var exp:  u64 = (bl - 1)::u64;
-    var mant: u64;
-    if (bl <= 53) {
-        mant = shl(a, 53 - bl).lo;
-    }
-    or {
-        # keep the top 53 bits, then round half to even on what fell below
-        val shift: u32 = bl - 53;
-        mant = shr_u(a, shift).lo;
-        val rem:  Wide = trunc(a, shift);
-        val half: Wide = shl(from_u64(1), shift - 1);
-        if (lt_u(half, rem) || (eq(rem, half) && (mant & 1) != 0)) {
-            mant = mant + 1;
-            if (mant == (1::u64 << 53)) {
-                mant = mant >> 1;
-                exp  = exp + 1;
-            }
-        }
-    }
-    ret float.bits_f64(((exp + 1023) << 52) | (mant & 0xFFFFFFFFFFFFF));
-}
-
-pub fun to_f64_s(a: Wide) f64 {
-    if (!is_negative(a)) { ret to_f64_u(a); }
-    ret float.f64_neg(to_f64_u(neg(a)));
-}
-
-# magnitude of a finite f64 truncated toward zero, saturating at all ones
-# for any magnitude of 2^128 or more; `sat` reports that the cap was hit
-fun f64_magnitude(f: f64, sat: *bool) Wide {
-    val bits: u64 = float.f64_bits(f);
-    val exp:  u64 = (bits >> 52) & 0x7FF;
-    val frac: u64 = bits & 0xFFFFFFFFFFFFF;
-    @sat = false;
-    if (exp < 1023) { ret zero(); }
-    val e: u32 = (exp - 1023)::u32;
-    if (e >= 128) {
-        @sat = true;
-        ret Wide{lo: ALL_ONES, hi: ALL_ONES};
-    }
-    val mant: u64 = frac | (1::u64 << 52);
-    if (e >= 52) { ret shl(from_u64(mant), e - 52); }
-    ret from_u64(mant >> (52 - e)::u64);
-}
-
-fun f64_is_nan(f: f64) bool {
-    val bits: u64 = float.f64_bits(f);
-    ret ((bits >> 52) & 0x7FF) == 0x7FF && (bits & 0xFFFFFFFFFFFFF) != 0;
-}
-
-pub fun from_f64_u(f: f64) Wide {
-    if (f64_is_nan(f) || float.f64_signbit(f)) { ret zero(); }
-    var sat: bool;
-    ret f64_magnitude(f, ?sat);
-}
-
-pub fun from_f64_s(f: f64) Wide {
-    if (f64_is_nan(f)) { ret zero(); }
-    var sat: bool;
-    val mag: Wide = f64_magnitude(f, ?sat);
-    val min: Wide = Wide{lo: 0, hi: TOP_BIT};
-    if (float.f64_signbit(f)) {
-        if (sat || lt_u(min, mag)) { ret min; }
-        ret neg(mag);
-    }
-    if (sat || !lt_u(mag, min)) { ret Wide{lo: ALL_ONES, hi: TOP_BIT - 1}; }
-    ret mag;
 }
 
 pub fun format_u(a: Wide, buf: *u8, cap: usize) usize {
@@ -792,66 +718,6 @@ test mul_add_small__exact_and_overflow {
     if (ov || !eq(top, t_max_u())) { ret 5; }
     mul_add_small(t_wide(0x9999999999999999, 0x1999999999999999), 10, 6, ?ov);
     if (!ov) { ret 6; }
-    ret 0;
-}
-
-test to_f64__correct_rounding {
-    if (to_f64_u(zero()) != 0.0)                                    { ret 1; }
-    if (to_f64_u(from_u64(1)) != 1.0)                               { ret 2; }
-    if (to_f64_u(from_u64(0x20000000000000)) != 9007199254740992.0) { ret 3; }
-    # 2^64 + 1 is a non-tie below half an ulp: rounds down to 2^64
-    val two64: f64 = float.bits_f64(0x43F0000000000000);
-    if (to_f64_u(t_wide(1, 1)) != two64) { ret 4; }
-    # 2^64 + 2^11 is a tie with an even mantissa: stays at 2^64
-    if (to_f64_u(t_wide(0x800, 1)) != two64) { ret 5; }
-    # 2^64 + 2^11 + 1 is above the tie: rounds up one ulp
-    val two64_up: f64 = float.bits_f64(0x43F0000000000001);
-    if (to_f64_u(t_wide(0x801, 1)) != two64_up) { ret 6; }
-    # 2^64 + 3 * 2^11 is a tie with an odd mantissa: rounds up to even
-    val two64_up2: f64 = float.bits_f64(0x43F0000000000002);
-    if (to_f64_u(t_wide(0x1800, 1)) != two64_up2) { ret 7; }
-    # 2^127 + 2^74 is a tie with an even mantissa: stays at 2^127
-    val two127: f64 = float.bits_f64(0x47E0000000000000);
-    if (to_f64_u(t_wide(0, TOP_BIT | (1::u64 << 10))) != two127)                             { ret 8; }
-    if (to_f64_u(t_wide(1, TOP_BIT | (1::u64 << 10))) != float.bits_f64(0x47E0000000000001)) { ret 9; }
-    # 2^128 - 1 rounds up to 2^128
-    if (to_f64_u(t_max_u()) != float.bits_f64(0x47F0000000000000)) { ret 10; }
-    # a value below the rounding point in the top limb only rounds down
-    if (to_f64_u(t_wide(ALL_ONES, TOP_BIT | 0x3FF)) != two127)      { ret 11; }
-    if (to_f64_s(from_i64(-1)) != -1.0)                             { ret 12; }
-    if (to_f64_s(t_min()) != float.f64_neg(two127))                 { ret 13; }
-    if (to_f64_s(t_max_s()) != two127)                              { ret 14; }
-    if (to_f64_s(neg(t_wide(0x801, 1))) != float.f64_neg(two64_up)) { ret 15; }
-    ret 0;
-}
-
-test from_f64__truncation_and_saturation {
-    val two64:  f64 = float.bits_f64(0x43F0000000000000);
-    val two127: f64 = float.bits_f64(0x47E0000000000000);
-    val two128: f64 = float.bits_f64(0x47F0000000000000);
-    val inf:    f64 = float.bits_f64(0x7FF0000000000000);
-    val nan:    f64 = float.bits_f64(0x7FF8000000000000);
-    if (!is_zero(from_f64_u(0.0)))                                                          { ret 1; }
-    if (!is_zero(from_f64_u(0.999)))                                                        { ret 2; }
-    if (!eq(from_f64_u(1.0), from_u64(1)))                                                  { ret 3; }
-    if (!eq(from_f64_u(3.99), from_u64(3)))                                                 { ret 4; }
-    if (!is_zero(from_f64_u(-3.5)))                                                         { ret 5; }
-    if (!is_zero(from_f64_u(nan)))                                                          { ret 6; }
-    if (!eq(from_f64_u(two64), t_wide(0, 1)))                                               { ret 7; }
-    if (!eq(from_f64_u(two127), t_min()))                                                   { ret 8; }
-    if (!eq(from_f64_u(two128), t_max_u()))                                                 { ret 9; }
-    if (!eq(from_f64_u(inf), t_max_u()))                                                    { ret 10; }
-    if (!eq(from_f64_u(9007199254740992.0), from_u64(0x20000000000000)))                    { ret 11; }
-    if (!eq(from_f64_s(-3.99), from_i64(-3)))                                               { ret 12; }
-    if (!is_zero(from_f64_s(-0.5)))                                                         { ret 13; }
-    if (!is_zero(from_f64_s(nan)))                                                          { ret 14; }
-    if (!eq(from_f64_s(float.f64_neg(two127)), t_min()))                                    { ret 15; }
-    if (!eq(from_f64_s(float.f64_neg(two128)), t_min()))                                    { ret 16; }
-    if (!eq(from_f64_s(float.f64_neg(inf)), t_min()))                                       { ret 17; }
-    if (!eq(from_f64_s(two127), t_max_s()))                                                 { ret 18; }
-    if (!eq(from_f64_s(inf), t_max_s()))                                                    { ret 19; }
-    if (!eq(from_f64_s(float.bits_f64(0x47DFFFFFFFFFFFFF)), t_wide(0, 0x7FFFFFFFFFFFFC00))) { ret 20; }
-    if (!eq(from_f64_s(float.f64_neg(two64)), neg(t_wide(0, 1))))                           { ret 21; }
     ret 0;
 }
 

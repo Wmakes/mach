@@ -151,6 +151,11 @@ pub fun flt(op: Opcode, w: float.FloatWidth, x: f64, y: f64, n: u32) Answer {
     ret fold_op(op, Kind.float{w}, [3]wide.Wide{xb, yb, wide.zero()}, n, opt[Kind].none{});
 }
 
+# a conversion of `x`, read as `from`, to `to` by mirl's conversion row `op`
+pub fun convert(op: Opcode, from: Kind, x: wide.Wide, to: Kind) Answer {
+    ret fold_op(op, from, [3]wide.Wide{x, wide.zero(), wide.zero()}, 1, opt[Kind].some{to});
+}
+
 # the first result of a fold the caller knows cannot trap
 pub fun first(a: Answer) wide.Wide {
     if (sel a.folded) { ret a.folded[0]; }
