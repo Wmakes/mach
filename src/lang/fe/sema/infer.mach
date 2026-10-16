@@ -913,8 +913,7 @@ fun symbol_at_expr_is(sc: *sema_context.SemaContext, eid: ast_id.ExprId, sym: *r
 }
 
 fun target_expr_type(sc: *sema_context.SemaContext, eid: ast_id.ExprId) type.TypeId {
-    if (sc.view.expr_type == nil)                                                      { ret type.TYPE_ERROR; }
-    if (ast_id.expr_is_nil(eid) || ast_id.expr_index(eid) >= sc.view.a.exprs.len::u32) { ret type.TYPE_ERROR; }
+    if (sc.view.expr_type == nil || ast_id.expr_is_nil(eid) || !sema_context.expr_in_view(sc, eid)) { ret type.TYPE_ERROR; }
     ret sc.view.expr_type[ast_id.expr_index(eid)];
 }
 
@@ -1330,8 +1329,7 @@ fun operand_packed_nominal(sc: *sema_context.SemaContext, eid: ast_id.ExprId) re
 }
 
 fun expr_packed_nominal(sc: *sema_context.SemaContext, eid: ast_id.ExprId) type.TypeId {
-    if (sc.view.expr_type == nil)                                                      { ret type.TYPE_NIL; }
-    if (ast_id.expr_is_nil(eid) || ast_id.expr_index(eid) >= sc.view.a.exprs.len::u32) { ret type.TYPE_NIL; }
+    if (sc.view.expr_type == nil || ast_id.expr_is_nil(eid) || !sema_context.expr_in_view(sc, eid)) { ret type.TYPE_NIL; }
 
     ret type_packed_nominal(sc, sc.view.expr_type[ast_id.expr_index(eid)]);
 }

@@ -1213,8 +1213,8 @@ fun ptr_width(sc: *sema_context.SemaContext) u32 {
 }
 
 fun expr_type_of(sc: *sema_context.SemaContext, eid: ast_id.ExprId) type.TypeId {
-    if (ast_id.expr_is_nil(eid))                                                          { ret type.TYPE_ERROR; }
-    if (sc.view.expr_type == nil || ast_id.expr_index(eid)::usize >= sc.view.a.exprs.len) { ret type.TYPE_ERROR; }
+    if (ast_id.expr_is_nil(eid))                                         { ret type.TYPE_ERROR; }
+    if (sc.view.expr_type == nil || !sema_context.expr_in_view(sc, eid)) { ret type.TYPE_ERROR; }
     ret sc.view.expr_type[ast_id.expr_index(eid)];
 }
 

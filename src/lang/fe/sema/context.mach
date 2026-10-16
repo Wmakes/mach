@@ -184,10 +184,10 @@ pub rec Typing {
 
 # the module a walk reads and the typing tables it writes: the module being typed, or the
 # declaring module of an instance. a walk over one construct, as a check is, may leave a table
-# it does without nil: with no `rr` no name is resolved and no deferred name is reported, a
-# table nil is not written and reads as unrecorded, an expression typed through no `expr_type`
-# has no comptime operand type, and a type read through no `type_resolved_ty` is the error type
-# with the failure recorded. `inferred_len`, `layout_state`, `type_resolved_memo` and the
+# it does without nil: with no `rr` no name is resolved and no deferred name is reported, and a
+# typing table nil is not written and a read of it answers as unrecorded, with the error or nil
+# type, no state or no operand type, except a type read through `resolved_type_of`, which also
+# records the failure. `inferred_len`, `layout_state`, `type_resolved_memo` and the
 # constant tables are the module's own and nil in a view of another module
 pub rec ModuleView {
     a:          *ast.Ast;
@@ -596,11 +596,7 @@ pub fun inst_worklist_dnit(sc: *SemaContext) {
 # the type the walk gives expression `eid`, recorded in its frame when the frame is not
 # the module's own typing
 pub fun expr_type_set(sc: *SemaContext, eid: ast_id.ExprId, ty: type.TypeId) {
-    if (sc.view.expr_type == nil) { ret; }
-    if (ast_id.expr_index(eid)::usize >= sc.view.a.exprs.len) {
-        fail.internal(?sc.status, "a typed expression lies outside its module's syntax");
-        ret;
-    }
+    if (sc.view.expr_type == nil || !expr_in_view(sc, eid)) { ret; }
     sc.view.expr_type[ast_id.expr_index(eid)] = ty;
     logical_check(sc, ty, sc.view.a.exprs.data[ast_id.expr_index(eid)].span);
     if (!frame_records_typing(sc)) { ret; }
@@ -609,11 +605,7 @@ pub fun expr_type_set(sc: *SemaContext, eid: ast_id.ExprId, ty: type.TypeId) {
 }
 
 pub fun decl_type_set(sc: *SemaContext, did: ast_id.DeclId, ty: type.TypeId) {
-    if (sc.view.decl_type == nil) { ret; }
-    if (ast_id.decl_index(did)::usize >= sc.view.a.decls.len) {
-        fail.internal(?sc.status, "a typed declaration lies outside its module's syntax");
-        ret;
-    }
+    if (sc.view.decl_type == nil || !decl_in_view(sc, did)) { ret; }
     sc.view.decl_type[ast_id.decl_index(did)] = ty;
     val d: *ast_decl.Decl = ?sc.view.a.decls.data[ast_id.decl_index(did)];
     if (d.kind == ast_decl.DECL_KIND_VAL || d.kind == ast_decl.DECL_KIND_VAR) { logical_check(sc, ty, d.span); }
@@ -727,6 +719,20 @@ pub fun decl_type_for(sc: *SemaContext, sym: *resolve.Symbol) type.TypeId {
         ret type.TYPE_ERROR;
     }
     ret exported.some.ty;
+}
+
+# whether expression `eid` lies in this view's syntax; one past it records an internal failure
+pub fun expr_in_view(sc: *SemaContext, eid: ast_id.ExprId) bool {
+    if (ast_id.expr_index(eid)::usize < sc.view.a.exprs.len) { ret true; }
+    fail.internal(?sc.status, "an expression lies outside its module's syntax");
+    ret false;
+}
+
+# whether declaration `did` lies in this view's syntax; one past it records an internal failure
+pub fun decl_in_view(sc: *SemaContext, did: ast_id.DeclId) bool {
+    if (ast_id.decl_index(did)::usize < sc.view.a.decls.len) { ret true; }
+    fail.internal(?sc.status, "a declaration lies outside its module's syntax");
+    ret false;
 }
 
 # the symbol an expression names, none when it names none
@@ -980,10 +986,7 @@ pub fun resolve_type_comparison_operand(sc: *SemaContext, eid: ast_id.ExprId) re
     if (sc == nil)                { ret res[opt[u32], comptime.EvalFail].ok{opt[u32].none{}}; }
     if (sc.view.expr_type == nil) { ret res[opt[u32], comptime.EvalFail].ok{opt[u32].none{}}; }
     if (ast_id.expr_is_nil(eid))  { ret res[opt[u32], comptime.EvalFail].ok{opt[u32].none{}}; }
-    if (ast_id.expr_index(eid) >= sc.view.a.exprs.len::u32) {
-        fail.internal(?sc.status, "a compared operand lies outside its module's syntax");
-        ret res[opt[u32], comptime.EvalFail].ok{opt[u32].none{}};
-    }
+    if (!expr_in_view(sc, eid))   { ret res[opt[u32], comptime.EvalFail].ok{opt[u32].none{}}; }
     val t: type.TypeId = apply_subst(sc, sc.view.expr_type[ast_id.expr_index(eid)]);
     if (type.is_nil(t) || type.is_error(t)) { ret res[opt[u32], comptime.EvalFail].ok{opt[u32].none{}}; }
     if (awaits_instance(sc, t)) {
