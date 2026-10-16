@@ -2,7 +2,7 @@
 . "$(dirname "$0")/../../check/common.sh"
 
 # produce_prologue_lines <engine> <leg> <nog_binary> <g_binary> <profile>
-# the binary-inspection producer for #3394. every fact is read from the `-g` artifact
+# the binary-inspection producer for prologue lines. every fact is read from the `-g` artifact
 # with llvm-dwarfdump, the same decode a symbolizer performs:
 #
 #   main_entry               what the function's entry address resolves to. this is the

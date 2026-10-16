@@ -1,5 +1,5 @@
 /* the C object linked into the mach shared library of the shared-unwind case
- * (mach #4047): the frames between the mach functions, compiled by the
+ *: the frames between the mach functions, compiled by the
  * runner's own toolchain, which describes each one in the object's .eh_frame */
 
 extern long long lib_inner(long long depth);

@@ -8,12 +8,12 @@
 # The Mach-O header carries an 80-byte section_64 per named section and an
 # LC_LOAD_DYLIB per dependency, so it grows with the image; `sizeofcmds` is a
 # uint32 and the format caps it nowhere near a page. A fixed one-page reservation
-# refused the link outright (#2690).
+# refused the link outright.
 #
 # Size alone would be a weak observable. The reservation is what places __TEXT:
 # the header occupies the gap between the image base and the first segment, so a
 # writer that widened the gap on its own would slide __TEXT, and __PAGEZERO with
-# it, below the base - the defect of #2599, which every size check would still
+# it, below the base - the defect, which every size check would still
 # pass. The framing is therefore asserted alongside: __PAGEZERO spans the whole low
 # region, __TEXT is based exactly where __PAGEZERO ends, and the header sits at
 # file offset 0 inside it.

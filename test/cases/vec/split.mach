@@ -1,4 +1,4 @@
-# vectors wider than one register (#3589): each is split into register-width
+# vectors wider than one register: each is split into register-width
 # pieces, the last holding whatever lanes are left, down to one. one noinline
 # probe per shape of operation, so each runs through its own body: lane-wise
 # arithmetic, bitwise, shift, compare and select at odd lane counts; widening

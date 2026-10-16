@@ -1,10 +1,10 @@
 # a Mach-O header outgrows its one-page reservation as soon as an image carries
-# enough named sections: since #2606 the linker preserves input section identity,
+# enough named sections: the linker preserves input section identity,
 # and every surviving section is another 80-byte section_64 in the header. A
 # vendored objective-c archive carries dozens (__objc_classlist, __objc_const,
 # __objc_data, __cstring, __gcc_except_tab, ...) alongside its system-library
 # dependencies, which is how briar-systems/mach-glfw#32 reached 4 KiB of load
-# commands and was refused (#2690).
+# commands and was refused.
 #
 # The 224 `#[section]` globals below stand in for that section table without
 # needing the macOS SDK to build one: they cross the reservation on both darwin

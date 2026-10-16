@@ -90,7 +90,7 @@ fun divrem_i128(seed: u64) u64 {
 }
 
 # quotients and remainders by constant powers of two past the low limb and of
-# either sign, down to the most negative divisor (#3350)
+# either sign, down to the most negative divisor
 #[noinline]
 fun divconst_128(seed: u64) u64 {
     var h:   u64     = fold.init();

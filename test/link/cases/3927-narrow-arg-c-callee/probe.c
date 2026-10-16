@@ -1,4 +1,4 @@
-/* C half of the narrow integer argument controls (mach #3927). Compiled at -O0 so
+/* C half of the narrow integer argument controls. Compiled at -O0 so
  * every read really happens. */
 #ifdef _WIN32
 int _fltused = 0;

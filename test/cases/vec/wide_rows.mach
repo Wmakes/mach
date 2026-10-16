@@ -1,4 +1,4 @@
-# the packed rows at 256 bits (#4128): one noinline probe per row over the
+# the packed rows at 256 bits: one noinline probe per row over the
 # 32-byte vectors, which a target with 256-bit vector registers holds whole
 # and a 128-bit one splits in two. integer arithmetic, bitwise ops, every
 # compare, uniform and per-lane shifts and multiplies at every lane width;

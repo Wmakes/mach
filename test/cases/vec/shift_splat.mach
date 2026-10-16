@@ -1,4 +1,4 @@
-# the hashing idiom a uniform shift count exists for (#3736, #3740): a lane-wise
+# the hashing idiom a uniform shift count exists for: a lane-wise
 # xorshift-multiply mix, `x ^ (x >> {16, 16, 16, 16})` then a multiply by a
 # splat constant, run over several rounds, and the same round with its shift
 # counts known only at run time. the counts are the same in every lane of each

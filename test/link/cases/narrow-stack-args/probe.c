@@ -1,4 +1,4 @@
-/* the C half of the narrow-stack-args surface case (mach #2598).
+/* the C half of the narrow-stack-args surface case.
  *
  * Compiled by the RUNNER'S OWN C toolchain, so each callee reads its stack arguments
  * at the offsets the platform's real ABI puts them at rather than mach's model of it.

@@ -19,12 +19,12 @@ riscv_pcrel_label_scan() {
 # properties of every load reached through an `auipc`-materialized base.
 #
 #   misaligned      the resolved address is not a multiple of the access width. this
-#                   is the one that CATCHES the #2797 defect: a low half resolved
+#                   is the one that CATCHES the pairing defect: a low half resolved
 #                   against the wrong pc lands an arbitrary byte count off its symbol,
 #                   and the fixture's own repros report 8 (debug) and 4 (release)
 #   text-relative   the resolved address lands inside the text range. a float or data
 #                   constant is never in .text, so a correct link answers 0 - but so
-#                   does the #2797 defect, which resolves to a wrong address in .data
+#                   does the pairing defect, which resolves to a wrong address in .data
 #                   rather than onto code. it is kept as a true invariant that fails
 #                   closed for a DIFFERENT mistake (a pair resolved onto instructions,
 #                   which is what a bad relaxation or a wrong section base produces),
@@ -119,7 +119,7 @@ riscv_pcrel_image_scan() {
 }
 
 # produce_riscv_pcrel <engine> <leg> <binary>
-# the riscv64 pc-relative HI/LO PAIR observable (#2797): the values a clang-built
+# the riscv64 pc-relative HI/LO PAIR observable: the values a clang-built
 # object loads through psABI hi/lo pairs, plus two facts about what was emitted.
 #
 # the values first, because the defect's signature is a believable zero: a pooled
@@ -172,10 +172,10 @@ produce_riscv_pcrel() {
     "$tool" -d -r --no-show-raw-insn "$probe" | riscv_pcrel_label_scan
     # no --mattr override: the image now describes itself completely enough for the
     # disassembler to configure itself. it needed one twice over - e_flags did not
-    # advertise the compressed extension the image contained (mach#2813), and the
+    # advertise the compressed extension the image contained, and the
     # `.riscv.attributes` arch string was derived from a per-ISA constant describing
     # what mach's own encoder emits rather than from what the linked image ended up
-    # holding, which is what the compressed FLOAT loads (`c.fld`) read (mach#2828).
+    # holding, which is what the compressed FLOAT loads (`c.fld`) read.
     # both are now derived from the image, so an override here would be hiding whether
     # they still are. without a correct answer from one of them those loads decode as
     # `<unknown>` and the property silently measures nothing

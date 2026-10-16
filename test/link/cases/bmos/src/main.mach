@@ -7,7 +7,7 @@
 # the sum live so isel and encode are exercised; the image is not executed here,
 # since no Linux host can map its load address.
 #
-# the image must also carry its zero-initialized data (#2402): `raw` once stored
+# the image must also carry its zero-initialized data: `raw` once stored
 # file bytes only and left bss past the end of the file for a startup that cannot
 # exist. `zeros` is a zero-init global larger than the code around it, so a writer
 # that reverts to `filesz` emits an image too short to contain it, and `seeded` puts

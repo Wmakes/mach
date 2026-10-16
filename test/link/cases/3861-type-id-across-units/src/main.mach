@@ -1,4 +1,4 @@
-# $type_id of one type agrees in every object of the program, and differs between types (#3861)
+# $type_id of one type agrees in every object of the program, and differs between types
 use p: std.print;
 use case.a;
 use case.b;

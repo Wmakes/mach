@@ -1,4 +1,4 @@
-/* the C half of the riscv64 pc-relative pair case (mach #2797).
+/* the C half of the riscv64 pc-relative pair case.
  *
  * Compiled by clang for riscv64, which reaches a global through the RISC-V psABI's
  * hi/lo pair: `auipc rN, %pcrel_hi(sym)` materializes the page, and a following

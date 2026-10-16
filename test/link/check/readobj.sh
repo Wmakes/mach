@@ -131,7 +131,7 @@ produce_build_id() {
 # parsed by llvm-readobj (--all: headers, sections, segments, symbols, relocations
 # and every format-specific table), and any diagnostic the reader prints is a
 # failure. the writer's own tiling checks prove that its plan and its bytes agree
-# with each other; this proves the bytes are the format (#3113). the golden then
+# with each other; this proves the bytes are the format. the golden then
 # names the image's sections and their alignments, which is what the file plan
 # decides, without offsets or sizes so that a dependency bump does not rebless it.
 produce_readobj() {
@@ -181,7 +181,7 @@ produce_readobj() {
         /^ *Name: /  { print "segment " $2 }
     '
 
-    # the build id every linked image carries (#3221), read by an external tool and
+    # the build id every linked image carries, read by an external tool and
     # checked against an independent recomputation over the file, which is the
     # content-derived property: the value itself is not recorded because it
     # changes with every dependency bump, the length and the agreement do not.

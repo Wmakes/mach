@@ -557,91 +557,94 @@ fun t_run_one_bounded(a: *A.Allocator, body: str, timeout: chrono_duration.Durat
     ret 0;
 }
 
-test run_one__a_test_past_its_bound_is_timed_out {
-    $if ($mach.build.os == $mach.os.windows) { ret 0; }
-    var a:      A.Allocator;
-    val make_r: err[A.Error] = page.make(?a);
-    if (sel make_r.err) { ret 1; }
+$if ($mach.build.os != $mach.os.windows) {
+    test run_one__a_test_past_its_bound_is_timed_out {
+        var a:      A.Allocator;
+        val make_r: err[A.Error] = page.make(?a);
+        if (sel make_r.err) { ret 1; }
 
-    var pr: TimeoutProbe;
-    pr.script  = "";
-    pr.log_dir = "";
-    val setup: i32 = t_run_one_bounded(?a, "sleep 30\n", chrono_duration.SECOND, ?pr);
-    var bad:   i32 = 0;
-    if (setup != 0) { bad = 10 + setup; }
-    or {
-        val o: *readout.TestResult = ?pr.outcome;
-        if (o.result.kind != outcome.RESULT_RESOURCE_EXHAUSTION) { bad = 4; }
-        or (o.result.cause != outcome.CAUSE_ORACLE_TIMEOUT)      { bad = 5; }
-        or (o.bound != chrono_duration.SECOND)                   { bad = 6; }
+        var pr: TimeoutProbe;
+        pr.script  = "";
+        pr.log_dir = "";
+        val setup: i32 = t_run_one_bounded(?a, "sleep 30\n", chrono_duration.SECOND, ?pr);
+        var bad:   i32 = 0;
+        if (setup != 0) { bad = 10 + setup; }
         or {
-            var one: [1]readout.TestResult;
-            one[0] = @o;
-            if (count_timed_out(?one[0], 1) != 1) { bad = 8; }
-            or (count_failed(?one[0], 1) != 1)    { bad = 9; }
+            val o: *readout.TestResult = ?pr.outcome;
+            if (o.result.kind != outcome.RESULT_RESOURCE_EXHAUSTION) { bad = 4; }
+            or (o.result.cause != outcome.CAUSE_ORACLE_TIMEOUT)      { bad = 5; }
+            or (o.bound != chrono_duration.SECOND)                   { bad = 6; }
             or {
-                var tally: outcome.GateTally = outcome.gate_tally_init(?a);
-                build_gate_tally(?tally, ?a, ?one[0], 1);
-                if (tally.infrastructure_failure != 0) { bad = 20; }
-                outcome.gate_tally_dnit(?tally);
+                var one: [1]readout.TestResult;
+                one[0] = @o;
+                if (count_timed_out(?one[0], 1) != 1) { bad = 8; }
+                or (count_failed(?one[0], 1) != 1)    { bad = 9; }
+                or {
+                    var tally: outcome.GateTally = outcome.gate_tally_init(?a);
+                    build_gate_tally(?tally, ?a, ?one[0], 1);
+                    if (tally.infrastructure_failure != 0) { bad = 20; }
+                    outcome.gate_tally_dnit(?tally);
+                }
             }
         }
+        t_probe_free(?a, ?pr);
+        ret bad;
     }
-    t_probe_free(?a, ?pr);
-    ret bad;
 }
 
-test run_one__an_unbounded_test_that_sleeps_briefly_still_passes {
-    $if ($mach.build.os == $mach.os.windows) { ret 0; }
-    var a:      A.Allocator;
-    val make_r: err[A.Error] = page.make(?a);
-    if (sel make_r.err) { ret 1; }
+$if ($mach.build.os != $mach.os.windows) {
+    test run_one__an_unbounded_test_that_sleeps_briefly_still_passes {
+        var a:      A.Allocator;
+        val make_r: err[A.Error] = page.make(?a);
+        if (sel make_r.err) { ret 1; }
 
-    var pr: TimeoutProbe;
-    pr.script  = "";
-    pr.log_dir = "";
-    val setup: i32 = t_run_one_bounded(?a, "sleep 1\nexit 0\n", 0, ?pr);
-    var bad:   i32 = 0;
-    if (setup != 0) { bad = 10 + setup; }
-    or {
-        val o: *readout.TestResult = ?pr.outcome;
-        if (o.result.kind != outcome.RESULT_PASS) { bad = 2; }
-        or (o.bound != 0)                         { bad = 3; }
+        var pr: TimeoutProbe;
+        pr.script  = "";
+        pr.log_dir = "";
+        val setup: i32 = t_run_one_bounded(?a, "sleep 1\nexit 0\n", 0, ?pr);
+        var bad:   i32 = 0;
+        if (setup != 0) { bad = 10 + setup; }
         or {
-            var one: [1]readout.TestResult;
-            one[0] = @o;
-            if (count_timed_out(?one[0], 1) != 0) { bad = 4; }
+            val o: *readout.TestResult = ?pr.outcome;
+            if (o.result.kind != outcome.RESULT_PASS) { bad = 2; }
+            or (o.bound != 0)                         { bad = 3; }
             or {
-                var tally: outcome.GateTally = outcome.gate_tally_init(?a);
-                build_gate_tally(?tally, ?a, ?one[0], 1);
-                if (tally.infrastructure_failure != 0 || tally.pass != 1) { bad = 5; }
-                outcome.gate_tally_dnit(?tally);
+                var one: [1]readout.TestResult;
+                one[0] = @o;
+                if (count_timed_out(?one[0], 1) != 0) { bad = 4; }
+                or {
+                    var tally: outcome.GateTally = outcome.gate_tally_init(?a);
+                    build_gate_tally(?tally, ?a, ?one[0], 1);
+                    if (tally.infrastructure_failure != 0 || tally.pass != 1) { bad = 5; }
+                    outcome.gate_tally_dnit(?tally);
+                }
             }
         }
+        t_probe_free(?a, ?pr);
+        ret bad;
     }
-    t_probe_free(?a, ?pr);
-    ret bad;
 }
 
-test run_one__a_test_that_beats_its_bound_keeps_its_own_outcome {
-    $if ($mach.build.os == $mach.os.windows) { ret 0; }
-    var a:      A.Allocator;
-    val make_r: err[A.Error] = page.make(?a);
-    if (sel make_r.err) { ret 1; }
+$if ($mach.build.os != $mach.os.windows) {
+    test run_one__a_test_that_beats_its_bound_keeps_its_own_outcome {
+        var a:      A.Allocator;
+        val make_r: err[A.Error] = page.make(?a);
+        if (sel make_r.err) { ret 1; }
 
-    var pr: TimeoutProbe;
-    pr.script  = "";
-    pr.log_dir = "";
-    val setup: i32 = t_run_one_bounded(?a, "exit 4\n", chrono_duration.SECOND * 30, ?pr);
-    var bad:   i32 = 0;
-    if (setup != 0) { bad = 10 + setup; }
-    or {
-        val o: *readout.TestResult = ?pr.outcome;
-        if (o.result.kind != outcome.RESULT_SEMANTIC_MISMATCH) { bad = 2; }
-        or (o.result.cause != outcome.CAUSE_ORACLE_EXIT)       { bad = 3; }
-        or (o.code != 4)                                       { bad = 4; }
-        or (o.bound != 0)                                      { bad = 5; }
+        var pr: TimeoutProbe;
+        pr.script  = "";
+        pr.log_dir = "";
+        val setup: i32 = t_run_one_bounded(?a, "exit 4\n", chrono_duration.SECOND * 30, ?pr);
+        var bad:   i32 = 0;
+        if (setup != 0) { bad = 10 + setup; }
+        or {
+            val o: *readout.TestResult = ?pr.outcome;
+            if (o.result.kind != outcome.RESULT_SEMANTIC_MISMATCH) { bad = 2; }
+            or (o.result.cause != outcome.CAUSE_ORACLE_EXIT)       { bad = 3; }
+            or (o.code != 4)                                       { bad = 4; }
+            or (o.bound != 0)                                      { bad = 5; }
+        }
+        t_probe_free(?a, ?pr);
+        ret bad;
     }
-    t_probe_free(?a, ?pr);
-    ret bad;
 }

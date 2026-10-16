@@ -8,14 +8,14 @@
 # Block-decorated struct with explicit member offsets, and an entry point must name
 # its Input and Output variables.
 #
-# Reading a MEMBER of the uniform block IS here now (#2649): MIR keeps the GEP's
+# Reading a MEMBER of the uniform block IS here now: MIR keeps the GEP's
 # index list on a logical-addressing target, so the walk reaches the back end as
 # ordinals and becomes an `OpAccessChain`. `transform.model[2]` is the nested case -
 # a struct member that is an array, indexed - which lowers to two chained GEPs and
 # is what a flat `camera.view` would not exercise.
 #
 # A scalar `f32` interface variable IS here, in both directions, and it is the
-# #2655 pin. It used to be refused alongside the member walk: MIR materialized a
+# member-walk pin. It is reached through the member walk: MIR materialized a
 # FLOAT variable's address into a register before loading or storing it, which is a
 # repair for x86-64 recording no relocation on a float MEM operand's symbol, and it
 # was applied on every target. That destroyed the direct reference SPIR-V needs, so
@@ -38,7 +38,7 @@ var vertex_index: i32;
 # a scalar float BUILT-IN, which is a different path from the scalar float varying
 # above: a built-in derives its storage class from the built-in itself rather than
 # from an `#[input]` / `#[output]` marker, so it reaches the interface declaration
-# through separate code. It was unreachable for the same #2655 reason and is the
+# through separate code. It was unreachable for the same member-walk reason and is the
 # only spellable scalar-float built-in, so nothing else covers that path.
 #[builtin("point_size")]
 var point_size: f32;
@@ -46,7 +46,7 @@ var point_size: f32;
 #[output(0)]
 var vary_colour: f32x4;
 
-# the #2655 pin: SCALAR float varyings, written by a vertex stage and read by a
+# the member-walk pin: SCALAR float varyings, written by a vertex stage and read by a
 # fragment stage. f64 is deliberately absent - a Vulkan shader interface variable
 # may not be 64-bit without the Float64 capability, which this module does not
 # declare, so f32 is the whole of the scalar float interface surface here.
@@ -55,19 +55,19 @@ var vary_alpha: f32;
 #[input(2)]
 var in_alpha:   f32;
 
-# SUB-REGISTER-WIDTH vector varyings, in both directions, and the #2744 pin. These
+# SUB-REGISTER-WIDTH vector varyings, in both directions, and the sub-width pin. These
 # are the same shape of defect as the scalar float above, one type-class over: the
-# sub-width vector memory round trip introduced with #2687 spilled a 12-byte value
+# sub-width vector memory round trip could spill a 12-byte value
 # to a register-width scratch slot and walked it out in 8/4/2/1 chunks, which is
 # right on a byte-addressed machine and is three things logical addressing cannot
 # express at all. It was applied on every target, so it destroyed the direct symbol
 # reference this target reaches an interface variable through, and every one of
 # these declarations was unreachable while `f32x4` beside it worked.
 #
-# `f32x3` is the shape #2687 names as one of its two live needs - a vec3 vertex
+# `f32x3` is one of the two live sub-width shapes - a vec3 vertex
 # attribute - and a vertex attribute that cannot be read is not one.
 #
-# BOTH DIRECTIONS AND REAL ARITHMETIC, for the reason #2655's comment records: a
+# BOTH DIRECTIONS AND REAL ARITHMETIC, for the member-walk reason: a
 # copy-only case, or a store-only one, passes with one of the two sites still
 # ungated. The values below are loaded, computed on, and stored back.
 #[input(3)]
@@ -133,7 +133,7 @@ var transform: Transform;
 # size anyway, so the two layouts happen to agree and `ambient` lands at 32 either
 # way. Replace either member with an `f32` and they diverge, which is the shape
 # `spirv-uniform-layout` holds and which this case passed silently over until
-# #2746 - the emitter reported mach's offsets and checked nothing.
+# the case - an emitter that reported mach's offsets and checked nothing.
 rec Fog {
     colour:  f32x4;
     density: f32x4;
@@ -212,7 +212,7 @@ fun fragment_main() {
 #[workgroup(8, 8, 1)]
 fun compute_main() {}
 
-# the sub-width varyings carried through a stage in both directions (#2744). the
+# the sub-width varyings carried through a stage in both directions. the
 # vertex stage writes them from arithmetic on its own inputs and the fragment stage
 # reads them back, so each variable is both an OpLoad and an OpStore target and
 # neither site can be dead.

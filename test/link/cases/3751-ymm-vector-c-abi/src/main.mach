@@ -1,4 +1,4 @@
-# 32-byte vectors in ymm registers against a C callee and a C caller (mach #3751)
+# 32-byte vectors in ymm registers against a C callee and a C caller
 #
 # Every function below is paired with one in probe.c of matching signature; see
 # case.conf for what each position proves. The observable is a small integer each

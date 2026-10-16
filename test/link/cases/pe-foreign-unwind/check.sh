@@ -8,7 +8,7 @@
 # linked symbol table; its patched call displacement begins immediately after
 # that signature. the row's 22-byte extent and exact UNWIND_INFO distinguish the
 # foreign entry from mach-generated unwind rows in the same sorted table. the
-# fixture's qz_unused, which nothing calls, is collected with its row (#3410).
+# fixture's qz_unused, which nothing calls, is collected with its row.
 produce_pe_exceptions() {
     bin=$3
     elfanew=$(read_le_uint "$bin" 60 4)

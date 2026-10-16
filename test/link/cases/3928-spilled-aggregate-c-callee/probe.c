@@ -1,4 +1,4 @@
-/* C half of the spilled aggregate controls (mach #3928). Compiled at -O0 so every
+/* C half of the spilled aggregate controls. Compiled at -O0 so every
  * read really happens. */
 #ifdef _WIN32
 int _fltused = 0;

@@ -5,7 +5,7 @@
 # the table holds quiet and signaling NaNs of both signs and several payloads
 # beside the values f16_ops draws on. the same operations over f16x8 lanes
 # fold too, every pair of the table in some lane, so a column's packed rows are
-# held to the base column's lanes, each of which is its scalar operation (#3802).
+# held to the base column's lanes, each of which is its scalar operation.
 
 use corpus.lib.fold;
 

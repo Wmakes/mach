@@ -1,5 +1,5 @@
 # a read-only global vector wider than one register, read in a loop beside
-# enough live pieces that some are spilled (#4151). a spilled piece loaded from
+# enough live pieces that some are spilled. a spilled piece loaded from
 # the global is taken through a register and the global is read with its
 # relocation, never copied memory to memory. one probe per width that splits:
 # a masked sum, an operation taking the global as its direct source, and a

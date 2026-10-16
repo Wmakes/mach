@@ -7,7 +7,7 @@
 # linked code address and final PE section. The fixture's `.text` requires 8 KiB
 # alignment while PE's first section begins at RVA 0x1000, so deriving the
 # expected offset from the section header (rather than linker content) exercises
-# the alignment prefix that originally made the two bases differ.
+# the alignment prefix that makes the two bases differ.
 produce_pe_codeview() {
     bin=$3
     elfanew=$(read_le_uint "$bin" 60 4)

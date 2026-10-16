@@ -1,4 +1,4 @@
-# a frame that ends in a tail jump, walked by windows' own unwinder (#3417)
+# a frame that ends in a tail jump, walked by windows' own unwinder
 #
 # m_outer holds values across the call into c_touch, so its frame saves
 # nonvolatile registers, and then tail-calls m_inner, whose own values across

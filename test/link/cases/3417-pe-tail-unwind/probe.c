@@ -1,4 +1,4 @@
-/* the C half of the tail-unwind case (mach #3417).
+/* the C half of the tail-unwind case.
  *
  * No <windows.h>: the unwinder entry points and the CONTEXT offsets they fill
  * are declared here, so the probe builds with any C compiler for the leg. The

@@ -34,7 +34,7 @@ elf_seg_identical() {
 }
 
 # produce_debuginfo <engine> <leg> <nog_binary> <g_binary>
-# the binary-inspection producer for the debuginfo case kind (#2039): asserts, purely
+# the binary-inspection producer for the debuginfo case kind: asserts, purely
 # host-side over the artifacts run.sh built with and without `-g`, that (1) the
 # standard structural validator accepts the whole `-g` image and which warning classes
 # it reports while doing so, (1b) a real consumer
@@ -61,7 +61,7 @@ produce_debuginfo() {
         echo "link: debuginfo: addr2line not found (install 'binutils')" >&2; return 2
     }
 
-    # --verify EXITS ZERO ON WARNINGS (#2755), so reading only its status collapsed "no
+    # --verify EXITS ZERO ON WARNINGS, so reading only its status collapsed "no
     # diagnostics at all" onto "no errors, and a wall of warnings". That is how a
     # validator stops validating: the next real warning lands in a stream nobody reads.
     # The observable is therefore the stream. `errors` is reported first because an
@@ -74,7 +74,7 @@ produce_debuginfo() {
     # `file` register an initial value of 1, and binutils resolves that in favour of
     # §6.2.2. So a single-file CU must declare its source at slot 0 AND at slot 1 or
     # libbfd rejects the whole section ("mangled line number section (bad file number)",
-    # #2582) - measured on binutils 2.47 against clang's own single-entry `-gdwarf-5`
+    # this) - measured on binutils 2.47 against clang's own single-entry `-gdwarf-5`
     # output as well as ours. gcc emits the duplicate and llvm-dwarfdump warns on gcc's
     # output identically. It is also validator-version dependent: llvm-dwarfdump 18 does
     # not report it and 22 does, so leaving it in the stream would make the golden a
@@ -98,7 +98,7 @@ produce_debuginfo() {
         printf '%s\n' "$dd_warn" | while IFS= read -r w; do echo "dwarfdump_warning=$w"; done
     fi
 
-    # CONSUMER-SIDE DECODE (#2582). --verify above checks structural and reference
+    # CONSUMER-SIDE DECODE. --verify above checks structural and reference
     # integrity; it does NOT check that the line program decodes against the file table
     # the way a consumer reads it, so it accepted a .debug_line that binutils rejected
     # outright ("mangled line number section (bad file number)") on every CU. addr2line
@@ -127,7 +127,7 @@ produce_debuginfo() {
     fi
 
     # remat_mark's value is a constant the allocator builds at its read rather
-    # than keeps in a register or a slot, so its location is that constant (#4185)
+    # than keeps in a register or a slot, so its location is that constant
     remat=$("$dd_tool" --name=remat_mark "$g" | sed -n 's/^[[:space:]]*DW_AT_location[[:space:]]*(\(.*\))$/\1/p' | sed -n '1p')
     echo "remat_mark_location=${remat:-missing}"
 
@@ -154,7 +154,7 @@ produce_debuginfo() {
         ')
         set -- $counts
         printf 'weak_%s_dies=live:%s,dead:%s\n' "$label" "$1" "$2"
-        # a substring match, not equality: once a `.symtab` exists (#2772) a real
+        # a substring match, not equality: once a `.symtab` exists a real
         # symbolizer prefers the ELF symbol table's linkage name over DWARF's
         # DW_AT_name for the function-name field, so the resolved text is the
         # mangled form (e.g. `_M7dbgcase7genericN11identI3i64E`), not the bare

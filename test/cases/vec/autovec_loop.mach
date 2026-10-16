@@ -138,7 +138,7 @@ pub fun checksum(seed: u64) u64 {
     }
     h = fold.mix_f32(h, fs);
 
-    # strict dot products and a product (#3351): the element-wise part packs and
+    # strict dot products and a product: the element-wise part packs and
     # the lanes fold into the accumulator in element order, whichever side of the
     # update it reads from
     var fp: f32 = 0.0;

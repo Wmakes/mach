@@ -1,5 +1,4 @@
 # a record with natural 16-byte alignment against a C callee and a C caller
-# (mach #3929)
 #
 # Every function below is paired with one in probe.c of matching signature; see
 # case.conf for what each shape proves. The observable is the integer each side

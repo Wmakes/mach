@@ -4,7 +4,7 @@
 # produce_pe_imports <engine> <leg> <binary>
 # emit the PE import table's symbol->DLL bindings, one `<dll>:<symbol>` line per
 # imported function, sorted. this is the fact the two-level-namespace attribution
-# rules decide (#2510) and the one execution cannot observe: a wrongly attributed
+# rules decide and the one execution cannot observe: a wrongly attributed
 # import still links and still runs on the host that happens to export it, so only
 # the emitted descriptor distinguishes a correct binding from a lucky one.
 #

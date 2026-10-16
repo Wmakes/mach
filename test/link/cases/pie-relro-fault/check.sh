@@ -12,7 +12,7 @@
 # on the expected fault the program's output is noise and stays out of the way. on any
 # other status it is evidence - how far the program got before the write that should
 # have faulted did not - so it is reported to stderr, leaving the observable the golden
-# pins byte-identical (#2593).
+# pins byte-identical.
 produce_relro_fault() {
     engine=$1
     target=$2

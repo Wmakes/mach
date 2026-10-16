@@ -1,4 +1,4 @@
-/* the far half of the #3898 case: head_call at the start of this object's code
+/* the far half of the branch-thunk case: head_call at the start of this object's code
  * and far_call and far_tail past a 140 MB skip, each branching back into mach's
  * near_add. on darwin head_call also calls getpid, an import whose stub the link
  * places after all the code. near_add is mach's own definition, which carries its

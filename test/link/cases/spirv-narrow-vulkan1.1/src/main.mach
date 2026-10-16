@@ -1,4 +1,4 @@
-# a bool-returning `op` under an environment without Int8 (#4302)
+# a bool-returning `op` under an environment without Int8
 
 rec Out {
     ints: [8]u32;

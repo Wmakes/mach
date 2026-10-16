@@ -108,7 +108,7 @@ failure.
 | formatter | the block below |
 | committed reference | `"$MACH" doc . -o out/docgen -q && diff -r out/docgen/mach doc/mach && diff out/docgen/README.md doc/README.md` |
 | documented flags are accepted | `python3 .github/scripts/doc-flags.py "$MACH" doc` |
-| doc and source markers cite open issues | `GH_TOKEN=$(gh auth token) GH_REPO=briar-systems/mach python3 .github/scripts/doc-markers.py doc/language src` |
+| doc and source markers cite open issues | `GH_TOKEN=$(gh auth token) GH_REPO=briar-systems/mach python3 .github/scripts/doc-markers.py` |
 | release notes selection | `bash .github/scripts/release-notes-test.sh` |
 | `doc/language` code blocks | `MACH="$MACH" bash test/run.sh --docs` |
 | warm rebuilds match clean | `MACH="$MACH" bash test/run.sh --incremental` |

@@ -1,5 +1,5 @@
 # a data import a shared library provides, read and written directly and through
-# its taken address (mach #3941, #4035)
+# its taken address
 
 use p: std.print;
 use std.runtime;

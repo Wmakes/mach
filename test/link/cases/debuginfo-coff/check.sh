@@ -67,7 +67,7 @@ produce_debuginfo_coff() {
     echo "g_additive=$additive"
 
     # remat_mark's value is a constant the allocator builds at its read rather
-    # than keeps in a register or a slot, so its location is that constant (#4185)
+    # than keeps in a register or a slot, so its location is that constant
     remat=$("$dd_tool" --name=remat_mark "$g" | sed -n 's/^[[:space:]]*DW_AT_location[[:space:]]*(\(.*\))$/\1/p' | sed -n '1p')
     echo "remat_mark_location=${remat:-missing}"
 }

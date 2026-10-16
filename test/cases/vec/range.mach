@@ -1,4 +1,4 @@
-# range indexing `x[start, count]` and `::` between `[N]T` and `TxN` (#3779).
+# range indexing `x[start, count]` and `::` between `[N]T` and `TxN`.
 # `p[i, 4]::f32x4` is one vector load and `p[i, 4] = v::[4]f32` one vector
 # store, through a pointer and on a local array, at a constant (aligned) and a
 # seed-driven (unaligned) offset. `v[0, n]::T` and `v[n, n]::T` over a vector

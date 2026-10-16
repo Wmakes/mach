@@ -1,4 +1,4 @@
-# the eight std.sync.atomic wrappers, called across the module boundary (#3110).
+# the eight std.sync.atomic wrappers, called across the module boundary.
 #
 # `probe` makes one call to each wrapper in the order atomic.mach documents them,
 # straight-line, in a function that stays a symbol (`noinline`) so the producer can

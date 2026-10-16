@@ -4002,63 +4002,64 @@ test execute_warm__tampered_artifact_forces_relink_not_silent_reuse {
     ret bad;
 }
 
-# a symlink to a directory at the artifact fails the link: the build replaces
-# a stale directory there, never a link
-test execute_warm__failed_link_retries_at_unchanged_revision {
-    $if ($mach.build.os == $mach.os.windows) { ret 0; }
-    var w:      WarmProject;
-    val opened: err[fail.Fail] = warm_project_init(?w);
-    if (sel opened.err) { ret 1; }
-    fin { warm_project_dnit(?w); }
+$if ($mach.build.os != $mach.os.windows) {
+    # a symlink to a directory at the artifact fails the link: the build replaces
+    # a stale directory there, never a link
+    test execute_warm__failed_link_retries_at_unchanged_revision {
+        var w:      WarmProject;
+        val opened: err[fail.Fail] = warm_project_init(?w);
+        if (sel opened.err) { ret 1; }
+        fin { warm_project_dnit(?w); }
 
-    var names: [1]str;
-    names[0] = "main.mach";
-    var texts: [1]str;
-    texts[0] = driver.joined(?w.alloc, "#[symbol(\"", entry_symbol(), "\")]\nfun start() i32 { ret 0; }\n\ntest main_zero { ret 0; }\n");
-    val scaffolded: err[fail.Fail] = warm_project_scaffold(?w, driver.fixture_manifest(), ?names[0], ?texts[0], 1);
-    if (sel scaffolded.err) { ret 1; }
+        var names: [1]str;
+        names[0] = "main.mach";
+        var texts: [1]str;
+        texts[0] = driver.joined(?w.alloc, "#[symbol(\"", entry_symbol(), "\")]\nfun start() i32 { ret 0; }\n\ntest main_zero { ret 0; }\n");
+        val scaffolded: err[fail.Fail] = warm_project_scaffold(?w, driver.fixture_manifest(), ?names[0], ?texts[0], 1);
+        if (sel scaffolded.err) { ret 1; }
 
-    var rq: request.BuildRequest = request.defaults();
-    rq.goal = request.GOAL_TESTS;
-    val planned: err[fail.Fail] = warm_project_plan(?w, rq);
-    if (sel planned.err) { ret 1; }
+        var rq: request.BuildRequest = request.defaults();
+        rq.goal = request.GOAL_TESTS;
+        val planned: err[fail.Fail] = warm_project_plan(?w, rq);
+        if (sel planned.err) { ret 1; }
 
-    val artifact:  str               = w.plan.units.data[0].out_path;
-    val elsewhere: res[str, A.Error] = types_path.join(?w.alloc, w.root, "elsewhere");
-    if (sel elsewhere.err) { ret 1; }
-    val made: err[fs.FsError] = fs.create_dir_all(?w.alloc, elsewhere.ok, 493);
-    if (sel made.err) { ret 1; }
-    val parent: res[str, A.Error] = types_path.parent(?w.alloc, artifact);
-    if (sel parent.err) { ret 1; }
-    val made_parent: err[fs.FsError] = fs.create_dir_all(?w.alloc, parent.ok, 493);
-    if (sel made_parent.err) { ret 1; }
-    val linked: err[io_error.Error] = fs.symlink(elsewhere.ok, artifact);
-    if (sel linked.err) { ret 1; }
+        val artifact:  str               = w.plan.units.data[0].out_path;
+        val elsewhere: res[str, A.Error] = types_path.join(?w.alloc, w.root, "elsewhere");
+        if (sel elsewhere.err) { ret 1; }
+        val made: err[fs.FsError] = fs.create_dir_all(?w.alloc, elsewhere.ok, 493);
+        if (sel made.err) { ret 1; }
+        val parent: res[str, A.Error] = types_path.parent(?w.alloc, artifact);
+        if (sel parent.err) { ret 1; }
+        val made_parent: err[fs.FsError] = fs.create_dir_all(?w.alloc, parent.ok, 493);
+        if (sel made_parent.err) { ret 1; }
+        val linked: err[io_error.Error] = fs.symlink(elsewhere.ok, artifact);
+        if (sel linked.err) { ret 1; }
 
-    var bad: i32                                  = 0;
-    val r1:  res[outcome.BuildOutcome, fail.Fail] = execute_warm(?w.plan, 0, ?w.s, ?w.published, ?w.alloc, nil);
-    if (sel r1.err) { bad = 1; }
-    if (sel r1.ok) {
-        val bo1: outcome.BuildOutcome = r1.ok;
-        if (bo1.severity == outcome.BUILD_OK) { bad = 1; }
+        var bad: i32                                  = 0;
+        val r1:  res[outcome.BuildOutcome, fail.Fail] = execute_warm(?w.plan, 0, ?w.s, ?w.published, ?w.alloc, nil);
+        if (sel r1.err) { bad = 1; }
+        if (sel r1.ok) {
+            val bo1: outcome.BuildOutcome = r1.ok;
+            if (bo1.severity == outcome.BUILD_OK) { bad = 1; }
+        }
+
+        val lk_1: query.Revision = query.peek_revision(?w.s.queries, ?passes.LINK, 0);
+        if (lk_1 == 0) { bad = 1; }
+        fs.remove_file(artifact);
+
+        val r2: res[outcome.BuildOutcome, fail.Fail] = execute_warm(?w.plan, 0, ?w.s, ?w.published, ?w.alloc, nil);
+        if (sel r2.err) { bad = 1; }
+        if (sel r2.ok) {
+            val bo2: outcome.BuildOutcome = r2.ok;
+            if (bo2.severity != outcome.BUILD_OK) { bad = 1; }
+        }
+        if (query.peek_revision(?w.s.queries, ?passes.LINK, 0) != lk_1) { bad = 1; }
+        val is_file_r: res[bool, io_error.Error] = fs.is_file(artifact);
+        if (sel is_file_r.err)                   { ret 99; }
+        if (!(sel is_file_r.ok && is_file_r.ok)) { bad = 1; }
+
+        ret bad;
     }
-
-    val lk_1: query.Revision = query.peek_revision(?w.s.queries, ?passes.LINK, 0);
-    if (lk_1 == 0) { bad = 1; }
-    fs.remove_file(artifact);
-
-    val r2: res[outcome.BuildOutcome, fail.Fail] = execute_warm(?w.plan, 0, ?w.s, ?w.published, ?w.alloc, nil);
-    if (sel r2.err) { bad = 1; }
-    if (sel r2.ok) {
-        val bo2: outcome.BuildOutcome = r2.ok;
-        if (bo2.severity != outcome.BUILD_OK) { bad = 1; }
-    }
-    if (query.peek_revision(?w.s.queries, ?passes.LINK, 0) != lk_1) { bad = 1; }
-    val is_file_r: res[bool, io_error.Error] = fs.is_file(artifact);
-    if (sel is_file_r.err)                   { ret 99; }
-    if (!(sel is_file_r.ok && is_file_r.ok)) { bad = 1; }
-
-    ret bad;
 }
 
 # the modules left alone keep their codegen queries in the warm session; the object cache is

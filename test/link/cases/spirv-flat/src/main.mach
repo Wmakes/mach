@@ -7,7 +7,7 @@
 # out of the fragment entry point's list. That is the right answer when the fragment
 # stage does not use the value and no answer at all for when it does, which is an
 # ordinary thing to write - a material index or a per-vertex id passed through to
-# the fragment stage is standard (#2747).
+# the fragment stage is standard.
 #
 # EVERY ELEMENT CLASS THAT NEEDS THE DECORATION IS HERE, because the requirement is
 # on the element and each class reaches it through different code: a scalar integer,

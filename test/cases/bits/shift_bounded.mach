@@ -1,6 +1,6 @@
 # shifts by counts the range analysis proves below the width, which lower to
 # the bare machine shift, beside the same shapes run to and past the width,
-# which keep the saturation (#3885, #3756): a loop counter under its guard, an
+# which keep the saturation: a loop counter under its guard, an
 # inclusive guard, a signed counter, a narrow counter, an if around the shift
 # and its failing arm, the differences `63 - bit` and `127 - bit` under both
 # arms of `bit < 64`, and the load and unload steps of a bitsliced cipher

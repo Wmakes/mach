@@ -1,4 +1,4 @@
-# the subject of the f16 proof (#3804): the f16 operations this compiler
+# the subject of the f16 proof: the f16 operations this compiler
 # lowers, over one slice of a mode's input domain, written to stdout as raw
 # little-endian 16-bit words for check.c to hold against its correctly rounded
 # reference. a record is what one input's function below writes, in order, and

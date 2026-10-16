@@ -1,5 +1,5 @@
 # a callee writes to its own by-value record parameter, and the caller's object must
-# be unchanged (mach #3416). the caller owns the copy on every ABI, as C does, so the
+# be unchanged. the caller owns the copy on every ABI, as C does, so the
 # callee works in the memory it was handed; that is only safe because the memory is
 # already a copy the caller made. each size covers a different carrier class: M8 and
 # M16 arrive in registers, M24 and M64 by reference or in the outgoing stack area,

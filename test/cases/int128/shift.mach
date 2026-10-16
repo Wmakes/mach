@@ -1,4 +1,4 @@
-# u128 and i128 shifts across the limb boundary and at and past the width (#3756).
+# u128 and i128 shifts across the limb boundary and at and past the width.
 # one noinline part per type.
 
 use corpus.lib.fold;
@@ -7,7 +7,7 @@ use corpus.lib.fold128;
 # u128 shifts: << and >> (logical, zero-filling) across the limb boundary at every
 # count below 128, then counts at and past the width (128, 129, 200, 255),
 # which saturate: 0 for << and a logical >>, the sign fill for an arithmetic
-# >> (#3756). a constant count at or above the width is a compile error, so
+# >>. a constant count at or above the width is a compile error, so
 # the saturating counts come through a noinline call. the 128-bit shift is
 # legalized into a barrel of constant stages, and the saturation wraps it.
 #[noinline]
@@ -66,7 +66,7 @@ fun shift_u128(seed: u64) u64 {
 # i128 shifts: << and >> (arithmetic, sign-filling) across the limb boundary at every
 # count below 128, then counts at and past the width (128, 129, 200, 255),
 # which saturate: 0 for << and a logical >>, the sign fill for an arithmetic
-# >> (#3756). a constant count at or above the width is a compile error, so
+# >>. a constant count at or above the width is a compile error, so
 # the saturating counts come through a noinline call. the 128-bit shift is
 # legalized into a barrel of constant stages, and the saturation wraps it.
 #[noinline]

@@ -1,4 +1,4 @@
-# the operator matrix of #3432 written once against a type parameter and
+# the operator matrix written once against a type parameter and
 # instantiated at six types. every operator here resolves at the instantiation,
 # against that instance's concrete type, so a body that resolved one against the
 # wrong type disagrees with the C reference rather than with another mach

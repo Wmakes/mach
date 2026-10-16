@@ -1,5 +1,5 @@
 # a C object whose .riscv.attributes names Zfh, an extension mach has no codegen
-# for, links with mach code and runs (mach #4130). see case.conf
+# for, links with mach code and runs. see case.conf
 use p: std.print;
 use std.runtime;
 use std.types.size.usize;

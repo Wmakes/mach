@@ -4,7 +4,7 @@
 # produce_macho_got_aarch64 <engine> <leg> <binary> [<g-binary>] [<profile>]
 #
 # The aarch64 `ext val` read is an adrp/ldr pair carrying the GOT kinds, which
-# Mach-O spells ARM64_RELOC_GOT_LOAD_PAGE21 / GOT_LOAD_PAGEOFF12 (#3675). Three
+# Mach-O spells ARM64_RELOC_GOT_LOAD_PAGE21 / GOT_LOAD_PAGEOFF12. Three
 # facts, each read by an external decoder or straight from the bytes:
 #
 #  - main.o carries matched PAGE21/PAGEOFF12 pairs for every imported cell,
@@ -14,7 +14,7 @@
 #    address of bytes in __DATA,__data whose values are the cells' initializers
 #    (7 and 35);
 #  - libSystem's `__stderrp` is reached through one import slot after them in
-#    the same __got, which dyld binds (#3903).
+#    the same __got, which dyld binds.
 #
 # On a native arm64 macOS leg the image is also executed and its output compared
 # with the runtime contract, so the structural facts and the loaded values are

@@ -688,7 +688,7 @@ fi
 # artifact's closure is loaded as a build loads it, the collected tests run
 # through the leg's engine as part of the compile step, and the artifact is the
 # test dispatcher.
-# a defect that exists only under a test build (#3535) is reachable by no other
+# a defect that exists only under a test build is reachable by no other
 # goal.
 link_cell() {
     dir=$1; leg=$2; profile=$3
@@ -1151,7 +1151,7 @@ if [ "$mode" = docs ]; then
     echo "docs: $total blocks, $compiled compiled ($ran run), $errors error, $fragments fragment"
 fi
 
-# the exhaustive f16 proof (#3804): test/f16proof's subject, built for each f16
+# the exhaustive f16 proof: test/f16proof's subject, built for each f16
 # column at O2, writes every result of a mode over its slice of the mode's
 # domain, and test/f16proof/check.c holds each one to a correctly rounded
 # reference computed in integers, NaNs by the target's rule. every pair of

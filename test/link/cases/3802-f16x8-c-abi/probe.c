@@ -1,4 +1,4 @@
-/* C half of the f16 lane transport controls (mach #3802). Compiled at -O0,
+/* C half of the f16 lane transport controls. Compiled at -O0,
  * where AAPCS64 passes and returns a short vector in a v register. */
 #include <arm_neon.h>
 #include <string.h>

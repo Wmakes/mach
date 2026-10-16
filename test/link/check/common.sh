@@ -13,8 +13,7 @@
 # deliberate return. a signal death is 128 + N with N in 1..64 (POSIX real-time
 # signals cap there). the two are completely different defects - a process that
 # faulted versus one that ran to completion and returned nonzero because it computed
-# a wrong value - so nothing that reports a failed run may collapse them (#2593,
-# #2369).
+# a wrong value - so nothing that reports a failed run may collapse them.
 is_signal_exit() {
     [ "$1" -ge 129 ] && [ "$1" -le 192 ]
 }
@@ -65,8 +64,8 @@ run_captured() {
 # report_run_failure <label> <status> <output>
 # report a failed execution of a built binary: what the status actually was, and
 # everything the program printed before it stopped. the output is the evidence -
-# #2586 was a program that printed four correct values and one wrong one, and the
-# harness discarded the line naming the defect and said "execution failed" (#2593).
+# a program can print four correct values and one wrong one, and the
+# harness discarded the line naming the defect and said "execution failed".
 report_run_failure() {
     echo "link: $1: $(describe_exit "$2")" >&2
     if [ -n "$3" ]; then
@@ -78,8 +77,8 @@ report_run_failure() {
 
 # diff_expected_actual <expected> <actual>
 # report a runtime contract mismatch as a diff. a producer that compares a program's
-# output against a fixed contract must show WHICH line disagreed: #2586 was one wrong
-# value among five correct ones, and naming it is the whole diagnosis (#2593).
+# output against a fixed contract must show WHICH line disagreed: one wrong
+# value among five correct ones, and naming it is the whole diagnosis.
 diff_expected_actual() {
     _de=$(mktemp)
     _da=$(mktemp)

@@ -1,7 +1,7 @@
 #include "corpus.h"
 
 /* mach saturates a shift count at or above the operand width: << and a
- * logical >> answer 0, an arithmetic >> the sign fill (#3756). every op runs on
+ * logical >> answer 0, an arithmetic >> the sign fill. every op runs on
  * the unsigned identity. */
 static inline uint8_t shl8(uint8_t v, uint64_t n) { return n >= 8u ? (uint8_t)0 : (uint8_t)(v << n); }
 static inline uint8_t asr8(uint8_t v, uint64_t n) {

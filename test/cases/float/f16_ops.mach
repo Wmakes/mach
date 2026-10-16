@@ -3,7 +3,7 @@
 # subnormals, the smallest normal, the largest finite, both infinities, a NaN,
 # rounding ties and conversions that overflow to infinity. each result folds
 # its exact encoding, so it is checked bit for bit against the correctly
-# rounded one. one noinline part per family (#3799).
+# rounded one. one noinline part per family.
 
 use corpus.lib.fold;
 

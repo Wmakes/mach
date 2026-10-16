@@ -2323,36 +2323,37 @@ test pull__a_changed_path_realizes_the_new_source {
     ret 0;
 }
 
-# a symlinked path dependency slot is refused and left alone, never synced through
-test pull__a_symlinked_path_dependency_slot_is_refused {
-    $if ($mach.build.os == $mach.os.windows) { ret 0; }
-    var a:      A.Allocator;
-    val make_r: err[A.Error] = page.make(?a);
-    if (sel make_r.err) { ret 1; }
-    val source: str = t_path_source(?a, "mach_dep_link_source", "pub fun v() i32 { ret 1; }\n");
-    if (str_empty(source)) { ret 2; }
-    fin { fs.remove_all(?a, source); }
-    val elsewhere: str = t_scratch(?a, "mach_dep_link_target");
-    if (str_empty(elsewhere)) { ret 2; }
-    fin { fs.remove_all(?a, elsewhere); }
-    if (!fixture.write(?a, elsewhere, "kept.txt", "untouched\n")) { ret 2; }
-    val root: str = t_root_repo(?a, "mach_dep_link_root", t_dep_table_path(?a, "local", source));
-    if (str_empty(root)) { ret 3; }
-    fin { fs.remove_all(?a, root); }
-    val dep_r: res[str, A.Error] = types_path.join(?a, root, "dep");
-    if (sel dep_r.err) { ret 4; }
-    val made: err[fs.FsError] = fs.create_dir_all(?a, dep_r.ok, 0o755);
-    if (sel made.err) { ret 4; }
-    val slot_r: res[str, A.Error] = types_path.join(?a, root, "dep/local");
-    if (sel slot_r.err) { ret 4; }
-    val linked: err[io_error.Error] = fs.symlink(elsewhere, slot_r.ok);
-    if (sel linked.err)                                          { ret 4; }
-    if (t_pull(root, true, git.t_file_transport_environ()) != 1) { ret 5; }
-    val still: res[bool, io_error.Error] = fs.is_symlink(slot_r.ok);
-    if (!(sel still.ok && still.ok))                          { ret 6; }
-    if (t_exists_under(?a, elsewhere, "mach.toml"))           { ret 7; }
-    if (!t_read_is(?a, elsewhere, "kept.txt", "untouched\n")) { ret 8; }
-    ret 0;
+$if ($mach.build.os != $mach.os.windows) {
+    # a symlinked path dependency slot is refused and left alone, never synced through
+    test pull__a_symlinked_path_dependency_slot_is_refused {
+        var a:      A.Allocator;
+        val make_r: err[A.Error] = page.make(?a);
+        if (sel make_r.err) { ret 1; }
+        val source: str = t_path_source(?a, "mach_dep_link_source", "pub fun v() i32 { ret 1; }\n");
+        if (str_empty(source)) { ret 2; }
+        fin { fs.remove_all(?a, source); }
+        val elsewhere: str = t_scratch(?a, "mach_dep_link_target");
+        if (str_empty(elsewhere)) { ret 2; }
+        fin { fs.remove_all(?a, elsewhere); }
+        if (!fixture.write(?a, elsewhere, "kept.txt", "untouched\n")) { ret 2; }
+        val root: str = t_root_repo(?a, "mach_dep_link_root", t_dep_table_path(?a, "local", source));
+        if (str_empty(root)) { ret 3; }
+        fin { fs.remove_all(?a, root); }
+        val dep_r: res[str, A.Error] = types_path.join(?a, root, "dep");
+        if (sel dep_r.err) { ret 4; }
+        val made: err[fs.FsError] = fs.create_dir_all(?a, dep_r.ok, 0o755);
+        if (sel made.err) { ret 4; }
+        val slot_r: res[str, A.Error] = types_path.join(?a, root, "dep/local");
+        if (sel slot_r.err) { ret 4; }
+        val linked: err[io_error.Error] = fs.symlink(elsewhere, slot_r.ok);
+        if (sel linked.err)                                          { ret 4; }
+        if (t_pull(root, true, git.t_file_transport_environ()) != 1) { ret 5; }
+        val still: res[bool, io_error.Error] = fs.is_symlink(slot_r.ok);
+        if (!(sel still.ok && still.ok))                          { ret 6; }
+        if (t_exists_under(?a, elsewhere, "mach.toml"))           { ret 7; }
+        if (!t_read_is(?a, elsewhere, "kept.txt", "untouched\n")) { ret 8; }
+        ret 0;
+    }
 }
 
 #[testing]

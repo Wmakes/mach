@@ -1,10 +1,10 @@
 # a freestanding riscv32 image for the readobj producer: the ELFCLASS32 static
-# writer and the ELFCLASS32 relocatable writer are the RV32 paths #3113 has to
+# writer and the ELFCLASS32 relocatable writer are the RV32 paths that have to
 # preserve, and this is the only harness case that exercises them. 32-bit values
 # only: the riscv32 backend does not legalize wider ones. the entry spins.
 var table: [8]u32;
 var seeds: [4]u32;
-# a zero initializer is zero fill (#3421), so the initialized data starts at one
+# a zero initializer is zero fill, so the initialized data starts at one
 var sink: u32 = 1;
 
 fun checksum(seed: u32) u32 {

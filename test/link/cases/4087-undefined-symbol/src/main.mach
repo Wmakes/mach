@@ -1,5 +1,5 @@
 # an ext function no input defines is the program's link failure, reported
-# under its key rather than as a compiler defect (#4087)
+# under its key rather than as a compiler defect
 
 use std.runtime;
 

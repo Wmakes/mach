@@ -10,7 +10,7 @@
 #
 # the exit code starts from an `#[embed]`ed byte (0x2d = 45), so the embedded
 # bytes must land in the flat image at an address the code resolves with no
-# loader, no section table and no runtime (#2507). a counted loop then adds the
+# loader, no section table and no runtime. a counted loop then adds the
 # sum 0..9 (45), so running the image asserts the emitted machine code is correct
 # end to end: 90.
 #
@@ -18,7 +18,7 @@
 # base), satisfying raw's entry-at-base contract; the embed's data follows it.
 #
 # the f16 arithmetic and conversions are inlined integer and binary64 code, so
-# the image links them with no runtime helper to provide (#3799). their check
+# the image links them with no runtime helper to provide. their check
 # adds 0 when every result is the correctly rounded one.
 
 #[embed("blob.bin")]

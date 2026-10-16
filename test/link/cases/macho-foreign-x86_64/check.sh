@@ -8,7 +8,7 @@
 # independently embody SIGNED_1/_2/_4's P+4+N convention. Exact equality with
 # the three marker VAs proves more than a successful cross-link: every relocation
 # selected the intended target byte, with the object's __text split at its
-# symbols and the function nothing calls collected (#3410).
+# symbols and the function nothing calls collected.
 produce_macho_signed() {
     bin=$3
     text_fields=$(macho_segment_fields "$bin" __TEXT) || return 2

@@ -7,7 +7,7 @@
 # selected; a losing SELECT_ANY body's `__imp_dead_local` site leaves no cell.
 # provider.o's direct local_add call still addresses the function. The sole cell
 # stores that function's image VA, receives the sole DIR64 base relocation, and
-# produces neither an import directory nor an IAT (#2552).
+# produces neither an import directory nor an IAT.
 produce_pe_local_import() {
     bin=$3
     elfanew=$(read_le_uint "$bin" 60 4)

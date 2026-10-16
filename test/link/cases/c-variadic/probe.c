@@ -1,4 +1,4 @@
-/* the C half of the c-variadic surface case (mach #2575).
+/* the C half of the c-variadic surface case.
  *
  * Compiled by the RUNNER'S OWN C toolchain, so the va_arg side of every call is the
  * platform's real ABI rather than mach's model of it. That is the whole point: on

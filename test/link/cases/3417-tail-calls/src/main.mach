@@ -1,4 +1,4 @@
-# ten million levels of tail calls in constant stack (#3417); see case.conf
+# ten million levels of tail calls in constant stack; see case.conf
 
 use p: std.print;
 use std.runtime;

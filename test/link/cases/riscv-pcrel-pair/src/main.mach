@@ -1,4 +1,4 @@
-# riscv64 pc-relative hi/lo pair surface case (mach #2797)
+# riscv64 pc-relative hi/lo pair surface case
 #
 # Calls into a clang-built riscv64 object whose globals and pooled constants are all
 # reached through the psABI's `auipc` + `%pcrel_lo(.Lpcrel_hiK)` pair, and reads every

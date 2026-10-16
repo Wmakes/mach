@@ -5,7 +5,7 @@
 # Assert that a linked darwin image kept the (segment, section) identity of its
 # inputs, which is what a name-based runtime scan needs: libobjc walks
 # __DATA,__objc_classlist and reads __DATA,__objc_imageinfo, and dyld calls every
-# pointer in __DATA,__mod_init_func (#2606). Merging inputs by KIND alone drops the
+# pointer in __DATA,__mod_init_func. Merging inputs by KIND alone drops the
 # names and the sections do not exist in the output at all, even though their bytes
 # are still mapped somewhere inside __data.
 #
@@ -20,7 +20,7 @@
 # and building one needs the macOS SDK - so the markers that make concatenation
 # order checkable here are not addresses at all. libobjc reads that list for real
 # on darwin and dereferences every entry, so running this image faults before main
-# (#2637). Executing a genuine __mod_init_func initializer is `macho-mod-init`,
+#. Executing a genuine __mod_init_func initializer is `macho-mod-init`,
 # whose payload is valid content a runtime can act on correctly.
 produce_macho_sections() {
     target=$2
@@ -66,7 +66,7 @@ produce_macho_sections() {
     set -- $fields
     mi_addr=$1; mi_size=$2; mi_align=$4; mi_flags=$5
     # the section TYPE is the low byte of the flags word, and dyld dispatches on it:
-    # S_MOD_INIT_FUNC_POINTERS is 9 (#2637).
+    # S_MOD_INIT_FUNC_POINTERS is 9.
     [ $((mi_flags & 0xFF)) -eq 9 ] || {
         echo "link: macho-sections: __mod_init_func has section type $((mi_flags & 0xFF)), expected 9 (S_MOD_INIT_FUNC_POINTERS)" >&2
         return 1

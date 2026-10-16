@@ -1,4 +1,4 @@
-# a backtrace through C frames linked into a mach ELF image (#4048); see case.conf
+# a backtrace through C frames linked into a mach ELF image; see case.conf
 use std.runtime;
 use std.types.size.usize;
 

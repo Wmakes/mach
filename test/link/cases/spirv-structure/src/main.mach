@@ -1,4 +1,4 @@
-# SPIR-V structured control-flow fixture (#3371)
+# SPIR-V structured control-flow fixture
 #
 # each function is a control-flow shape the structurizer must express as nested
 # constructs. `#[noinline]` keeps each one a function of its own, so its shape is

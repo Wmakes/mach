@@ -7,7 +7,7 @@
 # `.eh_frame`, the objects' descriptions folded into the image's own, and every
 # function an fde in it covers has a row of `.eh_frame_hdr`'s search table, the
 # two C functions in particular. the C function nothing calls is collected with
-# its fde (#3410), so every fde left starts at a function the image keeps
+# its fde, so every fde left starts at a function the image keeps
 produce_foreign_unwind() {
     b=$3
     for tool in gdb llvm-dwarfdump llvm-readobj llvm-readelf llvm-nm; do

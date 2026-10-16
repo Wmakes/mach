@@ -564,38 +564,39 @@ test purge_beneath__a_removal_refusal_is_an_error {
     ret 0;
 }
 
-test dep_root_for__refuses_symlinked_dep_directory {
-    $if ($mach.build.os == $mach.os.windows) { ret 0; }
-    var a:      A.Allocator;
-    val make_r: err[A.Error] = page.make(?a);
-    if (sel make_r.err) { ret 1; }
+$if ($mach.build.os != $mach.os.windows) {
+    test dep_root_for__refuses_symlinked_dep_directory {
+        var a:      A.Allocator;
+        val make_r: err[A.Error] = page.make(?a);
+        if (sel make_r.err) { ret 1; }
 
-    val res_temp: res[fs.TempFile, fs.FsError] = fs.temp_create(?a, "mach_test_dep_root_escape");
-    if (sel res_temp.err) { ret 1; }
-    var tf:   fs.TempFile = res_temp.ok;
-    val root: str         = fs.temp_path(?tf);
-    fs.temp_close_and_remove(?tf);
-    fin { fs.remove_all(?a, root); }
+        val res_temp: res[fs.TempFile, fs.FsError] = fs.temp_create(?a, "mach_test_dep_root_escape");
+        if (sel res_temp.err) { ret 1; }
+        var tf:   fs.TempFile = res_temp.ok;
+        val root: str         = fs.temp_path(?tf);
+        fs.temp_close_and_remove(?tf);
+        fin { fs.remove_all(?a, root); }
 
-    val proj:              str             = package_closure.concat3(?a, root, "/", "proj");
-    val outside:           str             = package_closure.concat3(?a, root, "/", "outside");
-    val create_dir_all_r2: err[fs.FsError] = fs.create_dir_all(?a, proj, 0o755);
-    val create_dir_all_r:  err[fs.FsError] = fs.create_dir_all(?a, outside, 0o755);
-    if (sel create_dir_all_r2.err) { ret 1; }
-    if (sel create_dir_all_r.err)  { ret 1; }
-    val link:      str                 = package_closure.concat3(?a, proj, "/", "dep");
-    val symlink_r: err[io_error.Error] = fs.symlink(outside, link);
-    if (sel symlink_r.err) { ret 1; }
+        val proj:              str             = package_closure.concat3(?a, root, "/", "proj");
+        val outside:           str             = package_closure.concat3(?a, root, "/", "outside");
+        val create_dir_all_r2: err[fs.FsError] = fs.create_dir_all(?a, proj, 0o755);
+        val create_dir_all_r:  err[fs.FsError] = fs.create_dir_all(?a, outside, 0o755);
+        if (sel create_dir_all_r2.err) { ret 1; }
+        if (sel create_dir_all_r.err)  { ret 1; }
+        val link:      str                 = package_closure.concat3(?a, proj, "/", "dep");
+        val symlink_r: err[io_error.Error] = fs.symlink(outside, link);
+        if (sel symlink_r.err) { ret 1; }
 
-    val res_dep_root: res[bool, fail.Fail]      = driver_closure.check_dep_root(proj);
-    val bad:          bool                      = sel res_dep_root.ok;
-    val purge_r:      res[usize, fail.Fail]     = purge_dependency_dir(?a, proj, "anything");
-    val purge_ok:     bool                      = sel purge_r.ok;
-    val exists_r:     res[bool, io_error.Error] = fs.exists(outside);
-    if (sel exists_r.err) { ret 99; }
-    val outside_kept: bool = (sel exists_r.ok && exists_r.ok);
-    if (bad || purge_ok || !outside_kept) { ret 1; }
-    ret 0;
+        val res_dep_root: res[bool, fail.Fail]      = driver_closure.check_dep_root(proj);
+        val bad:          bool                      = sel res_dep_root.ok;
+        val purge_r:      res[usize, fail.Fail]     = purge_dependency_dir(?a, proj, "anything");
+        val purge_ok:     bool                      = sel purge_r.ok;
+        val exists_r:     res[bool, io_error.Error] = fs.exists(outside);
+        if (sel exists_r.err) { ret 99; }
+        val outside_kept: bool = (sel exists_r.ok && exists_r.ok);
+        if (bad || purge_ok || !outside_kept) { ret 1; }
+        ret 0;
+    }
 }
 
 test purge_dependency_dir__removes_only_a_contained_name_and_refuses_dotdot {

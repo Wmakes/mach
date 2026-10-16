@@ -62,7 +62,7 @@ atomic_inline_scan() {
 }
 
 # produce_atomic_inline <engine> <leg> <binary>
-# the CROSS-MODULE INLINING observable for the std atomic wrappers (#3110): the
+# the CROSS-MODULE INLINING observable for the std atomic wrappers: the
 # program's own output first (its counts depend on the atomicity and the ordering the
 # wrappers promise, from two threads), then two facts read from the linked image.
 #

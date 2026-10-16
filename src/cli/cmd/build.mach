@@ -452,63 +452,63 @@ fun t_req_exit_code(a: *A.Allocator, exe: str) i32 {
     ret term.code;
 }
 
-test run__a_glob_requirement_builds_first_and_the_bin_embeds_its_output {
-    $if ($mach.build.os != $mach.os.linux)      { ret 0; }
-    $if ($mach.build.arch != $mach.arch.x86_64) { ret 0; }
+$if ($mach.build.arch == $mach.arch.x86_64 && $mach.build.os == $mach.os.linux) {
+    test run__a_glob_requirement_builds_first_and_the_bin_embeds_its_output {
 
-    var a:      A.Allocator;
-    val make_r: err[A.Error] = page.make(?a);
-    if (sel make_r.err) { ret 1; }
+        var a:      A.Allocator;
+        val make_r: err[A.Error] = page.make(?a);
+        if (sel make_r.err) { ret 1; }
 
-    val tf_r: res[fs.TempFile, fs.FsError] = fs.temp_create(?a, "mach_build_artifact_need");
-    if (sel tf_r.err) { ret 1; }
-    var tf:   fs.TempFile = tf_r.ok;
-    val root: str         = fs.temp_path(?tf);
-    fs.temp_close_and_remove(?tf);
-    val create_dir_all_r: err[fs.FsError] = fs.create_dir_all(?a, root, 0o755);
-    if (sel create_dir_all_r.err) { ret 1; }
-    fin { fs.remove_all(?a, root); }
+        val tf_r: res[fs.TempFile, fs.FsError] = fs.temp_create(?a, "mach_build_artifact_need");
+        if (sel tf_r.err) { ret 1; }
+        var tf:   fs.TempFile = tf_r.ok;
+        val root: str         = fs.temp_path(?tf);
+        fs.temp_close_and_remove(?tf);
+        val create_dir_all_r: err[fs.FsError] = fs.create_dir_all(?a, root, 0o755);
+        if (sel create_dir_all_r.err) { ret 1; }
+        fin { fs.remove_all(?a, root); }
 
-    var bad: i32 = 0;
-    if (!fixture.write(?a, root, "mach.toml", T_REQ_MANIFEST)) { bad = 1; }
-    val src_dir: str = fixture.join(?a, root, "src");
-    if (!fixture.write(?a, src_dir, "shader.mach", T_REQ_SHADER)) { bad = 1; }
-    if (!fixture.write(?a, src_dir, "main.mach", T_REQ_MAIN))     { bad = 1; }
-    if (bad != 0)                                                 { ret 1; }
+        var bad: i32 = 0;
+        if (!fixture.write(?a, root, "mach.toml", T_REQ_MANIFEST)) { bad = 1; }
+        val src_dir: str = fixture.join(?a, root, "src");
+        if (!fixture.write(?a, src_dir, "shader.mach", T_REQ_SHADER)) { bad = 1; }
+        if (!fixture.write(?a, src_dir, "main.mach", T_REQ_MAIN))     { bad = 1; }
+        if (bad != 0)                                                 { ret 1; }
 
-    var argv: [5]*u8;
-    argv[0] = "mach"::*u8;
-    argv[1] = "build"::*u8;
-    argv[2] = root::*u8;
-    argv[3] = "--target"::*u8;
-    argv[4] = "host"::*u8;
-    if (t_build(5, ?argv[0]) != 0) { ret 1; }
+        var argv: [5]*u8;
+        argv[0] = "mach"::*u8;
+        argv[1] = "build"::*u8;
+        argv[2] = root::*u8;
+        argv[3] = "--target"::*u8;
+        argv[4] = "host"::*u8;
+        if (t_build(5, ?argv[0]) != 0) { ret 1; }
 
-    val lib_a:     str                       = fixture.join(?a, root, "out/alt/debug/lib/shader-a.a");
-    val lib_b:     str                       = fixture.join(?a, root, "out/alt/debug/lib/shader-b.a");
-    val app:       str                       = fixture.join(?a, root, "out/host/debug/bin/app");
-    val is_file_r: res[bool, io_error.Error] = fs.is_file(lib_a);
-    if (sel is_file_r.err)                   { ret 99; }
-    if (!(sel is_file_r.ok && is_file_r.ok)) { bad = 1; }
-    val is_file_r2: res[bool, io_error.Error] = fs.is_file(lib_b);
-    if (sel is_file_r2.err)                    { ret 99; }
-    if (!(sel is_file_r2.ok && is_file_r2.ok)) { bad = 1; }
-    val is_file_r3: res[bool, io_error.Error] = fs.is_file(app);
-    if (sel is_file_r3.err)                    { ret 99; }
-    if (!(sel is_file_r3.ok && is_file_r3.ok)) { bad = 1; }
-    if (bad != 0)                              { ret 1; }
+        val lib_a:     str                       = fixture.join(?a, root, "out/alt/debug/lib/shader-a.a");
+        val lib_b:     str                       = fixture.join(?a, root, "out/alt/debug/lib/shader-b.a");
+        val app:       str                       = fixture.join(?a, root, "out/host/debug/bin/app");
+        val is_file_r: res[bool, io_error.Error] = fs.is_file(lib_a);
+        if (sel is_file_r.err)                   { ret 99; }
+        if (!(sel is_file_r.ok && is_file_r.ok)) { bad = 1; }
+        val is_file_r2: res[bool, io_error.Error] = fs.is_file(lib_b);
+        if (sel is_file_r2.err)                    { ret 99; }
+        if (!(sel is_file_r2.ok && is_file_r2.ok)) { bad = 1; }
+        val is_file_r3: res[bool, io_error.Error] = fs.is_file(app);
+        if (sel is_file_r3.err)                    { ret 99; }
+        if (!(sel is_file_r3.ok && is_file_r3.ok)) { bad = 1; }
+        if (bad != 0)                              { ret 1; }
 
-    if (t_req_exit_code(?a, app) != 0) { bad = 1; }
+        if (t_req_exit_code(?a, app) != 0) { bad = 1; }
 
-    val out_dir: str = fixture.join(?a, root, "out");
-    fs.remove_all(?a, out_dir);
-    if (!fixture.write(?a, src_dir, "shader.mach", "pub fun tint(x: u64) u64 { ret nonesuch; }\n")) { bad = 1; }
-    if (t_build(5, ?argv[0]) == 0)                                                                  { bad = 1; }
-    val is_file_r4: res[bool, io_error.Error] = fs.is_file(app);
-    if (sel is_file_r4.err)                   { ret 99; }
-    if ((sel is_file_r4.ok && is_file_r4.ok)) { bad = 1; }
+        val out_dir: str = fixture.join(?a, root, "out");
+        fs.remove_all(?a, out_dir);
+        if (!fixture.write(?a, src_dir, "shader.mach", "pub fun tint(x: u64) u64 { ret nonesuch; }\n")) { bad = 1; }
+        if (t_build(5, ?argv[0]) == 0)                                                                  { bad = 1; }
+        val is_file_r4: res[bool, io_error.Error] = fs.is_file(app);
+        if (sel is_file_r4.err)                   { ret 99; }
+        if ((sel is_file_r4.ok && is_file_r4.ok)) { bad = 1; }
 
-    ret bad;
+        ret bad;
+    }
 }
 
 #[testing]
@@ -618,25 +618,25 @@ test run__rejects_quiet_combined_with_plan {
     ret 0;
 }
 
-# under json every failure a build raises outside the diagnostic store is one
-# record carrying its code and the phase it came from, and every run ends with
-# one summary whose counts match the records before it
-test json__failures_are_records_and_a_summary_closes_every_run {
-    $if ($mach.build.os != $mach.os.linux)      { ret 0; }
-    $if ($mach.build.arch != $mach.arch.x86_64) { ret 0; }
-    val clean: i32 = t_json_build("check", "need = []\n", "", 0, nil, nil, nil);
-    if (clean != 0) { ret clean; }
-    # nothing supplies `_start` without a startup library
-    val link: i32 = t_json_build("build", "need = []\n", "", 1, "failure", "link.entry_missing", "link");
-    if (link != 0) { ret 10 + link; }
-    val step: i32 = t_json_build("build", "need = [\"step.boom\"]\n", "\n[step.boom]\nargv = [\"false\"]\nin = []\nout = []\nneed = []\n",
-        1, "failure", "step.exit", "build");
-    if (step != 0) { ret 20 + step; }
-    val manifest: i32 = t_json_build("build", "need = []\n", "\n[profile.release]\n", 1, "failure", "manifest.missing_required", "build");
-    if (manifest != 0) { ret 30 + manifest; }
-    val dep: i32 = t_json_build("build", "need = []\n", "\n[dep.gone]\npath = \"../nowhere\"\n", 1, "failure", "dep.unrealized", "build");
-    if (dep != 0) { ret 40 + dep; }
-    ret 0;
+$if ($mach.build.arch == $mach.arch.x86_64 && $mach.build.os == $mach.os.linux) {
+    # under json every failure a build raises outside the diagnostic store is one
+    # record carrying its code and the phase it came from, and every run ends with
+    # one summary whose counts match the records before it
+    test json__failures_are_records_and_a_summary_closes_every_run {
+        val clean: i32 = t_json_build("check", "need = []\n", "", 0, nil, nil, nil);
+        if (clean != 0) { ret clean; }
+        # nothing supplies `_start` without a startup library
+        val link: i32 = t_json_build("build", "need = []\n", "", 1, "failure", "link.entry_missing", "link");
+        if (link != 0) { ret 10 + link; }
+        val step: i32 = t_json_build("build", "need = [\"step.boom\"]\n", "\n[step.boom]\nargv = [\"false\"]\nin = []\nout = []\nneed = []\n",
+            1, "failure", "step.exit", "build");
+        if (step != 0) { ret 20 + step; }
+        val manifest: i32 = t_json_build("build", "need = []\n", "\n[profile.release]\n", 1, "failure", "manifest.missing_required", "build");
+        if (manifest != 0) { ret 30 + manifest; }
+        val dep: i32 = t_json_build("build", "need = []\n", "\n[dep.gone]\npath = \"../nowhere\"\n", 1, "failure", "dep.unrealized", "build");
+        if (dep != 0) { ret 40 + dep; }
+        ret 0;
+    }
 }
 
 # `mach <verb> <root> <flags...> --diagnostics=json` over a scratch project with
@@ -678,23 +678,23 @@ fun t_json_readout(verb: str, flags: *str, n: usize, extra: str, code: i64, has:
     ret 0;
 }
 
-# `-v` and `-vv` are accepted beside `--diagnostics=json` and the readout comes
-# out as records: a phase record per row under -v and no item, a phase_item
-# record per module under -vv, and a built unit's line in the summary record
-test json__v_and_vv_write_the_readout_as_records {
-    $if ($mach.build.os != $mach.os.linux)      { ret 0; }
-    $if ($mach.build.arch != $mach.arch.x86_64) { ret 0; }
-    var v:    [1]str = [1]str{"-v"};
-    val rows: i32    = t_json_readout("check", ?v[0], 1, "", 0, "{\"schema\":1,\"record\":\"phase\",\"name\":\"sema\",\"count\":", "\"record\":\"phase_item\"");
-    if (rows != 0) { ret rows; }
-    var vv:    [1]str = [1]str{"-vv"};
-    val items: i32    = t_json_readout("check", ?vv[0], 1, "", 0, "{\"schema\":1,\"record\":\"phase_item\",\"phase\":\"load\",\"name\":", nil);
-    if (items != 0) { ret 10 + items; }
-    val lib:   str    = "\n[artifact.lib]\nkind = \"static\"\nentry = \"main.mach\"\nout = \"{project.work}/lib/libjr{artifact.suffix}\"\ntargets = [\"*\"]\nlink = []\nneed = []\n";
-    var built: [3]str = [3]str{"-v", "-a", "lib"};
-    val sum:   i32    = t_json_readout("build", ?built[0], 3, lib, 0, "\"exit_code\":0,\"time_us\":", nil);
-    if (sum != 0) { ret 20 + sum; }
-    ret 0;
+$if ($mach.build.arch == $mach.arch.x86_64 && $mach.build.os == $mach.os.linux) {
+    # `-v` and `-vv` are accepted beside `--diagnostics=json` and the readout comes
+    # out as records: a phase record per row under -v and no item, a phase_item
+    # record per module under -vv, and a built unit's line in the summary record
+    test json__v_and_vv_write_the_readout_as_records {
+        var v:    [1]str = [1]str{"-v"};
+        val rows: i32    = t_json_readout("check", ?v[0], 1, "", 0, "{\"schema\":1,\"record\":\"phase\",\"name\":\"sema\",\"count\":", "\"record\":\"phase_item\"");
+        if (rows != 0) { ret rows; }
+        var vv:    [1]str = [1]str{"-vv"};
+        val items: i32    = t_json_readout("check", ?vv[0], 1, "", 0, "{\"schema\":1,\"record\":\"phase_item\",\"phase\":\"load\",\"name\":", nil);
+        if (items != 0) { ret 10 + items; }
+        val lib:   str    = "\n[artifact.lib]\nkind = \"static\"\nentry = \"main.mach\"\nout = \"{project.work}/lib/libjr{artifact.suffix}\"\ntargets = [\"*\"]\nlink = []\nneed = []\n";
+        var built: [3]str = [3]str{"-v", "-a", "lib"};
+        val sum:   i32    = t_json_readout("build", ?built[0], 3, lib, 0, "\"exit_code\":0,\"time_us\":", nil);
+        if (sum != 0) { ret 20 + sum; }
+        ret 0;
+    }
 }
 
 #[testing]
@@ -762,64 +762,64 @@ fun t_plan_scaffold(a: *A.Allocator, manifest_text: str, out_root: *str) bool {
     ret fixture.write(a, src, "main.mach", T_PLAN_MAIN);
 }
 
-test plan__displays_the_selection_the_build_produces_and_executes_nothing {
-    $if ($mach.build.os != $mach.os.linux)      { ret 0; }
-    $if ($mach.build.arch != $mach.arch.x86_64) { ret 0; }
-    var a:      A.Allocator;
-    val make_r: err[A.Error] = page.make(?a);
-    if (sel make_r.err) { ret 1; }
-    var root: str = "";
-    if (!t_plan_scaffold(?a, T_PLAN_MANIFEST, ?root)) { ret 2; }
-    fin { fs.remove_all(?a, root); }
+$if ($mach.build.arch == $mach.arch.x86_64 && $mach.build.os == $mach.os.linux) {
+    test plan__displays_the_selection_the_build_produces_and_executes_nothing {
+        var a:      A.Allocator;
+        val make_r: err[A.Error] = page.make(?a);
+        if (sel make_r.err) { ret 1; }
+        var root: str = "";
+        if (!t_plan_scaffold(?a, T_PLAN_MANIFEST, ?root)) { ret 2; }
+        fin { fs.remove_all(?a, root); }
 
-    var cli:      args.CliArgs   = t_plan_cli(?a, "", "", true);
-    var text:     str            = "";
-    val rendered: err[fail.Fail] = t_plan_text(?a, root, ?cli, true, ?text);
-    if (sel rendered.err) { ret 3; }
+        var cli:      args.CliArgs   = t_plan_cli(?a, "", "", true);
+        var text:     str            = "";
+        val rendered: err[fail.Fail] = t_plan_text(?a, root, ?cli, true, ?text);
+        if (sel rendered.err) { ret 3; }
 
-    # every declared cell, its entry, its derived suffix and its prerequisite order
-    if (!str_contains(text, "project: planfx"))                                                       { ret 4; }
-    if (!str_contains(text, "units:   4"))                                                            { ret 5; }
-    if (!str_contains(text, "  entry   main.mach"))                                                   { ret 6; }
-    if (!str_contains(text, "  entry   support.mach"))                                                { ret 7; }
-    if (!str_contains(text, "/out/host/debug/bin/app\n"))                                             { ret 8; }
-    if (!str_contains(text, "/out/win/debug/bin/app.exe\n"))                                          { ret 9; }
-    if (!str_contains(text, "/out/host/debug/lib/libsupport.a\n"))                                    { ret 10; }
-    if (!str_contains(text, "/out/win/debug/lib/libsupport.lib\n"))                                   { ret 11; }
-    if (!str_contains(text, "  need    artifact support"))                                            { ret 12; }
-    if (!str_contains(text, "  step    project prepare"))                                             { ret 13; }
-    if (!str_contains(text, "  step    project generate"))                                            { ret 14; }
-    if (str_index(text, "  step    project prepare") > str_index(text, "  step    project generate")) { ret 15; }
-    if (!str_contains(text, "generated bytes are unresolved"))                                        { ret 16; }
-    if (!str_contains(text, "it does not claim the link succeeds"))                                   { ret 17; }
-    if (str_contains(text, "not configured against the dependency closure"))                          { ret 18; }
+        # every declared cell, its entry, its derived suffix and its prerequisite order
+        if (!str_contains(text, "project: planfx"))                                                       { ret 4; }
+        if (!str_contains(text, "units:   4"))                                                            { ret 5; }
+        if (!str_contains(text, "  entry   main.mach"))                                                   { ret 6; }
+        if (!str_contains(text, "  entry   support.mach"))                                                { ret 7; }
+        if (!str_contains(text, "/out/host/debug/bin/app\n"))                                             { ret 8; }
+        if (!str_contains(text, "/out/win/debug/bin/app.exe\n"))                                          { ret 9; }
+        if (!str_contains(text, "/out/host/debug/lib/libsupport.a\n"))                                    { ret 10; }
+        if (!str_contains(text, "/out/win/debug/lib/libsupport.lib\n"))                                   { ret 11; }
+        if (!str_contains(text, "  need    artifact support"))                                            { ret 12; }
+        if (!str_contains(text, "  step    project prepare"))                                             { ret 13; }
+        if (!str_contains(text, "  step    project generate"))                                            { ret 14; }
+        if (str_index(text, "  step    project prepare") > str_index(text, "  step    project generate")) { ret 15; }
+        if (!str_contains(text, "generated bytes are unresolved"))                                        { ret 16; }
+        if (!str_contains(text, "it does not claim the link succeeds"))                                   { ret 17; }
+        if (str_contains(text, "not configured against the dependency closure"))                          { ret 18; }
 
-    # nothing ran: no step output, no object, IR or assembly tree, no artifact
-    val exists_r: res[bool, io_error.Error] = fs.exists(fixture.join(?a, root, "out"));
-    if (sel exists_r.err)                 { ret 99; }
-    if ((sel exists_r.ok && exists_r.ok)) { ret 19; }
+        # nothing ran: no step output, no object, IR or assembly tree, no artifact
+        val exists_r: res[bool, io_error.Error] = fs.exists(fixture.join(?a, root, "out"));
+        if (sel exists_r.err)                 { ret 99; }
+        if ((sel exists_r.ok && exists_r.ok)) { ret 19; }
 
-    # the build that follows produces exactly the paths the plan named
-    var argv: [5]*u8;
-    argv[0] = "mach"::*u8;
-    argv[1] = "build"::*u8;
-    argv[2] = root::*u8;
-    argv[3] = "--target"::*u8;
-    argv[4] = "host"::*u8;
-    if (t_build(5, ?argv[0]) != 0) { ret 20; }
-    val is_file_r: res[bool, io_error.Error] = fs.is_file(fixture.join(?a, root, "out/host/debug/bin/app"));
-    if (sel is_file_r.err)                   { ret 99; }
-    if (!(sel is_file_r.ok && is_file_r.ok)) { ret 21; }
-    val is_file_r2: res[bool, io_error.Error] = fs.is_file(fixture.join(?a, root, "out/host/debug/lib/libsupport.a"));
-    if (sel is_file_r2.err)                    { ret 99; }
-    if (!(sel is_file_r2.ok && is_file_r2.ok)) { ret 22; }
-    val is_file_r3: res[bool, io_error.Error] = fs.is_file(fixture.join(?a, root, "out/host/debug/generated.txt"));
-    if (sel is_file_r3.err)                    { ret 99; }
-    if (!(sel is_file_r3.ok && is_file_r3.ok)) { ret 23; }
-    val is_file_r4: res[bool, io_error.Error] = fs.is_file(fixture.join(?a, root, "out/host/debug/prepared.txt"));
-    if (sel is_file_r4.err)                    { ret 99; }
-    if (!(sel is_file_r4.ok && is_file_r4.ok)) { ret 24; }
-    ret 0;
+        # the build that follows produces exactly the paths the plan named
+        var argv: [5]*u8;
+        argv[0] = "mach"::*u8;
+        argv[1] = "build"::*u8;
+        argv[2] = root::*u8;
+        argv[3] = "--target"::*u8;
+        argv[4] = "host"::*u8;
+        if (t_build(5, ?argv[0]) != 0) { ret 20; }
+        val is_file_r: res[bool, io_error.Error] = fs.is_file(fixture.join(?a, root, "out/host/debug/bin/app"));
+        if (sel is_file_r.err)                   { ret 99; }
+        if (!(sel is_file_r.ok && is_file_r.ok)) { ret 21; }
+        val is_file_r2: res[bool, io_error.Error] = fs.is_file(fixture.join(?a, root, "out/host/debug/lib/libsupport.a"));
+        if (sel is_file_r2.err)                    { ret 99; }
+        if (!(sel is_file_r2.ok && is_file_r2.ok)) { ret 22; }
+        val is_file_r3: res[bool, io_error.Error] = fs.is_file(fixture.join(?a, root, "out/host/debug/generated.txt"));
+        if (sel is_file_r3.err)                    { ret 99; }
+        if (!(sel is_file_r3.ok && is_file_r3.ok)) { ret 23; }
+        val is_file_r4: res[bool, io_error.Error] = fs.is_file(fixture.join(?a, root, "out/host/debug/prepared.txt"));
+        if (sel is_file_r4.err)                    { ret 99; }
+        if (!(sel is_file_r4.ok && is_file_r4.ok)) { ret 24; }
+        ret 0;
+    }
 }
 
 test plan__an_unconfigured_plan_does_not_claim_an_empty_dependency_closure {
@@ -1049,103 +1049,103 @@ test check__checks_the_selected_graph_and_runs_no_step {
     ret 0;
 }
 
-test check__a_missing_generated_input_is_reported_not_produced {
-    $if ($mach.build.os != $mach.os.linux)      { ret 0; }
-    $if ($mach.build.arch != $mach.arch.x86_64) { ret 0; }
-    var a:      A.Allocator;
-    val make_r: err[A.Error] = page.make(?a);
-    if (sel make_r.err) { ret 1; }
-    val created: res[fs.TempFile, fs.FsError] = fs.temp_create(?a, "mach_check_generated");
-    if (sel created.err) { ret 2; }
-    var temporary: fs.TempFile = created.ok;
-    val root:      str         = fs.temp_path(?temporary);
-    fs.temp_close_and_remove(?temporary);
-    fin { fs.remove_all(?a, root); }
-    val src: str = fixture.join(?a, root, "src");
-    if (!fixture.write(?a, root, "mach.toml", T_REQ_MANIFEST)
-        || !fixture.write(?a, src, "shader.mach", T_REQ_SHADER)
-        || !fixture.write(?a, src, "main.mach", T_REQ_MAIN)) { ret 3; }
+$if ($mach.build.arch == $mach.arch.x86_64 && $mach.build.os == $mach.os.linux) {
+    test check__a_missing_generated_input_is_reported_not_produced {
+        var a:      A.Allocator;
+        val make_r: err[A.Error] = page.make(?a);
+        if (sel make_r.err) { ret 1; }
+        val created: res[fs.TempFile, fs.FsError] = fs.temp_create(?a, "mach_check_generated");
+        if (sel created.err) { ret 2; }
+        var temporary: fs.TempFile = created.ok;
+        val root:      str         = fs.temp_path(?temporary);
+        fs.temp_close_and_remove(?temporary);
+        fin { fs.remove_all(?a, root); }
+        val src: str = fixture.join(?a, root, "src");
+        if (!fixture.write(?a, root, "mach.toml", T_REQ_MANIFEST)
+            || !fixture.write(?a, src, "shader.mach", T_REQ_SHADER)
+            || !fixture.write(?a, src, "main.mach", T_REQ_MAIN)) { ret 3; }
 
-    # main embeds the output of the required artifact shader-a, which only a build produces
-    var argv: [5]*u8;
-    argv[0] = "mach"::*u8;
-    argv[1] = "check"::*u8;
-    argv[2] = root::*u8;
-    argv[3] = "--target"::*u8;
-    argv[4] = "host"::*u8;
-    if (t_check(5, ?argv[0]) != 1) { ret 4; }
-    val exists_r: res[bool, io_error.Error] = fs.exists(fixture.join(?a, root, "out"));
-    if (sel exists_r.err)                 { ret 99; }
-    if ((sel exists_r.ok && exists_r.ok)) { ret 5; }
+        # main embeds the output of the required artifact shader-a, which only a build produces
+        var argv: [5]*u8;
+        argv[0] = "mach"::*u8;
+        argv[1] = "check"::*u8;
+        argv[2] = root::*u8;
+        argv[3] = "--target"::*u8;
+        argv[4] = "host"::*u8;
+        if (t_check(5, ?argv[0]) != 1) { ret 4; }
+        val exists_r: res[bool, io_error.Error] = fs.exists(fixture.join(?a, root, "out"));
+        if (sel exists_r.err)                 { ret 99; }
+        if ((sel exists_r.ok && exists_r.ok)) { ret 5; }
 
-    # the build produces it, and the same check then accepts the same source
-    var build_argv: [5]*u8;
-    build_argv[0] = "mach"::*u8;
-    build_argv[1] = "build"::*u8;
-    build_argv[2] = root::*u8;
-    build_argv[3] = "--target"::*u8;
-    build_argv[4] = "host"::*u8;
-    if (t_build(5, ?build_argv[0]) != 0) { ret 6; }
-    val is_file_r: res[bool, io_error.Error] = fs.is_file(fixture.join(?a, root, "out/alt/debug/lib/shader-a.a"));
-    if (sel is_file_r.err)                   { ret 99; }
-    if (!(sel is_file_r.ok && is_file_r.ok)) { ret 7; }
-    if (t_check(5, ?argv[0]) != 0)           { ret 8; }
-    ret 0;
+        # the build produces it, and the same check then accepts the same source
+        var build_argv: [5]*u8;
+        build_argv[0] = "mach"::*u8;
+        build_argv[1] = "build"::*u8;
+        build_argv[2] = root::*u8;
+        build_argv[3] = "--target"::*u8;
+        build_argv[4] = "host"::*u8;
+        if (t_build(5, ?build_argv[0]) != 0) { ret 6; }
+        val is_file_r: res[bool, io_error.Error] = fs.is_file(fixture.join(?a, root, "out/alt/debug/lib/shader-a.a"));
+        if (sel is_file_r.err)                   { ret 99; }
+        if (!(sel is_file_r.ok && is_file_r.ok)) { ret 7; }
+        if (t_check(5, ?argv[0]) != 0)           { ret 8; }
+        ret 0;
+    }
 }
 
-test check__an_unbuilt_required_artifact_is_named_and_every_cell_reads_as_checked {
-    $if ($mach.build.os != $mach.os.linux)      { ret 0; }
-    $if ($mach.build.arch != $mach.arch.x86_64) { ret 0; }
-    var a:      A.Allocator;
-    val make_r: err[A.Error] = page.make(?a);
-    if (sel make_r.err) { ret 1; }
-    val created: res[fs.TempFile, fs.FsError] = fs.temp_create(?a, "mach_check_required_named");
-    if (sel created.err) { ret 2; }
-    var temporary: fs.TempFile = created.ok;
-    val root:      str         = fs.temp_path(?temporary);
-    fs.temp_close_and_remove(?temporary);
-    fin { fs.remove_all(?a, root); }
-    val src: str = fixture.join(?a, root, "src");
-    if (!fixture.write(?a, root, "mach.toml", T_REQ_MANIFEST)
-        || !fixture.write(?a, src, "shader.mach", T_REQ_SHADER)
-        || !fixture.write(?a, src, "main.mach", T_REQ_MAIN)) { ret 3; }
+$if ($mach.build.arch == $mach.arch.x86_64 && $mach.build.os == $mach.os.linux) {
+    test check__an_unbuilt_required_artifact_is_named_and_every_cell_reads_as_checked {
+        var a:      A.Allocator;
+        val make_r: err[A.Error] = page.make(?a);
+        if (sel make_r.err) { ret 1; }
+        val created: res[fs.TempFile, fs.FsError] = fs.temp_create(?a, "mach_check_required_named");
+        if (sel created.err) { ret 2; }
+        var temporary: fs.TempFile = created.ok;
+        val root:      str         = fs.temp_path(?temporary);
+        fs.temp_close_and_remove(?temporary);
+        fin { fs.remove_all(?a, root); }
+        val src: str = fixture.join(?a, root, "src");
+        if (!fixture.write(?a, root, "mach.toml", T_REQ_MANIFEST)
+            || !fixture.write(?a, src, "shader.mach", T_REQ_SHADER)
+            || !fixture.write(?a, src, "main.mach", T_REQ_MAIN)) { ret 3; }
 
-    var cli:     args.CliArgs            = t_plan_cli(?a, "host", "app", false);
-    var ps:      session.Session;
-    val planned: res[Planned, fail.Fail] = plan_invocation(?a, root, ?cli, request.GOAL_CHECK, manifest.ARTIFACT_DEFAULT_SET, false, ?ps);
-    if (sel planned.err) { ret 4; }
-    var bp: build_plan.BuildPlan = planned.ok.plans.data[0];
-    fin { session.dnit(?ps); }
+        var cli:     args.CliArgs            = t_plan_cli(?a, "host", "app", false);
+        var ps:      session.Session;
+        val planned: res[Planned, fail.Fail] = plan_invocation(?a, root, ?cli, request.GOAL_CHECK, manifest.ARTIFACT_DEFAULT_SET, false, ?ps);
+        if (sel planned.err) { ret 4; }
+        var bp: build_plan.BuildPlan = planned.ok.plans.data[0];
+        fin { session.dnit(?ps); }
 
-    var oa:      A.Allocator;
-    val make_r2: err[A.Error] = page.make(?oa);
-    if (sel make_r2.err) { ret 5; }
-    var rd: readout.Recording;
-    readout.recording_init(?rd, ?oa, readout.LEVEL_RESULTS);
-    fin { readout.recording_dnit(?rd); }
-    val executed: res[outcome.BuildOutcome, fail.Fail] = engine.execute(?bp, ?a, ?oa, ?rd.sink);
-    if (sel executed.err) { ret 6; }
-    var bo: outcome.BuildOutcome = executed.ok;
-    fin { outcome.outcome_dnit(?bo); }
+        var oa:      A.Allocator;
+        val make_r2: err[A.Error] = page.make(?oa);
+        if (sel make_r2.err) { ret 5; }
+        var rd: readout.Recording;
+        readout.recording_init(?rd, ?oa, readout.LEVEL_RESULTS);
+        fin { readout.recording_dnit(?rd); }
+        val executed: res[outcome.BuildOutcome, fail.Fail] = engine.execute(?bp, ?a, ?oa, ?rd.sink);
+        if (sel executed.err) { ret 6; }
+        var bo: outcome.BuildOutcome = executed.ok;
+        fin { outcome.outcome_dnit(?bo); }
 
-    # no cell of a check is built, so none of them announces itself as built
-    var i: usize = 0;
-    for (i < rd.verbs.len) {
-        if (!str_equals(rd.verbs.data[i], "checking")) { ret 7; }
-        i = i + 1;
+        # no cell of a check is built, so none of them announces itself as built
+        var i: usize = 0;
+        for (i < rd.verbs.len) {
+            if (!str_equals(rd.verbs.data[i], "checking")) { ret 7; }
+            i = i + 1;
+        }
+        var named: bool = false;
+        i = 0;
+        for (i < rd.diagnostics.len) {
+            val d: *readout.RecordedDiagnostic = ?rd.diagnostics.data[i];
+            if (diagnostic_kind.is_error(d.kind)
+                && str_contains(d.message, "the output of required artifact `shader-a`")
+                && str_contains(d.message, "build the project first")) { named = true; }
+            i = i + 1;
+        }
+        if (rd.verbs.len < 2) { ret 8; }
+        if (!named)           { ret 9; }
+        ret 0;
     }
-    var named: bool = false;
-    i = 0;
-    for (i < rd.diagnostics.len) {
-        val d: *readout.RecordedDiagnostic = ?rd.diagnostics.data[i];
-        if (diagnostic_kind.is_error(d.kind)
-            && str_contains(d.message, "the output of required artifact `shader-a`")
-            && str_contains(d.message, "build the project first")) { named = true; }
-        i = i + 1;
-    }
-    if (rd.verbs.len < 2) { ret 8; }
-    if (!named)           { ret 9; }
-    ret 0;
 }
 
 test check__requires_one_path_and_refuses_output_options {
@@ -1287,61 +1287,61 @@ val T_NOGIT_LIB_MANIFEST: str = "[project]\nmach = \">=5\"\nid = \"nogitlib\"\nv
 #[testing]
 val T_NOGIT_MAIN: str = "use nogitlib.lib;\n\n#[symbol(\"_start\")]\nfun start() {\n    val c: u64 = lib.code();\n    asm x86_64 {\n        mov rax, 60\n        mov rdi, {c}\n        syscall\n    }\n}\n";
 
-# `mach build` of a project whose dependency is a git checkout runs no git process: the
-# build only locates each dependency and reads its manifest. PATH is pointed at
-# a stand-in git that records every run, so any git the build spawns is caught
-test build__a_checked_out_dependency_runs_no_git {
-    $if ($mach.build.os != $mach.os.linux)      { ret 0; }
-    $if ($mach.build.arch != $mach.arch.x86_64) { ret 0; }
-    var a:      A.Allocator;
-    val make_r: err[A.Error] = page.make(?a);
-    if (sel make_r.err) { ret 1; }
-    val created: res[fs.TempFile, fs.FsError] = fs.temp_create(?a, "mach_build_no_git");
-    if (sel created.err) { ret 2; }
-    var temporary: fs.TempFile = created.ok;
-    val root:      str         = fs.temp_path(?temporary);
-    fs.temp_close_and_remove(?temporary);
-    fin { fs.remove_all(?a, root); }
-    val dep: str = fixture.join(?a, root, "dep/nogitlib");
-    if (!fixture.write(?a, root, "mach.toml", T_NOGIT_MANIFEST)
-        || !fixture.write(?a, fixture.join(?a, root, "src"), "main.mach", T_NOGIT_MAIN)
-        || !fixture.write(?a, dep, "mach.toml", T_NOGIT_LIB_MANIFEST)
-        || !fixture.write(?a, fixture.join(?a, dep, "src"), "lib.mach", "pub fun code() u64 { ret 0; }\n")) { ret 3; }
-    var init:   [2]str = [2]str{"init", "-q"};
-    var add:    [2]str = [2]str{"add", "-A"};
-    var commit: [4]str = [4]str{"commit", "-q", "-m", "checked out"};
-    if (!git.scratch_git(?a, dep, ?init[0], 2) || !git.scratch_git(?a, dep, ?add[0], 2) || !git.scratch_git(?a, dep, ?commit[0], 4)) { ret 4; }
+$if ($mach.build.arch == $mach.arch.x86_64 && $mach.build.os == $mach.os.linux) {
+    # `mach build` of a project whose dependency is a git checkout runs no git process: the
+    # build only locates each dependency and reads its manifest. PATH is pointed at
+    # a stand-in git that records every run, so any git the build spawns is caught
+    test build__a_checked_out_dependency_runs_no_git {
+        var a:      A.Allocator;
+        val make_r: err[A.Error] = page.make(?a);
+        if (sel make_r.err) { ret 1; }
+        val created: res[fs.TempFile, fs.FsError] = fs.temp_create(?a, "mach_build_no_git");
+        if (sel created.err) { ret 2; }
+        var temporary: fs.TempFile = created.ok;
+        val root:      str         = fs.temp_path(?temporary);
+        fs.temp_close_and_remove(?temporary);
+        fin { fs.remove_all(?a, root); }
+        val dep: str = fixture.join(?a, root, "dep/nogitlib");
+        if (!fixture.write(?a, root, "mach.toml", T_NOGIT_MANIFEST)
+            || !fixture.write(?a, fixture.join(?a, root, "src"), "main.mach", T_NOGIT_MAIN)
+            || !fixture.write(?a, dep, "mach.toml", T_NOGIT_LIB_MANIFEST)
+            || !fixture.write(?a, fixture.join(?a, dep, "src"), "lib.mach", "pub fun code() u64 { ret 0; }\n")) { ret 3; }
+        var init:   [2]str = [2]str{"init", "-q"};
+        var add:    [2]str = [2]str{"add", "-A"};
+        var commit: [4]str = [4]str{"commit", "-q", "-m", "checked out"};
+        if (!git.scratch_git(?a, dep, ?init[0], 2) || !git.scratch_git(?a, dep, ?add[0], 2) || !git.scratch_git(?a, dep, ?commit[0], 4)) { ret 4; }
 
-    val fake_dir: str                              = fixture.join(?a, root, "fakebin");
-    val marker:   str                              = fixture.join(?a, root, "git-ran");
-    val script:   res[str, std_format.FormatError] = std_format.sprint(?a, "#!/bin/sh\necho \"$*\" >> '{}'\nexit 1\n", marker);
-    if (sel script.err) { ret 5; }
-    val created_dir: err[fs.FsError] = fs.create_dir_all(?a, fake_dir, 0o755);
-    if (sel created_dir.err) { ret 5; }
-    val fake_git: str             = fixture.join(?a, fake_dir, "git");
-    val written:  err[fs.FsError] = fs.write_bytes(fake_git, script.ok::*u8, str_len(script.ok), 0o755);
-    if (sel written.err) { ret 5; }
-    val path_entry: res[str, std_format.FormatError] = std_format.sprint(?a, "PATH={}", fake_dir);
-    if (sel path_entry.err) { ret 6; }
+        val fake_dir: str                              = fixture.join(?a, root, "fakebin");
+        val marker:   str                              = fixture.join(?a, root, "git-ran");
+        val script:   res[str, std_format.FormatError] = std_format.sprint(?a, "#!/bin/sh\necho \"$*\" >> '{}'\nexit 1\n", marker);
+        if (sel script.err) { ret 5; }
+        val created_dir: err[fs.FsError] = fs.create_dir_all(?a, fake_dir, 0o755);
+        if (sel created_dir.err) { ret 5; }
+        val fake_git: str             = fixture.join(?a, fake_dir, "git");
+        val written:  err[fs.FsError] = fs.write_bytes(fake_git, script.ok::*u8, str_len(script.ok), 0o755);
+        if (sel written.err) { ret 5; }
+        val path_entry: res[str, std_format.FormatError] = std_format.sprint(?a, "PATH={}", fake_dir);
+        if (sel path_entry.err) { ret 6; }
 
-    # the build resolves git through PATH from the native capture, which an inheriting child
-    # is handed as it is, so the entry is swapped there
-    val envp: **u8  = env.environ_native()::ptr::**u8;
-    var at:   usize = 0;
-    for (envp[at] != nil && !str_starts_with(envp[at]::str, "PATH=")) { at = at + 1; }
-    if (envp[at] == nil) { ret 6; }
-    val inherited: *u8 = envp[at];
-    envp[at] = path_entry.ok::*u8;
-    fin { envp[at] = inherited; }
-    val resolved: res[str, fail.Fail] = host.program_resolve(?a, "git");
-    if (!(sel resolved.ok && str_equals(resolved.ok, fake_git))) { ret 7; }
+        # the build resolves git through PATH from the native capture, which an inheriting child
+        # is handed as it is, so the entry is swapped there
+        val envp: **u8  = env.environ_native()::ptr::**u8;
+        var at:   usize = 0;
+        for (envp[at] != nil && !str_starts_with(envp[at]::str, "PATH=")) { at = at + 1; }
+        if (envp[at] == nil) { ret 6; }
+        val inherited: *u8 = envp[at];
+        envp[at] = path_entry.ok::*u8;
+        fin { envp[at] = inherited; }
+        val resolved: res[str, fail.Fail] = host.program_resolve(?a, "git");
+        if (!(sel resolved.ok && str_equals(resolved.ok, fake_git))) { ret 7; }
 
-    var argv: [3]*u8;
-    argv[0] = "mach"::*u8;
-    argv[1] = "build"::*u8;
-    argv[2] = root::*u8;
-    if (t_build(3, ?argv[0]) != 0) { ret 8; }
-    val ran: res[bool, io_error.Error] = fs.exists(marker);
-    if (!(sel ran.ok && !ran.ok)) { ret 9; }
-    ret 0;
+        var argv: [3]*u8;
+        argv[0] = "mach"::*u8;
+        argv[1] = "build"::*u8;
+        argv[2] = root::*u8;
+        if (t_build(3, ?argv[0]) != 0) { ret 8; }
+        val ran: res[bool, io_error.Error] = fs.exists(marker);
+        if (!(sel ran.ok && !ran.ok)) { ret 9; }
+        ret 0;
+    }
 }

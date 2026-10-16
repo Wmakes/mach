@@ -8,7 +8,7 @@
 # host's x86-64 `cc`, so the step silently emits an x86-64 object that gets
 # linked into the leg's image. The result surfaces downstream as a relocation
 # overflow or a wrong-code crash, a diagnostic that names nothing about its own
-# cause (mach#2741).
+# cause.
 #
 # The fix is not "always cross-compile": several cases (narrow-stack-args,
 # c-variadic) exist SPECIFICALLY to catch a leg's real toolchain diverging from
@@ -89,15 +89,15 @@ fi
 # COMPILE-ONLY NEEDS NO CROSS LINKER. It DOES need the target's libc headers as
 # soon as a probe includes one, and this file used to claim otherwise - "needs no
 # sysroot or cross-linker for any of these, verified against every registered
-# leg (mach#2741)". That claim was verified against a set that could not disprove
+# leg". That claim was verified against a set that could not disprove
 # it: `c-variadic` skipped riscv64-linux, so no probe that cross-built here
-# had ever included a libc header. Restoring that leg (mach#2771) reached the case
+# had ever included a libc header. Restoring that leg reached the case
 # that falsifies it, and clang resolved the HOST's /usr/include/stdint.h while
 # targeting riscv64 - failing inside it on a file no case mentions
 # ("bits/libc-header-start.h file not found", a multiarch host's glibc looking for
 # its own arch subdirectory). Silently succeeding would have been worse: an object
 # compiled against the wrong architecture's libc headers, which is the same class
-# of quiet divergence mach#2741 named. So the riscv64 branch names a sysroot, and
+# of quiet divergence as a wrong relocation. So the riscv64 branch names a sysroot, and
 # no branch pretends the headers are free.
 #
 # extend this table exactly when engines.conf gains a leg (same axis
@@ -126,7 +126,7 @@ case "$MACH_TARGET_OS-$MACH_TARGET_ISA" in
     #                                  the original -mabi gap, one knob over, found
     #                                  the same way: passed on this developer host's
     #                                  newer clang (whose default -march already
-    #                                  carries +d) and failed in CI (mach#2771's own
+    #                                  carries +d) and failed in CI (its own
     #                                  first CI run after that PR was already open -
     #                                  narrow-stack-args's variadic-free floats still
     #                                  read back as flat zero). pinning both removes
@@ -144,7 +144,7 @@ case "$MACH_TARGET_OS-$MACH_TARGET_ISA" in
     #   -fno-jump-tables               a switch-derived jump table in .rodata
     #                                  hits the exact same ADD32/SUB32 pairing.
     # suppressing emission at the compiler is the fix, not teaching mach's reader
-    # relocation arithmetic it will never otherwise need (mach#2741).
+    # relocation arithmetic it will never otherwise need.
     #
     # ...and a SYSROOT, because this is the one leg CI cross-builds: linux-riscv64
     # is the only engines.conf row whose runner is not its own ISA, so it is the
@@ -191,7 +191,7 @@ clang -target "$triple" ${sysroot_arg:+--sysroot="$sysroot_arg"} $extra "$@" || 
 # fails silently in the direction that looks like a mach bug: a soft-float probe
 # linked against mach's hard-float code reads every float argument back as zero,
 # which is indistinguishable from a broken classifier. that exact confusion cost
-# real time on mach#2771 twice, once per knob. so verify the produced object
+# real time twice, once per knob. so verify the produced object
 # rather than trusting the flag, and name the toolchain when it disagrees.
 #
 # riscv64 records the float ABI in the ELF header's e_flags (offset 0x30, 4 bytes

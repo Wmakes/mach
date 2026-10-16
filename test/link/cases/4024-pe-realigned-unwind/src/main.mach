@@ -1,4 +1,4 @@
-# a realigned mach frame unwound by windows' own unwinder (#4024)
+# a realigned mach frame unwound by windows' own unwinder
 #
 # m_realigned's over-aligned local makes its prologue realign rsp, and the
 # values it holds across the call into C keep callee-saved registers in use,

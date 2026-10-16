@@ -2,9 +2,9 @@
 . "$(dirname "$0")/common.sh"
 
 # produce_image_sections <engine> <leg> <binary>
-# the linked ELF image's own account of its data (#3362): a freestanding image
+# the linked ELF image's own account of its data: a freestanding image
 # built with `of = "elf"` must carry, in the file and not merely in its program
-# headers, the section names and data symbols its objects had. #3362 found an
+# headers, the section names and data symbols its objects had, never an
 # image whose section table was synthesized from the LOAD segments - every
 # allocated section named `.text`/`.data`/`.rodata` by segment protection, sized
 # by p_filesz and typed PROGBITS - so a `#[section(...)]` name was gone, `.bss`

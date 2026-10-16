@@ -1,4 +1,4 @@
-/* C half of the wide vector transport controls (mach #3589). Compiled at -O0 so
+/* C half of the wide vector transport controls. Compiled at -O0 so
  * every read really happens. */
 #ifdef _WIN32
 int _fltused = 0;

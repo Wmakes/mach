@@ -1,6 +1,6 @@
 # float to unsigned at and above the signed boundary, which the rest of the convert
 # group deliberately stays below. on x86-64 the conversion is a two-arm expansion
-# around 2^31 and 2^63 (#2909) and only the arm below the boundary was ever reached.
+# around 2^31 and 2^63 and only the arm below the boundary was ever reached.
 #
 # the boundary itself proves nothing: a bare signed convert of exactly 2^31 or 2^63
 # yields the integer-indefinite value, which is the correct unsigned answer, so a

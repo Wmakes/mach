@@ -71,7 +71,7 @@ static uint64_t divrem_i128(uint64_t seed) {
 }
 
 /* quotients and remainders by constant powers of two past the low limb and
- * of either sign, down to the most negative divisor (#3350) */
+ * of either sign, down to the most negative divisor */
 static uint64_t divconst_128(uint64_t seed) {
     uint64_t h = fold_init();
     const corpus_u128 s = (corpus_u128)(seed & 1023);

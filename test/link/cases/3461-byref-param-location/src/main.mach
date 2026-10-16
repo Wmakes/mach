@@ -1,5 +1,5 @@
-# a by-reference aggregate parameter has a -g location that reaches the object (#3461),
-# beside a decoy `probe` in src/decoy.mach the check must not select (#3815)
+# a by-reference aggregate parameter has a -g location that reaches the object,
+# beside a decoy `probe` in src/decoy.mach the check must not select
 #
 # `probe` takes a 32-byte record, which aapcs64, lp64d and win64 pass as the address
 # of a caller-owned copy and sysv64 hands over in the caller's outgoing area. Its

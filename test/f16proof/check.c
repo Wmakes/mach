@@ -1,4 +1,4 @@
-/* the reference of the f16 proof (#3804): reads what the subject
+/* the reference of the f16 proof: reads what the subject
  * (src/bin/main.mach) writes for one slice of one mode on stdin and holds every
  * result against a correctly rounded binary16 computed here in integers alone.
  *
@@ -17,7 +17,7 @@
  * NaN; arm gives a signaling operand priority, then the first NaN, and makes
  * the positive default NaN; riscv makes the canonical NaN for every NaN. a
  * converted NaN keeps its sign and the top of its payload, quieted, on x86 and
- * arm, and is canonical on riscv (#4125).
+ * arm, and is canonical on riscv.
  *
  * the output is one line per variant, `result <mode> <variant> <role> <cases>
  * <mismatches>`, after the first mismatches of each proof variant as

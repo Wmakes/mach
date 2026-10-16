@@ -1,5 +1,5 @@
 # SPIR-V debug model fixture: a fragment stage over a uniform record, a local, a loop and a
-# callee from another module (#3398)
+# callee from another module
 use tn: case.tone;
 
 rec Grade {

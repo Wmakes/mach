@@ -1,4 +1,4 @@
-/* C half of the record transport controls (mach #3263). Each struct is the C spelling
+/* C half of the record transport controls. Each struct is the C spelling
  * of a mach record of matching layout. Compiled at -O0 so every field read really
  * happens. */
 /* the MSVC-target compiler marks floating-point use with this symbol; nothing links a C runtime here */
@@ -17,7 +17,7 @@ struct al16 { unsigned char d; unsigned char p; } __attribute__((aligned(16)));
 struct tf { unsigned char d; double p; };
 struct tf8 { unsigned char d; float p; };
 struct tfm { double p; long long q; };
-/* packed shapes (mach #3266): pk5 and pk9 hold a field at an offset its type does not align to, and pka
+/* packed shapes: pk5 and pk9 hold a field at an offset its type does not align to, and pka
  * packs fields that happen to sit aligned anyway */
 #pragma pack(push, 1)
 struct pk5 { unsigned char d; unsigned int p; };

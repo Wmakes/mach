@@ -2,7 +2,7 @@
 . "$(dirname "$0")/../../check/common.sh"
 
 # produce_varloc_fbreg <engine> <leg> <nog_binary> <g_binary>
-# the FRAME-SLOT VARIABLE LOCATION observable (#2759): does a `DW_OP_fbreg` offset name
+# the FRAME-SLOT VARIABLE LOCATION observable: does a `DW_OP_fbreg` offset name
 # an address the emitted code actually uses for that slot.
 #
 # the offset alone is not evidence. the producer and the encoder each turn one layout

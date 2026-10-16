@@ -1,7 +1,7 @@
 #include "corpus.h"
 
 /* mach saturates a shift count at or above the operand width: << and a
- * logical >> answer 0, an arithmetic >> the sign fill (#3756). a plain C shift
+ * logical >> answer 0, an arithmetic >> the sign fill. a plain C shift
  * by such a count is UB, and a C >> of a negative signed value is
  * implementation-defined, so every op runs on the unsigned identity. */
 static inline uint64_t shl64(uint64_t v, uint64_t n) { return n >= 64u ? (uint64_t)0 : (uint64_t)(v << n); }

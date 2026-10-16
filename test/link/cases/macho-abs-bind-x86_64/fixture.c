@@ -1,5 +1,5 @@
 /* Absolute 64-bit references to a libSystem data import, the shape ObjC class
-   metadata uses for runtime symbols (#2563): no call, no GOT load - dyld must
+   metadata uses for runtime symbols: no call, no GOT load - dyld must
    bind each pointer cell in place. Two slots at adjacent offsets prove each
    site gets its own bind row.
 

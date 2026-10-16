@@ -1,5 +1,5 @@
 # an aggregate argument is captured where it is evaluated, so a later argument that
-# writes its source does not change what the callee sees (mach #3460). the caller may
+# writes its source does not change what the callee sees. the caller may
 # read an argument in place only when nothing evaluated after it can write, and each
 # block here has a later argument that does: a call writing a global directly, a call
 # writing a local through a pointer, a call writing through the pointer the argument is

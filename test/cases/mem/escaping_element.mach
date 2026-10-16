@@ -1,6 +1,6 @@
 # an element address derived by pointer arithmetic and handed to a call: the callee
 # reads the element's siblings through it, so each array must stay whole however the
-# helper that derives the address is inlined (#3482). the reader stays out of line so
+# helper that derives the address is inlined. the reader stays out of line so
 # the address really leaves the function, and the results are folded only at the end
 # so nothing between the arrays and the calls changes how they are optimized.
 

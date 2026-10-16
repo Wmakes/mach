@@ -2,7 +2,7 @@
 # mask read as a u128 and compared, as the matching-byte test of a scan does,
 # and a u128 built into a vector and read back by lane and whole. the integer
 # is two general registers and the vector one vector register, so every
-# crossing goes through memory (#4068).
+# crossing goes through memory.
 
 use corpus.lib.fold;
 use corpus.lib.fold128;

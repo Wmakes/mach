@@ -1,4 +1,4 @@
-# the conditional assignments if-conversion turns into selects (#3346): min,
+# the conditional assignments if-conversion turns into selects: min,
 # max, abs and clamp at signed and unsigned widths from a byte to a word, a
 # conditional accumulate, a 0/1 and a 1/0 choice, and a compare with its
 # constant on the left, over a xorshift sequence no predictor learns, so every

@@ -1,4 +1,4 @@
-# narrow integers in function storage under an environment without Int8 (#4302)
+# narrow integers in function storage under an environment without Int8
 #
 # `x` is a truth value held in a u8 local, and `a` and `c` wrap at eight bits.
 

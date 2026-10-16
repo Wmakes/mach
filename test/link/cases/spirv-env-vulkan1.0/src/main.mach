@@ -3,7 +3,7 @@
 # The environment pins the version, and two forms depend on it. Before SPIR-V 1.4 an
 # `OpEntryPoint` lists only its Input and Output variables, and before 1.3 a storage
 # buffer is a `Uniform` variable over a `BufferBlock` block rather than a
-# `StorageBuffer` variable over a `Block` one (#3399). Each descriptor kind is reached
+# `StorageBuffer` variable over a `Block` one. Each descriptor kind is reached
 # so each storage class is listed or omitted on its own, and two stages reach
 # different sets so the interface is per entry point rather than per module.
 

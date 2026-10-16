@@ -1,4 +1,4 @@
-/* C half of the foreign-extension link (mach #4130). Built with Zfh, so its
+/* C half of the foreign-extension link. Built with Zfh, so its
  * .riscv.attributes names zfh and its body computes in half-precision
  * instructions, neither of which mach generates. Values cross the boundary as
  * their bits, so the ABI is plain integers. */

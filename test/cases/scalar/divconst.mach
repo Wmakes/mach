@@ -1,6 +1,6 @@
 # division and remainder by constants at 8, 16, 32 and 64 bits, signed and
 # unsigned: every 8- and 16-bit dividend, and edge and pseudo-random ones at
-# 32 and 64 bits, by divisors that take each sequence the lowering picks (#3350).
+# 32 and 64 bits, by divisors that take each sequence the lowering picks.
 # generated: one noinline part per type.
 
 use corpus.lib.fold;

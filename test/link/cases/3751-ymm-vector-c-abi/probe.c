@@ -1,4 +1,4 @@
-/* C half of the ymm vector transport controls (mach #3751). Compiled at -O0 and
+/* C half of the ymm vector transport controls. Compiled at -O0 and
  * -mavx2, where System V passes and returns a 32-byte vector in a ymm register. */
 typedef int v8 __attribute__((vector_size(32)));
 typedef int v16 __attribute__((vector_size(64)));
