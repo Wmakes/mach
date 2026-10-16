@@ -80,6 +80,30 @@ pub rec TargetEntry {
     lib_count: u32;
 }
 
+# the target entry a selected build unit describes: the one place a TargetEntry is
+# built, so every field is carried wherever an entry is made
+pub fun target_entry_of(bu: *manifest.BuildUnit) TargetEntry {
+    ret TargetEntry{
+        name:            bu.target_name,
+        os_name:         bu.target.os,
+        isa_name:        bu.target.isa,
+        abi_name:        bu.target.abi,
+        of_name:         bu.target.of,
+        platform_name:   bu.target.platform,
+        env_name:        bu.target.env,
+        base:            bu.target.base,
+        stack_reserve:   bu.target.stack_reserve,
+        stack_commit:    bu.target.stack_commit,
+        extensions:      bu.target.extensions,
+        extension_count: bu.target.extension_count,
+        entrypoint:      bu.entry,
+        kind:            bu.artifact.kind,
+        optimize:        bu.optimize,
+        libs:            bu.libs,
+        lib_count:       bu.lib_count,
+    };
+}
+
 pub rec DepEntry {
     alias:           intern.StrId;
     project_id:      intern.StrId;

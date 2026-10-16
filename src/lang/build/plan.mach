@@ -764,19 +764,8 @@ fun plan_unit(a: *A.Allocator, itn: *intern.Interner, reg: *lang_target.TargetRe
     val ter: res[*project.TargetEntry, A.Error] = A.allocate[project.TargetEntry](a, 1::usize);
     if (sel ter.err) { ret res[BuildUnit, fail.Fail].err{fail.refused(ter.err)}; }
     val te: *project.TargetEntry = ter.ok;
-    te.name            = bu.target_name;
-    te.os_name         = bu.target.os;
-    te.isa_name        = bu.target.isa;
-    te.abi_name        = bu.target.abi;
-    te.of_name         = bu.target.of;
-    te.extensions      = bu.target.extensions;
-    te.extension_count = bu.target.extension_count;
-    te.entrypoint      = bu.entry;
-    te.kind            = bu.artifact.kind;
-    te.optimize        = bu.optimize;
-    te.libs            = bu.libs;
-    te.lib_count       = bu.lib_count;
-    u.target_entry     = te;
+    @te            = project.target_entry_of(?bu);
+    u.target_entry = te;
 
     val root: str = req.project_root;
 
