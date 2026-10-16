@@ -367,15 +367,15 @@ fun run_capture(alloc: *A.Allocator, gi: *Inspector, argv: **u8, shown: **u8, tr
     options.capture_stderr = capture_stderr;
     options.capture_limit  = 1048576;
     val sr: err[subprocess.Error] = subprocess.spawn_native(alloc, ?child, gi.program, argv, exec.NativeEnvironment.given{git_env.items}, options);
-    if (sel sr.err) { ret res[Bytes, fail.Fail].err{fail.environment(diagnostic_kind.GIT_COMMAND, subprocess.text(alloc, sr.err))}; }
+    if (sel sr.err) { ret res[Bytes, fail.Fail].err{subprocess.refusal(alloc, diagnostic_kind.GIT_COMMAND, sr.err)}; }
     val wr: res[subprocess.SubprocessTerminal, subprocess.Error] = subprocess.wait(alloc, ?child);
     if (sel wr.err) {
         subprocess.abandon_capture(?child);
-        ret res[Bytes, fail.Fail].err{fail.environment(diagnostic_kind.GIT_COMMAND, subprocess.text(alloc, wr.err))};
+        ret res[Bytes, fail.Fail].err{subprocess.refusal(alloc, diagnostic_kind.GIT_COMMAND, wr.err)};
     }
     val terminal: subprocess.SubprocessTerminal                     = wr.ok;
     val cr:       res[subprocess.CaptureIoResult, subprocess.Error] = subprocess.finish_capture(alloc, ?child, true);
-    if (sel cr.err) { ret res[Bytes, fail.Fail].err{fail.environment(diagnostic_kind.GIT_COMMAND, subprocess.text(alloc, cr.err))}; }
+    if (sel cr.err) { ret res[Bytes, fail.Fail].err{subprocess.refusal(alloc, diagnostic_kind.GIT_COMMAND, cr.err)}; }
     val cap: subprocess.CaptureIoResult = cr.ok;
     captured = true;
     if (cap.read_failed || cap.write_failed || cap.close_failed || cap.short_read || cap.truncated) {

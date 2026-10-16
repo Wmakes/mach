@@ -317,6 +317,10 @@ fun spawn_one(a: *A.Allocator, processes: *subprocess.OwnedSubprocess, slots: *S
     options.capture        = t.log;
     options.capture_stderr = true;
     options.capture_limit  = CAPTURE_LIMIT;
+    if (timeout > 0) {
+        val bounded: err[subprocess.Error] = subprocess.bound(?processes[idx], timeout);
+        if (sel bounded.err) { ret opt[testrun.GateResult].some{build_testing.classify_setup_failure()}; }
+    }
     val start: readout.Instant       = readout.sample();
     val res_c: err[subprocess.Error] = subprocess.spawn(
         a, ?processes[idx], child_argv[0], ?child_argv[0], exec.Environment.inherit{}, options);
@@ -336,8 +340,6 @@ fun spawn_one(a: *A.Allocator, processes: *subprocess.OwnedSubprocess, slots: *S
         fs.remove_file(t.log);
         ret opt[testrun.GateResult].some{result};
     }
-
-    if (timeout > 0) { subprocess.bound(?processes[idx], timeout); }
 
     slots[s].active = true;
     slots[s].idx    = idx;

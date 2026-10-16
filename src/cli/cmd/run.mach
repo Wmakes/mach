@@ -195,6 +195,10 @@ pub fun run(cx: *args.Call) res[i64, fail.Fail] {
     fin { subprocess.dnit(alloc, ?child); }
     var options: subprocess.SpawnOptions = subprocess.spawn_options();
     options.grouped = timeout > 0;
+    if (timeout > 0) {
+        val bounded: err[subprocess.Error] = subprocess.bound(?child, timeout);
+        if (sel bounded.err) { ret res[i64, fail.Fail].err{subprocess.refusal(alloc, diagnostic_kind.PROCESS_WAIT, bounded.err)}; }
+    }
     val res_spawn: err[subprocess.Error] = subprocess.spawn(alloc, ?child, exe::str, child_argv, inv.environ, options);
     if (sel res_spawn.err) {
         if (runner != nil) { ret res[i64, fail.Fail].err{fail.user(diagnostic_kind.PROCESS_SPAWN, "failed to execute the runner")}; }
@@ -203,16 +207,15 @@ pub fun run(cx: *args.Call) res[i64, fail.Fail] {
 
     var res_wait: res[subprocess.SubprocessTerminal, fail.Fail];
     if (timeout > 0) {
-        subprocess.bound(?child, timeout);
         val wr: res[*subprocess.OwnedSubprocess, subprocess.Error] = subprocess.wait_any(alloc, ?child, 1, nil, nil);
         if (sel wr.err) {
-            res_wait = res[subprocess.SubprocessTerminal, fail.Fail].err{fail.environment(diagnostic_kind.PROCESS_WAIT, subprocess.text(alloc, wr.err))};
+            res_wait = res[subprocess.SubprocessTerminal, fail.Fail].err{subprocess.refusal(alloc, diagnostic_kind.PROCESS_WAIT, wr.err)};
         }
         if (sel wr.ok) { res_wait = res[subprocess.SubprocessTerminal, fail.Fail].ok{child.terminal}; }
     }
     or {
         val waited: res[subprocess.SubprocessTerminal, subprocess.Error] = subprocess.wait(alloc, ?child);
-        if (sel waited.err) { res_wait = res[subprocess.SubprocessTerminal, fail.Fail].err{fail.environment(diagnostic_kind.PROCESS_WAIT, subprocess.text(alloc, waited.err))}; }
+        if (sel waited.err) { res_wait = res[subprocess.SubprocessTerminal, fail.Fail].err{subprocess.refusal(alloc, diagnostic_kind.PROCESS_WAIT, waited.err)}; }
         if (sel waited.ok)  { res_wait = res[subprocess.SubprocessTerminal, fail.Fail].ok{waited.ok}; }
     }
     if (sel res_wait.err) {
