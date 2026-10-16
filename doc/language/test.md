@@ -32,8 +32,8 @@ so a qualified name never collides with another symbol. It is the test's symbol
 unquoted: `break std.types.string#str_len__empty` in gdb.
 
 Related tests group under a common subject as `subject__case`
-(`str_len__empty`, `str_len__multibyte`), and a regression test is named
-`regression__*`. Both are conventions the compiler does not check.
+(`str_len__empty`, `str_len__multibyte`). This is a convention the compiler
+does not check.
 
 `test` is a reserved keyword and appears at module (declaration) scope,
 the same level as `fun`, `rec`, and `val`. Visibility modifiers such as
@@ -300,45 +300,20 @@ selection with nothing runnable on the host exits `0` under `--allow-unrunnable`
 after building it and printing each skip line; a build failure still exits non-zero.
 
 An inline `test name { }` declaration in a module the artifact reaches runs
-with no further wiring. A module that exists only for tests, such as a suite
-that exercises several modules together, is reached by no artifact and so never
-runs on its own. Give such modules a **test artifact**: an ordinary library artifact
-whose entry `use`s each of them, tested by name.
+with no further wiring, and that is the only way a test is placed: a test is
+found through the import chain from an artifact's entry, never by the manifest.
+There is no test-only artifact and no module that exists only to gather tests.
 
-```toml
-[artifact.app]
-kind    = "bin"
-default = true
-entry   = "main.mach"
-out     = "{project.work}/bin/app"
-targets = ["*"]
-link    = []
-need    = []
-
-# the test-only modules no other artifact reaches
-[artifact.tests]
-kind    = "static"
-entry   = "test/all.mach"
-out     = "{project.work}/lib/tests"
-targets = ["*"]
-link    = []
-need    = []
-```
+A test that can run only on some hosts sits in a declaration-level `$if`, so on
+any other host it is absent rather than reported as a pass:
 
 ```mach fragment
-# src/test/all.mach
-use std.runtime;
-
-use app.test.parser;
-use app.test.roundtrip;
+$if ($mach.build.os != $mach.os.windows) {
+    test spawn__a_shell_script_runs {
+        ret 0;
+    }
+}
 ```
-
-`mach test .` then runs the tests `app` reaches and `mach test . -a tests`
-the test-only suites. The entry reaches the runtime's startup (`use std.runtime;`)
-because a library artifact's closure is all the test dispatcher links. Marking
-`app` `default = true` keeps `mach build .` and `mach check .` to `app`, since with
-no selector they take the marked artifacts; `mach build . -a tests` builds the
-test artifact.
 
 ## Test policy
 
@@ -357,10 +332,12 @@ Coverage means branches and known failure points, not volume. `str_len` gets
 the inputs that exercise each of its branches, not a pile of strings, and a
 parser's tests cover its surface concisely, not exhaustively.
 
-Inline tests are small and sit in their module for convenience or because they
-need private access. A test lives outside the module it covers to declutter it,
-because the test is significant, or, most often, because it exercises several
-modules together (see [Which tests run](#which-tests-run)).
+A test sits beside what it tests, in the module whose code it covers. A test
+that exercises several modules together sits in the module that composes them,
+the lowest one whose own imports reach everything the test drives, and it drives
+them through the same entry points production uses, never through one that
+exists only for tests. A tests-only module, a `tests.mach` that gathers a
+subject's tests apart from it, is not used.
 
 A fixture lives at the layer of what it builds, in the module that owns the
 type it makes. A test reaches its fixtures through the imports its module
@@ -369,9 +346,9 @@ below. An import only tests make never reaches above its module's layer: the
 mark is no cycle escape, so such an edge would push the module up the graph.
 The compiler holds its own tree to this with a test.
 
-Regression tests are a separate kind, and rare: they are kept only for
-regressions that are easy to reintroduce, and are named `regression__*`. They
-may sit next to unit tests. The name is a convention, not a mechanism.
+A test that pins a defect is an ordinary test of the surface the defect was in,
+named for that surface and the case it covers. A test builds its fixtures in a
+temporary directory, and any `git` it runs is held inside that directory.
 
 The compiler's codegen corpus and link cases get the same scrutiny, scoped to
 what cannot be tested inside the compiler: the final codegen and link result on

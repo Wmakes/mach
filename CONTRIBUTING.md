@@ -65,15 +65,13 @@ the seed on `PATH`:
 ```bash
 out/linux-x86_64/debug/bin/mach test .
 out/linux-x86_64/debug/bin/mach test . -p release
-out/linux-x86_64/debug/bin/mach test . -a tests
-out/linux-x86_64/debug/bin/mach test . -a tests -p release
 out/linux-x86_64/debug/bin/mach fmt .
 ```
 
-`mach test .` runs the tests in the compiler's own closure. The suites that
-live in modules the compiler never reaches (`src/lang/driver/tests/` and the
-rest) are reached by the `tests` library artifact, whose entry `src/lib/tests.mach` `use`s each of them, so a new
-test-only module is added there.
+`mach test .` runs every test in the compiler's own closure, and that is every
+test the compiler has: each sits beside the code it covers, or in the module
+that composes what it drives, as [test.md](doc/language/test.md#test-policy)
+says, so a new test needs no wiring.
 
 The tree is canonical: `mach fmt .` must leave it unchanged before a pull
 request is opened (`mach fmt --check .` reports what differs). `.` reaches only
@@ -82,7 +80,7 @@ time: each file under `test/cases` and `test/lib`, and each project under
 `test/link/cases` (its `mach.toml`) and `test/f16proof`; the command is under
 [Checks CI does not run](#checks-ci-does-not-run). The fuzz corpus is retained input and is left as it is.
 
-Two tests in `src/lang/driver/tests/hygiene.mach` hold the source to its import
+Two tests in `src/lang/driver/hygiene.mach` hold the source to its import
 and surface rules. A module is imported under the same name in every file, and
 a name imports one module in every file, but for the arms of a
 declaration-level `$if`. A `pub` declaration is named in some other file, or
@@ -96,8 +94,7 @@ differ from a fresh generation.
 
 ### Checks CI does not run
 
-CI is the build and the unit suites (`mach test .` and `mach test . -a tests`)
-and nothing else. Every other check is a local command, run from the repository
+CI is the build and the unit suite (`mach test .`) and nothing else. Every other check is a local command, run from the repository
 root with the compiler you built (`$MACH`, the path in `out/boot/env`, or
 `out/<host>/debug/bin/mach`). A pull request that touches what a check covers
 runs that check before it is marked ready. Each command exits non-zero on
