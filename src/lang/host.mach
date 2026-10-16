@@ -616,6 +616,7 @@ pub fun cursor_enter(c: *Cursor, enter: str, invalid: str, label: str, rel: str,
         var st:     system_os.stat_t;
         val stated: i64 = system_os.stat(next, ?st);
         if (stated < 0 || probe_mode(native.stat_mode(?st)) != PROBE_DIR) {
+            # a directory opened read-only loses nothing to a refused close, so the failure going out stands alone
             system_os.close(next);
             ret walk_fail(fail.formatted_user(c.alloc, diagnostic_kind.PATH_ENTRY_TYPE, invalid, label, rel, prefix));
         }
@@ -664,6 +665,7 @@ fun finish_owned(held: *fs.File, out: *u8) err[Fault] {
     var computed: [32]u8;
     val hashed:   err[Fault]          = hash_held(@held, ?computed[0]);
     val closed:   err[io_error.Error] = fs.close(held);
+    # the image is opened read-only and loses nothing to a refused close, so the hash failure stands alone
     if (sel hashed.err) { ret hashed; }
     if (sel closed.err) { ret err[Fault].err{internal(system_os.message(closed.err))}; }
     memory.raw_copy(out::ptr, (?computed[0])::ptr, 32);

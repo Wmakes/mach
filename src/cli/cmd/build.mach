@@ -67,6 +67,8 @@ use spirv_tests:   mach.lang.target.isa.spirv.tests;
 use isa_tests:     mach.lang.target.isa.tests;
 #[testing]
 use x64_probe:     mach.lang.target.isa.x64.probe;
+#[testing]
+use T:             std.allocator.testing;
 
 # length of BUILD_TABLES
 val BUILD_TABLES_N: usize = 12;
@@ -173,9 +175,7 @@ pub rec Planned {
 pub fun plan_invocation(a: *A.Allocator, root: str, cli: *args.CliArgs, goal: request.BuildGoal,
     mode: manifest.ArtifactDefault, configure_deps: bool, ps: *session.Session) res[Planned, fail.Fail] {
     val res_session: res[session.Session, fail.Fail] = toolchain.session_init(a);
-    if (sel res_session.err) {
-        ret res[Planned, fail.Fail].err{fail.message("failed to initialise compiler session")};
-    }
+    if (sel res_session.err) { ret res[Planned, fail.Fail].err{fail.prefixed(a, "failed to initialise compiler session: ", res_session.err)}; }
     @ps = res_session.ok;
 
     # the plans borrow the manifest, so it lives in the session they run in
@@ -1240,6 +1240,35 @@ test plan_invocation__o_needs_the_selection_to_be_one_cell {
     if (sel one.err) { ret 6; }
     session.dnit(?ps);
     ret 0;
+}
+
+# a refused session init reports its own cause, kind and text, behind the context
+test plan_invocation__a_failed_session_init_keeps_its_cause {
+    var raw:   T.Testing;
+    val raw_r: err[A.Error] = T.make(?raw);
+    if (sel raw_r.err) { ret 1; }
+    fin { T.dnit(?raw); }
+    T.fail_at_ordinal(?raw, 1);
+    val bare: res[session.Session, fail.Fail] = toolchain.session_init(T.allocator_of(?raw));
+    if (sel bare.ok) { ret 2; }
+    val cause: fail.Fail = bare.err;
+
+    var t:      T.Testing;
+    val make_r: err[A.Error] = T.make(?t);
+    if (sel make_r.err) { ret 3; }
+    fin { T.dnit(?t); }
+    T.fail_at_ordinal(?t, 1);
+    var cli: args.CliArgs;
+    var ps:  session.Session;
+    val r:   res[Planned, fail.Fail] = plan_invocation(T.allocator_of(?t), "", ?cli, request.GOAL_ARTIFACT, manifest.ARTIFACT_DEFAULT_SET, false, ?ps);
+    if (sel r.ok) { ret 4; }
+    val failure: fail.Fail = r.err;
+    var bad:     i32       = 0;
+    if (fail.is_message(failure) != fail.is_message(cause) || fail.kind_of(failure) != fail.kind_of(cause)) { bad = 5; }
+    or (!str_starts_with(fail.describe(failure), "failed to initialise compiler session: "))                { bad = 6; }
+    or (!str_contains(fail.describe(failure), fail.describe(cause)))                                        { bad = 7; }
+    fail.dnit(T.allocator_of(?t), failure);
+    ret bad;
 }
 
 # a build whose levers change its profile names where its artifacts go: -o, or

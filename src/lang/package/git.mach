@@ -138,11 +138,22 @@ fun captured_bytes(alloc: *A.Allocator, p: *subprocess.OwnedSubprocess, trim_lin
     ret res[Bytes, fail.Fail].ok{Bytes{data: out, len: n}};
 }
 
-fun capture_cleanup(alloc: *A.Allocator, temp: *fs.TempFile, child: *subprocess.OwnedSubprocess, release: bool) {
+# release a run's child and capture file; a capture file that stays is the failure
+fun capture_cleanup(alloc: *A.Allocator, temp: *fs.TempFile, child: *subprocess.OwnedSubprocess, release: bool) err[fail.Fail] {
+    # a capture finished once refuses release only when its own buffer's free is refused, which leaves no file behind
     if (release) { subprocess.release_capture(alloc, child); }
     subprocess.dnit(alloc, child);
-    fs.temp_remove(temp);
+    val removed: err[fail.Fail] = capture_removed(alloc, temp);
     str_free(alloc, fs.temp_path(temp));
+    ret removed;
+}
+
+# the capture file removed; one already gone is no failure
+fun capture_removed(alloc: *A.Allocator, temp: *fs.TempFile) err[fail.Fail] {
+    val removed: err[io_error.Error] = fs.temp_remove(temp);
+    if (sel removed.ok)                         { ret err[fail.Fail].ok{}; }
+    if (removed.err.kind == io_error.NOT_FOUND) { ret err[fail.Fail].ok{}; }
+    ret err[fail.Fail].err{fail.environment_of(diagnostic_kind.FS_REMOVE, fail.format(alloc, "cannot remove the git capture file '{}': {}", fs.temp_path(temp), fail.io_text(removed.err)))};
 }
 
 pub fun count_nil_terminated(arr: **u8) usize {
@@ -340,15 +351,34 @@ fun run(alloc: *A.Allocator, gi: *Inspector, argv: **u8, shown: **u8, trim_line_
     var temp:         fs.TempFile         = tr.ok;
     val temp_close_r: err[io_error.Error] = fs.temp_close(?temp);
     if (sel temp_close_r.err) {
-        fs.temp_remove(?temp);
+        val closing: fail.Fail      = fail.environment(diagnostic_kind.GIT_COMMAND, "failed to close dependency verification capture");
+        val removed: err[fail.Fail] = capture_removed(alloc, ?temp);
         str_free(alloc, fs.temp_path(?temp));
-        ret res[opt[Bytes], fail.Fail].err{fail.environment(diagnostic_kind.GIT_COMMAND, "failed to close dependency verification capture")};
+        if (sel removed.err) { ret res[opt[Bytes], fail.Fail].err{fail.with_secondary(alloc, closing, removed.err)}; }
+        ret res[opt[Bytes], fail.Fail].err{closing};
     }
 
     var child: subprocess.OwnedSubprocess;
     subprocess.init(?child);
-    var captured: bool = false;
-    fin { capture_cleanup(alloc, ?temp, ?child, captured); }
+    var captured: bool                       = false;
+    val ran:      res[opt[Bytes], fail.Fail] = run_captured(alloc, gi, ?temp, ?child, ?captured, argv, shown, trim_line_end, extra_env, stdin_fd, capture_stderr, quiet_exit);
+    val cleaned:  err[fail.Fail]             = capture_cleanup(alloc, ?temp, ?child, captured);
+    if (sel cleaned.err) {
+        if (sel ran.err) { ret res[opt[Bytes], fail.Fail].err{fail.with_secondary(alloc, ran.err, cleaned.err)}; }
+        if (sel ran.ok.some) {
+            var answered: Bytes = ran.ok.some;
+            bytes_free(alloc, ?answered);
+        }
+        ret res[opt[Bytes], fail.Fail].err{cleaned.err};
+    }
+    ret ran;
+}
+
+# `run` once its capture file is made: git spawned, waited on and its output read
+# ---
+# captured: set once the capture is finished, so its release is owed
+fun run_captured(alloc: *A.Allocator, gi: *Inspector, temp: *fs.TempFile, child: *subprocess.OwnedSubprocess, captured: *bool,
+    argv: **u8, shown: **u8, trim_line_end: bool, extra_env: **u8, stdin_fd: usize, capture_stderr: bool, quiet_exit: bool) res[opt[Bytes], fail.Fail] {
     if (!argv_reads_only(argv)) { inspector_drop_trees(gi); }
     var shared: bool = extra_env == nil && gi.alloc != nil;
     if (shared && gi.env_ready && !same_environment(gi.env_inherited, gi.inherited_env)) {
@@ -374,29 +404,29 @@ fun run(alloc: *A.Allocator, gi: *Inspector, argv: **u8, shown: **u8, trim_line_
     }
     var options: subprocess.SpawnOptions = subprocess.spawn_options();
     options.stdin          = stdin_fd;
-    options.capture        = fs.temp_path(?temp);
+    options.capture        = fs.temp_path(temp);
     options.capture_stderr = capture_stderr;
     options.capture_limit  = 1048576;
-    val sr: err[subprocess.Error] = subprocess.spawn_native(alloc, ?child, gi.program, argv, exec.NativeEnvironment.given{git_env.items}, options);
+    val sr: err[subprocess.Error] = subprocess.spawn_native(alloc, child, gi.program, argv, exec.NativeEnvironment.given{git_env.items}, options);
     if (sel sr.err) { ret res[opt[Bytes], fail.Fail].err{subprocess.refusal(alloc, diagnostic_kind.GIT_COMMAND, sr.err)}; }
-    val wr: res[subprocess.SubprocessTerminal, subprocess.Error] = subprocess.wait(alloc, ?child);
+    val wr: res[subprocess.SubprocessTerminal, subprocess.Error] = subprocess.wait(alloc, child);
     if (sel wr.err) {
-        subprocess.abandon_capture(?child);
+        subprocess.abandon_capture(child);
         ret res[opt[Bytes], fail.Fail].err{subprocess.refusal(alloc, diagnostic_kind.GIT_COMMAND, wr.err)};
     }
     val terminal: subprocess.SubprocessTerminal                     = wr.ok;
-    val cr:       res[subprocess.CaptureIoResult, subprocess.Error] = subprocess.finish_capture(alloc, ?child, true);
+    val cr:       res[subprocess.CaptureIoResult, subprocess.Error] = subprocess.finish_capture(alloc, child, true);
     if (sel cr.err) { ret res[opt[Bytes], fail.Fail].err{subprocess.refusal(alloc, diagnostic_kind.GIT_COMMAND, cr.err)}; }
     val cap: subprocess.CaptureIoResult = cr.ok;
-    captured = true;
+    @captured = true;
     if (cap.read_failed || cap.write_failed || cap.close_failed || cap.short_read || cap.truncated) {
         ret res[opt[Bytes], fail.Fail].err{fail.environment(diagnostic_kind.GIT_COMMAND, "Git dependency inspection output could not be captured completely")};
     }
     if (terminal.kind != subprocess.STATE_EXITED || terminal.code != 0) {
         if (quiet_exit) { ret res[opt[Bytes], fail.Fail].ok{opt[Bytes].none{}}; }
-        ret res[opt[Bytes], fail.Fail].err{failure(alloc, ?child, shown, terminal)};
+        ret res[opt[Bytes], fail.Fail].err{failure(alloc, child, shown, terminal)};
     }
-    val bytes: res[Bytes, fail.Fail] = captured_bytes(alloc, ?child, trim_line_end);
+    val bytes: res[Bytes, fail.Fail] = captured_bytes(alloc, child, trim_line_end);
     if (sel bytes.err) { ret res[opt[Bytes], fail.Fail].err{bytes.err}; }
     ret res[opt[Bytes], fail.Fail].ok{opt[Bytes].some{bytes.ok}};
 }

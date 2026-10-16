@@ -274,7 +274,7 @@ pub fun run(cx: *args.Call) res[i64, fail.Fail] {
 # a session for a dependency action, running git in environ
 fun dep_session(a: *A.Allocator, environ: exec.Environment) res[session.Session, fail.Fail] {
     val sr: res[session.Session, fail.Fail] = toolchain.session_init(a);
-    if (sel sr.err) { ret res[session.Session, fail.Fail].err{fail.message("failed to initialise a session")}; }
+    if (sel sr.err) { ret res[session.Session, fail.Fail].err{fail.prefixed(a, "failed to initialise a session: ", sr.err)}; }
     var s: session.Session = sr.ok;
     s.environ = environ;
     ret res[session.Session, fail.Fail].ok{s};

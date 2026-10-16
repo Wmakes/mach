@@ -700,7 +700,8 @@ pub fun spawn_native(a: *A.Allocator, p: *OwnedSubprocess, pathname: str, argv: 
     ret err[Error].ok{};
 }
 
-fun running(p: *OwnedSubprocess) bool {
+# whether `p` holds a child that has not ended, which a cancel or a timeout can stop
+pub fun running(p: *OwnedSubprocess) bool {
     ret p.state == STATE_RUNNING;
 }
 
@@ -756,6 +757,7 @@ pub fun wait_any(a: *A.Allocator, owners: *OwnedSubprocess, count: u32, scope: *
                         val event: events.Event = next.ok.some;
                         if (event.kind == events.TERMINATE || event.kind == events.INTERRUPT
                             || event.kind == events.CONSOLE_CLOSE || event.kind == events.SERVICE_STOP) {
+                            # the caller's scope is live, so cancel refuses nothing, and an already ended scope already stops the wait
                             sync_cancel.cancel(scope);
                         }
                     }

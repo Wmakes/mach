@@ -1118,6 +1118,7 @@ fun discover_project_root(alloc: *A.Allocator, file_path: str) res[opt[str], fai
             var file:     fs.File                          = opened.ok;
             val metadata: res[fs.Metadata, io_error.Error] = fs.stat_of(file);
             val closed:   err[io_error.Error]              = fs.close(?file);
+            # a manifest opened read-only loses nothing to a refused close, so the failure going out stands alone
             if (sel metadata.err) {
                 ret res[opt[str], fail.Fail].err{fail.message(system_os.message(metadata.err))};
             }
@@ -3822,7 +3823,7 @@ fun t_deep_source(alloc: *A.Allocator, opens: usize) opt[str] {
 #[testing]
 fun t_driver_parse_outcome(alloc: *A.Allocator, root: str, diags_out: *diagnostic.DiagnosticStore) opt[fail.Fail] {
     val sr: res[session.Session, fail.Fail] = toolchain.session_init(alloc);
-    if (sel sr.err) { ret opt[fail.Fail].some{fail.message("session")}; }
+    if (sel sr.err) { ret opt[fail.Fail].some{sr.err}; }
     var s:       session.Session                 = sr.ok;
     var pick:    manifest.Selectors              = manifest.t_selectors("", "", "");
     val pr:      res[project.Project, fail.Fail] = driver.build_project(?s, root, ?pick);

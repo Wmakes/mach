@@ -522,6 +522,7 @@ fun purge_dependency_dir(a: *A.Allocator, root: str, name: str) res[usize, fail.
     var root_fd: usize = system_os.INVALID_HANDLE;
     val opened:  i64   = remove.open_path(root, ?root_fd);
     if (opened < 0) { ret res[usize, fail.Fail].err{fail.environment(diagnostic_kind.FS_READ, system_os.error_message(opened))}; }
+    # a directory opened read-only loses nothing to a refused close
     fin { system_os.close(root_fd); }
     ret purge_beneath(root_fd, name);
 }
@@ -531,6 +532,7 @@ fun purge_beneath(root_fd: usize, name: str) res[usize, fail.Fail] {
     val opened: i64   = remove.open_dir(root_fd, driver_closure.DEP_DIR, ?fd);
     if (system_os.error_kind(opened) == io_error.NOT_FOUND) { ret res[usize, fail.Fail].ok{0}; }
     if (opened < 0)                                         { ret res[usize, fail.Fail].err{fail.user(diagnostic_kind.DEP_NOT_DIRECTORY, driver_closure.DEP_ROOT_REFUSED)}; }
+    # a directory opened read-only loses nothing to a refused close
     fin { system_os.close(fd); }
     val rr: remove.Removal = remove.relative(fd, name);
     if (rr.failed) {

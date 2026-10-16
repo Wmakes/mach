@@ -60,6 +60,7 @@ pub fun file_sha256(path: str, digest: *u8) err[fail.Fail] {
     var f:      fs.File = open_r.ok;
     var opened: bool    = true;
     fin {
+        # a file opened read-only loses nothing to a refused close, so the failure going out stands alone
         if (opened) { fs.close(?f); }
     }
     val before_r: res[fs.Metadata, io_error.Error] = fs.stat_of(f);
@@ -135,6 +136,7 @@ fun validate_digest_input(path: str, held: fs.File, before: fs.Metadata, identit
     var current:  fs.File                          = opened.ok;
     val observed: res[fs.Identity, io_error.Error] = fs.identity_of(current);
     val closed:   err[io_error.Error]              = fs.close(?current);
+    # a file opened read-only loses nothing to a refused close, so the failure going out stands alone
     if (sel observed.err) {
         ret err[fail.Fail].err{fail.message(system_os.message(observed.err))};
     }

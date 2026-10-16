@@ -120,6 +120,7 @@ fun walk(alloc: *A.Allocator, root: str, base_rel: str, pat: str, recursive: boo
     var cursor: system_os.DirectoryCursor     = system_os.DirectoryCursor{};
     val opened: system_os.DirectoryInitResult = system_os.directory_init(?cursor, fd);
     if (opened.code < 0) {
+        # a directory opened read-only loses nothing to a refused close, so the failure going out stands alone
         system_os.close(fd);
         ret err[fail.Fail].err{fail.user(diagnostic_kind.GLOB_INACCESSIBLE, system_os.error_message(opened.code))};
     }
@@ -141,11 +142,13 @@ fun walk(alloc: *A.Allocator, root: str, base_rel: str, pat: str, recursive: boo
             }
         }
     }
+    # a directory read loses nothing to a refused close, so a failure already going out stands alone
     val cursor_r:  i64  = system_os.directory_close(?cursor);
     val result_ok: bool = sel result.ok && cursor_r < 0;
     if (result_ok) {
         result = err[fail.Fail].err{fail.user(diagnostic_kind.GLOB_INACCESSIBLE, system_os.error_message(cursor_r))};
     }
+    # so does the read-only directory descriptor
     val close_r:    i64  = system_os.close(fd);
     val result_ok2: bool = sel result.ok && close_r < 0;
     if (result_ok2) {

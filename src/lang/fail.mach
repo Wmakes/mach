@@ -424,6 +424,22 @@ pub fun with_text(f: Fail, text: str) Fail {
     ret out;
 }
 
+# the same failure also naming `secondary`, a failure met while releasing what
+# the failing path held (a child cancelled, a file removed, a source closed):
+# the text gains "; cleanup also failed: " and the secondary's, joined into
+# `a`, and the class, kind and places stay the failure's. a reported failure
+# has no text to carry it, so the secondary goes out in its place, the reported
+# diagnostics already recorded, and a reported secondary already named itself.
+# a refused join leaves the failure as it was, as `prefixed` does, so the
+# secondary never takes the failure's place
+pub fun with_secondary(a: *A.Allocator, f: Fail, secondary: Fail) Fail {
+    if (is_reported(secondary)) { ret f; }
+    if (is_reported(f))         { ret secondary; }
+    val joined: res[str, Fail] = join(a, describe(f), "; cleanup also failed: ", describe(secondary));
+    if (sel joined.err) { ret f; }
+    ret with_text(f, joined.ok);
+}
+
 # release the text a failure owns through `a`; a reported failure owns nothing
 fun text_free(a: *A.Allocator, f: Fail) {
     val carried: opt[str] = text(f);
@@ -644,6 +660,17 @@ pub fun join(a: *A.Allocator, va: ...) res[str, Fail] {
     val r: res[str, StrError] = str_join(a, va...);
     if (sel r.err) { ret res[str, Fail].err{str_refused(r.err)}; }
     ret res[str, Fail].ok{r.ok};
+}
+
+# `cause` with `context` in front of its text, joined into `a`, which owns the
+# new text; the class, the kind and the places are kept. a reported cause has
+# no text to extend, and a refused join leaves the cause as it was, so the
+# context never takes the cause's place
+pub fun prefixed(a: *A.Allocator, context: str, cause: Fail) Fail {
+    if (is_reported(cause)) { ret cause; }
+    val joined: res[str, Fail] = join(a, context, describe(cause));
+    if (sel joined.err) { ret cause; }
+    ret with_text(cause, joined.ok);
 }
 
 # an internal failure whose text is `fmt` formatted with `va` into `a`, which
@@ -964,6 +991,39 @@ test fail__keyed_classes_keep_their_kind {
     ret 0;
 }
 
+# a secondary failure rides on the failure going out, which keeps its class,
+# kind and place, in the one text it allocates; a reported side gives way to
+# the other and allocates nothing, and a refused text leaves the failure whole
+test with_secondary__the_failure_going_out_names_its_cleanup {
+    var tracking: T.Testing;
+    val made:     err[A.Error] = T.make(?tracking);
+    if (sel made.err) { ret 1; }
+    fin { T.dnit(?tracking); }
+    val a:         *A.Allocator = T.allocator_of(?tracking);
+    val primary:   Fail         = located(a, user(diagnostic_kind.TOML_MALFORMED, "bad object"), Place{path: "m.toml", spanned: true});
+    val secondary: Fail         = environment(diagnostic_kind.FS_REMOVE, "cannot remove 'm.toml.tmp'");
+    val before:    usize        = T.live_count(?tracking);
+    val both:      Fail         = with_secondary(a, primary, secondary);
+    if (T.live_count(?tracking) != before + 1)                                                      { ret 2; }
+    if (!sel both.user || kind_of(both) != diagnostic_kind.TOML_MALFORMED)                          { ret 3; }
+    if (!str_equals(describe(both), "bad object; cleanup also failed: cannot remove 'm.toml.tmp'")) { ret 4; }
+    if (!same_places(both, primary))                                                                { ret 5; }
+    t_text_free(a, both);
+    val alone: Fail = with_secondary(a, reported(), secondary);
+    if (!sel alone.environment || !str_equals(describe(alone), "cannot remove 'm.toml.tmp'")) { ret 6; }
+    val kept: Fail = with_secondary(a, primary, reported());
+    if (!str_equals(describe(kept), "bad object"))               { ret 7; }
+    if (!is_reported(with_secondary(a, reported(), reported()))) { ret 8; }
+    if (T.live_count(?tracking) != before)                       { ret 9; }
+    T.fail_at_ordinal(?tracking, T.attempt_count(?tracking) + 1);
+    val refused_text: Fail = with_secondary(a, primary, secondary);
+    T.clear_failure(?tracking);
+    if (!t_user_with(refused_text, "bad object")) { ret 10; }
+    places_dnit(a, primary);
+    if (T.live_count(?tracking) != 0) { ret 11; }
+    ret 0;
+}
+
 # the three closed-catalog classes land on distinct failures: a member from
 # input or a cross-module product and a declared member a target cannot honor
 # are the user's (exit 1), a member the compiler produced is internal (exit
@@ -1186,5 +1246,27 @@ test formatted_user__a_refused_text_stays_the_refusal {
     if (!str_equals(r.message, "out of memory")) { ret 5; }
     T.clear_failure(?t);
     if (T.leaked(?t) || T.double_free_count(?t) != 0) { ret 6; }
+    ret 0;
+}
+
+test prefixed__the_context_goes_in_front_and_never_in_place {
+    var t:    T.Testing;
+    val made: err[A.Error] = T.make(?t);
+    if (sel made.err) { ret 1; }
+    fin { T.dnit(?t); }
+    val a:   *A.Allocator = T.allocator_of(?t);
+    val msg: Fail         = prefixed(a, "ctx: ", message("broken"));
+    if (!t_message_with(msg, "ctx: broken")) { ret 2; }
+    dnit(a, msg);
+    val keyed: Fail = prefixed(a, "ctx: ", environment(diagnostic_kind.FS_READ, "cannot read"));
+    if (!sel keyed.environment || kind_of(keyed) != diagnostic_kind.FS_READ) { ret 3; }
+    if (!str_equals(describe(keyed), "ctx: cannot read"))                    { ret 4; }
+    dnit(a, keyed);
+    if (!is_reported(prefixed(a, "ctx: ", reported()))) { ret 5; }
+    T.fail_at_ordinal(?t, T.attempt_count(?t) + 1);
+    val refused_join: Fail = prefixed(a, "ctx: ", user(diagnostic_kind.TOML_MALFORMED, "bad object"));
+    T.clear_failure(?t);
+    if (!t_user_with(refused_join, "bad object") || kind_of(refused_join) != diagnostic_kind.TOML_MALFORMED) { ret 6; }
+    if (T.leaked(?t) || T.double_free_count(?t) != 0)                                                        { ret 7; }
     ret 0;
 }

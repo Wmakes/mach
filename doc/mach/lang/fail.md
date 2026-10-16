@@ -285,6 +285,21 @@ pub fun with_text(f: Fail, text: str) Fail;
 the same failure carrying `text` instead: the class, the kind and the places
 are kept (a caller that copies the message into storage it owns)
 
+## fun with_secondary
+
+```mach
+pub fun with_secondary(a: *A.Allocator, f: Fail, secondary: Fail) Fail;
+```
+
+the same failure also naming `secondary`, a failure met while releasing what
+the failing path held (a child cancelled, a file removed, a source closed):
+the text gains "; cleanup also failed: " and the secondary's, joined into
+`a`, and the class, kind and places stay the failure's. a reported failure
+has no text to carry it, so the secondary goes out in its place, the reported
+diagnostics already recorded, and a reported secondary already named itself.
+a refused join leaves the failure as it was, as `prefixed` does, so the
+secondary never takes the failure's place
+
 ## fun retain
 
 ```mach
@@ -411,6 +426,17 @@ pub fun join(a: *A.Allocator, va: ...) res[str, Fail];
 
 the texts `va` joined into `a`, which owns the result; a refusal to join is
 the failure instead
+
+## fun prefixed
+
+```mach
+pub fun prefixed(a: *A.Allocator, context: str, cause: Fail) Fail;
+```
+
+`cause` with `context` in front of its text, joined into `a`, which owns the
+new text; the class, the kind and the places are kept. a reported cause has
+no text to extend, and a refused join leaves the cause as it was, so the
+context never takes the cause's place
 
 ## fun formatted
 

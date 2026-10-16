@@ -59,13 +59,16 @@ def RememberFn: fun(ptr, str, str) err[fail.Fail];
 
 def CloseFn: fun(ptr);
 
+# release the table; err names what it could not release, once the rest is released
+def ReleasesCloseFn: fun(ptr) err[fail.Fail];
+
 pub rec Releases {
     ctx:        ptr;
     list:       ListFn;
     shipped:    ShippedFn;
     release_of: ReleaseOfFn;
     remember:   RememberFn;
-    close:      CloseFn;
+    close:      ReleasesCloseFn;
 }
 
 # what acquiring dep/<id> changed

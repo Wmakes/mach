@@ -69,9 +69,13 @@ pub fun open(s: *session.Session, offline: bool, local: str) res[Remotes, fail.F
         locals: collections_vector.init[LocalRepo](s.build_alloc), offline: offline, local: local, scratch: "", scratch_ready: false}};
 }
 
-pub fun close(c: *Remotes) {
+# release the table; a candidate scratch that stays is the failure, once
+# everything else is released
+pub fun close(c: *Remotes) err[fail.Fail] {
+    var out: err[fail.Fail] = err[fail.Fail].ok{};
     if (c.scratch_ready) {
-        fs.remove_all(c.s.build_alloc, c.scratch);
+        val removed: err[fs.FsError] = fs.remove_all(c.s.build_alloc, c.scratch);
+        if (sel removed.err) { out = err[fail.Fail].err{fail.environment_of(diagnostic_kind.FS_REMOVE, fail.format(c.s.build_alloc, "cannot remove the release candidate scratch '{}': {}", c.scratch, fail.fs_text(removed.err)))}; }
         str_free(c.s.build_alloc, c.scratch);
         c.scratch_ready = false;
     }
@@ -90,6 +94,7 @@ pub fun close(c: *Remotes) {
     }
     collections_vector.dnit[LocalRepo](?c.locals);
     git.inspector_dnit(c.s.build_alloc, ?c.gi);
+    ret out;
 }
 
 # the local repository offline resolution reads `url`'s releases from; the first existing one
@@ -305,10 +310,19 @@ fun ensure_scratch(c: *Remotes) err[fail.Fail] {
     val a:    *A.Allocator                 = c.s.build_alloc;
     val tf_r: res[fs.TempFile, fs.FsError] = fs.temp_create(a, "mach_candidates");
     if (sel tf_r.err) { ret err[fail.Fail].err{fail.environment(diagnostic_kind.FS_TEMP, fail.fs_text(tf_r.err))}; }
-    var tf:    fs.TempFile       = tf_r.ok;
-    val dup_r: res[str, A.Error] = str_dup_range(a, fs.temp_path(?tf), 0, str_len(fs.temp_path(?tf)));
-    fs.temp_close_and_remove(?tf);
-    if (sel dup_r.err) { ret err[fail.Fail].err{fail.refused(dup_r.err)}; }
+    var tf:    fs.TempFile         = tf_r.ok;
+    val dup_r: res[str, A.Error]   = str_dup_range(a, fs.temp_path(?tf), 0, str_len(fs.temp_path(?tf)));
+    val freed: err[io_error.Error] = fs.temp_close_and_remove(?tf);
+    var held:  err[fail.Fail]      = err[fail.Fail].ok{};
+    if (sel freed.err) { held = err[fail.Fail].err{fail.environment_of(diagnostic_kind.FS_REMOVE, fail.format(a, "cannot free the release candidate scratch name '{}': {}", fs.temp_path(?tf), fail.io_text(freed.err)))}; }
+    if (sel dup_r.err) {
+        if (sel held.err) { ret err[fail.Fail].err{fail.with_secondary(a, fail.refused(dup_r.err), held.err)}; }
+        ret err[fail.Fail].err{fail.refused(dup_r.err)};
+    }
+    if (sel held.err) {
+        str_free(a, dup_r.ok);
+        ret held;
+    }
     val made: err[fs.FsError] = fs.create_dir_all(a, dup_r.ok, 448);
     if (sel made.err) {
         str_free(a, dup_r.ok);

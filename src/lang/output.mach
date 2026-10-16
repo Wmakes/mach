@@ -25,11 +25,13 @@ use std.types.bool.bool;
 use std.types.bool.false;
 use std.types.bool.true;
 use std.types.error.err;
+use std.types.option.opt;
 use types_path: std.types.path;
 use std.types.result.res;
 use std.types.size.usize;
 use types_string: std.types.string;
 use std.types.string.str;
+use std.types.string.str_equals;
 use std.types.string.str_join;
 use std.types.string.str_len;
 use std.types.string.str_replace;
@@ -154,6 +156,7 @@ pub fun writer[W](itn: *intern.Interner, a: *A.Allocator, path: str, ctx: *W,
     var w:      io_writer.Writer          = fs.writer(file);
     val wrote:  err[io_writer.WriteError] = write_cb(ctx, ?w);
     val closed: err[io_error.Error]       = fs.close(?file);
+    # a refused close after a failed write adds nothing: the file's contents are already lost
     if (sel wrote.err) {
         ret err[fail.Fail].err{environment_fail(itn, a, diagnostic_kind.FS_WRITE, op, path, "write failed")};
     }
@@ -218,16 +221,22 @@ pub fun through_temporary[C](a: *A.Allocator, destination: str, ctx: *C,
     val temporary: str = named.ok;
     fin { str_free(a, temporary); }
     val written: err[fail.Fail] = write(ctx, temporary);
-    if (sel written.err) {
-        fs.remove_file(temporary);
-        ret err[fail.Fail].err{written.err};
-    }
+    if (sel written.err) { ret err[fail.Fail].err{temporary_removed(a, temporary, written.err)}; }
     val renamed: err[io_error.Error] = fs.rename(temporary, destination);
     if (sel renamed.err) {
-        fs.remove_file(temporary);
-        ret err[fail.Fail].err{environment_fail(nil, a, diagnostic_kind.FS_WRITE, "cannot publish", destination, fail.io_text(renamed.err))};
+        ret err[fail.Fail].err{temporary_removed(a, temporary, environment_fail(nil, a, diagnostic_kind.FS_WRITE, "cannot publish", destination, fail.io_text(renamed.err)))};
     }
     ret err[fail.Fail].ok{};
+}
+
+# `failed`, the failure of a write through `temporary`, once the temporary is
+# removed: a temporary the write never made is no failure, and one that stays
+# is named as a secondary failure
+fun temporary_removed(a: *A.Allocator, temporary: str, failed: fail.Fail) fail.Fail {
+    val removed: err[io_error.Error] = fs.remove_file(temporary);
+    if (sel removed.ok)                         { ret failed; }
+    if (removed.err.kind == io_error.NOT_FOUND) { ret failed; }
+    ret fail.with_secondary(a, failed, environment_fail(nil, a, diagnostic_kind.FS_REMOVE, "cannot remove", temporary, fail.io_text(removed.err)));
 }
 
 #[testing]
@@ -243,6 +252,41 @@ fun t_torn_write(w: *TornWrite, destination: str) err[fail.Fail] {
     if (sel written.err) { ret err[fail.Fail].err{fail.message("torn write could not write")}; }
     if (w.fails)         { ret err[fail.Fail].err{fail.message("interrupted")}; }
     ret err[fail.Fail].ok{};
+}
+
+# fails without writing, or after leaving a directory where its temporary
+# belonged, which no file removal takes away
+#[testing]
+rec StuckWrite {
+    a:     *A.Allocator;
+    makes: bool;
+}
+
+#[testing]
+fun t_stuck_write(w: *StuckWrite, temporary: str) err[fail.Fail] {
+    if (!w.makes) { ret err[fail.Fail].err{fail.message("never written")}; }
+    val made: err[io_error.Error] = fs.create_dir(temporary, 0o700);
+    if (sel made.err) { ret err[fail.Fail].err{fail.message("stuck write could not make its directory")}; }
+    val held_r: res[str, types_string.StrError] = str_join(w.a, temporary, "/held");
+    if (sel held_r.err) { ret err[fail.Fail].err{fail.message("stuck write could not name its file")}; }
+    val held: err[fs.FsError] = fs.write_bytes(held_r.ok, "held", 4, 0o600);
+    str_free(w.a, held_r.ok);
+    if (sel held.err) { ret err[fail.Fail].err{fail.message("stuck write could not write its file")}; }
+    ret err[fail.Fail].err{fail.message("stuck")};
+}
+
+# how many times `needle` occurs in `text`
+#[testing]
+fun t_occurrences(text: str, needle: str) usize {
+    var n:    usize = 0;
+    var from: usize = 0;
+    for (true) {
+        val at: opt[usize] = types_string.str_index_of_from(text, needle, from);
+        if (sel at.none) { ret n; }
+        n    = n + 1;
+        from = at.some + str_len(needle);
+    }
+    ret n;
 }
 
 #[testing]
@@ -297,5 +341,36 @@ test through_temporary__an_interrupted_write_leaves_the_previous_file_whole {
     if (sel replaced.err)                             { ret 7; }
     if (!t_holds(?a, destination, "the next object")) { ret 8; }
     if (t_entries(?a, file.directory) != 1)           { ret 9; }
+    ret 0;
+}
+
+# a failed write whose temporary cannot be removed names that removal as a
+# secondary failure, once; one that never made its temporary names none
+test through_temporary__a_temporary_that_stays_is_a_secondary_failure {
+    var a:      A.Allocator;
+    val make_r: err[A.Error] = page.make(?a);
+    if (sel make_r.err) { ret 1; }
+    val created: res[output_testing.Output, fail.Fail] = output_testing.create(?a, "through-temporary-stays");
+    if (sel created.err) { ret 1; }
+    var file: output_testing.Output = created.ok;
+    fin { output_testing.dnit(?file); }
+    val closed: err[fail.Fail] = output_testing.close(?file);
+    if (sel closed.err) { ret 1; }
+    val destination: str = output_testing.path(?file);
+
+    var never:  StuckWrite     = StuckWrite{a: ?a, makes: false};
+    val absent: err[fail.Fail] = through_temporary[StuckWrite](?a, destination, ?never, t_stuck_write);
+    if (sel absent.ok)                                           { ret 2; }
+    if (!str_equals(fail.describe(absent.err), "never written")) { ret 3; }
+
+    var stuck:  StuckWrite     = StuckWrite{a: ?a, makes: true};
+    val stayed: err[fail.Fail] = through_temporary[StuckWrite](?a, destination, ?stuck, t_stuck_write);
+    if (sel stayed.ok) { ret 4; }
+    val said: str = fail.describe(stayed.err);
+    if (!types_string.str_starts_with(said, "stuck; cleanup also failed: cannot remove '")) { ret 5; }
+    if (t_occurrences(said, "cleanup also failed") != 1)                                    { ret 6; }
+    if (fail.kind_of(stayed.err) != diagnostic_kind.COMPILER_INTERNAL)                      { ret 7; }
+    # the destination and the temporary that stayed
+    if (t_entries(?a, file.directory) != 2) { ret 8; }
     ret 0;
 }
