@@ -59,6 +59,7 @@ pub fun populate_union_tuples(p: *project.Project, m: *manifest.Manifest) err[fa
         if (!intern.str_is_nil(td.of)) { of_name = intern.text(?p.s.interner, td.of); }
         var req: lang_target.TargetRequest = lang_target.target_request(isa_name, os_name, abi_name);
         lang_target.with_of(?req, of_name);
+        if (!intern.str_is_nil(td.baseline)) { lang_target.with_baseline(?req, intern.text(?p.s.interner, td.baseline)); }
         var ext_names: [64]str;
         var ei:        u32 = 0;
         for (ei < td.extension_count) {

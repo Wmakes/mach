@@ -159,9 +159,10 @@ val PROJECT_KEYS:      [6]KeyRow = [6]KeyRow{
     KeyRow{key: "out", shape: SHAPE_STRING, rule: RULE_REMOVED, note: "the work directory is `work`, written from `{project.work}` in a template", migrate: out_migrate},
 };
 
-val TARGET_KEY_COUNT: usize      = 11;
-val TARGET_KEYS:      [11]KeyRow = [11]KeyRow{
+val TARGET_KEY_COUNT: usize      = 12;
+val TARGET_KEYS:      [12]KeyRow = [12]KeyRow{
     KeyRow{key: "isa", shape: SHAPE_STRING, rule: RULE_REQUIRED, note: ""},
+    KeyRow{key: "baseline", shape: SHAPE_STRING, rule: RULE_OPTIONAL, note: "the isa's default baseline"},
     KeyRow{key: "os", shape: SHAPE_STRING, rule: RULE_REQUIRED, note: ""},
     KeyRow{key: "abi", shape: SHAPE_STRING, rule: RULE_REQUIRED, note: ""},
     KeyRow{key: "env", shape: SHAPE_STRING, rule: RULE_OPTIONAL, note: "the isa's default environment"},

@@ -4151,7 +4151,8 @@ test analyze__explicit_target_changes_context_and_expires_previous_view {
     fin { session.dnit(?s); }
     var es: EditorSession = init(?s);
     fin { t_dnit(?es); }
-    var tr32:       lang_target.TargetRequest           = lang_target.target_request("rv32imafdc", "freestanding", "ilp32d");
+    var tr32: lang_target.TargetRequest = lang_target.target_request("riscv32", "freestanding", "ilp32d");
+    lang_target.with_baseline(?tr32, "rv32imafdc");
     var tr64:       lang_target.TargetRequest           = lang_target.target_request("riscv64", "linux", "lp64d");
     val selected32: res[lang_target.Binding, fail.Fail] = lang_target.resolve(toolchain.t_registry(), ?tr32);
     if (sel selected32.err) { ret 6; }

@@ -23,7 +23,7 @@ use std.types.string.str_region_equals;
 use mach.lang.be.codegen;
 use mach.lang.be.codegen.testing.codegen_target_ok;
 use mach.lang.be.codegen.testing.ct_edge_project;
-use mach.lang.be.codegen.testing.ext_manifest;
+use mach.lang.be.codegen.testing.ext_manifest_on;
 use mach.lang.be.codegen.testing.run_codegen_err;
 use mach.lang.be.codegen.testing.run_codegen_ok;
 use mach.lang.be.codegen.testing.sema_clean;
@@ -914,7 +914,7 @@ fun float_on_rv32(target_name: str, needle: str, want_refusal: bool) i32 {
 # only the selection string; the same program on an F selection is clean
 test float__refusal_names_the_missing_f_extension {
     val no_f: i32 = float_on_rv32("rv32nf",
-        "which target `rv32imc` does not support: the selection lacks the F extension", true);
+        "which target `riscv32` does not support: the selection lacks the f extension", true);
     if (no_f != 0) { ret no_f; }
     val with_f: i32 = float_on_rv32("rv32s", "floating-point", false);
     if (with_f != 0) { ret 10 + with_f; }
@@ -1070,16 +1070,22 @@ val CT_WIDTHS: [4]u8 = [4]u8{8, 16, 32, 64};
 # a one-target project for a registered tuple; a static library everywhere
 # but spirv, which only builds programs
 #[testing]
-fun ct_mul_manifest(alloc: *A.Allocator, isa_name: str, os_name: str, abi_name: str, of_name: str) str {
+fun ct_mul_manifest(alloc: *A.Allocator, isa_name: str, baseline_name: str, os_name: str, abi_name: str, of_name: str) str {
     var kind: str = "static";
-    var out:  str = "lib/ctmul.a";
+    var base: str = "";
+    if (baseline_name != nil && str_len(baseline_name) != 0) {
+        val l: res[str, std_format.FormatError] = std_format.sprint(alloc, "baseline = \"{}\"\n", baseline_name);
+        if (sel l.err) { ret ""; }
+        base = l.ok;
+    }
+    var out: str = "lib/ctmul.a";
     if (str_equals(of_name, "spirv")) {
         kind = "bin";
         out  = "bin/ctmul";
     }
     val r: res[str, std_format.FormatError] = std_format.sprint(alloc,
-        "[project]\nmach = \">=5\"\nid = \"ctmul\"\nversion = \"0.0.0\"\nsrc = \"src\"\nwork = \"out/{{target.name}}/{{profile.name}}\"\n\n[target.t]\nisa = \"{}\"\nos = \"{}\"\nabi = \"{}\"\nof = \"{}\"\n\n[artifact.ctmul]\nkind = \"{}\"\nentry = \"main.mach\"\nout = \"{}\"\ntargets = [\"*\"]\nlink = []\nneed = []\n[profile.debug]\ndefault = true\noptimize = false\ndebug = false\nsimd = \"scalarize\"\n[profile.release]\noptimize = true\ndebug = false\nsimd = \"scalarize\"\n",
-        isa_name, os_name, abi_name, of_name, kind, out);
+        "[project]\nmach = \">=5\"\nid = \"ctmul\"\nversion = \"0.0.0\"\nsrc = \"src\"\nwork = \"out/{{target.name}}/{{profile.name}}\"\n\n[target.t]\nisa = \"{}\"\n{}os = \"{}\"\nabi = \"{}\"\nof = \"{}\"\n\n[artifact.ctmul]\nkind = \"{}\"\nentry = \"main.mach\"\nout = \"{}\"\ntargets = [\"*\"]\nlink = []\nneed = []\n[profile.debug]\ndefault = true\noptimize = false\ndebug = false\nsimd = \"scalarize\"\n[profile.release]\noptimize = true\ndebug = false\nsimd = \"scalarize\"\n",
+        isa_name, base, os_name, abi_name, of_name, kind, out);
     if (sel r.err) { ret ""; }
     ret r.ok;
 }
@@ -1132,6 +1138,8 @@ fun ct_mul_query_program(alloc: *A.Allocator, op: u32, width: u8) str {
 #[testing]
 rec CtTuple {
     isa_name: str;
+    # the target's baseline, nil for the isa's default
+    baseline: str;
     os_name:  str;
     abi_name: str;
     of_name:  str;
@@ -1193,7 +1201,7 @@ fun ct_mul_build(alloc: *A.Allocator, t: *CtTuple, rows: *ct.CtMulForm, row_len:
     fin { ct_mul_restore(?kept); }
     var names:  [1]str              = [1]str{"main.mach"};
     var texts:  [1]str              = [1]str{program};
-    val root_r: res[str, fail.Fail] = driver.scaffold(alloc, ct_mul_manifest(alloc, t.isa_name, t.os_name, t.abi_name, t.of_name), ?names[0], ?texts[0], 1);
+    val root_r: res[str, fail.Fail] = driver.scaffold(alloc, ct_mul_manifest(alloc, t.isa_name, t.baseline, t.os_name, t.abi_name, t.of_name), ?names[0], ?texts[0], 1);
     if (sel root_r.err) { ret 4; }
     val root: str = root_r.ok;
     fin { fs.remove_all(alloc, root); }
@@ -1296,8 +1304,8 @@ test ct_mul_query__agrees_with_the_lowering_gate {
     var tuples: [5]CtTuple = [5]CtTuple{
         CtTuple{isa_name: "aarch64", os_name: "linux", abi_name: "aapcs64", of_name: "elf"},
         CtTuple{isa_name: "aarch64", os_name: "freestanding", abi_name: "aapcs64", of_name: "elf"},
-        CtTuple{isa_name: "rv64gc_zkt", os_name: "linux", abi_name: "lp64d", of_name: "elf"},
-        CtTuple{isa_name: "rv64gc", os_name: "linux", abi_name: "lp64d", of_name: "elf"},
+        CtTuple{isa_name: "riscv64", baseline: "rv64gc_zkt", os_name: "linux", abi_name: "lp64d", of_name: "elf"},
+        CtTuple{isa_name: "riscv64", baseline: "rv64gc", os_name: "linux", abi_name: "lp64d", of_name: "elf"},
         CtTuple{isa_name: "spirv", os_name: "vulkan", abi_name: "spirv", of_name: "spirv"}
     };
     var ti: usize = 0;
@@ -1480,7 +1488,7 @@ fun ct_mul_listing(alloc: *A.Allocator, t: *CtTuple, rows: *ct.CtMulForm, row_le
     fin { ct_mul_restore(?kept); }
     var names:  [1]str              = [1]str{"main.mach"};
     var texts:  [1]str              = [1]str{program};
-    val root_r: res[str, fail.Fail] = driver.scaffold(alloc, ct_mul_manifest(alloc, t.isa_name, t.os_name, t.abi_name, t.of_name), ?names[0], ?texts[0], 1);
+    val root_r: res[str, fail.Fail] = driver.scaffold(alloc, ct_mul_manifest(alloc, t.isa_name, t.baseline, t.os_name, t.abi_name, t.of_name), ?names[0], ?texts[0], 1);
     if (sel root_r.err) { ret 2; }
     val root: str = root_r.ok;
     fin { fs.remove_all(alloc, root); }
@@ -1566,7 +1574,7 @@ test ct_mul__lowers_to_one_multiply_on_each_isa {
     val make_r: err[A.Error] = page.make(?alloc);
     if (sel make_r.err) { ret 1; }
 
-    var rv:     CtTuple = CtTuple{isa_name: "rv64gc_zkt", os_name: "linux", abi_name: "lp64d", of_name: "elf"};
+    var rv:     CtTuple = CtTuple{isa_name: "riscv64", baseline: "rv64gc_zkt", os_name: "linux", abi_name: "lp64d", of_name: "elf"};
     var x86:    CtTuple = CtTuple{isa_name: "x86_64", os_name: "freestanding", abi_name: "sysv64", of_name: "elf"};
     var arm:    CtTuple = CtTuple{isa_name: "aarch64", os_name: "linux", abi_name: "aapcs64", of_name: "elf"};
     var arm_dw: CtTuple = CtTuple{isa_name: "aarch64", os_name: "darwin", abi_name: "aapcs64", of_name: "macho"};
@@ -1583,8 +1591,8 @@ test ct_mul__lowers_to_one_multiply_on_each_isa {
 
 # 0 when a secret 64-bit multiply is refused on the tuple with its registered rows
 #[testing]
-fun ct_mul_refused(alloc: *A.Allocator, isa_name: str, os_name: str, abi_name: str, of_name: str) i32 {
-    var t:    CtTuple = CtTuple{isa_name: isa_name, os_name: os_name, abi_name: abi_name, of_name: of_name};
+fun ct_mul_refused(alloc: *A.Allocator, isa_name: str, baseline_name: str, os_name: str, abi_name: str, of_name: str) i32 {
+    var t:    CtTuple = CtTuple{isa_name: isa_name, baseline: baseline_name, os_name: os_name, abi_name: abi_name, of_name: of_name};
     var buf:  [16384]u8;
     var len:  usize   = 0;
     val code: i32     = ct_mul_listing(alloc, ?t, nil, 0,
@@ -1606,7 +1614,7 @@ fun ct_mul_marker(alloc: *A.Allocator, t: *CtTuple, program: str) i32 {
     fin { session.dnit(?s); }
     var names:  [1]str              = [1]str{"main.mach"};
     var texts:  [1]str              = [1]str{program};
-    val root_r: res[str, fail.Fail] = driver.scaffold(alloc, ct_mul_manifest(alloc, t.isa_name, t.os_name, t.abi_name, t.of_name), ?names[0], ?texts[0], 1);
+    val root_r: res[str, fail.Fail] = driver.scaffold(alloc, ct_mul_manifest(alloc, t.isa_name, t.baseline, t.os_name, t.abi_name, t.of_name), ?names[0], ?texts[0], 1);
     if (sel root_r.err) { ret 2; }
     val root: str = root_r.ok;
     fin { fs.remove_all(alloc, root); }
@@ -1659,7 +1667,7 @@ test ct_mul__dit_need_is_marked_only_for_a_dit_multiply {
     var arm:        CtTuple = CtTuple{isa_name: "aarch64", os_name: "linux", abi_name: "aapcs64", of_name: "elf"};
     var arm_dw:     CtTuple = CtTuple{isa_name: "aarch64", os_name: "darwin", abi_name: "aapcs64", of_name: "macho"};
     var x86:        CtTuple = CtTuple{isa_name: "x86_64", os_name: "linux", abi_name: "sysv64", of_name: "elf"};
-    var rv:         CtTuple = CtTuple{isa_name: "rv64gc_zkt", os_name: "linux", abi_name: "lp64d", of_name: "elf"};
+    var rv:         CtTuple = CtTuple{isa_name: "riscv64", baseline: "rv64gc_zkt", os_name: "linux", abi_name: "lp64d", of_name: "elf"};
     if (ct_mul_marker(?alloc, ?arm, secret_mul) != 1)    { ret 2; }
     if (ct_mul_marker(?alloc, ?arm, narrow_mul) != 1)    { ret 3; }
     if (ct_mul_marker(?alloc, ?arm_dw, secret_mul) != 1) { ret 4; }
@@ -1679,13 +1687,13 @@ test ct_mul__refuses_every_undeclared_isa_os_and_condition {
     val make_r: err[A.Error] = page.make(?alloc);
     if (sel make_r.err) { ret 1; }
     var bad: i32 = 0;
-    if (ct_mul_refused(?alloc, "rv32imac_zkt", "freestanding", "ilp32", "elf") != 0)      { bad = bad | 1; }
-    if (ct_mul_refused(?alloc, "spirv", "vulkan", "spirv", "spirv") != 0)                 { bad = bad | 2; }
-    if (ct_mul_refused(?alloc, "rv64gc", "linux", "lp64d", "elf") != 0)                   { bad = bad | 4; }
-    if (ct_mul_refused(?alloc, "rv64imafd_zicsr_zifencei", "linux", "lp64d", "elf") != 0) { bad = bad | 8; }
-    if (ct_mul_refused(?alloc, "rv64i_zkt", "linux", "lp64", "elf") != 0)                 { bad = bad | 16; }
-    if (ct_mul_refused(?alloc, "aarch64", "freestanding", "aapcs64", "elf") != 0)         { bad = bad | 128; }
-    var control: CtTuple = CtTuple{isa_name: "rv64gc_zkt", os_name: "linux", abi_name: "lp64d", of_name: "elf"};
+    if (ct_mul_refused(?alloc, "riscv32", "rv32imac_zkt", "freestanding", "ilp32", "elf") != 0)      { bad = bad | 1; }
+    if (ct_mul_refused(?alloc, "spirv", "", "vulkan", "spirv", "spirv") != 0)                        { bad = bad | 2; }
+    if (ct_mul_refused(?alloc, "riscv64", "rv64gc", "linux", "lp64d", "elf") != 0)                   { bad = bad | 4; }
+    if (ct_mul_refused(?alloc, "riscv64", "rv64imafd_zicsr_zifencei", "linux", "lp64d", "elf") != 0) { bad = bad | 8; }
+    if (ct_mul_refused(?alloc, "riscv64", "rv64i_zkt", "linux", "lp64", "elf") != 0)                 { bad = bad | 16; }
+    if (ct_mul_refused(?alloc, "aarch64", "", "freestanding", "aapcs64", "elf") != 0)                { bad = bad | 128; }
+    var control: CtTuple = CtTuple{isa_name: "riscv64", baseline: "rv64gc_zkt", os_name: "linux", abi_name: "lp64d", of_name: "elf"};
     var buf:     [16384]u8;
     var len:     usize   = 0;
     if (ct_mul_listing(?alloc, ?control, nil, 0, "#[noinline]\n#[oblivious]\npub fun product(a: ^u64, b: ^u64) ^u64 { ret a * b; }\n", ?buf[0], 16384, ?len) != 0) { bad = bad | 256; }
@@ -1754,7 +1762,7 @@ test ct_mul_query__folds_to_u8_and_refuses_malformed_calls {
 # 0 when the build reports an error containing `needle`, or, for an empty
 # needle, when it loads and passes sema with no error at all
 #[testing]
-fun ext_probe(isa_name: str, os_name: str, abi_name: str, exts: str, program: str, needle: str) i32 {
+fun ext_probe(isa_name: str, baseline_name: str, os_name: str, abi_name: str, exts: str, program: str, needle: str) i32 {
     var alloc: A.Allocator;
     val made:  err[A.Error] = page.make(?alloc);
     if (sel made.err) { ret 1; }
@@ -1764,7 +1772,7 @@ fun ext_probe(isa_name: str, os_name: str, abi_name: str, exts: str, program: st
     fin { session.dnit(?s); }
     var names:  [1]str              = [1]str{"main.mach"};
     var texts:  [1]str              = [1]str{program};
-    val root_r: res[str, fail.Fail] = driver.scaffold(?alloc, ext_manifest(?alloc, isa_name, os_name, abi_name, exts), ?names[0], ?texts[0], 1);
+    val root_r: res[str, fail.Fail] = driver.scaffold(?alloc, ext_manifest_on(?alloc, isa_name, baseline_name, os_name, abi_name, exts), ?names[0], ?texts[0], 1);
     if (sel root_r.err) { ret 2; }
     val root: str = root_r.ok;
     fin { fs.remove_all(?alloc, root); }
@@ -1790,13 +1798,13 @@ fun ext_probe(isa_name: str, os_name: str, abi_name: str, exts: str, program: st
 # 0 when the program reaches codegen and the encoder reports an error containing
 # `needle`, or, for an empty needle, when it encodes with no error at all
 #[testing]
-fun ext_codegen(isa_name: str, os_name: str, abi_name: str, exts: str, program: str, needle: str) i32 {
-    ret ext_codegen_at(isa_name, os_name, abi_name, exts, program, needle, 0, 0);
+fun ext_codegen(isa_name: str, baseline_name: str, os_name: str, abi_name: str, exts: str, program: str, needle: str) i32 {
+    ret ext_codegen_at(isa_name, baseline_name, os_name, abi_name, exts, program, needle, 0, 0);
 }
 
 # as ext_codegen, and a nonzero `line` also holds the error to main.mach at `line`:`col`
 #[testing]
-fun ext_codegen_at(isa_name: str, os_name: str, abi_name: str, exts: str, program: str, needle: str, line: usize, col: usize) i32 {
+fun ext_codegen_at(isa_name: str, baseline_name: str, os_name: str, abi_name: str, exts: str, program: str, needle: str, line: usize, col: usize) i32 {
     var alloc: A.Allocator;
     val made:  err[A.Error] = page.make(?alloc);
     if (sel made.err) { ret 1; }
@@ -1806,7 +1814,7 @@ fun ext_codegen_at(isa_name: str, os_name: str, abi_name: str, exts: str, progra
     fin { session.dnit(?s); }
     var names:  [1]str              = [1]str{"main.mach"};
     var texts:  [1]str              = [1]str{program};
-    val root_r: res[str, fail.Fail] = driver.scaffold(?alloc, ext_manifest(?alloc, isa_name, os_name, abi_name, exts), ?names[0], ?texts[0], 1);
+    val root_r: res[str, fail.Fail] = driver.scaffold(?alloc, ext_manifest_on(?alloc, isa_name, baseline_name, os_name, abi_name, exts), ?names[0], ?texts[0], 1);
     if (sel root_r.err) { ret 2; }
     val root: str = root_r.ok;
     fin { fs.remove_all(?alloc, root); }
@@ -1830,38 +1838,38 @@ test extensions__aes_and_carry_less_rows_need_their_extension {
     val v:   str = "sysv64";
     val aes: str = "fun f() {\n    asm x86_64 { aesenc xmm0, xmm1\n aeskeygenassist xmm2, xmm1, 1 }\n}\n";
     val clm: str = "fun f() {\n    asm x86_64 { pclmulqdq xmm0, xmm1, 0x11 }\n}\n";
-    if (ext_codegen_at(x, l, v, "", aes, "inline-asm instruction 'aesenc' needs the `aes` extension", 2, 5) != 0)                                      { ret 1; }
-    if (ext_codegen(x, l, v, "[\"aes\"]", aes, "") != 0)                                                                                               { ret 2; }
-    if (ext_codegen_at(x, l, v, "[\"aes\"]", clm, "inline-asm instruction 'pclmulqdq' needs the `pclmul` extension", 2, 5) != 0)                       { ret 3; }
-    if (ext_codegen(x, l, v, "[\"pclmul\"]", clm, "") != 0)                                                                                            { ret 4; }
-    if (ext_codegen(x, l, v, "", "#[extensions(aes, pclmul)]\nfun f() { asm x86_64 { aesdeclast xmm0, xmm1\n pclmulqdq xmm0, xmm1, 0 } }\n", "") != 0) { ret 5; }
+    if (ext_codegen_at(x, "", l, v, "", aes, "inline-asm instruction 'aesenc' needs the `aes` extension", 2, 5) != 0)                                      { ret 1; }
+    if (ext_codegen(x, "", l, v, "[\"aes\"]", aes, "") != 0)                                                                                               { ret 2; }
+    if (ext_codegen_at(x, "", l, v, "[\"aes\"]", clm, "inline-asm instruction 'pclmulqdq' needs the `pclmul` extension", 2, 5) != 0)                       { ret 3; }
+    if (ext_codegen(x, "", l, v, "[\"pclmul\"]", clm, "") != 0)                                                                                            { ret 4; }
+    if (ext_codegen(x, "", l, v, "", "#[extensions(aes, pclmul)]\nfun f() { asm x86_64 { aesdeclast xmm0, xmm1\n pclmulqdq xmm0, xmm1, 0 } }\n", "") != 0) { ret 5; }
 
     val a:       str = "aarch64";
     val c:       str = "aapcs64";
     val arm_aes: str = "fun f() {\n    asm aarch64 { aese v0.16b, v1.16b\n aesmc v0.16b, v0.16b }\n}\n";
     val arm_clm: str = "fun f() {\n    asm aarch64 { pmull v0.1q, v1.1d, v2.1d\n pmull2 v3.1q, v1.2d, v2.2d }\n}\n";
-    if (ext_codegen_at(a, l, c, "", arm_aes, "inline-asm instruction 'aese' needs the `aes` extension", 2, 5) != 0)                                      { ret 6; }
-    if (ext_codegen(a, l, c, "[\"aes\"]", arm_aes, "") != 0)                                                                                             { ret 7; }
-    if (ext_codegen(a, l, c, "[\"pmull\"]", arm_aes, "") != 0)                                                                                           { ret 8; }
-    if (ext_codegen_at(a, l, c, "[\"aes\"]", arm_clm, "inline-asm instruction 'pmull' needs the `pmull` extension", 2, 5) != 0)                          { ret 9; }
-    if (ext_codegen(a, l, c, "[\"pmull\"]", arm_clm, "") != 0)                                                                                           { ret 10; }
-    if (ext_codegen(a, l, c, "", "#[extensions(aes, pmull)]\nfun f() { asm aarch64 { aesimc v0.16b, v1.16b\n pmull v0.1q, v1.1d, v2.1d } }\n", "") != 0) { ret 11; }
-    if (ext_answer(a, l, c, "[\"pmull\"]", "aes") != 1)                                                                                                  { ret 12; }
-    if (ext_answer(x, l, v, "[\"pclmul\"]", "aes") != 0)                                                                                                 { ret 13; }
+    if (ext_codegen_at(a, "", l, c, "", arm_aes, "inline-asm instruction 'aese' needs the `aes` extension", 2, 5) != 0)                                      { ret 6; }
+    if (ext_codegen(a, "", l, c, "[\"aes\"]", arm_aes, "") != 0)                                                                                             { ret 7; }
+    if (ext_codegen(a, "", l, c, "[\"pmull\"]", arm_aes, "") != 0)                                                                                           { ret 8; }
+    if (ext_codegen_at(a, "", l, c, "[\"aes\"]", arm_clm, "inline-asm instruction 'pmull' needs the `pmull` extension", 2, 5) != 0)                          { ret 9; }
+    if (ext_codegen(a, "", l, c, "[\"pmull\"]", arm_clm, "") != 0)                                                                                           { ret 10; }
+    if (ext_codegen(a, "", l, c, "", "#[extensions(aes, pmull)]\nfun f() { asm aarch64 { aesimc v0.16b, v1.16b\n pmull v0.1q, v1.1d, v2.1d } }\n", "") != 0) { ret 11; }
+    if (ext_answer(a, "", l, c, "[\"pmull\"]", "aes") != 1)                                                                                                  { ret 12; }
+    if (ext_answer(x, "", l, v, "[\"pclmul\"]", "aes") != 0)                                                                                                 { ret 13; }
     ret 0;
 }
 
 # the answer `$mach.build.extensions.<name>` gives on a target: 1, 0, or -1 when the build fails otherwise
 #[testing]
-fun ext_answer(isa_name: str, os_name: str, abi_name: str, exts: str, name: str) i32 {
+fun ext_answer(isa_name: str, baseline_name: str, os_name: str, abi_name: str, exts: str, name: str) i32 {
     var alloc: A.Allocator;
     val made:  err[A.Error] = page.make(?alloc);
     if (sel made.err) { ret -1; }
     val program: res[str, std_format.FormatError] = std_format.sprint(?alloc,
         "$if ($mach.build.extensions.{} == 1) {{ $error(\"ext answered one\"); }}\nval W: u64 = $mach.build.extensions.{};\n", name, name);
-    if (sel program.err)                                                                   { ret -1; }
-    if (ext_probe(isa_name, os_name, abi_name, exts, program.ok, "ext answered one") == 0) { ret 1; }
-    if (ext_probe(isa_name, os_name, abi_name, exts, program.ok, "") == 0)                 { ret 0; }
+    if (sel program.err)                                                                                  { ret -1; }
+    if (ext_probe(isa_name, baseline_name, os_name, abi_name, exts, program.ok, "ext answered one") == 0) { ret 1; }
+    if (ext_probe(isa_name, baseline_name, os_name, abi_name, exts, program.ok, "") == 0)                 { ret 0; }
     ret -1;
 }
 
@@ -1870,41 +1878,41 @@ fun ext_answer(isa_name: str, os_name: str, abi_name: str, exts: str, name: str)
 # isa's name is refused like an unknown one, never folded; a union of a riscv
 # isa string and a manifest list answers for both
 test build_extensions__answers_the_selected_isa_only {
-    if (ext_answer("x86_64", "linux", "sysv64", "[\"sha\"]", "sha") != 1)     { ret 1; }
-    if (ext_answer("x86_64", "linux", "sysv64", "[\"sha\"]", "sse41") != 0)   { ret 2; }
-    if (ext_answer("x86_64", "linux", "sysv64", "[\"sha\"]", "sha2") != -1)   { ret 3; }
-    if (ext_answer("x86_64", "linux", "sysv64", "[\"sha\"]", "m") != -1)      { ret 4; }
-    if (ext_answer("x86_64", "linux", "sysv64", "", "sha") != 0)              { ret 5; }
-    if (ext_answer("aarch64", "linux", "aapcs64", "[\"sha2\"]", "sha2") != 1) { ret 6; }
-    if (ext_answer("aarch64", "linux", "aapcs64", "[\"sha2\"]", "sha") != -1) { ret 7; }
-    if (ext_answer("aarch64", "linux", "aapcs64", "", "sha2") != 0)           { ret 8; }
+    if (ext_answer("x86_64", "", "linux", "sysv64", "[\"sha\"]", "sha") != 1)     { ret 1; }
+    if (ext_answer("x86_64", "", "linux", "sysv64", "[\"sha\"]", "sse41") != 0)   { ret 2; }
+    if (ext_answer("x86_64", "", "linux", "sysv64", "[\"sha\"]", "sha2") != -1)   { ret 3; }
+    if (ext_answer("x86_64", "", "linux", "sysv64", "[\"sha\"]", "m") != -1)      { ret 4; }
+    if (ext_answer("x86_64", "", "linux", "sysv64", "", "sha") != 0)              { ret 5; }
+    if (ext_answer("aarch64", "", "linux", "aapcs64", "[\"sha2\"]", "sha2") != 1) { ret 6; }
+    if (ext_answer("aarch64", "", "linux", "aapcs64", "[\"sha2\"]", "sha") != -1) { ret 7; }
+    if (ext_answer("aarch64", "", "linux", "aapcs64", "", "sha2") != 0)           { ret 8; }
 
     val unknown: str = "$if ($mach.build.extensions.avx9 == 1) { val X: u8 = 1; }\n";
-    if (ext_probe("x86_64", "linux", "sysv64", "", unknown,
+    if (ext_probe("x86_64", "", "linux", "sysv64", "", unknown,
         "`$mach.build.extensions.avx9`: `avx9` is not an extension of isa 'x86_64'; its extensions are: ssse3, sse41, sha, fsgsbase, popcnt, lzcnt, bmi1, sse42, cx16, avx, avx2, bmi2, fma, movbe, f16c, avx512f, avx512bw, avx512cd, avx512dq, avx512vl, aes, pclmul") != 0) { ret 9; }
-    if (ext_probe("aarch64", "linux", "aapcs64", "", "$if ($mach.build.extensions.sha == 1) { val X: u8 = 1; }\n",
+    if (ext_probe("aarch64", "", "linux", "aapcs64", "", "$if ($mach.build.extensions.sha == 1) { val X: u8 = 1; }\n",
         "`$mach.build.extensions.sha`: `sha` is not an extension of isa 'aarch64'; its extensions are: sha2, sb, aes, pmull") != 0) { ret 16; }
-    if (ext_probe("x86_64", "linux", "sysv64", "", "val X: u8 = $mach.build.extensions;\n", "names one extension") != 0) { ret 10; }
+    if (ext_probe("x86_64", "", "linux", "sysv64", "", "val X: u8 = $mach.build.extensions;\n", "names one extension") != 0) { ret 10; }
     # `&&` does not guard the right-hand side: the path is checked on its own,
     # so another isa's name needs the nested form under an arch guard
     val one_line: str = "$if ($mach.build.arch == $mach.arch.x86_64 && $mach.build.extensions.sha == 1) { $error(\"guarded one\"); }\n";
-    if (ext_probe("x86_64", "linux", "sysv64", "[\"sha\"]", one_line, "guarded one") != 0)                             { ret 17; }
-    if (ext_probe("aarch64", "linux", "aapcs64", "[\"sha2\"]", one_line, "is not an extension of isa 'aarch64'") != 0) { ret 18; }
+    if (ext_probe("x86_64", "", "linux", "sysv64", "[\"sha\"]", one_line, "guarded one") != 0)                             { ret 17; }
+    if (ext_probe("aarch64", "", "linux", "aapcs64", "[\"sha2\"]", one_line, "is not an extension of isa 'aarch64'") != 0) { ret 18; }
     val nested: str = "$if ($mach.build.arch == $mach.arch.x86_64) {\n    $if ($mach.build.extensions.sha == 1) { $error(\"guarded one\"); }\n}\n";
-    if (ext_probe("x86_64", "linux", "sysv64", "[\"sha\"]", nested, "guarded one") != 0) { ret 19; }
-    if (ext_probe("aarch64", "linux", "aapcs64", "[\"sha2\"]", nested, "") != 0)         { ret 20; }
+    if (ext_probe("x86_64", "", "linux", "sysv64", "[\"sha\"]", nested, "guarded one") != 0) { ret 19; }
+    if (ext_probe("aarch64", "", "linux", "aapcs64", "[\"sha2\"]", nested, "") != 0)         { ret 20; }
 
-    if (ext_answer("rv64i", "freestanding", "lp64", "[\"m\"]", "m") != 1)  { ret 11; }
-    if (ext_answer("rv64i", "freestanding", "lp64", "[\"m\"]", "a") != 0)  { ret 12; }
-    if (ext_answer("rv64ia", "freestanding", "lp64", "[\"m\"]", "a") != 1) { ret 13; }
-    if (ext_answer("rv64i", "freestanding", "lp64", "", "m") != 0)         { ret 14; }
-    if (ext_answer("rv64i", "freestanding", "lp64", "", "sha") != -1)      { ret 15; }
+    if (ext_answer("riscv64", "rv64i", "freestanding", "lp64", "[\"m\"]", "m") != 1)  { ret 11; }
+    if (ext_answer("riscv64", "rv64i", "freestanding", "lp64", "[\"m\"]", "a") != 0)  { ret 12; }
+    if (ext_answer("riscv64", "rv64ia", "freestanding", "lp64", "[\"m\"]", "a") != 1) { ret 13; }
+    if (ext_answer("riscv64", "rv64i", "freestanding", "lp64", "", "m") != 0)         { ret 14; }
+    if (ext_answer("riscv64", "rv64i", "freestanding", "lp64", "", "sha") != -1)      { ret 15; }
     # zkt is one vocabulary with the isa string: `_zkt` and the list select the same bit
-    if (ext_answer("rv64gc_zkt", "freestanding", "lp64d", "", "zkt") != 1)      { ret 21; }
-    if (ext_answer("rv64gc", "freestanding", "lp64d", "[\"zkt\"]", "zkt") != 1) { ret 22; }
-    if (ext_answer("rv64gc", "freestanding", "lp64d", "", "zkt") != 0)          { ret 23; }
-    if (ext_answer("x86_64", "linux", "sysv64", "", "zkt") != -1)               { ret 24; }
-    if (ext_answer("rv64gc", "freestanding", "lp64d", "[\"zkt\"]", "m") != 1)   { ret 25; }
+    if (ext_answer("riscv64", "rv64gc_zkt", "freestanding", "lp64d", "", "zkt") != 1)      { ret 21; }
+    if (ext_answer("riscv64", "rv64gc", "freestanding", "lp64d", "[\"zkt\"]", "zkt") != 1) { ret 22; }
+    if (ext_answer("riscv64", "rv64gc", "freestanding", "lp64d", "", "zkt") != 0)          { ret 23; }
+    if (ext_answer("x86_64", "", "linux", "sysv64", "", "zkt") != -1)                      { ret 24; }
+    if (ext_answer("riscv64", "rv64gc", "freestanding", "lp64d", "[\"zkt\"]", "m") != 1)   { ret 25; }
     ret 0;
 }
 
@@ -1913,14 +1921,14 @@ test build_extensions__answers_the_selected_isa_only {
 # brings f brings zicsr. the selection is closed once, at target resolution
 test extensions__selection_closes_over_implied {
     val shuffle: str = "fun f() { asm x86_64 { pshufb xmm0, xmm1 } }\n";
-    if (ext_codegen("x86_64", "linux", "sysv64", "[\"sse41\"]", shuffle, "") != 0)                          { ret 1; }
-    if (ext_codegen("x86_64", "linux", "sysv64", "", shuffle, "needs the `ssse3` extension") != 0)          { ret 2; }
-    if (ext_codegen("x86_64", "linux", "sysv64", "[\"sha\"]", shuffle, "needs the `ssse3` extension") != 0) { ret 3; }
-    if (ext_answer("x86_64", "linux", "sysv64", "[\"sse41\"]", "ssse3") != 1)                               { ret 4; }
-    if (ext_answer("x86_64", "linux", "sysv64", "[\"ssse3\"]", "sse41") != 0)                               { ret 5; }
-    if (ext_answer("rv64i", "freestanding", "lp64", "[\"d\"]", "f") != 1)                                   { ret 6; }
-    if (ext_answer("rv64i", "freestanding", "lp64", "[\"d\"]", "zicsr") != 1)                               { ret 7; }
-    if (ext_answer("rv64i", "freestanding", "lp64", "[\"f\"]", "d") != 0)                                   { ret 8; }
+    if (ext_codegen("x86_64", "", "linux", "sysv64", "[\"sse41\"]", shuffle, "") != 0)                          { ret 1; }
+    if (ext_codegen("x86_64", "", "linux", "sysv64", "", shuffle, "needs the `ssse3` extension") != 0)          { ret 2; }
+    if (ext_codegen("x86_64", "", "linux", "sysv64", "[\"sha\"]", shuffle, "needs the `ssse3` extension") != 0) { ret 3; }
+    if (ext_answer("x86_64", "", "linux", "sysv64", "[\"sse41\"]", "ssse3") != 1)                               { ret 4; }
+    if (ext_answer("x86_64", "", "linux", "sysv64", "[\"ssse3\"]", "sse41") != 0)                               { ret 5; }
+    if (ext_answer("riscv64", "rv64i", "freestanding", "lp64", "[\"d\"]", "f") != 1)                            { ret 6; }
+    if (ext_answer("riscv64", "rv64i", "freestanding", "lp64", "[\"d\"]", "zicsr") != 1)                        { ret 7; }
+    if (ext_answer("riscv64", "rv64i", "freestanding", "lp64", "[\"f\"]", "d") != 0)                            { ret 8; }
     ret 0;
 }
 
@@ -1963,36 +1971,37 @@ test extensions_decorator__checked_against_every_vocabulary {
     val x: str = "x86_64";
     val l: str = "linux";
     val a: str = "sysv64";
-    if (ext_probe(x, l, a, "", "#[extensions(sha, sse41)]\nfun f() i32 { ret 0; }\n", "") != 0)                          { ret 1; }
-    if (ext_probe(x, l, a, "", "#[extensions(sha2, zicsr)]\nfun f() i32 { ret 0; }\n", "") != 0)                         { ret 2; }
-    if (ext_probe(x, l, a, "", "#[extensions(sha)]\nval V: i32 = 0;\n", "applies only to functions") != 0)               { ret 3; }
-    if (ext_probe(x, l, a, "", "#[extensions(sha)]\next fun f() i32;\n", "applies only to a function with a body") != 0) { ret 4; }
-    if (ext_probe(x, l, a, "", "#[extensions()]\nfun f() i32 { ret 0; }\n", "names at least one extension") != 0)        { ret 5; }
-    if (ext_probe(x, l, a, "", "#[extensions(\"sha\")]\nfun f() i32 { ret 0; }\n", "bare extension names") != 0)         { ret 6; }
-    if (ext_probe(x, l, a, "", "#[extensions(sha, sha)]\nfun f() i32 { ret 0; }\n", "names this extension twice") != 0)  { ret 7; }
+    if (ext_probe(x, "", l, a, "", "#[extensions(sha, sse41)]\nfun f() i32 { ret 0; }\n", "") != 0)                          { ret 1; }
+    if (ext_probe(x, "", l, a, "", "#[extensions(sha2, zicsr)]\nfun f() i32 { ret 0; }\n", "") != 0)                         { ret 2; }
+    if (ext_probe(x, "", l, a, "", "#[extensions(sha)]\nval V: i32 = 0;\n", "applies only to functions") != 0)               { ret 3; }
+    if (ext_probe(x, "", l, a, "", "#[extensions(sha)]\next fun f() i32;\n", "applies only to a function with a body") != 0) { ret 4; }
+    if (ext_probe(x, "", l, a, "", "#[extensions()]\nfun f() i32 { ret 0; }\n", "names at least one extension") != 0)        { ret 5; }
+    if (ext_probe(x, "", l, a, "", "#[extensions(\"sha\")]\nfun f() i32 { ret 0; }\n", "bare extension names") != 0)         { ret 6; }
+    if (ext_probe(x, "", l, a, "", "#[extensions(sha, sha)]\nfun f() i32 { ret 0; }\n", "names this extension twice") != 0)  { ret 7; }
     val unknown: str = "#[extensions(avx9)]\nfun f() i32 { ret 0; }\n";
-    if (ext_probe(x, l, a, "", unknown,
+    if (ext_probe(x, "", l, a, "", unknown,
         "`extensions` decorator: no extension catalog names `avx9` (read from masc's x86 catalog, ") != 0) { ret 8; }
-    if (ext_probe(x, l, a, "", unknown, "ssse3, sse41, sha, fsgsbase, popcnt, lzcnt, bmi1") != 0)                   { ret 9; }
-    if (ext_probe(x, l, a, "", unknown, "sha2") != 0)                                                               { ret 10; }
-    if (ext_probe("rv64i", "freestanding", "lp64", "", "#[extensions(m, sha)]\nfun f() i32 { ret 0; }\n", "") != 0) { ret 11; }
+    if (ext_probe(x, "", l, a, "", unknown, "ssse3, sse41, sha, fsgsbase, popcnt, lzcnt, bmi1") != 0)                          { ret 9; }
+    if (ext_probe(x, "", l, a, "", unknown, "sha2") != 0)                                                                      { ret 10; }
+    if (ext_probe("riscv64", "rv64i", "freestanding", "lp64", "", "#[extensions(m, sha)]\nfun f() i32 { ret 0; }\n", "") != 0) { ret 11; }
     # a row only a target selects is never a function's, on its own isa or another's
-    if (ext_probe("rv64i", "freestanding", "lp64", "", "#[extensions(f)]\nfun f() i32 { ret 0; }\n",
+    if (ext_probe("riscv64", "rv64i", "freestanding", "lp64", "", "#[extensions(f)]\nfun f() i32 { ret 0; }\n",
         "`extensions` decorator: `f` is not a function's to admit, it selects the float register file and the calling convention's float registers for the whole target; select it with the target's `extensions` or isa string") != 0) { ret 12; }
-    if (ext_probe("rv64i", "freestanding", "lp64", "", "#[extensions(d)]\nfun f() i32 { ret 0; }\n", "`d` is not a function's to admit") != 0)                                                           { ret 13; }
-    if (ext_probe("rv64i", "freestanding", "lp64", "", "#[extensions(i)]\nfun f() i32 { ret 0; }\n", "it is the baseline every selection holds") != 0)                                                   { ret 14; }
-    if (ext_probe("rv64i", "freestanding", "lp64", "", "#[extensions(c)]\nfun f() i32 { ret 0; }\n", "it is a code-size selection of the whole target; mach emits no compressed forms") != 0)            { ret 15; }
-    if (ext_probe("rv64i", "freestanding", "lp64", "", "#[extensions(zkt)]\nfun f() i32 { ret 0; }\n", "`zkt` is not a function's to admit, it is a promise about the machine's execution timing") != 0) { ret 18; }
-    if (ext_probe(x, l, a, "", "#[extensions(f)]\nfun f() i32 { ret 0; }\n", "`f` is not a function's to admit") != 0)                                                                                   { ret 16; }
-    if (ext_probe(x, l, a, "", "#[extensions(zicsr, a)]\nfun f() i32 { ret 0; }\n", "") != 0)                                                                                                            { ret 17; }
+    if (ext_probe("riscv64", "rv64i", "freestanding", "lp64", "", "#[extensions(d)]\nfun f() i32 { ret 0; }\n", "`d` is not a function's to admit") != 0)                                                           { ret 13; }
+    if (ext_probe("riscv64", "rv64i", "freestanding", "lp64", "", "#[extensions(i)]\nfun f() i32 { ret 0; }\n", "it is the baseline every selection holds") != 0)                                                   { ret 14; }
+    if (ext_probe("riscv64", "rv64i", "freestanding", "lp64", "", "#[extensions(c)]\nfun f() i32 { ret 0; }\n", "it is a code-size selection of the whole target; mach emits no compressed forms") != 0)            { ret 15; }
+    if (ext_probe("riscv64", "rv64i", "freestanding", "lp64", "", "#[extensions(zkt)]\nfun f() i32 { ret 0; }\n", "`zkt` is not a function's to admit, it is a promise about the machine's execution timing") != 0) { ret 18; }
+    if (ext_probe(x, "", l, a, "", "#[extensions(f)]\nfun f() i32 { ret 0; }\n", "`f` is not a function's to admit") != 0)                                                                                          { ret 16; }
+    if (ext_probe(x, "", l, a, "", "#[extensions(zicsr, a)]\nfun f() i32 { ret 0; }\n", "") != 0)                                                                                                                   { ret 17; }
     ret 0;
 }
 
 # `{target.isa}` is the manifest's `isa` value as written, on every isa: the
 # `extensions` list is part of the target's identity and of `{target.name}`,
-# never of the isa placeholder, so `rv64i` plus `["m"]` still expands to `rv64i`
+# never of the isa placeholder, so `riscv64` on `rv64i` plus `["m"]` still expands
+# to `riscv64`
 #[testing]
-fun ext_isa_placeholder(isa_name: str, os_name: str, abi_name: str, exts: str, want: str) i32 {
+fun ext_isa_placeholder(isa_name: str, baseline_name: str, os_name: str, abi_name: str, exts: str, want: str) i32 {
     var alloc: A.Allocator;
     val made:  err[A.Error] = page.make(?alloc);
     if (sel made.err) { ret 1; }
@@ -2002,7 +2011,7 @@ fun ext_isa_placeholder(isa_name: str, os_name: str, abi_name: str, exts: str, w
     fin { session.dnit(?s); }
     var names:  [1]str              = [1]str{"main.mach"};
     var texts:  [1]str              = [1]str{"fun f() i32 { ret 0; }\n"};
-    val root_r: res[str, fail.Fail] = driver.scaffold(?alloc, ext_manifest(?alloc, isa_name, os_name, abi_name, exts), ?names[0], ?texts[0], 1);
+    val root_r: res[str, fail.Fail] = driver.scaffold(?alloc, ext_manifest_on(?alloc, isa_name, baseline_name, os_name, abi_name, exts), ?names[0], ?texts[0], 1);
     if (sel root_r.err) { ret 2; }
     val root: str = root_r.ok;
     fin { fs.remove_all(?alloc, root); }
@@ -2017,8 +2026,8 @@ fun ext_isa_placeholder(isa_name: str, os_name: str, abi_name: str, exts: str, w
 }
 
 test target_isa_placeholder__omits_the_extensions_list {
-    if (ext_isa_placeholder("rv64i", "freestanding", "lp64", "[\"m\"]", "rv64i") != 0) { ret 1; }
-    if (ext_isa_placeholder("x86_64", "linux", "sysv64", "[\"sha\"]", "x86_64") != 0)  { ret 2; }
+    if (ext_isa_placeholder("riscv64", "rv64i", "freestanding", "lp64", "[\"m\"]", "riscv64") != 0) { ret 1; }
+    if (ext_isa_placeholder("x86_64", "", "linux", "sysv64", "[\"sha\"]", "x86_64") != 0)           { ret 2; }
     ret 0;
 }
 
@@ -2027,24 +2036,24 @@ test target_isa_placeholder__omits_the_extensions_list {
 # does; d alone is fine, it brings f and zicsr
 test manifest_extensions__checked_against_the_isa_vocabulary {
     val ok: str = "fun f() i32 { ret 0; }\n";
-    if (ext_probe("x86_64", "linux", "sysv64", "[\"sha\", \"ssse3\", \"sse41\"]", ok, "") != 0) { ret 1; }
-    if (ext_probe("x86_64", "linux", "sysv64", "[\"sha2\"]", ok,
+    if (ext_probe("x86_64", "", "linux", "sysv64", "[\"sha\", \"ssse3\", \"sse41\"]", ok, "") != 0) { ret 1; }
+    if (ext_probe("x86_64", "", "linux", "sysv64", "[\"sha2\"]", ok,
         "`sha2` is not an extension or level of isa 'x86_64'; its extensions are: ssse3, sse41, sha, fsgsbase, popcnt, lzcnt, bmi1, sse42, cx16, avx, avx2, bmi2, fma, movbe, f16c, avx512f, avx512bw, avx512cd, avx512dq, avx512vl, aes, pclmul; its levels are: x86-64-v2, x86-64-v3, x86-64-v4") != 0) { ret 2; }
-    if (ext_probe("aarch64", "linux", "aapcs64", "[\"sha\"]", ok,
+    if (ext_probe("aarch64", "", "linux", "aapcs64", "[\"sha\"]", ok,
         "`sha` is not an extension of isa 'aarch64'; its extensions are: sha2, sb, aes, pmull") != 0) { ret 3; }
-    if (ext_probe("x86_64", "linux", "sysv64", "[\"sse4.1\"]", ok, "is not an extension name or level") != 0) { ret 4; }
+    if (ext_probe("x86_64", "", "linux", "sysv64", "[\"sse4.1\"]", ok, "is not an extension name or level") != 0) { ret 4; }
     # a level is a manifest spelling that expands to its members, beside names
     # or alone, and an unknown level names the known ones
-    if (ext_probe("x86_64", "linux", "sysv64", "[\"x86-64-v2\", \"sha\"]", ok, "") != 0) { ret 8; }
-    if (ext_probe("x86_64", "linux", "sysv64", "[\"x86-64-v5\"]", ok,
+    if (ext_probe("x86_64", "", "linux", "sysv64", "[\"x86-64-v2\", \"sha\"]", ok, "") != 0) { ret 8; }
+    if (ext_probe("x86_64", "", "linux", "sysv64", "[\"x86-64-v5\"]", ok,
         "`x86-64-v5` is not an extension or level of isa 'x86_64'; its extensions are: ssse3, sse41, sha, fsgsbase, popcnt, lzcnt, bmi1, sse42, cx16, avx, avx2, bmi2, fma, movbe, f16c, avx512f, avx512bw, avx512cd, avx512dq, avx512vl, aes, pclmul; its levels are: x86-64-v2, x86-64-v3, x86-64-v4") != 0) { ret 9; }
-    if (ext_probe("aarch64", "linux", "aapcs64", "[\"x86-64-v2\"]", ok,
+    if (ext_probe("aarch64", "", "linux", "aapcs64", "[\"x86-64-v2\"]", ok,
         "`x86-64-v2` is not an extension of isa 'aarch64'; its extensions are: sha2, sb, aes, pmull") != 0) { ret 10; }
-    if (ext_answer("x86_64", "linux", "sysv64", "[\"x86-64-v3\"]", "avx2") != 1)                              { ret 11; }
-    if (ext_answer("x86_64", "linux", "sysv64", "[\"x86-64-v3\"]", "sse41") != 1)                             { ret 12; }
-    if (ext_answer("x86_64", "linux", "sysv64", "[\"x86-64-v2\"]", "avx") != 0)                               { ret 13; }
-    if (ext_probe("x86_64", "linux", "sysv64", "[\"sha\", \"sha\"]", ok, "lists \"sha\" twice") != 0)         { ret 5; }
-    if (ext_probe("x86_64", "linux", "sysv64", "\"sha\"", ok, "extensions must be an array of strings") != 0) { ret 6; }
-    if (ext_probe("rv64i", "freestanding", "lp64", "[\"d\"]", ok, "") != 0)                                   { ret 7; }
+    if (ext_answer("x86_64", "", "linux", "sysv64", "[\"x86-64-v3\"]", "avx2") != 1)                              { ret 11; }
+    if (ext_answer("x86_64", "", "linux", "sysv64", "[\"x86-64-v3\"]", "sse41") != 1)                             { ret 12; }
+    if (ext_answer("x86_64", "", "linux", "sysv64", "[\"x86-64-v2\"]", "avx") != 0)                               { ret 13; }
+    if (ext_probe("x86_64", "", "linux", "sysv64", "[\"sha\", \"sha\"]", ok, "lists \"sha\" twice") != 0)         { ret 5; }
+    if (ext_probe("x86_64", "", "linux", "sysv64", "\"sha\"", ok, "extensions must be an array of strings") != 0) { ret 6; }
+    if (ext_probe("riscv64", "rv64i", "freestanding", "lp64", "[\"d\"]", ok, "") != 0)                            { ret 7; }
     ret 0;
 }

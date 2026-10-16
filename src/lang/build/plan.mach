@@ -767,6 +767,7 @@ fun plan_unit(a: *A.Allocator, itn: *intern.Interner, reg: *lang_target.TargetRe
     te.name            = bu.target_name;
     te.os_name         = bu.target.os;
     te.isa_name        = bu.target.isa;
+    te.baseline_name   = bu.target.baseline;
     te.abi_name        = bu.target.abi;
     te.of_name         = bu.target.of;
     te.extensions      = bu.target.extensions;

@@ -30,7 +30,6 @@ use std.text.string.str_free;
 use masc_extension: masc.core.extension;
 use masc.core.requirement;
 
-use mach.lang.fail;
 use mach.lang.lexis;
 use mach.lang.textbuild;
 
@@ -57,44 +56,24 @@ pub rec Extension {
 #          no masc catalog states
 # rows:    the extensions, each a row of the catalog
 # count:   how many
+# float:   the bits a value of a floating-point width needs to be held in float
+#          registers, nil when every selection holds them
 pub rec Table {
     source:  str;
     catalog: *masc_extension.Catalog;
     rows:    *Extension;
     count:   u32;
+    float:   FloatRequirementFn;
 }
 
-# the token a refusal of a selection is about: its offset and length in the
-# name, zero-length when the refusal is about the name as a whole
-pub rec Span {
-    at:  usize;
-    len: usize;
-}
+# the bits of a table a floating-point value of `bits` bits needs held
+pub def FloatRequirementFn: fun(u32) u64;
 
-# what a name spelled in a selection syntax selects: the registered
-# instruction set it narrows, by its catalog spelling, and the extension bits
-# it names
-pub rec Selection {
-    template:   str;
-    extensions: u64;
-}
-
-# how an instruction set whose names carry a selection reads and writes them.
-# an instruction set without one is named only by its registered name
-pub rec SelectionSyntax {
-    # whether the name is spelled in this syntax
-    claims: fun(str) bool;
-    # the selection the name spells; a refusal marks its token in the span
-    parse: fun(str, *Span) res[Selection, fail.Fail];
-    # the canonical name of a register width in bytes and extension bits,
-    # written into the buffer
-    spell: fun(u32, u64, *u8, usize) str;
-    # the extension bits passing floats of a width in float registers needs
-    float_requirement: fun(u32) u64;
-    # the letters of extension bits, for a diagnostic
-    letters: fun(u64) str;
-    # why extension bits hold no floating-point unit, "" when they hold one
-    float_absence: fun(u64) str;
+# the bits a floating-point value of `bits` bits needs that `selected` lacks, 0
+# when it lacks none
+pub fun float_absent(t: *Table, bits: u32, selected: u64) u64 {
+    if (t == nil || t.float == nil) { ret 0; }
+    ret t.float(bits) & ~selected;
 }
 
 # the most rows a table holds: one per bit
@@ -371,7 +350,6 @@ pub fun levels_append(b: *textbuild.TextBuilder, t: *Table) err[textbuild.Error]
 }
 
 # the names of every row whose bit is in `bits`, `, `-separated, appended to `b`
-#[testing]
 pub fun bits_append(b: *textbuild.TextBuilder, t: *Table, bits: u64) err[textbuild.Error] {
     var first: bool = true;
     var i:     u32  = 0;

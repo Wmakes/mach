@@ -1,6 +1,6 @@
 # the instruction set catalog: the architectures of mink's catalog mach has a
-# target for, each with its id, its fingerprint tag and the selection syntax its
-# names may carry. it is an explicit projection: a row names mink's architecture
+# target for, each with its id, its fingerprint tag and the baseline a target of it
+# stands on when it names none. it is an explicit projection: a row names mink's architecture
 # row and is spelled by it, and an architecture of mink's no row names (x86,
 # arm64e, wasm32, ...) is no instruction set here and no `$mach.arch` tag
 use mink_arch:    mink.catalog.arch;
@@ -10,15 +10,10 @@ use arch_riscv:   mink.catalog.arch.riscv;
 use arch_spirv:   mink.catalog.arch.spirv;
 use arch_x86:     mink.catalog.arch.x86;
 
-use mach.lang.fail;
-use mach.lang.target.extension;
-use extension_riscv: mach.lang.target.extension.riscv;
-use std.types.option.opt;
-use std.types.result.res;
 use std.types.size.usize;
 use std.types.string.str;
 use std.types.string.str_equals;
-use std.types.string.str_len;
+
 pub val UNKNOWN: u32 = 0;
 pub val X86_64:  u32 = 1;
 pub val AARCH64: u32 = 2;
@@ -35,9 +30,9 @@ rec Row {
     arch:            u32;
     owner:           *mink_arch.Arch;
     fingerprint_tag: u8;
-    # how a name that carries a selection spells this instruction set, nil
-    # when only its spelling names it
-    syntax: *extension.SelectionSyntax;
+    # the baseline a target naming no `baseline` stands on, spelled as masc's catalog
+    # spells a selection; nil for an instruction set whose catalog spells none
+    default_baseline: str;
 }
 
 # version 2: catalog id 4 is reserved with no row and the tags after it moved up
@@ -47,9 +42,9 @@ val ROW_COUNT: usize          = 5;
 val ROWS:      [ROW_COUNT]Row = [ROW_COUNT]Row{
     Row{arch: X86_64, owner: ?arch_x86.X86_64, fingerprint_tag: 1},
     Row{arch: AARCH64, owner: ?arch_aarch64.AARCH64, fingerprint_tag: 2},
-    Row{arch: RISCV64, owner: ?arch_riscv.RISCV64, fingerprint_tag: 3, syntax: ?extension_riscv.SYNTAX},
+    Row{arch: RISCV64, owner: ?arch_riscv.RISCV64, fingerprint_tag: 3, default_baseline: "rv64gc"},
     Row{arch: SPIRV, owner: ?arch_spirv.SPIRV, fingerprint_tag: 4},
-    Row{arch: RISCV32, owner: ?arch_riscv.RISCV32, fingerprint_tag: 5, syntax: ?extension_riscv.SYNTAX},
+    Row{arch: RISCV32, owner: ?arch_riscv.RISCV32, fingerprint_tag: 5, default_baseline: "rv32imac"},
 };
 
 # the spelling of a row: mink's name for its architecture
@@ -72,52 +67,15 @@ pub fun id_for(name: str) u32 {
         if (str_equals(spelling(?ROWS[i]), name)) { ret ROWS[i].arch; }
         i = i + 1;
     }
-    val syntax: *extension.SelectionSyntax = syntax_for(name);
-    if (syntax == nil) { ret UNKNOWN; }
-    var bad:    extension.Span;
-    val parsed: res[extension.Selection, fail.Fail] = syntax.parse(name, ?bad);
-    if (sel parsed.err) { ret UNKNOWN; }
-    i = 0;
-    for (i < ROW_COUNT) {
-        if (str_equals(spelling(?ROWS[i]), parsed.ok.template)) { ret ROWS[i].arch; }
-        i = i + 1;
-    }
     ret UNKNOWN;
 }
 
-# the selection syntax that claims a name, nil when none does and only a
-# spelling names an instruction set
-pub fun syntax_for(name: str) *extension.SelectionSyntax {
-    var i: usize = 0;
-    for (i < ROW_COUNT) {
-        val syntax: *extension.SelectionSyntax = ROWS[i].syntax;
-        if (syntax != nil && syntax.claims(name)) { ret syntax; }
-        i = i + 1;
-    }
-    ret nil;
-}
-
-# the selection syntax an instruction set's names carry, nil when it has none
-pub fun syntax_of(id: u32) *extension.SelectionSyntax {
+# the baseline a target of the instruction set `id` stands on when it names none, in
+# masc's spelling; nil when its catalog spells no selection, so it takes no baseline
+pub fun default_baseline(id: u32) str {
     val spec: *Row = row_of(id);
     if (spec == nil) { ret nil; }
-    ret spec.syntax;
-}
-
-# why a selection has no floating-point unit, for a diagnostic that already names
-# the selection: what the selection syntax says it lacks, or none when the name
-# carries no extension vocabulary the front end could ask the user to add. the
-# name is the selection the target was resolved from, so one that does not
-# parse is the failure that refused it
-pub fun float_absence_note(name: str) res[opt[str], fail.Fail] {
-    val syntax: *extension.SelectionSyntax = syntax_for(name);
-    if (syntax == nil) { ret res[opt[str], fail.Fail].ok{opt[str].none{}}; }
-    var bad:    extension.Span;
-    val parsed: res[extension.Selection, fail.Fail] = syntax.parse(name, ?bad);
-    if (sel parsed.err) { ret res[opt[str], fail.Fail].err{parsed.err}; }
-    val note: str = syntax.float_absence(parsed.ok.extensions);
-    if (str_len(note) == 0) { ret res[opt[str], fail.Fail].ok{opt[str].none{}}; }
-    ret res[opt[str], fail.Fail].ok{opt[str].some{note}};
+    ret spec.default_baseline;
 }
 
 # the instruction set the compiler itself was built for, UNKNOWN when the
@@ -157,39 +115,16 @@ pub fun fingerprint_tag(id: u32) u8 {
     ret spec.fingerprint_tag;
 }
 
-# the note, "-" for none and "!" for a refusal
-#[testing]
-fun t_note(name: str) str {
-    val r: res[opt[str], fail.Fail] = float_absence_note(name);
-    if (sel r.err)     { ret "!"; }
-    if (sel r.ok.none) { ret "-"; }
-    ret r.ok.some;
-}
-
-test float_absence_note__names_the_missing_extension_for_a_riscv_selection {
-    if (!str_equals(t_note("rv32imc"), "the selection lacks the F extension")) { ret 1; }
-    if (!str_equals(t_note("rv64i"), "the selection lacks the F extension"))   { ret 2; }
-    if (!str_equals(t_note("riscv32"), "the selection lacks the F extension")) { ret 3; }
-    if (!str_equals(t_note("rv32imafdc"), "-"))                                { ret 4; }
-    if (!str_equals(t_note("riscv64"), "-"))                                   { ret 5; }
-    if (!str_equals(t_note("x86_64"), "-"))                                    { ret 6; }
-    if (!str_equals(t_note("rv32iv"), "!"))                                    { ret 7; }
-    ret 0;
-}
-
 test id_for__name_roundtrip {
-    if (id_for("x86_64") != X86_64)   { ret 1; }
-    if (id_for("aarch64") != AARCH64) { ret 1; }
-    if (id_for("riscv64") != RISCV64) { ret 1; }
-    if (id_for("riscv32") != RISCV32) { ret 1; }
-    if (id_for("mos6502") != UNKNOWN) { ret 1; }
-    if (id_for("spirv") != SPIRV)     { ret 1; }
-    if (id_for("riscv") != UNKNOWN)   { ret 1; }
-    if (RISCV32 == RISCV64)           { ret 1; }
-    if (id_for("rv32imc") != RISCV32) { ret 2; }
-    if (id_for("rv64gc") != RISCV64)  { ret 2; }
-    if (id_for("rv32e") != UNKNOWN || id_for("rv64iv") != UNKNOWN
-        || id_for("rv128i") != UNKNOWN) { ret 2; }
+    if (id_for("x86_64") != X86_64)                                  { ret 1; }
+    if (id_for("aarch64") != AARCH64)                                { ret 1; }
+    if (id_for("riscv64") != RISCV64)                                { ret 1; }
+    if (id_for("riscv32") != RISCV32)                                { ret 1; }
+    if (id_for("mos6502") != UNKNOWN)                                { ret 1; }
+    if (id_for("spirv") != SPIRV)                                    { ret 1; }
+    if (id_for("riscv") != UNKNOWN)                                  { ret 1; }
+    if (RISCV32 == RISCV64)                                          { ret 1; }
+    if (id_for("rv32imc") != UNKNOWN || id_for("rv64gc") != UNKNOWN) { ret 2; }
 
     if (!str_equals(name_for(X86_64), "x86_64"))   { ret 1; }
     if (!str_equals(name_for(AARCH64), "aarch64")) { ret 1; }

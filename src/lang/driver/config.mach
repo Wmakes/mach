@@ -311,6 +311,7 @@ pub fun load_config_manifest(p: *project.Project, project_root: str, m: *manifes
     entry.name            = bu.target_name;
     entry.os_name         = bu.target.os;
     entry.isa_name        = bu.target.isa;
+    entry.baseline_name   = bu.target.baseline;
     entry.abi_name        = bu.target.abi;
     entry.of_name         = bu.target.of;
     entry.platform_name   = bu.target.platform;
@@ -642,6 +643,7 @@ pub fun select_target(p: *project.Project, t: *project.TargetEntry) err[fail.Fai
     var req: lang_target.TargetRequest = lang_target.target_request(isa_name, os_name, abi_name);
     lang_target.with_of(?req, of_name);
     lang_target.with_image(?req, t.base, t.stack_reserve, t.stack_commit);
+    if (!intern.str_is_nil(t.baseline_name)) { lang_target.with_baseline(?req, intern.text(?p.s.interner, t.baseline_name)); }
     var env_name: str = "";
     if (!intern.str_is_nil(t.env_name)) { env_name = intern.text(?p.s.interner, t.env_name); }
     # a target the manifest does not name is labelled by its isa

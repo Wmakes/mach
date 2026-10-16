@@ -2227,7 +2227,7 @@ test union__loads_every_artifact_entry_and_a_selection_narrows {
 
 #[testing]
 fun float_union_manifest() str {
-    ret "[project]\nmach = \">=5\"\nid = \"floatunion\"\nversion = \"0.0.0\"\nsrc = \"src\"\nwork = \"out/{target.name}/{profile.name}\"\n\n[target.linux]\nisa = \"x86_64\"\nos = \"linux\"\nabi = \"sysv64\"\n\n[target.rv32]\nisa = \"rv32imc\"\nos = \"freestanding\"\nabi = \"ilp32\"\n\n[artifact.floatunion]\nkind = \"bin\"\nentry = \"main.mach\"\nout = \"{project.work}/bin/floatunion\"\ntargets = [\"*\"]\nlink = []\nneed = []\n[profile.debug]\ndefault = true\noptimize = false\ndebug = true\nsimd = \"scalarize\"\n[profile.release]\noptimize = true\ndebug = false\nsimd = \"scalarize\"\n";
+    ret "[project]\nmach = \">=5\"\nid = \"floatunion\"\nversion = \"0.0.0\"\nsrc = \"src\"\nwork = \"out/{target.name}/{profile.name}\"\n\n[target.linux]\nisa = \"x86_64\"\nos = \"linux\"\nabi = \"sysv64\"\n\n[target.rv32]\nisa = \"riscv32\"\nbaseline = \"rv32imc\"\nos = \"freestanding\"\nabi = \"ilp32\"\n\n[artifact.floatunion]\nkind = \"bin\"\nentry = \"main.mach\"\nout = \"{project.work}/bin/floatunion\"\ntargets = [\"*\"]\nlink = []\nneed = []\n[profile.debug]\ndefault = true\noptimize = false\ndebug = true\nsimd = \"scalarize\"\n[profile.release]\noptimize = true\ndebug = false\nsimd = \"scalarize\"\n";
 }
 
 # a float arm gated to linux draws no floating-point refusal from the freestanding rv32imc

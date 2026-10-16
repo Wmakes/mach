@@ -922,6 +922,21 @@ pub fun extension_bundle(m: *Machine, name: str, len: usize) u64 {
 
 # the text a spelling built into `b`, owned by `b`'s allocator (released with
 # str_free), or the failure that stopped it; `b` is released either way
+# why a selection holds no float registers for a value of `bits` bits, as a note
+# naming the extensions it lacks, none when it lacks none
+pub fun float_absence(a: *A.Allocator, t: *extension.Table, bits: u32, selected: u64) res[opt[str], fail.Fail] {
+    val absent: u64 = extension.float_absent(t, bits, selected);
+    if (absent == 0) { ret res[opt[str], fail.Fail].ok{opt[str].none{}}; }
+    var noun: str = "extension";
+    if ((absent & (absent - 1)) != 0) { noun = "extensions"; }
+    var b:     textbuild.TextBuilder = textbuild.tb_init(a);
+    val names: res[str, fail.Fail]   = spelling_finish(?b, extension.bits_append(?b, t, absent));
+    if (sel names.err) { ret res[opt[str], fail.Fail].err{names.err}; }
+    val note: res[str, fail.Fail] = fail.format(a, "the selection lacks the {} {}", names.ok, noun);
+    if (sel note.err) { ret res[opt[str], fail.Fail].err{note.err}; }
+    ret res[opt[str], fail.Fail].ok{opt[str].some{note.ok}};
+}
+
 pub fun spelling_finish(b: *textbuild.TextBuilder, r: err[textbuild.Error]) res[str, fail.Fail] {
     var e: textbuild.Error;
     if (sel r.err) { e = r.err; }

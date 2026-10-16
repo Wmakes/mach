@@ -819,7 +819,7 @@ fun t_selected_copy(t: *lang_target.Binding, opcode: u32, copied: bool) bool {
 }
 
 test copies__a_narrow_copy_merges_only_where_the_machine_selected_a_move {
-    val s32: res[lang_target.Binding, fail.Fail] = lang_target.t_select("rv32imafdc", "freestanding", "ilp32d");
+    val s32: res[lang_target.Binding, fail.Fail] = lang_target.t_select_on("riscv32", "rv32imafdc", "freestanding", "ilp32d");
     if (sel s32.err) { ret 2; }
     var rv32: lang_target.Binding                 = s32.ok;
     val s64:  res[lang_target.Binding, fail.Fail] = lang_target.t_select("riscv64", "linux", "lp64d");

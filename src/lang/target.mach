@@ -1,5 +1,6 @@
 use mach.lang.fail;
 use mach.lang.float;
+use mink_arch: mink.catalog.arch;
 use std.allocator.page;
 use collections_vector: std.collections.vector;
 use std.collections.vector.Vector;
@@ -37,6 +38,7 @@ use mir_debug: mach.lang.mir.debug;
 use mach.lang.target.abi;
 use mach.lang.target.abi.aapcs64;
 use mach.lang.target.abi.sysv;
+use target_baseline: mach.lang.target.baseline;
 use mach.lang.target.binding;
 use catalog_abi:       mach.lang.target.catalog.abi;
 use catalog_arch:      mach.lang.target.catalog.arch;
@@ -246,6 +248,8 @@ pub rec TargetRequest {
     # names from the isa's extension vocabulary, borrowed for the call
     extensions:      *str;
     extension_count: u32;
+    # the selection the target stands on, in masc's spelling, "" for the isa's default
+    baseline_name: str;
 }
 
 pub fun target_request(isa_name: str, os_name: str, abi_name: str) TargetRequest {
@@ -259,7 +263,12 @@ pub fun target_request(isa_name: str, os_name: str, abi_name: str) TargetRequest
     r.stack_commit    = 0;
     r.extensions      = nil;
     r.extension_count = 0;
+    r.baseline_name   = "";
     ret r;
+}
+
+pub fun with_baseline(req: *TargetRequest, baseline_name: str) {
+    req.baseline_name = baseline_name;
 }
 
 pub fun with_extensions(req: *TargetRequest, names: *str, count: u32) {
@@ -334,19 +343,7 @@ pub fun resolve(reg: *TargetRegistry, req: *TargetRequest) res[binding.Binding, 
     }
     val os_vt: *lang_target_os.OsVTable = opt_os_vt.some;
 
-    var lookup_name: str                        = isa_name;
-    var selection:   opt[extension.Selection]   = opt[extension.Selection].none{};
-    val syntax:      *extension.SelectionSyntax = catalog_arch.syntax_for(isa_name);
-    if (syntax != nil) {
-        var bad:    extension.Span;
-        val parsed: res[extension.Selection, fail.Fail] = syntax.parse(isa_name, ?bad);
-        if (sel parsed.err) {
-            ret res[binding.Binding, fail.Fail].err{selection_refusal(?reg.alloc, fail.describe(parsed.err), isa_name, ?bad)};
-        }
-        selection   = opt[extension.Selection].some{parsed.ok};
-        lookup_name = parsed.ok.template;
-    }
-    val opt_arch_vt: opt[*isa.IsaVTable] = target_registry.find[isa.IsaVTable](?reg.isa, lookup_name);
+    val opt_arch_vt: opt[*isa.IsaVTable] = target_registry.find[isa.IsaVTable](?reg.isa, isa_name);
     if (sel opt_arch_vt.none) {
         ret res[binding.Binding, fail.Fail].err{unregistered[isa.IsaVTable](reg, ?reg.isa, isa_name)};
     }
@@ -373,6 +370,8 @@ pub fun resolve(reg: *TargetRegistry, req: *TargetRequest) res[binding.Binding, 
 
     val of_vt: *target_of.OfVTable = opt_of_vt.some;
 
+    val base_r: res[u64, fail.Fail] = baseline_bits(?reg.alloc, arch_vt, req.baseline_name);
+    if (sel base_r.err) { ret res[binding.Binding, fail.Fail].err{base_r.err}; }
     val added_r: res[u64, fail.Fail] = requested_extensions(?reg.alloc, arch_vt, req);
     if (sel added_r.err) { ret res[binding.Binding, fail.Fail].err{added_r.err}; }
     val env_r: res[u32, fail.Fail] = resolve_environment(?reg.alloc, arch_vt, req);
@@ -381,7 +380,7 @@ pub fun resolve(reg: *TargetRegistry, req: *TargetRequest) res[binding.Binding, 
     val added: u64 = added_r.ok | isa_environment.extensions(?arch_vt.environments, env_r.ok);
 
     var selected_model: target_model.Machine;
-    val selected_isa:   isa.IsaVTable = select_isa(arch_vt, isa_name, selection, added, ?selected_model);
+    val selected_isa:   isa.IsaVTable = select_isa(arch_vt, base_r.ok, added, ?selected_model);
     val cap:            u32           = tuple.capability(os_vt, ?selected_isa, abi_vt, of_vt);
     if (cap != tuple.OK) {
         ret res[binding.Binding, fail.Fail].err{tuple.refusal(?reg.alloc, cap, os_vt, ?selected_isa, abi_vt, of_vt)};
@@ -510,6 +509,28 @@ pub fun resolve(reg: *TargetRegistry, req: *TargetRequest) res[binding.Binding, 
     ret res[binding.Binding, fail.Fail].ok{b};
 }
 
+# the bits the target's baseline selects: the one it names, else the instruction
+# set's default, each read by masc's catalog for it. an instruction set whose
+# catalog spells no selection takes no baseline and stands on its model's own
+# extensions
+fun baseline_bits(a: *A.Allocator, arch_vt: *isa.IsaVTable, named: str) res[u64, fail.Fail] {
+    val owner: *mink_arch.Arch = catalog_arch.owner_of(arch_vt.id);
+    if (!target_baseline.spells(owner)) {
+        if (!str_empty(named)) {
+            ret res[u64, fail.Fail].err{fail.formatted(a,
+                "target: isa '{}' takes no `baseline`: masc's extension catalog for it spells no selection; name what it adds with `extensions`", arch_vt.name)};
+        }
+        ret res[u64, fail.Fail].ok{arch_vt.model.extensions};
+    }
+    var spelled: str = catalog_arch.default_baseline(arch_vt.id);
+    if (!str_empty(named)) { spelled = named; }
+    val picked: res[u64, fail.Fail] = target_baseline.select(a, owner, arch_vt.model.extension_table, spelled);
+    if (sel picked.err) {
+        ret res[u64, fail.Fail].err{fail.formatted(a, "target: baseline `{}` on isa '{}': {}", spelled, arch_vt.name, fail.describe(picked.err))};
+    }
+    ret picked;
+}
+
 # the bits a request's extension names select in the isa's vocabulary; a name the
 # vocabulary does not hold is refused with the names it does
 fun requested_extensions(a: *A.Allocator, arch_vt: *isa.IsaVTable, req: *TargetRequest) res[u64, fail.Fail] {
@@ -558,33 +579,27 @@ fun no_module_format(a: *A.Allocator, isa_vt: *isa.IsaVTable) fail.Fail {
     ret fail.formatted(a, "instruction set '{}' emits whole modules, but no registered object format carries a finished module for it", isa_vt.name);
 }
 
-# the instruction set a name selects: the registered template with the
-# selection's extensions, and those the request adds, applied. model backs the
-# returned vtable's model pointer and must outlive it
-fun select_isa(arch_vt: *isa.IsaVTable, name: str, selection: opt[extension.Selection], added: u64, model: *target_model.Machine) isa.IsaVTable {
+# the instruction set the registered template selects with the baseline's
+# extensions, and those the request adds, applied. model backs the returned
+# vtable's model pointer and must outlive it
+fun select_isa(arch_vt: *isa.IsaVTable, base: u64, added: u64, model: *target_model.Machine) isa.IsaVTable {
     @model = @arch_vt.model;
-    var base: u64 = model.extensions;
-    if (sel selection.some) { base = selection.some.extensions; }
     isa.extensions_select(arch_vt, model, target_model.extension_close(model, base | added));
     var selected: isa.IsaVTable = @arch_vt;
     selected.model = model;
-    selected.name  = name;
     ret selected;
 }
 
-# the instruction set a [target.*] table selects by naming a registered isa:
-# the template narrowed to the selection its registered name spells when its
-# names carry a selection, every other template as registered. model backs the
+# the instruction set a [target.*] table selects by naming a registered isa and no
+# baseline: the template narrowed to the isa's default baseline. model backs the
 # returned vtable's model pointer and must outlive it
 pub fun registered_selection(arch_vt: *isa.IsaVTable, model: *target_model.Machine) isa.IsaVTable {
-    var selection: opt[extension.Selection]   = opt[extension.Selection].none{};
-    val syntax:    *extension.SelectionSyntax = catalog_arch.syntax_of(arch_vt.id);
-    if (syntax != nil && syntax.claims(arch_vt.name)) {
-        var bad:    extension.Span;
-        val parsed: res[extension.Selection, fail.Fail] = syntax.parse(arch_vt.name, ?bad);
-        if (sel parsed.ok) { selection = opt[extension.Selection].some{parsed.ok}; }
-    }
-    ret select_isa(arch_vt, arch_vt.name, selection, 0, model);
+    var a: A.Allocator;
+    page.make(?a);
+    var base: u64                 = arch_vt.model.extensions;
+    val bits: res[u64, fail.Fail] = baseline_bits(?a, arch_vt, "");
+    if (sel bits.ok) { base = bits.ok; }
+    ret select_isa(arch_vt, base, 0, model);
 }
 
 # the capability of one cell of the target matrix as a [target.*] table naming
@@ -597,16 +612,25 @@ pub fun registered_tuple_capability(os_vt: *lang_target_os.OsVTable, arch_vt: *i
     ret tuple.capability(os_vt, ?selected, abi_vt, of_vt);
 }
 
-# the canonical selection string for an instruction set and the model selected
-# on it (a resolved target's `model`, or the one registered_selection filled),
-# written into buf: an isa whose names carry a selection spells the extensions
-# the model holds, every other isa its name
+# the selection an instruction set and the model selected on it hold (a resolved
+# target's `model`, or the one registered_selection filled), written into buf: an
+# isa whose catalog spells a selection gives masc's spelling of the extensions the
+# model holds, every other isa its name
 pub fun selection_spelling(isa_vt: *isa.IsaVTable, model: *target_model.Machine, buf: *u8, cap: usize) str {
-    val syntax: *extension.SelectionSyntax = catalog_arch.syntax_of(isa_vt.id);
-    if (syntax != nil && syntax.claims(isa_vt.name)) {
-        ret syntax.spell(model.gpr_width, model.extensions, buf, cap);
+    var text: str = isa_vt.name;
+    var a:    A.Allocator;
+    page.make(?a);
+    if (target_baseline.spells(catalog_arch.owner_of(isa_vt.id))) {
+        val spelled: res[str, fail.Fail] = target_baseline.spell(?a, catalog_arch.owner_of(isa_vt.id), model.extension_table, model.extensions, false);
+        if (sel spelled.ok) {
+            var off: usize = buf_put(buf, cap, 0, spelled.ok);
+            str_free(?a, spelled.ok);
+            if (off >= cap) { off = cap - 1; }
+            buf[off] = 0;
+            ret buf::str;
+        }
     }
-    var off: usize = buf_put(buf, cap, 0, isa_vt.name);
+    var off: usize = buf_put(buf, cap, 0, text);
     if (off >= cap) { off = cap - 1; }
     buf[off] = 0;
     ret buf::str;
@@ -642,6 +666,14 @@ pub fun t_registry() *TargetRegistry {
 #[testing]
 pub fun t_select(isa_name: str, os_name: str, abi_name: str) res[binding.Binding, fail.Fail] {
     ret select(t_registry(), isa_name, os_name, abi_name);
+}
+
+# the target `isa_name` names on the baseline `baseline_name`, selected from the test catalog
+#[testing]
+pub fun t_select_on(isa_name: str, baseline_name: str, os_name: str, abi_name: str) res[binding.Binding, fail.Fail] {
+    var req: TargetRequest = target_request(isa_name, os_name, abi_name);
+    with_baseline(?req, baseline_name);
+    ret resolve(t_registry(), ?req);
 }
 
 pub fun artifact_naming(tgt: *binding.Binding, kind: catalog_artifact.Kind) res[target_of.ArtifactName, fail.Fail] {
@@ -846,18 +878,6 @@ fun environment_names_append(b: *textbuild.TextBuilder, arch_vt: *isa.IsaVTable)
         i = i + 1;
     }
     ret err[textbuild.Error].ok{};
-}
-
-# a refused RISC-V selection names the token it stumbled on and the whole string
-fun selection_refusal(a: *A.Allocator, why: str, name: str, bad: *extension.Span) fail.Fail {
-    if (bad.len == 0) { ret fail.formatted(a, "{}: selection '{}'", why, name); }
-    val made: res[*u8, A.Error] = A.allocate[u8](a, bad.len + 1);
-    if (sel made.err) { ret fail.refused(made.err); }
-    val tok: *u8 = made.ok;
-    fin { A.deallocate[u8](a, tok, bad.len + 1); }
-    memory.raw_copy(tok::ptr, (?name[bad.at])::ptr, bad.len);
-    tok[bad.len] = 0;
-    ret fail.formatted(a, "{}: '{}' in selection '{}'", why, tok::str, name);
 }
 
 fun unregistered[T](reg: *TargetRegistry, ax: *target_registry.Axis[T], name: str) fail.Fail {
@@ -2243,9 +2263,10 @@ test select_of__every_capable_tuple_is_selectable_and_the_census_is_stable {
                     val of_vt: *target_of.OfVTable = of_vt_r.some;
                     if (tuple.capability(os_vt, isa_vt, abi_vt, of_vt) == tuple.OK) {
                         capable = capable + 1;
-                        var concrete_isa: str = isa_vt.name;
-                        if (isa_vt.id == catalog_arch.RISCV32) { concrete_isa = "rv32imafdc"; }
-                        val r: res[binding.Binding, fail.Fail] = select_of(reg, concrete_isa, os_vt.name, abi_vt.name, of_vt.name);
+                        var req: TargetRequest = target_request(isa_vt.name, os_vt.name, abi_vt.name);
+                        with_of(?req, of_vt.name);
+                        if (isa_vt.id == catalog_arch.RISCV32) { with_baseline(?req, "rv32imafdc"); }
+                        val r: res[binding.Binding, fail.Fail] = resolve(reg, ?req);
                         if (sel r.ok) { selectable = selectable + 1; }
                     }
                     fi = fi + 1;

@@ -13,8 +13,11 @@ use std.types.string.str_len;
 use std.allocator.page;
 use std.encoding.leb128;
 use std_format: std.format;
+use std.text.string.str_free;
 use std.types.char.char_is_digit;
 
+use target_baseline: mach.lang.target.baseline;
+use catalog_arch:    mach.lang.target.catalog.arch;
 use extension_riscv: mach.lang.target.extension.riscv;
 
 use A: std.allocator;
@@ -639,24 +642,10 @@ fun write_arch_string(buf: *u8, pos: u32, a: *Arch) u32 {
     ret p - pos;
 }
 
-fun push_ext(a: *Arch, name: str, major: u32, minor: u32) {
-    if (a.count >= MAX_EXTS) { ret; }
-    var e: Ext;
-    e.name_len = 0;
-    for (name[e.name_len::usize] != 0) {
-        e.name[e.name_len] = name[e.name_len::usize]::u8;
-        e.name_len         = e.name_len + 1;
-    }
-    e.major         = major;
-    e.minor         = minor;
-    a.exts[a.count] = e;
-    a.count         = a.count + 1;
-}
-
 pub fun attributes_build(alloc: *A.Allocator, xlen_bits: u32, extension_bits: u64, float_arg_bits: u32,
     has_compressed: bool, out_len: *u32) res[*u8, fail.Fail] {
     @out_len = 0;
-    if ((xlen_bits != 32 && xlen_bits != 64) || !extension_riscv.valid(extension_bits)) {
+    if ((xlen_bits != 32 && xlen_bits != 64) || !extension_riscv.has(extension_bits, extension_riscv.I)) {
         ret res[*u8, fail.Fail].err{fail.message("riscv attributes: invalid selected ISA capabilities")};
     }
     if ((float_arg_bits != 0 && float_arg_bits != 32 && float_arg_bits != 64)
@@ -669,15 +658,13 @@ pub fun attributes_build(alloc: *A.Allocator, xlen_bits: u32, extension_bits: u6
     }
     var at: Attrs;
     attrs_blank(?at);
-    at.arch.xlen = xlen_bits;
-    var ei: usize = 0;
-    for (ei < extension_riscv.EXT_COUNT) {
-        val spec: extension_riscv.ExtSpec = extension_riscv.EXTS[ei];
-        if (spec.emitted && extension_riscv.has(extension_bits, spec.requires)) {
-            push_ext(?at.arch, spec.name, spec.major, spec.minor);
-        }
-        ei = ei + 1;
-    }
+    var arch: u32 = catalog_arch.RISCV64;
+    if (xlen_bits == 32) { arch = catalog_arch.RISCV32; }
+    val spelled: res[str, fail.Fail] = target_baseline.spell(alloc, catalog_arch.owner_of(arch), ?extension_riscv.TABLE, extension_bits, true);
+    if (sel spelled.err) { ret res[*u8, fail.Fail].err{spelled.err}; }
+    val parsed: bool = parse_arch(spelled.ok::*u8, str_len(spelled.ok)::u32, ?at.arch);
+    str_free(alloc, spelled.ok);
+    if (!parsed) { ret res[*u8, fail.Fail].err{fail.message("riscv attributes: masc's versioned spelling of the selection does not read as a Tag_RISCV_arch")}; }
     at.has_arch = true;
 
     at.stack_align     = STACK_ALIGN;
@@ -944,7 +931,7 @@ test attributes_build__selected_target {
     page.make(?alloc);
 
     var plain_len: u32                 = 0;
-    val pr:        res[*u8, fail.Fail] = attributes_build(?alloc, 64, extension_riscv.G, 64, false, ?plain_len);
+    val pr:        res[*u8, fail.Fail] = attributes_build(?alloc, 64, extension_riscv.DEFAULT64 & ~extension_riscv.C, 64, false, ?plain_len);
     if (sel pr.err) { ret 1; }
     fin { A.deallocate[u8](?alloc, pr.ok, plain_len::usize); }
     if (!t_arch_is(pr.ok, plain_len, "rv64i2p1_m2p0_a2p1_f2p2_d2p2_zicsr2p0_zifencei2p0")) { ret 1; }
