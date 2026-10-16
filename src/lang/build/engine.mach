@@ -83,7 +83,7 @@ use std_format: std.format;
 #[testing]
 use std.print;
 #[testing]
-use process_env: std.process.env;
+use std.process.env;
 #[testing]
 use std.process.exec;
 #[testing]
@@ -3659,7 +3659,7 @@ $if ($mach.build.os == $mach.os.linux && $mach.build.arch == $mach.arch.x86_64) 
         if (sel path.err) { ret 5; }
         val wrote: err[fs.FsError] = fs.write_bytes(path.ok, probe.ok, str_len(probe.ok), 420);
         if (sel wrote.err) { ret 6; }
-        val inherited: res[opt[OwnedString], process_env.EnvError] = process_env.value(?alloc, "PATH");
+        val inherited: res[opt[OwnedString], env.EnvError] = env.value(?alloc, "PATH");
         if (sel inherited.err)     { ret 9; }
         if (sel inherited.ok.none) { ret 9; }
         val search: res[str, std_format.FormatError] = std_format.sprint(?alloc, "PATH={}", inherited.ok.some.data);
