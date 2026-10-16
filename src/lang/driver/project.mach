@@ -201,7 +201,9 @@ pub rec ModuleEntry {
     # the scope lowering binds the module's constants in, once a lowering made it
     lower_scope:  comptime.ComptimeCtx;
     lower_scoped: bool;
-    test:         TestObject;
+    # where the module's `#[expect]` declarations stand, read once per parse of it
+    expects: expect.Index;
+    test:    TestObject;
 }
 
 # a module's test object, beside its normal object and never changing it: the
@@ -389,6 +391,7 @@ pub fun dnit_project(p: *Project) {
     for (i < module_count(p)) {
         val m: *ModuleEntry = module_at(p, i);
         lower_scope_drop(m);
+        expect.index_dnit(?m.expects);
         fe_load.module_dnit(p.alloc, ?m.load);
         i = i + 1;
     }

@@ -920,7 +920,8 @@ pub fun refresh_diagnostics(p: *project.Project) err[fail.Fail] {
 
 # every loaded module's `#[expect]` keys. a module's are judged once its
 # warnings are all in: it was type checked this build, or its front end was
-# skipped and its recorded warnings replayed
+# skipped and its recorded warnings replayed. where each module's keys stand is
+# read once per parse of it, so a refresh walks no module's declarations
 fun gather_expectations(p: *project.Project, out: *collections_vector.Vector[diagnostic.Expectation]) err[fail.Fail] {
     var i: u32 = 0;
     for (i < project.module_count(p)) {
@@ -928,9 +929,12 @@ fun gather_expectations(p: *project.Project, out: *collections_vector.Vector[dia
         i = i + 1;
         val a: *ast.Ast = syntax(p, m);
         if (a == nil) { cnt; }
+        val indexed: err[fail.Fail] = expect.index(p.s, a, ?m.expects);
+        if (sel indexed.err)                    { ret indexed; }
+        if (expect.site_count(?m.expects) == 0) { cnt; }
         val checked:   bool                 = typed(p, m) != nil || m.frontend_skipped;
         var scope:     comptime.ComptimeCtx = typed_scope(p, m);
-        val collected: err[fail.Fail]       = expect.collect(p.s, a, ?scope, checked, out);
+        val collected: err[fail.Fail]       = expect.collect(p.s, a, ?m.expects, ?scope, checked, out);
         comptime.dnit(?scope);
         if (sel collected.err) { ret collected; }
     }
