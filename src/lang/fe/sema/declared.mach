@@ -1347,7 +1347,17 @@ fun resolve_type_array(sc: *sema_context.SemaContext, tid: ast_id.TypeId, ar: *a
         cv = got.some;
     }
     if (sel lay.none) {
-        val len_r: res[comptime.CTValue, comptime.EvalFail] = comptime.evaluate[sema_context.SemaContext](sc.view.ctx, sc, sc.typing.caps, sc.view.a, sc.view.source, ar.length, ?sc.s.interner);
+        # typed quietly first, as a constant initializer is, so a cast in the length folds at the
+        # types its operands were given; a failure is named by the refusal below
+        var caps:  comptime.PhaseCapabilities[sema_context.SemaContext] = sc.typing.caps;
+        val outer: sema_context.Walk                                    = sema_context.walk_open(sc);
+        if (sc.typing.infer_fn != nil) {
+            sc.walk.silent = true;
+            sc.typing.infer_fn(sc, ar.length);
+            caps = sc.typing.type_caps;
+        }
+        val len_r: res[comptime.CTValue, comptime.EvalFail] = comptime.evaluate[sema_context.SemaContext](sc.view.ctx, sc, caps, sc.view.a, sc.view.source, ar.length, ?sc.s.interner);
+        sema_context.walk_close(sc, outer);
         sema_context.record_eval_result(sc, len_r);
         if (sel len_r.err) {
             sema_context.reportf(sc, diagnostic_kind.ARRAY_LENGTH_NOT_CONST, span, "cannot infer type: array length is not a comptime constant: {}", len_r.err.message);
