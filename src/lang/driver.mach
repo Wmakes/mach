@@ -3396,6 +3396,95 @@ test load__unbound_use_is_reported_once_and_the_module_still_resolves {
     ret 0;
 }
 
+# the declarations every module had walked for its `#[expect]` sites once a project of `n`
+# imported modules typed, each holding two expectations its source judges and nothing fulfils
+# and one in an untaken arm; zero when the load failed or did not report exactly the judged ones
+# unfulfilled
+#[testing]
+fun expect_walked(n: u32) u64 {
+    var alloc:  A.Allocator;
+    val make_r: err[A.Error] = page.make(?alloc);
+    if (sel make_r.err) { ret 0; }
+    val sr: res[session.Session, fail.Fail] = toolchain.session_init(?alloc);
+    if (sel sr.err) { ret 0; }
+    var s: session.Session = sr.ok;
+    fin { session.dnit(?s); }
+
+    var names: [17]str;
+    var texts: [17]str;
+    names[0] = "main.mach";
+    var uses: str = "";
+    var sum:  str = "0";
+    var i:    u32 = 0;
+    for (i < n) {
+        val name: res[str, std_format.FormatError] = std_format.sprint(?alloc, "m{}.mach", i);
+        val used: res[str, std_format.FormatError] = std_format.sprint(?alloc, "{}use m{}: uniontest.m{};\n", uses, i, i);
+        val more: res[str, std_format.FormatError] = std_format.sprint(?alloc, "{} + m{}.f()", sum, i);
+        if (sel name.err) { ret 0; }
+        if (sel used.err) { ret 0; }
+        if (sel more.err) { ret 0; }
+        names[i + 1] = name.ok;
+        texts[i + 1] = "pub fun f() i32 { ret 0; }\npub val A: i32 = 1;\npub val B: i32 = 2;\n#[expect(\"decl.deprecated\")]\npub fun g() i32 { ret 0; }\n$if (1 == 1) {\n    #[expect(\"decl.deprecated\")]\n    pub fun h() i32 { ret 0; }\n} $or {\n    #[expect(\"decl.deprecated\")]\n    pub fun k() i32 { ret 0; }\n}\n";
+        uses         = used.ok;
+        sum          = more.ok;
+        i            = i + 1;
+    }
+    val main: res[str, std_format.FormatError] = std_format.sprint(?alloc, "{}fun main() i32 {{ ret {}; }}\n", uses, sum);
+    if (sel main.err) { ret 0; }
+    texts[0] = main.ok;
+
+    val root_r: res[str, fail.Fail] = scaffold(?alloc, fixture_manifest(), ?names[0], ?texts[0], n + 1);
+    if (sel root_r.err) { ret 0; }
+    val root: str = root_r.ok;
+    fin { fs.remove_all(?alloc, root); }
+    val mr: res[manifest.Manifest, fail.Fail] = load_manifest(?s, root);
+    if (sel mr.err) { ret 0; }
+    var mf: manifest.Manifest = mr.ok;
+    fin { manifest.dnit(?mf, ?alloc); }
+    var req: request.BuildRequest = request.defaults();
+    req.project_root = root;
+    req.target       = "linux";
+    req.artifact     = "uniontest";
+    req.goal         = request.GOAL_OBJECTS;
+
+    val kept: res[project.Project, fail.Fail] = analyze_project_tolerant(
+        ?s, ?mf, ?req, project.ROOT_ARTIFACT, nil, 0, FRONTEND_SEMA);
+    if (sel kept.err) { ret 0; }
+    var p: project.Project = kept.ok;
+    fin { project.dnit_project(?p); }
+
+    var unfulfilled: u32   = 0;
+    var di:          usize = 0;
+    for (di < diagnostic.len(?s.diags)) {
+        if (s.diags.items.data[di].kind == diagnostic_kind.EXPECT_UNFULFILLED) { unfulfilled = unfulfilled + 1; }
+        di = di + 1;
+    }
+    if (unfulfilled != 2 * n) { ret 0; }
+
+    var walked: u64 = 0;
+    var mi:     u32 = 0;
+    for (mi < project.module_count(?p)) {
+        walked = walked + project.module_at(?p, mi).expects.visited;
+        mi     = mi + 1;
+    }
+    ret walked;
+}
+
+# a module's `#[expect]` sites are read once per parse of it, so a load walks each declaration
+# once however many modules it loads; regathering on every refresh walks each module once per
+# module parsed after it
+test expect__sites_are_read_once_per_parse {
+    var n: u32 = 4;
+    for (n <= 16) {
+        val walked: u64 = expect_walked(n);
+        if (walked == 0) { ret 1; }
+        # seven declarations in each imported module, and main's uses and its `main`
+        if (walked != 8 * n::u64 + 1) { ret 2; }
+        n = n * 4;
+    }
+    ret 0;
+}
+
 # a path naming a symbol a surface forwards resolves to that symbol, never to
 # a module file whose name differs from it only in case
 test load__a_symbol_path_matches_a_module_file_only_by_exact_case {
