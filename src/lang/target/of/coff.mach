@@ -97,6 +97,7 @@ val IMAGE_SCN_CNT_UNINITIALIZED_DATA: u32 = 0x00000080;
 val IMAGE_SCN_LNK_INFO:               u32 = 0x00000200;
 val IMAGE_SCN_LNK_REMOVE:             u32 = 0x00000800;
 val IMAGE_SCN_LNK_COMDAT:             u32 = 0x00001000;
+val IMAGE_SCN_LNK_NRELOC_OVFL:        u32 = 0x01000000;
 val IMAGE_SCN_MEM_DISCARDABLE:        u32 = 0x02000000;
 val IMAGE_SCN_MEM_EXECUTE:            u32 = 0x20000000;
 val IMAGE_SCN_MEM_READ:               u32 = 0x40000000;
@@ -1091,8 +1092,34 @@ fun encode_directives_section(alloc: *A.Allocator, img: *target_of.ObjectImage,
     ret err[fail.Fail].ok{};
 }
 
-fun reloc_ovfl_message(itn: *intern.Interner, alloc: *A.Allocator, name_id: intern.StrId, count: u32) res[str, fail.Fail] {
-    ret fail.format_intern(itn, alloc, "section '{}' has {} relocations; this exceeds the COFF limit of 65535", bin.resolve_name(itn, name_id), count::usize);
+# a section past the u16 header count sets IMAGE_SCN_LNK_NRELOC_OVFL, writes 0xFFFF as
+# NumberOfRelocations and leads its table with an entry whose VirtualAddress is the
+# entry count including itself
+fun reloc_count_overflows(count: u32) bool {
+    ret count > 0xFFFF;
+}
+
+# a section's relocation entries: `first` is the file offset of the first real entry
+rec RelocTable {
+    first: usize;
+    count: u32;
+}
+
+# reads the section header at `sh`, taking the extended count of an overflowed section
+fun section_reloc_table(buf: *u8, buf_size: usize, sh: usize) res[RelocTable, fail.Fail] {
+    val rptr:  usize = bin.read_u32_le(buf, sh + 24)::usize;
+    val count: u32   = bin.read_u16_le(buf, sh + 32)::u32;
+    if ((bin.read_u32_le(buf, sh + 36) & IMAGE_SCN_LNK_NRELOC_OVFL) == 0 || count != 0xFFFF) {
+        ret res[RelocTable, fail.Fail].ok{RelocTable{first: rptr, count: count}};
+    }
+    if (!bin.region_ok(buf_size, rptr, RELOCATION_SIZE)) {
+        ret res[RelocTable, fail.Fail].err{fail.user(diagnostic_kind.OBJECT_MALFORMED, "relocation array out of bounds")};
+    }
+    val total: u32 = bin.read_u32_le(buf, rptr);
+    if (total == 0) {
+        ret res[RelocTable, fail.Fail].err{fail.user(diagnostic_kind.OBJECT_MALFORMED, "extended relocation count is zero")};
+    }
+    ret res[RelocTable, fail.Fail].ok{RelocTable{first: rptr + RELOCATION_SIZE, count: total - 1}};
 }
 
 fun write_bigobj_class_id(buf: *u8, off: usize) {
@@ -1292,13 +1319,6 @@ fun serialize_image(img: *target_of.ObjectImage, comdat: *bool, dst: *of_destina
     if (sel res_counts.err) { ret err[fail.Fail].err{res_counts.err}; }
     scratch.counts = res_counts.ok;
     val counts: *u32 = scratch.counts;
-    var cs:     u32  = 0;
-    for (cs < num_secs) {
-        if (counts[cs] > 0xFFFF) {
-            ret err[fail.Fail].err{fail.user_of(diagnostic_kind.LINK_SIZE_LIMIT, reloc_ovfl_message(img.interner, alloc, img.sections[cs].name, counts[cs]))};
-        }
-        cs = cs + 1;
-    }
 
     var header_size: usize = HEADER_SIZE;
     var symbol_size: usize = SYMBOL_SIZE;
@@ -1354,7 +1374,9 @@ fun serialize_image(img: *target_of.ObjectImage, comdat: *bool, dst: *of_destina
     for (s < num_secs) {
         reloc_rows[s] = of_plan.NO_ROW;
         if (counts[s] > 0) {
-            val rsize: res[usize, fail.Fail] = of_plan.table(?fp, "relocations", counts[s]::usize, RELOCATION_SIZE);
+            var entries: usize = counts[s]::usize;
+            if (reloc_count_overflows(counts[s])) { entries = entries + 1; }
+            val rsize: res[usize, fail.Fail] = of_plan.table(?fp, "relocations", entries, RELOCATION_SIZE);
             if (sel rsize.err) { ret err[fail.Fail].err{rsize.err}; }
             val row: res[u32, fail.Fail] = of_plan.place(?fp, "relocations", target_of.section_id(s), 1, rsize.ok);
             if (sel row.err) { ret err[fail.Fail].err{row.err}; }
@@ -1480,15 +1502,21 @@ fun serialize_image(img: *target_of.ObjectImage, comdat: *bool, dst: *of_destina
             bin.write_u32_le(buf, sh + 24, 0);
         }
         bin.write_u32_le(buf, sh + 28, 0);
-        bin.write_u16_le(buf, sh + 32, rc::u16);
         bin.write_u16_le(buf, sh + 34, 0);
         var chars: u32 = section_characteristics_for(img.sections[s].kind)
             | align_characteristic(img.sections[s].align);
         if (img.sections[s].native.format == target_of.COFF) {
-            chars = (img.sections[s].native.flags::u32 & ~0x00F00000)
+            chars = (img.sections[s].native.flags::u32 & ~(0x00F00000 | IMAGE_SCN_LNK_NRELOC_OVFL))
                 | align_characteristic(img.sections[s].align);
         }
         if (comdat != nil && comdat[s]) { chars = chars | IMAGE_SCN_LNK_COMDAT; }
+        if (reloc_count_overflows(rc)) {
+            bin.write_u16_le(buf, sh + 32, 0xFFFF);
+            chars = chars | IMAGE_SCN_LNK_NRELOC_OVFL;
+        }
+        or {
+            bin.write_u16_le(buf, sh + 32, rc::u16);
+        }
         bin.write_u32_le(buf, sh + 36, chars);
         sh = sh + SECTION_HEADER_SIZE;
         s  = s + 1;
@@ -1537,6 +1565,14 @@ fun serialize_image(img: *target_of.ObjectImage, comdat: *bool, dst: *of_destina
     for (s < num_secs) {
         reloc_cursors[s] = 0;
         if (reloc_rows[s] != of_plan.NO_ROW) { reloc_cursors[s] = of_plan.offset(?fp, reloc_rows[s]); }
+        if (reloc_count_overflows(counts[s])) {
+            val total: res[u32, fail.Fail] = of_plan.field_u32(?fp, counts[s]::usize + 1, "extended relocation count");
+            if (sel total.err) { ret err[fail.Fail].err{total.err}; }
+            bin.write_u32_le(buf, reloc_cursors[s], total.ok);
+            bin.write_u32_le(buf, reloc_cursors[s] + 4, 0);
+            bin.write_u16_le(buf, reloc_cursors[s] + 8, 0);
+            reloc_cursors[s] = reloc_cursors[s] + RELOCATION_SIZE;
+        }
         s = s + 1;
     }
     var ri: u32 = 0;
@@ -1887,9 +1923,9 @@ fun parse_object_into(alloc: *A.Allocator, itn: *intern.Interner, buf: *u8, buf_
     var rel_total: lang_checked.Count[target_of.Relocation] = lang_checked.count[target_of.Relocation](0::usize);
     var s:         u32                                      = 0;
     for (s < num_secs) {
-        val sh:   usize                                    = secthdr_base + s::usize * SECTION_HEADER_SIZE;
-        val term: lang_checked.Count[target_of.Relocation] =
-            lang_checked.count[target_of.Relocation](bin.read_u16_le(buf, sh + 32)::usize);
+        val table: res[RelocTable, fail.Fail] = section_reloc_table(buf, buf_size, secthdr_base + s::usize * SECTION_HEADER_SIZE);
+        if (sel table.err) { ret err[fail.Fail].err{table.err}; }
+        val term:  lang_checked.Count[target_of.Relocation]                          = lang_checked.count[target_of.Relocation](table.ok.count::usize);
         val added: res[lang_checked.Count[target_of.Relocation], lang_checked.Cause] =
             lang_checked.count_add[target_of.Relocation](rel_total, term);
         if (sel added.err) {
@@ -1975,7 +2011,7 @@ fun parse_object_into(alloc: *A.Allocator, itn: *intern.Interner, buf: *u8, buf_
         out.sections[s].align         = align_from_characteristics(chars);
         out.sections[s].bytes         = nil;
         out.sections[s].native.format = target_of.COFF;
-        out.sections[s].native.flags  = chars::u64;
+        out.sections[s].native.flags  = (chars & ~IMAGE_SCN_LNK_NRELOC_OVFL)::u64;
         # the object's function table: a RUNTIME_FUNCTION per function it describes
         if (kind == target_of.SK_EXCEPTION) {
             out.sections[s].flags             = target_of.SEC_FLAG_UNWIND_INDEX;
@@ -2113,9 +2149,13 @@ fun parse_object_into(alloc: *A.Allocator, itn: *intern.Interner, buf: *u8, buf_
     var rel_i: u32 = 0;
     s = 0;
     for (s < num_secs) {
-        val sh:     usize = secthdr_base + s::usize * SECTION_HEADER_SIZE;
-        val rptr:   usize = bin.read_u32_le(buf, sh + 24)::usize;
-        val rcount: u32   = bin.read_u16_le(buf, sh + 32)::u32;
+        val table: res[RelocTable, fail.Fail] = section_reloc_table(buf, buf_size, secthdr_base + s::usize * SECTION_HEADER_SIZE);
+        if (sel table.err) {
+            A.deallocate[i32](alloc, rec_map, (num_records + 1)::usize);
+            ret err[fail.Fail].err{table.err};
+        }
+        val rptr:   usize = table.ok.first;
+        val rcount: u32   = table.ok.count;
         if (rcount > 0 && !bin.region_ok(buf_size, rptr, rcount::usize * RELOCATION_SIZE)) {
             A.deallocate[i32](alloc, rec_map, (num_records + 1)::usize);
             ret err[fail.Fail].err{fail.user(diagnostic_kind.OBJECT_MALFORMED, "relocation array out of bounds")};
@@ -7252,50 +7292,39 @@ test coff_emit_object__reloc_count_overflow {
     var alloc: A.Allocator;
     page.make(?alloc);
     var i: intern.Interner = intern.init(?alloc);
+    fin { intern.dnit(?i); }
 
     var isa_vt: target_of.ObjectTarget = t_isa(catalog_arch.X86_64);
 
     var text_bytes: [16]u8;
-    var k:          usize = 0;
-    for (k < 16) {
-        text_bytes[k] = 0x90;
-        k             = k + 1;
-    }
-
-    var secs: [1]target_of.Section;
-    secs[0].name  = t_intern(?i, ".text");
-    secs[0].kind  = target_of.SK_TEXT;
-    secs[0].bytes = ?text_bytes[0];
-    secs[0].len   = 16;
-    secs[0].align = 16;
+    var data_bytes: [16]u8;
+    var secs:       [2]target_of.Section;
+    secs[0] = target_of.Section{name: t_intern(?i, ".text"), kind: target_of.SK_TEXT, bytes: ?text_bytes[0], len: 16, align: 16};
+    secs[1] = target_of.Section{name: t_intern(?i, ".data"), kind: target_of.SK_DATA, bytes: ?data_bytes[0], len: 16, align: 16};
 
     var syms: [1]target_of.Symbol;
-    syms[0].name    = t_intern(?i, "main");
-    syms[0].section = target_of.section_id(0);
-    syms[0].offset  = 0;
-    syms[0].size    = 16;
-    syms[0].flags   = target_of.SYM_OBJ_FLAG_GLOBAL | target_of.SYM_OBJ_FLAG_FUNCTION;
+    syms[0] = target_of.Symbol{name: t_intern(?i, "main"), section: target_of.section_id(0), size: 16,
+        flags: target_of.SYM_OBJ_FLAG_GLOBAL | target_of.SYM_OBJ_FLAG_FUNCTION};
 
-    val nrel: u32                                 = 65536;
+    # one section just over the u16 count and one at it
+    val over: u32                                 = 0x10000;
+    val at:   u32                                 = 0xFFFF;
+    val nrel: u32                                 = over + at;
     val rrl:  res[*target_of.Relocation, A.Error] = A.zallocate[target_of.Relocation](?alloc, nrel::usize);
     if (sel rrl.err) { ret 1; }
     val relocs: *target_of.Relocation = rrl.ok;
-    var r:      u32                   = 0;
+    fin { A.deallocate[target_of.Relocation](?alloc, relocs, nrel::usize); }
+    var r: u32 = 0;
     for (r < nrel) {
-        relocs[r].section = target_of.section_id(0);
-        relocs[r].offset  = 0;
-        relocs[r].kind    = target_of.RK_PC32;
-        relocs[r].sym     = 0;
-        relocs[r].addend  = 0;
-        r                 = r + 1;
+        var sec: u32 = 0;
+        if (r >= over) { sec = 1; }
+        relocs[r] = target_of.Relocation{section: target_of.section_id(sec), kind: target_of.RK_ABS64, sym: 0};
+        r         = r + 1;
     }
 
-    var img: target_of.ObjectImage;
-    img.alloc         = ?alloc;
-    img.interner      = ?i;
-    img.name          = t_intern(?i, "test");
+    var img: target_of.ObjectImage = target_of.object_image_init(?alloc, ?i, t_intern(?i, "test"));
     img.sections      = ?secs[0];
-    img.section_count = 1;
+    img.section_count = 2;
     img.symbols       = ?syms[0];
     img.symbol_count  = 1;
     img.relocations   = relocs;
@@ -7305,14 +7334,41 @@ test coff_emit_object__reloc_count_overflow {
     if (sel tf_r.err) { ret 1; }
     var tf: output_testing.Output = tf_r.ok;
     fin { output_testing.dnit(?tf); }
-    val tpath: str = output_testing.path(?tf);
 
-    val em: err[fail.Fail] = target_of.object_write(object_emit, ?isa_vt, ?img, tpath);
+    val em: err[fail.Fail] = target_of.object_write(object_emit, ?isa_vt, ?img, output_testing.path(?tf));
+    if (sel em.err) { ret 2; }
+    val read: res[Vector[u8], fs.FsError] = fs.read_bytes(?alloc, output_testing.path(?tf));
+    if (sel read.err) { ret 3; }
+    var bytes: Vector[u8] = read.ok;
+    fin {
+        if (bytes.data != nil) { A.deallocate[u8](?alloc, bytes.data, bytes.cap); }
+    }
 
-    A.deallocate[target_of.Relocation](?alloc, relocs, nrel::usize);
+    val sh0: usize = HEADER_SIZE;
+    val sh1: usize = HEADER_SIZE + SECTION_HEADER_SIZE;
+    if (bin.read_u16_le(bytes.data, sh0 + 32) != 0xFFFF
+        || (bin.read_u32_le(bytes.data, sh0 + 36) & IMAGE_SCN_LNK_NRELOC_OVFL) == 0
+        || bin.read_u32_le(bytes.data, bin.read_u32_le(bytes.data, sh0 + 24)::usize) != over + 1) { ret 4; }
+    if (bin.read_u16_le(bytes.data, sh1 + 32) != 0xFFFF
+        || (bin.read_u32_le(bytes.data, sh1 + 36) & IMAGE_SCN_LNK_NRELOC_OVFL) != 0) { ret 5; }
 
-    if (!sel em.err)                                     { ret 1; }
-    if (!str_contains(fail.describe(em.err), "exceeds")) { ret 1; }
+    var decoded: target_of.ObjectImage = target_of.object_image_init(?alloc, ?i, intern.STR_NIL);
+    fin { target_of.object_image_dnit(?decoded); }
+    val parsed: err[fail.Fail] = parse_object(?alloc, ?i, bytes.data, bytes.len, ?decoded);
+    if (sel parsed.err) { ret 6; }
+    if (decoded.reloc_count != nrel
+        || (decoded.sections[0].native.flags::u32 & IMAGE_SCN_LNK_NRELOC_OVFL) != 0) { ret 7; }
+    var per: [2]u32;
+    per[0] = 0;
+    per[1] = 0;
+    r      = 0;
+    for (r < decoded.reloc_count) {
+        val sec: u32 = target_of.section_index(decoded.relocations[r].section);
+        if (sec > 1 || decoded.relocations[r].kind != target_of.RK_ABS64) { ret 8; }
+        per[sec] = per[sec] + 1;
+        r        = r + 1;
+    }
+    if (per[0] != over || per[1] != at) { ret 9; }
     ret 0;
 }
 
