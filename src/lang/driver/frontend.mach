@@ -891,8 +891,9 @@ pub fun refresh_diagnostics(p: *project.Project) err[fail.Fail] {
     diagnostic.silence(?staged, p.req.allow);
     var expects:  collections_vector.Vector[diagnostic.Expectation] = collections_vector.init[diagnostic.Expectation](p.s.alloc);
     val gathered: err[fail.Fail]                                    = gather_expectations(p, ?expects);
-    diagnostic.expect(?staged, expects);
+    val indexed:  err[fail.Fail]                                    = diagnostic.expect(?staged, expects);
     if (sel gathered.err) { ret err[fail.Fail].err{gathered.err}; }
+    if (sel indexed.err)  { ret err[fail.Fail].err{indexed.err}; }
     var copied:    err[fail.Fail] = diagnostic.replay_into(?staged, ?p.diags);
     val copied_ok: bool           = sel copied.ok && p.s.query_presentation != nil;
     if (copied_ok) {
