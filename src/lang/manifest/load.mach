@@ -134,6 +134,7 @@ fun resolve_sites(lines: *SiteFile, m: *Manifest) {
         a.at         = resolved(lines, a.at);
         a.default_at = resolved(lines, a.default_at);
         a.export_at  = resolved(lines, a.export_at);
+        a.entry_at   = resolved(lines, a.entry_at);
         a.out_at     = resolved(lines, a.out_at);
         a.targets_at = resolved(lines, a.targets_at);
         resolve_all(lines, a.link_at, a.link_count);

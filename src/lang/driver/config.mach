@@ -321,6 +321,7 @@ pub fun load_config_manifest(p: *project.Project, project_root: str, m: *manifes
     entry.extensions      = bu.target.extensions;
     entry.extension_count = bu.target.extension_count;
     entry.entrypoint      = bu.entry;
+    entry.entry_at        = bu.artifact.entry_at;
     entry.kind            = bu.artifact.kind;
     entry.optimize        = bu.optimize;
     entry.libs            = bu.libs;
