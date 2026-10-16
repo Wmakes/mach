@@ -1597,7 +1597,7 @@ fun proj_ensure(es: *EditorSession, fid: lang_source.FileId) res[opt[*project.Mo
 
     val init_r: err[A.Error] = arena.init(?es.proj_arena, es.s.backing, 0);
     if (sel init_r.err) {
-        ret res[opt[*project.ModuleEntry], fail.Fail].err{fail.message("out of memory")};
+        ret res[opt[*project.ModuleEntry], fail.Fail].err{fail.refused(init_r.err)};
     }
     var arena_handed: bool = false;
     fin {
@@ -1605,7 +1605,7 @@ fun proj_ensure(es: *EditorSession, fid: lang_source.FileId) res[opt[*project.Mo
     }
     val make_r2: err[A.Error] = arena.make(?es.proj_alloc, ?es.proj_arena);
     if (sel make_r2.err) {
-        ret res[opt[*project.ModuleEntry], fail.Fail].err{fail.message("out of memory")};
+        ret res[opt[*project.ModuleEntry], fail.Fail].err{fail.refused(make_r2.err)};
     }
 
     val prior_build: *A.Allocator = es.s.build_alloc;

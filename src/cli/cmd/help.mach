@@ -47,7 +47,7 @@ fun named_page(a: *A.Allocator, inv: *args.ParsedInvocation, argv: **u8) res[Pag
     p.command = args.command_for(inv.commands, word);
     if (p.command == nil) {
         val said: res[str, std_format.FormatError] = std_format.sprint(a, "unknown command '{}'", word);
-        if (sel said.err) { ret res[Page, fail.Fail].err{fail.message("out of memory")}; }
+        if (sel said.err) { ret res[Page, fail.Fail].err{fail.format_refused(said.err)}; }
         ret res[Page, fail.Fail].err{fail.user(diagnostic_kind.CLI_UNKNOWN_COMMAND, said.ok)};
     }
     if (p.command == ?COMMAND)     { p.command = nil; }
@@ -55,13 +55,15 @@ fun named_page(a: *A.Allocator, inv: *args.ParsedInvocation, argv: **u8) res[Pag
     val action_word: str = argv[inv.positional_idxs[1]]::str;
     if (p.command == nil || p.command.action_n == 0) {
         val said: res[str, std_format.FormatError] = std_format.sprint(a, "'{}' takes no action", word);
-        if (sel said.err) { ret res[Page, fail.Fail].err{fail.message("out of memory")}; }
+        if (sel said.err) { ret res[Page, fail.Fail].err{fail.format_refused(said.err)}; }
         ret res[Page, fail.Fail].err{fail.user(diagnostic_kind.CLI_OPERAND, said.ok)};
     }
     p.action = args.action_for(p.command, action_word);
     if (p.action == nil) {
-        val said: res[str, std_format.FormatError] = std_format.sprint(a, "unknown {} action '{}'; the actions are {}", p.command.name, action_word, args.action_list(a, p.command));
-        if (sel said.err) { ret res[Page, fail.Fail].err{fail.message("out of memory")}; }
+        val listed: res[str, std_format.FormatError] = args.action_list(a, p.command);
+        if (sel listed.err) { ret res[Page, fail.Fail].err{fail.format_refused(listed.err)}; }
+        val said: res[str, std_format.FormatError] = std_format.sprint(a, "unknown {} action '{}'; the actions are {}", p.command.name, action_word, listed.ok);
+        if (sel said.err) { ret res[Page, fail.Fail].err{fail.format_refused(said.err)}; }
         ret res[Page, fail.Fail].err{fail.user(diagnostic_kind.CLI_UNKNOWN_ACTION, said.ok)};
     }
     ret res[Page, fail.Fail].ok{p};

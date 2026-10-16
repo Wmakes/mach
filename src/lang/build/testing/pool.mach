@@ -85,7 +85,7 @@ pub fun run(a: *A.Allocator, sink: *readout.Sink, arts: *testrun.TestArtifact, n
     val ld_r: res[str, fail.Fail] = capture_log_dir(a, arts[0].exe);
     if (sel ld_r.err) {
         val said: res[str, std_format.FormatError] = std_format.sprint(a, "could not derive the test log directory: {}", fail.describe(ld_r.err));
-        if (sel said.err) { ret res[Counts, fail.Fail].err{fail.message("out of memory")}; }
+        if (sel said.err) { ret res[Counts, fail.Fail].err{fail.format_refused(said.err)}; }
         ret res[Counts, fail.Fail].err{fail.with_text(ld_r.err, said.ok)};
     }
     val log_dir:  str            = ld_r.ok;
@@ -156,8 +156,8 @@ fun settle(t: *readout.TestResult, art: *testrun.TestArtifact, result: testrun.G
 
 # every test not yet finished settles as a setup failure when the run's own
 # storage was refused, each reported as it settles
-fun settle_exhausted(sink: *readout.Sink, results: *readout.TestResult, n: u32) {
-    var refused: fail.Fail = fail.message("out of memory");
+fun settle_exhausted(sink: *readout.Sink, results: *readout.TestResult, n: u32, e: A.Error) {
+    var refused: fail.Fail = fail.refused(e);
     readout.failure(sink, ?refused, diagnostic.ORIGIN_TEST);
     var i: u32 = 0;
     for (i < n) {
@@ -180,14 +180,14 @@ fun execute(a: *A.Allocator, sink: *readout.Sink, results: *readout.TestResult, 
 
     val res_processes: res[*subprocess.OwnedSubprocess, A.Error] = A.allocate[subprocess.OwnedSubprocess](a, n::usize);
     if (sel res_processes.err) {
-        settle_exhausted(sink, results, n);
+        settle_exhausted(sink, results, n, res_processes.err);
         ret;
     }
     val processes: *subprocess.OwnedSubprocess = res_processes.ok;
     val res_slots: res[*Slot, A.Error]         = A.allocate[Slot](a, window::usize);
     if (sel res_slots.err) {
         A.deallocate[subprocess.OwnedSubprocess](a, processes, n::usize);
-        settle_exhausted(sink, results, n);
+        settle_exhausted(sink, results, n, res_slots.err);
         ret;
     }
     val slots: *Slot = res_slots.ok;

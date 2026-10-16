@@ -370,7 +370,7 @@ pub fun compose(a: *A.Allocator, itn: *intern.Interner, m: *manifest.Manifest,
         t.text = o.link_tokens.data[ti]::str;
         val pr: res[usize, A.Error] = collections_vector.push[LinkToken](?r.link_tokens, t);
         if (sel pr.err) {
-            ret res[BuildRequest, fail.Fail].err{fail.message("out of memory")};
+            ret res[BuildRequest, fail.Fail].err{fail.refused(pr.err)};
         }
         ti = ti + 1;
     }
@@ -379,7 +379,7 @@ pub fun compose(a: *A.Allocator, itn: *intern.Interner, m: *manifest.Manifest,
     for (di < o.lib_dirs.len) {
         val dr: res[usize, A.Error] = collections_vector.push[str](?r.lib_dirs, o.lib_dirs.data[di]::str);
         if (sel dr.err) {
-            ret res[BuildRequest, fail.Fail].err{fail.message("out of memory")};
+            ret res[BuildRequest, fail.Fail].err{fail.refused(dr.err)};
         }
         di = di + 1;
     }

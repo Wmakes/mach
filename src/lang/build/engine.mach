@@ -191,7 +191,7 @@ pub fun execute(bp: *build_plan.BuildPlan, backing: *A.Allocator, oa: *A.Allocat
             readout.failure(sink, ?f, diagnostic.ORIGIN_BUILD);
             outcome.fold_fail(?bo, ?f);
             val pr: res[usize, A.Error] = collections_vector.push[str](?failed, unit.label);
-            if (sel pr.err) { ret res[outcome.BuildOutcome, fail.Fail].err{fail.message("out of memory")}; }
+            if (sel pr.err) { ret res[outcome.BuildOutcome, fail.Fail].err{fail.refused(pr.err)}; }
         }
         if (sel ur.ok) {
             var ubo:       outcome.BuildOutcome = ur.ok;
@@ -201,7 +201,7 @@ pub fun execute(bp: *build_plan.BuildPlan, backing: *A.Allocator, oa: *A.Allocat
             }
             if (ubo.severity != outcome.BUILD_OK) {
                 val fr: res[usize, A.Error] = collections_vector.push[str](?failed, unit.label);
-                if (sel fr.err) { ret res[outcome.BuildOutcome, fail.Fail].err{fail.message("out of memory")}; }
+                if (sel fr.err) { ret res[outcome.BuildOutcome, fail.Fail].err{fail.refused(fr.err)}; }
             }
             val mr: err[A.Error] = outcome.merge(?bo, ?ubo);
             if (sel mr.err) { ret res[outcome.BuildOutcome, fail.Fail].err{fail.message("failed to merge build outcome")}; }

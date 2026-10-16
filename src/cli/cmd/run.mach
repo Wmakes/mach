@@ -151,7 +151,7 @@ pub fun run(cx: *args.Call) res[i64, fail.Fail] {
         val res_runner: res[*u8, fail.Fail] = host.program_resolve(alloc, name);
         if (sel res_runner.err) {
             val said: res[str, std_format.FormatError] = std_format.sprint(alloc, "--runner '{}': {}", name::str, fail.describe(res_runner.err));
-            if (sel said.err) { ret res[i64, fail.Fail].err{fail.message("out of memory")}; }
+            if (sel said.err) { ret res[i64, fail.Fail].err{fail.format_refused(said.err)}; }
             ret res[i64, fail.Fail].err{fail.with_text(res_runner.err, said.ok)};
         }
         runner = res_runner.ok;
@@ -239,7 +239,7 @@ pub fun run(cx: *args.Call) res[i64, fail.Fail] {
 
 # a user failure of kind k with the formatted text, or out of memory when it could not be formatted
 fun refused(a: *A.Allocator, k: diagnostic_kind.Kind, said: res[str, std_format.FormatError]) res[i64, fail.Fail] {
-    if (sel said.err) { ret res[i64, fail.Fail].err{fail.message("out of memory")}; }
+    if (sel said.err) { ret res[i64, fail.Fail].err{fail.format_refused(said.err)}; }
     ret res[i64, fail.Fail].err{fail.user(k, said.ok)};
 }
 

@@ -150,7 +150,7 @@ fun run_reported(cx: *args.Call) i64 {
         val tv: opt[chrono_duration.Duration] = duration.parse(opt_timeout.some);
         if (sel tv.none) {
             val said: res[str, std_format.FormatError] = std_format.sprint(a, "--timeout expects {}", duration.FORMS);
-            if (sel said.err) { ret cli_diagnostic.report_fail(r, fail.message("out of memory"), diagnostic.ORIGIN_NONE); }
+            if (sel said.err) { ret cli_diagnostic.report_fail(r, fail.format_refused(said.err), diagnostic.ORIGIN_NONE); }
             ret cli_diagnostic.report_fail(r, fail.user(diagnostic_kind.CLI_FLAG_VALUE, said.ok), diagnostic.ORIGIN_NONE);
         }
         timeout = tv.some;
@@ -245,7 +245,7 @@ fun run_reported(cx: *args.Call) i64 {
         val res_resolve: res[*u8, fail.Fail] = host.program_resolve(a, name);
         if (sel res_resolve.err) {
             val said: res[str, std_format.FormatError] = std_format.sprint(a, "--runner '{}': {}", name::str, fail.describe(res_resolve.err));
-            if (sel said.err) { ret cli_diagnostic.report_fail(r, fail.message("out of memory"), diagnostic.ORIGIN_TEST); }
+            if (sel said.err) { ret cli_diagnostic.report_fail(r, fail.format_refused(said.err), diagnostic.ORIGIN_TEST); }
             ret cli_diagnostic.report_fail(r, fail.with_text(res_resolve.err, said.ok), diagnostic.ORIGIN_TEST);
         }
         runner = res_resolve.ok;
@@ -274,7 +274,7 @@ fun run_reported(cx: *args.Call) i64 {
         val said: res[str, std_format.FormatError] = std_format.sprint(a,
             "nothing was runnable on this host ({}): every selected target's os or isa differs from the host's, so its tests were built and not run; select a target native to this host with -t, or pass --runner for a single selection",
             host.ok);
-        if (sel said.err) { ret cli_diagnostic.report_fail(r, fail.message("out of memory"), diagnostic.ORIGIN_TEST); }
+        if (sel said.err) { ret cli_diagnostic.report_fail(r, fail.format_refused(said.err), diagnostic.ORIGIN_TEST); }
         ret cli_diagnostic.report_fail(r, fail.user(diagnostic_kind.TARGET_NOT_RUNNABLE, said.ok), diagnostic.ORIGIN_TEST);
     }
     ret code;

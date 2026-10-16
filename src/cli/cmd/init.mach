@@ -126,7 +126,7 @@ fun run_with(cx: *args.Call, deps: *ScaffoldDep, dep_count: usize) res[i64, fail
     val cwd_r: res[types_string.OwnedString, env.EnvError] = env.current_dir(a);
     if (sel cwd_r.err) {
         val said: res[str, std_format.FormatError] = std_format.sprint(a, "failed to read the working directory: {}", fail.env_text(cwd_r.err));
-        if (sel said.err) { ret res[i64, fail.Fail].err{fail.message("out of memory")}; }
+        if (sel said.err) { ret res[i64, fail.Fail].err{fail.format_refused(said.err)}; }
         ret res[i64, fail.Fail].err{fail.environment(diagnostic_kind.FS_CURRENT_DIR, said.ok)};
     }
     var cwd_owned: types_string.OwnedString = cwd_r.ok;

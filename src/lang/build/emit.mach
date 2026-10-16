@@ -277,7 +277,7 @@ pub fun emit_static_archive(p: *project.Project, destination: str, images: *targ
     fin { free_members(p.alloc, members, len); }
 
     val res_bufs: res[*Vector[u8], A.Error] = A.allocate[Vector[u8]](p.alloc, len::usize);
-    if (sel res_bufs.err) { ret err[fail.Fail].err{fail.message("out of memory")}; }
+    if (sel res_bufs.err) { ret err[fail.Fail].err{fail.refused(res_bufs.err)}; }
     val bufs: *Vector[u8] = res_bufs.ok;
     fin { free_read_bufs(p.alloc, bufs, len); }
 
@@ -338,7 +338,7 @@ pub fun link_shared_images(p: *project.Project, images: *target_of.ObjectImage,
     ext: *target_of.ObjectInput, ext_count: u32,
     dynlibs: *target_of.DynLib, dynlib_len: u32, destination: str, out_path: **u8) err[fail.Fail] {
     val res_ord: res[*target_of.ObjectImage, fail.Fail] = gather_topo_images(p, images);
-    if (sel res_ord.err) { ret err[fail.Fail].err{fail.message("out of memory")}; }
+    if (sel res_ord.err) { ret err[fail.Fail].err{res_ord.err}; }
     val ordered: *target_of.ObjectImage = res_ord.ok;
 
     val res_link: err[fail.Fail] = linker.link_mixed(p.s, ?p.linkage, ?p.diags, ?p.target, ordered, p.emit_len, ext, ext_count,
@@ -378,7 +378,7 @@ fun gather_topo_images(p: *project.Project, images: *target_of.ObjectImage) res[
 pub fun link_flat_images(p: *project.Project, images: *target_of.ObjectImage, destination: str,
     image_options: target_of.ImageOptions) err[fail.Fail] {
     val res_ord: res[*target_of.ObjectImage, fail.Fail] = gather_topo_images(p, images);
-    if (sel res_ord.err) { ret err[fail.Fail].err{fail.message("out of memory")}; }
+    if (sel res_ord.err) { ret err[fail.Fail].err{res_ord.err}; }
     val ordered: *target_of.ObjectImage = res_ord.ok;
 
     val res_link: err[fail.Fail] = linker.link_images(p.s, ?p.linkage, ?p.diags, ?p.target, ordered, p.emit_len, nil::*target_of.DynLib, 0, destination, artifact_product_name(p), catalog_artifact.EXECUTABLE, p.req.pie, image_options);
@@ -414,7 +414,7 @@ pub fun link_mixed_images(p: *project.Project, images: *target_of.ObjectImage,
     dynlibs: *target_of.DynLib, dynlib_len: u32, destination: str,
     image_options: target_of.ImageOptions) err[fail.Fail] {
     val res_ord: res[*target_of.ObjectImage, fail.Fail] = gather_topo_images(p, images);
-    if (sel res_ord.err) { ret err[fail.Fail].err{fail.message("out of memory")}; }
+    if (sel res_ord.err) { ret err[fail.Fail].err{res_ord.err}; }
     val ordered: *target_of.ObjectImage = res_ord.ok;
 
     val res_link: err[fail.Fail] = linker.link_mixed(p.s, ?p.linkage, ?p.diags, ?p.target, ordered, p.emit_len, ext, ext_count,
@@ -513,7 +513,7 @@ fun store_fact(p: *project.Project, li: *input.Input, inputs: *target_of.ObjectI
         ret err[fail.Fail].ok{};
     }
     val dup_r: res[str, types_string.StrError] = str_copy(p.alloc, li.text::*u8);
-    if (sel dup_r.err) { ret err[fail.Fail].err{fail.message("out of memory")}; }
+    if (sel dup_r.err) { ret err[fail.Fail].err{fail.str_refused(dup_r.err)}; }
     inputs[@written].path   = dup_r.ok::*u8;
     inputs[@written].origin = target_of.RELOC_INPUT;
     @written                = @written + 1;
@@ -539,7 +539,7 @@ fun append_dynlib(p: *project.Project, li: *input.Input,
     if (!str_empty(li.library)) {
         val name_r: res[intern.StrId, A.Error] = intern.add(?p.s.interner, li.library);
         if (sel name_r.err) {
-            ret err[fail.Fail].err{fail.message("out of memory")};
+            ret err[fail.Fail].err{fail.refused(name_r.err)};
         }
         name = name_r.ok;
     }
@@ -547,7 +547,7 @@ fun append_dynlib(p: *project.Project, li: *input.Input,
     if (!str_empty(li.rpath)) {
         val rp_r: res[intern.StrId, A.Error] = intern.add(?p.s.interner, li.rpath);
         if (sel rp_r.err) {
-            ret err[fail.Fail].err{fail.message("out of memory")};
+            ret err[fail.Fail].err{fail.refused(rp_r.err)};
         }
         rpath = rp_r.ok;
     }
@@ -661,12 +661,10 @@ fun register_link_provider(p: *project.Project, li: *input.Input) err[fail.Fail]
     if (str_empty(li.library)) { ret err[fail.Fail].ok{}; }
     val nr: res[intern.StrId, A.Error] = intern.add(?p.s.interner, li.library);
     if (sel nr.err) {
-        ret err[fail.Fail].err{fail.message("out of memory")};
+        ret err[fail.Fail].err{fail.refused(nr.err)};
     }
     val rr: err[fail.Fail] = linkage.register_provider(?p.linkage, nr.ok, li.kind == input.STATIC);
-    if (sel rr.err) {
-        ret err[fail.Fail].err{fail.message("out of memory")};
-    }
+    if (sel rr.err) { ret rr; }
     ret err[fail.Fail].ok{};
 }
 
@@ -689,9 +687,7 @@ fun register_link_claims(p: *project.Project, req: *manifest.LinkRequirement) er
             cnt;
         }
         val register_import_library_r: err[fail.Fail] = linkage.register_import_library(?p.linkage, sym, req.key);
-        if (sel register_import_library_r.err) {
-            ret err[fail.Fail].err{fail.message("out of memory")};
-        }
+        if (sel register_import_library_r.err) { ret register_import_library_r; }
         i = i + 1;
     }
     ret err[fail.Fail].ok{};

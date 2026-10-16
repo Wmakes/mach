@@ -111,7 +111,7 @@ pub fun collect_scope(p: *project.Project, col: testrunner.Collected, sc: *TestS
     }
 
     val res_sel: res[*testrunner.Test, A.Error] = A.allocate[testrunner.Test](p.alloc, sc.col.count::usize);
-    if (sel res_sel.err) { ret err[fail.Fail].err{fail.message("out of memory")}; }
+    if (sel res_sel.err) { ret err[fail.Fail].err{fail.refused(res_sel.err)}; }
     sc.pick = res_sel.ok;
     var i: u32 = 0;
     for (i < sc.col.count) {

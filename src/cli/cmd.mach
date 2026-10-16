@@ -108,7 +108,7 @@ pub fun dispatch(argc: usize, argv: **u8) i64 {
 
     if (inv.command == nil) {
         val said: res[str, std_format.FormatError] = std_format.sprint(?backing, "unknown command '{}'", argv[1]::str);
-        if (sel said.err) { ret cli_diagnostic.refuse(fail.message("out of memory")); }
+        if (sel said.err) { ret cli_diagnostic.refuse(fail.format_refused(said.err)); }
         cli_diagnostic.refuse(fail.user(diagnostic_kind.CLI_UNKNOWN_COMMAND, said.ok));
         val shown: i64 = render_overview(?backing);
         if (shown != exit.OK) { ret shown; }
