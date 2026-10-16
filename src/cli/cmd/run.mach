@@ -237,7 +237,7 @@ pub fun run(cx: *args.Call) res[i64, fail.Fail] {
     ret res[i64, fail.Fail].err{fail.environment(diagnostic_kind.PROCESS_NO_STATUS, "the executed process ended without an exit status or a signal")};
 }
 
-# a user failure of kind k with the formatted text, or out of memory when it could not be formatted
+# a user failure of kind k with the formatted text, or the refusal to format it
 fun refused(a: *A.Allocator, k: diagnostic_kind.Kind, said: res[str, std_format.FormatError]) res[i64, fail.Fail] {
     if (sel said.err) { ret res[i64, fail.Fail].err{fail.format_refused(said.err)}; }
     ret res[i64, fail.Fail].err{fail.user(k, said.ok)};
