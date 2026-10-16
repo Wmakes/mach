@@ -1,5 +1,15 @@
-# the instruction set catalog: every architecture id, its spelling, its
-# fingerprint tag and the selection syntax its names may carry
+# the instruction set catalog: the architectures of mink's catalog mach has a
+# target for, each with its id, its fingerprint tag and the selection syntax its
+# names may carry. it is an explicit projection: a row names mink's architecture
+# row and is spelled by it, and an architecture of mink's no row names (x86,
+# arm64e, wasm32, ...) is no instruction set here and no `$mach.arch` tag
+use mink_arch:    mink.catalog.arch;
+use arch_aarch64: mink.catalog.arch.aarch64;
+use arch_list:    mink.catalog.arch.list;
+use arch_riscv:   mink.catalog.arch.riscv;
+use arch_spirv:   mink.catalog.arch.spirv;
+use arch_x86:     mink.catalog.arch.x86;
+
 use mach.lang.fail;
 use mach.lang.target.extension;
 use extension_riscv: mach.lang.target.extension.riscv;
@@ -23,7 +33,7 @@ pub def CvRegFn: fun(i32) i32;
 
 rec Row {
     arch:            u32;
-    spelling:        str;
+    owner:           *mink_arch.Arch;
     fingerprint_tag: u8;
     # how a name that carries a selection spells this instruction set, nil
     # when only its spelling names it
@@ -35,12 +45,17 @@ pub val VERSION: u8 = 2;
 
 val ROW_COUNT: usize          = 5;
 val ROWS:      [ROW_COUNT]Row = [ROW_COUNT]Row{
-    Row{arch: X86_64, spelling: "x86_64", fingerprint_tag: 1},
-    Row{arch: AARCH64, spelling: "aarch64", fingerprint_tag: 2},
-    Row{arch: RISCV64, spelling: "riscv64", fingerprint_tag: 3, syntax: ?extension_riscv.SYNTAX},
-    Row{arch: SPIRV, spelling: "spirv", fingerprint_tag: 4},
-    Row{arch: RISCV32, spelling: "riscv32", fingerprint_tag: 5, syntax: ?extension_riscv.SYNTAX},
+    Row{arch: X86_64, owner: ?arch_x86.X86_64, fingerprint_tag: 1},
+    Row{arch: AARCH64, owner: ?arch_aarch64.AARCH64, fingerprint_tag: 2},
+    Row{arch: RISCV64, owner: ?arch_riscv.RISCV64, fingerprint_tag: 3, syntax: ?extension_riscv.SYNTAX},
+    Row{arch: SPIRV, owner: ?arch_spirv.SPIRV, fingerprint_tag: 4},
+    Row{arch: RISCV32, owner: ?arch_riscv.RISCV32, fingerprint_tag: 5, syntax: ?extension_riscv.SYNTAX},
 };
+
+# the spelling of a row: mink's name for its architecture
+fun spelling(r: *Row) str {
+    ret r.owner.name;
+}
 
 fun row_of(id: u32) *Row {
     var i: usize = 0;
@@ -54,7 +69,7 @@ fun row_of(id: u32) *Row {
 pub fun id_for(name: str) u32 {
     var i: usize = 0;
     for (i < ROW_COUNT) {
-        if (str_equals(ROWS[i].spelling, name)) { ret ROWS[i].arch; }
+        if (str_equals(spelling(?ROWS[i]), name)) { ret ROWS[i].arch; }
         i = i + 1;
     }
     val syntax: *extension.SelectionSyntax = syntax_for(name);
@@ -64,7 +79,7 @@ pub fun id_for(name: str) u32 {
     if (sel parsed.err) { ret UNKNOWN; }
     i = 0;
     for (i < ROW_COUNT) {
-        if (str_equals(ROWS[i].spelling, parsed.ok.template)) { ret ROWS[i].arch; }
+        if (str_equals(spelling(?ROWS[i]), parsed.ok.template)) { ret ROWS[i].arch; }
         i = i + 1;
     }
     ret UNKNOWN;
@@ -117,7 +132,7 @@ pub fun host_id() u32 {
 pub fun name_for(id: u32) str {
     val spec: *Row = row_of(id);
     if (spec == nil) { ret "unknown"; }
-    ret spec.spelling;
+    ret spelling(spec);
 }
 
 pub fun count() usize {
@@ -126,7 +141,7 @@ pub fun count() usize {
 
 pub fun name_at(index: usize) str {
     if (index >= ROW_COUNT) { ret "unknown"; }
-    ret ROWS[index].spelling;
+    ret spelling(?ROWS[index]);
 }
 
 pub fun fingerprint_tag(id: u32) u8 {
@@ -178,6 +193,31 @@ test id_for__name_roundtrip {
     ret 0;
 }
 
+# the projection is explicit: every row names a row of mink's catalog and is spelled
+# by it, and an architecture of mink's no row names is no instruction set here
+test rows__project_mink_s_catalog_explicitly {
+    var i: usize = 0;
+    for (i < ROW_COUNT) {
+        if (!arch_list.member(ROWS[i].owner)) { ret 1; }
+        i = i + 1;
+    }
+    var projected: usize = 0;
+    i = 0;
+    for (i < arch_list.count()) {
+        val a:  *mink_arch.Arch = arch_list.at(i);
+        val id: u32             = id_for(a.name);
+        if (id != UNKNOWN) {
+            if (row_of(id).owner != a) { ret 2; }
+            projected = projected + 1;
+        }
+        i = i + 1;
+    }
+    if (projected != ROW_COUNT)                                       { ret 3; }
+    if (id_for("x86") != UNKNOWN || id_for("wasm32") != UNKNOWN)      { ret 4; }
+    if (id_for("arm64e") != UNKNOWN || id_for("riscv64e") != UNKNOWN) { ret 5; }
+    ret 0;
+}
+
 test rows__complete_unique_ordered_roundtrip {
     if (ROWS[0].arch != X86_64)  { ret 1; }
     if (ROWS[1].arch != AARCH64) { ret 1; }
@@ -187,15 +227,15 @@ test rows__complete_unique_ordered_roundtrip {
 
     var i: usize = 0;
     for (i < ROW_COUNT) {
-        if (ROWS[i].fingerprint_tag != (i + 1)::u8)                { ret 1; }
-        if (id_for(ROWS[i].spelling) != ROWS[i].arch)              { ret 1; }
-        if (!str_equals(name_for(ROWS[i].arch), ROWS[i].spelling)) { ret 1; }
+        if (ROWS[i].fingerprint_tag != (i + 1)::u8)                  { ret 1; }
+        if (id_for(spelling(?ROWS[i])) != ROWS[i].arch)              { ret 1; }
+        if (!str_equals(name_for(ROWS[i].arch), spelling(?ROWS[i]))) { ret 1; }
 
         var j: usize = 0;
         for (j < ROW_COUNT) {
             if (i != j) {
                 if (ROWS[i].arch == ROWS[j].arch)                       { ret 1; }
-                if (str_equals(ROWS[i].spelling, ROWS[j].spelling))     { ret 1; }
+                if (str_equals(spelling(?ROWS[i]), spelling(?ROWS[j]))) { ret 1; }
                 if (ROWS[i].fingerprint_tag == ROWS[j].fingerprint_tag) { ret 1; }
             }
             j = j + 1;
