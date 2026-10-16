@@ -83,6 +83,11 @@ pub fun symbol_same(left: SymbolId, right: SymbolId) bool {
     ret left.index == right.index;
 }
 
+# whether an id is one of the sentinels, which name no symbol
+pub fun symbol_is_sentinel(id: SymbolId) bool {
+    ret id.index >= SYMBOL_RESERVED_MIN.index;
+}
+
 pub fun symbol_is_nil(id: SymbolId) bool {
     ret id.index == SYMBOL_NIL.index;
 }
@@ -585,7 +590,7 @@ fun deps_release(alloc: *A.Allocator, deps: *ResolveDeps, cap: u32) {
     deps.count   = 0;
 }
 
-# release what deps_of allocated
+# release what deps_of allocated; a list it left empty owns nothing
 pub fun deps_dnit(alloc: *A.Allocator, deps: *ResolveDeps) {
     if (deps.entries == nil) { ret; }
     var i: u32 = 0;
@@ -599,6 +604,7 @@ pub fun deps_dnit(alloc: *A.Allocator, deps: *ResolveDeps) {
     deps.count   = 0;
 }
 
+# release a resolution; a nil result holds nothing
 pub fun result_dnit(r: *ResolveResult) {
     if (r == nil) { ret; }
     if (r.symbols != nil && r.symbol_count > 0) {
@@ -3189,11 +3195,12 @@ fun report_named(rc: *ResolveContext, k: diagnostic_kind.Kind, span: lang_source
 # for the reporter to extend before `commit_built`
 fun named_builder(rc: *ResolveContext, k: diagnostic_kind.Kind, span: lang_source.Span, prefix: str, name_id: intern.StrId, suffix: str) res[diagnostic.DiagnosticBuilder, fail.Fail] {
     fail.reject(?rc.status);
-    var begun: res[diagnostic.DiagnosticBuilder, fail.Fail];
-    val no:    opt[str] = intern.get(?rc.s.interner, name_id);
-    if (sel no.some)   { begun = diagnostic.builder_initf(rc.diags.a, k, rc.a.file_id, span, "{}{}{}", prefix, no.some, suffix); }
-    or                 { begun = diagnostic.builder_init(rc.diags.a, k, rc.a.file_id, span, prefix); }
-    if (sel begun.err) { fail.internal(?rc.status, fail.describe(begun.err)); }
+    var begun: res[diagnostic.DiagnosticBuilder, fail.Fail] = res[diagnostic.DiagnosticBuilder, fail.Fail].err{fail.message("a reported name is absent from the interner")};
+    val no:    opt[str]                                     = intern.get(?rc.s.interner, name_id);
+    # a nil name reports the prefix alone; a name the interner lacks is a defect
+    if (sel no.some)                { begun = diagnostic.builder_initf(rc.diags.a, k, rc.a.file_id, span, "{}{}{}", prefix, no.some, suffix); }
+    or (intern.str_is_nil(name_id)) { begun = diagnostic.builder_init(rc.diags.a, k, rc.a.file_id, span, prefix); }
+    if (sel begun.err)              { fail.internal(?rc.status, fail.describe(begun.err)); }
     ret begun;
 }
 
@@ -3446,7 +3453,10 @@ fun literal_head_names_case(rc: *ResolveContext, tid: ast_id.TypeId) bool {
 # something other than a module; a head already split, or one the parser gave a case, stays
 fun split_case_head(rc: *ResolveContext, tid: ast_id.TypeId) {
     val t_opt: opt[*ast_type.Type] = ast.get_type(rc.a, tid);
-    if (!sel t_opt.some) { ret; }
+    if (!sel t_opt.some) {
+        fail.internal(?rc.status, "a type head names no type in its syntax tree");
+        ret;
+    }
     val t: *ast_type.Type = t_opt.some;
     if (t.kind != ast_type.TYPE_KIND_NAMED || !ast_id.expr_is_nil(t.data.named.case_desc) || t.data.named.case_name.len != 0) { ret; }
     if (rc.type_heads[ast_id.type_index(tid)] != interpretation.HEAD_PARSED)                                                  { ret; }
@@ -3463,7 +3473,8 @@ fun split_case_head(rc: *ResolveContext, tid: ast_id.TypeId) {
     rc.type_heads[ast_id.type_index(tid)] = interpretation.HEAD_CASE;
 }
 
-# the tail symbol of a dotted path, without reporting: SYMBOL_NIL when any segment is unknown
+# the tail symbol of a dotted path, without reporting a name it does not know: SYMBOL_NIL when any
+# segment is unknown, or when a segment cannot be interned, a refusal recorded in the status
 fun path_tail_symbol(rc: *ResolveContext, path: lang_source.Span) SymbolId {
     if (path.len == 0) { ret SYMBOL_NIL; }
     var cursor:         usize                  = path.offset;
@@ -3476,7 +3487,10 @@ fun path_tail_symbol(rc: *ResolveContext, path: lang_source.Span) SymbolId {
         val seg_span: lang_source.Span = fe_path.next(rc.source, path, ?cursor);
         if (seg_span.len == 0) { brk; }
         val r: res[intern.StrId, A.Error] = intern.range_add(?rc.s.interner, rc.source, seg_span.offset, seg_span.len);
-        if (sel r.err) { ret SYMBOL_NIL; }
+        if (sel r.err) {
+            fail.internal(?rc.status, fail.describe(fail.refused(r.err)));
+            ret SYMBOL_NIL;
+        }
         val seg_name: intern.StrId = r.ok;
 
         if (first) {

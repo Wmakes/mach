@@ -250,10 +250,14 @@ fun check_plan(entries: *CleanEntry, count: usize) err[fail.Fail] {
 
 fun execute_plan(r: *cli_diagnostic.Report, a: *A.Allocator, root: str, entries: *CleanEntry, count: usize, removed: *usize) i64 {
     val checked: err[fail.Fail] = check_plan(entries, count);
-    if (sel checked.err) { ret cli_diagnostic.report_fail(r, fail.with_text(checked.err, said(a, std_format.sprint(a, "cannot reserve clean targets: {}", fail.describe(checked.err)))), diagnostic.ORIGIN_NONE); }
+    if (sel checked.err) {
+        val text: res[str, fail.Fail] = fail.format(a, "cannot reserve clean targets: {}", fail.describe(checked.err));
+        if (sel text.err) { ret cli_diagnostic.report_fail(r, text.err, diagnostic.ORIGIN_NONE); }
+        ret cli_diagnostic.report_fail(r, fail.with_text(checked.err, text.ok), diagnostic.ORIGIN_NONE);
+    }
     var root_fd: usize = system_os.INVALID_HANDLE;
     val opened:  i64   = remove.open_path(root, ?root_fd);
-    if (opened < 0) { ret cli_diagnostic.report_fail(r, fail.environment(diagnostic_kind.FS_OPEN, said(a, std_format.sprint(a, "cannot open the project root: {}", system_os.error_message(opened)))), diagnostic.ORIGIN_NONE); }
+    if (opened < 0) { ret cli_diagnostic.report_fail(r, fail.environment_of(diagnostic_kind.FS_OPEN, fail.format(a, "cannot open the project root: {}", system_os.error_message(opened))), diagnostic.ORIGIN_NONE); }
     fin { system_os.close(root_fd); }
     var code: i64   = exit.OK;
     var i:    usize = 0;
@@ -264,19 +268,13 @@ fun execute_plan(r: *cli_diagnostic.Report, a: *A.Allocator, root: str, entries:
     ret code;
 }
 
-# formatted text, or what failed to format it when it could not be
-fun said(a: *A.Allocator, text: res[str, std_format.FormatError]) str {
-    if (sel text.err) { ret "out of memory"; }
-    ret text.ok;
-}
-
 fun execute_entry(r: *cli_diagnostic.Report, a: *A.Allocator, root_fd: usize, e: *CleanEntry, removed: *usize, code: i64) i64 {
     val rr: remove.Removal = remove.relative(root_fd, e.rel);
     if (rr.failed) {
         if (rr.kind == io_error.NOT_FOUND && !rr.containment) { ret code; }
-        val text: str = said(a, std_format.sprint(a, "cannot remove clean target '{}': {}", e.rel, remove.message(rr)));
-        if (rr.containment) { ret exit.worst(code, cli_diagnostic.report_fail(r, fail.user(diagnostic_kind.FS_REMOVE, text), diagnostic.ORIGIN_NONE)); }
-        ret exit.worst(code, cli_diagnostic.report_fail(r, fail.environment(diagnostic_kind.FS_REMOVE, text), diagnostic.ORIGIN_NONE));
+        val text: res[str, fail.Fail] = fail.format(a, "cannot remove clean target '{}': {}", e.rel, remove.message(rr));
+        if (rr.containment) { ret exit.worst(code, cli_diagnostic.report_fail(r, fail.user_of(diagnostic_kind.FS_REMOVE, text), diagnostic.ORIGIN_NONE)); }
+        ret exit.worst(code, cli_diagnostic.report_fail(r, fail.environment_of(diagnostic_kind.FS_REMOVE, text), diagnostic.ORIGIN_NONE));
     }
     if (rr.removed == 0) { ret code; }
 
@@ -317,8 +315,8 @@ test execute_entry__a_removal_refusal_is_an_error {
 
 # a clean target holding a name with no UTF-8 spelling, which only windows can
 # hold, is removed whole: the removal walks the tree in native units
-test execute_entry__removes_a_tree_holding_a_name_with_no_utf8_spelling {
-    $if ($mach.build.os == $mach.os.windows) {
+$if ($mach.build.os == $mach.os.windows) {
+    test execute_entry__removes_a_tree_holding_a_name_with_no_utf8_spelling {
         var r: cli_diagnostic.Report;
         cli_diagnostic.report_init(?r, cli_diagnostic.FORMAT_HUMAN);
         var a:      A.Allocator;
@@ -356,9 +354,6 @@ test execute_entry__removes_a_tree_holding_a_name_with_no_utf8_spelling {
         if (execute_entry(?r, ?a, root, ?target, ?removed, 0) != 0 || removed != 1) { ret 10; }
         val gone: res[bool, io_error.Error] = fs.exists(out_r.ok);
         if (!(sel gone.ok && !gone.ok)) { ret 11; }
-        ret 0;
-    }
-    $or {
         ret 0;
     }
 }

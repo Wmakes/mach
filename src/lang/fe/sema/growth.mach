@@ -107,6 +107,7 @@ pub fun init(alloc: *A.Allocator) Analysis {
     ret an;
 }
 
+# release an analysis; a nil one, or one never made, holds nothing
 pub fun dnit(an: *Analysis) {
     if (an == nil || an.alloc == nil) { ret; }
     map.dnit[u32, u32](?an.cycle_of);

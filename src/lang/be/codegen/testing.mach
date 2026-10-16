@@ -52,6 +52,8 @@ use catalog_subsystem: mach.lang.target.catalog.subsystem;
 use mach.lang.target.isa.riscv.refcore;
 use target_of: mach.lang.target.of;
 use mach.lang.target.resolved;
+#[testing]
+use mach.lang.testrun;
 
 #[testing]
 pub fun sema_rejects_at(src: str, needle: str, want_offset: usize, want_len: usize) bool {
@@ -1260,43 +1262,6 @@ pub fun divide_manifest() str {
     ret "[project]\nmach = \">=5\"\nid = \"divtrap\"\nversion = \"0.0.0\"\nsrc = \"src\"\nwork = \"out/{target.name}/{profile.name}\"\n\n[target.linux-x86_64]\nisa = \"x86_64\"\nos = \"linux\"\nabi = \"sysv64\"\n\n[target.linux-arm64]\nisa = \"aarch64\"\nos = \"linux\"\nabi = \"aapcs64\"\n\n[target.linux-riscv64]\nisa = \"riscv64\"\nos = \"linux\"\nabi = \"lp64d\"\n\n[artifact.divtrap]\nkind = \"bin\"\nentry = \"main.mach\"\nout = \"{project.work}/bin/divtrap\"\ntargets = [\"*\"]\nlink = []\nneed = []\n[profile.debug]\ndefault = true\noptimize = false\ndebug = true\nsimd = \"scalarize\"\n[profile.release]\noptimize = true\ndebug = false\nsimd = \"scalarize\"\n";
 }
 
-#[testing]
-pub fun run_with_argc(cwd: str, runner: str, program: str, argc: usize, trapped: *bool, exit_code: *i32) bool {
-    var argv:   [12]*u8;
-    var n:      usize = 0;
-    var launch: str   = program;
-    if (!str_empty(runner)) {
-        argv[n] = runner::*u8;
-        n       = n + 1;
-        launch  = runner;
-    }
-    argv[n] = program::*u8;
-    n       = n + 1;
-    var extra: usize = 1;
-    for (extra < argc) {
-        argv[n] = "x"::*u8;
-        n       = n + 1;
-        extra   = extra + 1;
-    }
-    argv[n] = nil;
-    val spawned: res[exec.Child, exec.Error] = exec.spawn_in(launch, ?argv[0], exec.Environment.inherit{}, cwd);
-    if (sel spawned.err) { ret false; }
-    val rr: res[exec.ExitStatus, exec.Error] = exec.wait(spawned.ok);
-    if (sel rr.err) { ret false; }
-    val status: exec.ExitStatus = rr.ok;
-    @trapped   = false;
-    @exit_code = -1;
-    if (exec.signaled(status)) {
-        val sig: i32 = exec.signal(status);
-        @trapped = sig == 4 || sig == 5 || sig == 8;
-        ret true;
-    }
-    if (!exec.exited(status)) { ret false; }
-    @exit_code = exec.code(status)::i32;
-    @trapped   = @exit_code == 132 || @exit_code == 133 || @exit_code == 136;
-    ret true;
-}
-
 # the pipeline's verdict on one program: 0 accepted, 1 rejected (a reported diagnostic, or the constant-time
 # validator's refusal, which the backend still surfaces as an internal failure naming the oblivious function), -1 apparatus
 #[testing]
@@ -1331,7 +1296,8 @@ pub fun tag_start_stub() str {
     ret "\n#[symbol(\"_start\")]\npub fun start() {\n    $if ($mach.build.arch == $mach.arch.x86_64) {\n        asm x86_64 {\n            mov rdi, [rsp]\n            and rsp, -16\n            call main\n            mov rdi, rax\n            mov rax, 60\n            syscall\n        }\n    }\n    $or ($mach.build.arch == $mach.arch.aarch64) {\n        asm aarch64 {\n            ldr x0, [sp]\n            bl main\n            mov x8, 93\n            svc 0\n        }\n    }\n    $or {\n        asm riscv64 {\n            ld a0, 0(sp)\n            call main\n            li a7, 93\n            ecall\n        }\n    }\n}\n";
 }
 
-# builds a freestanding tag fixture for one target and profile and runs it; the fixture exits 0 when every check holds
+# builds a freestanding tag fixture for one target and profile and runs it; the fixture exits 0 when every check holds,
+# and an absent runner skips the arm with 77
 #[testing]
 pub fun tag_native_case(alloc: *A.Allocator, target_name: str, runner_name: str, release: bool, program: str, label: str) i32 {
     ret tag_native_case_files(alloc, divide_manifest(), nil, nil, 0, target_name, runner_name, release, program, label);
@@ -1348,7 +1314,7 @@ pub fun tag_native_case_files(alloc: *A.Allocator, manifest_text: str, root_name
             print.print("tag-native: runner absent, arm skipped: ");
             print.print(runner_name);
             print.print("\n");
-            ret 0;
+            ret 77;
         }
         runner = rr.ok;
     }
@@ -1413,7 +1379,7 @@ pub fun tag_native_case_files(alloc: *A.Allocator, manifest_text: str, root_name
         or {
             var trapped: bool = false;
             var code:    i32  = 0;
-            if (!run_with_argc(root, runner, bo.artifacts.data[0].path, 1, ?trapped, ?code)) { bad = 4; }
+            if (!engine.run_with_argc(root, runner, bo.artifacts.data[0].path, 1, ?trapped, ?code)) { bad = 4; }
             or (trapped || code != 0) {
                 print.print("tag-native: ");
                 print.print(label);
@@ -1433,18 +1399,20 @@ pub fun tag_native_case_files(alloc: *A.Allocator, manifest_text: str, root_name
     ret bad;
 }
 
-# runs one fixture on the three native linux targets in both profiles
+# runs one fixture on the three native linux targets in both profiles; 77 when an arm skipped and none failed
 #[testing]
 pub fun tag_native_all(alloc: *A.Allocator, program: str, label: str) i32 {
+    var skipped: bool = false;
     var release: bool = false;
     var pass:    u32  = 0;
     for (pass < 2) {
-        if (tag_native_case(alloc, "linux-x86_64", "", release, program, label) != 0)              { ret 1; }
-        if (tag_native_case(alloc, "linux-arm64", "qemu-aarch64", release, program, label) != 0)   { ret 2; }
-        if (tag_native_case(alloc, "linux-riscv64", "qemu-riscv64", release, program, label) != 0) { ret 3; }
+        if (testrun.arm_failed(tag_native_case(alloc, "linux-x86_64", "", release, program, label), ?skipped))              { ret 1; }
+        if (testrun.arm_failed(tag_native_case(alloc, "linux-arm64", "qemu-aarch64", release, program, label), ?skipped))   { ret 2; }
+        if (testrun.arm_failed(tag_native_case(alloc, "linux-riscv64", "qemu-riscv64", release, program, label), ?skipped)) { ret 3; }
         release = true;
         pass    = pass + 1;
     }
+    if (skipped) { ret 77; }
     ret 0;
 }
 

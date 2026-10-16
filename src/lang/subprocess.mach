@@ -38,7 +38,9 @@ use std.types.string.str_contains;
 use std.types.string.str_empty;
 use std.types.string.str_equals;
 
-use lang_alloc: mach.lang.alloc;
+use lang_alloc:      mach.lang.alloc;
+use diagnostic_kind: mach.lang.diagnostic.kind;
+use mach.lang.fail;
 use mach.lang.host;
 use io_error:  std.io.error;
 use io_handle: std.io.handle;
@@ -115,6 +117,8 @@ tag Cause: u8 {
     reap;
     grace_negative;
     grace_large;
+    deadline_done;
+    deadline_invalid;
 }
 
 # a refusal of this module
@@ -132,7 +136,8 @@ pub fun failure(identity: str, cause: Cause) Error {
     ret Error{identity: identity, cause: cause};
 }
 
-fun cause_text(c: Cause) str {
+# the text of what refused, static
+pub fun cause_text(c: Cause) str {
     if (sel c.alloc)              { ret lang_alloc.text(c.alloc); }
     or (sel c.exec)               { ret exec.error_message(c.exec); }
     or (sel c.io)                 { ret system_os.message(c.io); }
@@ -151,15 +156,18 @@ fun cause_text(c: Cause) str {
     or (sel c.termination)        { ret "subprocess termination failed"; }
     or (sel c.reap)               { ret "subprocess reap failed"; }
     or (sel c.grace_negative)     { ret "subprocess termination grace cannot be negative"; }
-    ret "subprocess termination grace is too large";
+    or (sel c.grace_large)        { ret "subprocess termination grace is too large"; }
+    or (sel c.deadline_done)      { ret "subprocess deadline set on an owner that is done"; }
+    ret "subprocess deadline must lie a positive time ahead";
 }
 
-# "identity: cause", owned by `a` (released with str_free); the static
-# fallback when even that cannot be formatted
-pub fun text(a: *A.Allocator, e: Error) str {
-    val r: res[str, std_format.FormatError] = std_format.sprint(a, "{}: {}", e.identity, cause_text(e.cause));
-    if (sel r.err) { ret "subprocess operation failed"; }
-    ret r.ok;
+# the machine's refusal `e` as an environment failure under `k`, its text
+# "identity: cause" owned by `a`; a refusal to format the text is the failure
+# instead
+pub fun refusal(a: *A.Allocator, k: diagnostic_kind.Kind, e: Error) fail.Fail {
+    val made: res[str, fail.Fail] = fail.format(a, "{}: {}", e.identity, cause_text(e.cause));
+    if (sel made.err) { ret made.err; }
+    ret fail.environment(k, made.ok);
 }
 
 # how a child ended
@@ -248,6 +256,7 @@ fun cstr_count(list: **u8) usize {
     ret n;
 }
 
+# release a nil-terminated list of strings; a nil list owns nothing
 fun free_cstr_list(a: *A.Allocator, list: **u8) {
     if (list == nil) { ret; }
     var n: usize = 0;
@@ -368,25 +377,26 @@ pub fun init(p: *OwnedSubprocess) {
     p.timeout         = 0;
 }
 
-fun set_deadline(p: *OwnedSubprocess, deadline: time.Instant) bool {
-    if (p.state != STATE_UNSTARTED && p.state != STATE_RUNNING)               { ret false; }
-    if (deadline.sec < 0 || deadline.nsec < 0 || deadline.nsec >= 1000000000) { ret false; }
+fun set_deadline(p: *OwnedSubprocess, deadline: time.Instant) err[Cause] {
+    if (p.state != STATE_UNSTARTED && p.state != STATE_RUNNING)               { ret err[Cause].err{Cause.deadline_done{}}; }
+    if (deadline.sec < 0 || deadline.nsec < 0 || deadline.nsec >= 1000000000) { ret err[Cause].err{Cause.deadline_invalid{}}; }
     p.has_deadline = true;
     p.deadline     = deadline;
-    ret true;
+    ret err[Cause].ok{};
 }
 
 # give `p` a deadline `timeout` from now, which wait_any enforces
 # ---
-# ret: false when the timeout is not positive, the clock fails, or the owner
-#      is done
-pub fun bound(p: *OwnedSubprocess, timeout: chrono_duration.Duration) bool {
-    if (timeout < 1) { ret false; }
+# ret: nothing, or the refusal when the timeout is not positive, the clock
+#      fails, or the owner is done
+pub fun bound(p: *OwnedSubprocess, timeout: chrono_duration.Duration) err[Error] {
+    if (timeout < 1) { ret err[Error].err{failure(owner_identity(p), Cause.deadline_invalid{})}; }
     val now: time.InstantClock = time.instant();
-    if (sel now.err)                                         { ret false; }
-    if (!set_deadline(p, time.instant_add(now.ok, timeout))) { ret false; }
+    if (sel now.err) { ret err[Error].err{failure(owner_identity(p), Cause.io{now.err})}; }
+    val set: err[Cause] = set_deadline(p, time.instant_add(now.ok, timeout));
+    if (sel set.err) { ret err[Error].err{failure(owner_identity(p), set.err)}; }
     p.timeout = timeout;
-    ret true;
+    ret err[Error].ok{};
 }
 
 fun deadline_reached(p: *OwnedSubprocess, now: time.Instant) bool {
@@ -425,18 +435,18 @@ fun observe_spawn_failure(p: *OwnedSubprocess) {
     p.terminal = SubprocessTerminal{kind: STATE_SPAWN_FAILURE, code: 0};
 }
 
-fun begin_spawn(p: *OwnedSubprocess) bool {
-    if (p.spawn_attempted || p.state != STATE_UNSTARTED) { ret false; }
+fun begin_spawn(p: *OwnedSubprocess) err[Cause] {
+    if (p.spawn_attempted || p.state != STATE_UNSTARTED) { ret err[Cause].err{Cause.attempted{}}; }
     p.spawn_attempted = true;
-    ret true;
+    ret err[Cause].ok{};
 }
 
-fun observe_terminal(p: *OwnedSubprocess, kind: SubprocessState, code: i32) bool {
-    if (p.state != STATE_RUNNING)                       { ret false; }
-    if (kind != STATE_EXITED && kind != STATE_SIGNALED) { ret false; }
+fun observe_terminal(p: *OwnedSubprocess, kind: SubprocessState, code: i32) err[Cause] {
+    if (p.state != STATE_RUNNING)                       { ret err[Cause].err{Cause.transition{}}; }
+    if (kind != STATE_EXITED && kind != STATE_SIGNALED) { ret err[Cause].err{Cause.transition{}}; }
     p.state    = kind;
     p.terminal = SubprocessTerminal{kind: kind, code: code};
-    ret true;
+    ret err[Cause].ok{};
 }
 
 fun close_capture(c: *OwnedCapture) {
@@ -447,26 +457,34 @@ fun close_capture(c: *OwnedCapture) {
     c.result.closed = true;
 }
 
-fun mark_reaped(p: *OwnedSubprocess) bool {
-    if (p.state != STATE_EXITED && p.state != STATE_SIGNALED) { ret false; }
-    if (p.reap_count != 0)                                    { ret false; }
+fun mark_reaped(p: *OwnedSubprocess) err[Cause] {
+    if (p.state != STATE_EXITED && p.state != STATE_SIGNALED) { ret err[Cause].err{Cause.transition{}}; }
+    if (p.reap_count != 0)                                    { ret err[Cause].err{Cause.transition{}}; }
     p.reap_count = 1;
     p.state      = STATE_REAPED;
-    ret true;
+    ret err[Cause].ok{};
 }
 
-fun observe_status(p: *OwnedSubprocess, st: exec.ExitStatus) bool {
-    var kind: SubprocessState = STATE_EXITED;
-    var code: i32             = 0;
-    if (exec.signaled(st)) {
-        kind = STATE_SIGNALED;
-        code = exec.signal(st);
-    }
-    or (exec.exited(st)) {
-        code = exec.code(st)::i32;
-    }
-    or { ret false; }
-    ret observe_terminal(p, kind, code) && mark_reaped(p);
+# the child reached its terminal `kind` with `code` and was reaped
+fun observe_reaped(p: *OwnedSubprocess, kind: SubprocessState, code: i32) err[Error] {
+    val ended: err[Cause] = observe_terminal(p, kind, code);
+    if (sel ended.err) { ret err[Error].err{failure(owner_identity(p), ended.err)}; }
+    val reaped: err[Cause] = mark_reaped(p);
+    if (sel reaped.err) { ret err[Error].err{failure(owner_identity(p), reaped.err)}; }
+    ret err[Error].ok{};
+}
+
+# how a wait status ended its child, or the refusal of a status that names no end
+fun status_terminal(st: exec.ExitStatus) opt[SubprocessTerminal] {
+    if (exec.signaled(st)) { ret opt[SubprocessTerminal].some{SubprocessTerminal{kind: STATE_SIGNALED, code: exec.signal(st)}}; }
+    if (exec.exited(st))   { ret opt[SubprocessTerminal].some{SubprocessTerminal{kind: STATE_EXITED, code: exec.code(st)::i32}}; }
+    ret opt[SubprocessTerminal].none{};
+}
+
+fun observe_status(p: *OwnedSubprocess, st: exec.ExitStatus) err[Error] {
+    val ended: opt[SubprocessTerminal] = status_terminal(st);
+    if (sel ended.none) { ret err[Error].err{failure(owner_identity(p), Cause.invalid_status{})}; }
+    ret observe_reaped(p, ended.some.kind, ended.some.code);
 }
 
 # how spawn starts a child, spawn_options giving the defaults
@@ -540,7 +558,8 @@ fun capture_open(a: *A.Allocator, p: *OwnedSubprocess, pathname: str, options: S
 # ret:      nothing, or the refusal named by the pathname
 pub fun spawn(a: *A.Allocator, p: *OwnedSubprocess, pathname: str, argv: **u8, envp: exec.Environment,
     options: SpawnOptions) err[Error] {
-    if (!begin_spawn(p)) { ret err[Error].err{failure(owner_identity(p), Cause.attempted{})}; }
+    val begun: err[Cause] = begin_spawn(p);
+    if (sel begun.err) { ret err[Error].err{failure(owner_identity(p), begun.err)}; }
     var redirect: exec.SpawnOptions = exec.spawn_options();
     redirect.cwd     = options.cwd;
     redirect.stdin   = options.stdin;
@@ -637,7 +656,8 @@ fun native_argv(a: *A.Allocator, pathname: str, argv: **u8) res[**Unit, Error] {
 # envp: the child's environment, given native entries or this process's inherited
 pub fun spawn_native(a: *A.Allocator, p: *OwnedSubprocess, pathname: str, argv: **u8, envp: exec.NativeEnvironment,
     options: SpawnOptions) err[Error] {
-    if (!begin_spawn(p)) { ret err[Error].err{failure(owner_identity(p), Cause.attempted{})}; }
+    val begun: err[Cause] = begin_spawn(p);
+    if (sel begun.err) { ret err[Error].err{failure(owner_identity(p), begun.err)}; }
     var redirect: exec.NativeSpawnOptions = exec.native_spawn_options();
     redirect.stdin   = options.stdin;
     redirect.grouped = options.grouped;
@@ -695,17 +715,17 @@ pub fun wait(a: *A.Allocator, p: *OwnedSubprocess) res[SubprocessTerminal, Error
     if (sel wr.err) {
         ret res[SubprocessTerminal, Error].err{failure(owner_identity(p), Cause.exec{wr.err})};
     }
-    if (!observe_status(p, wr.ok)) {
-        ret res[SubprocessTerminal, Error].err{failure(owner_identity(p), Cause.invalid_status{})};
-    }
+    val observed: err[Error] = observe_status(p, wr.ok);
+    if (sel observed.err) { ret res[SubprocessTerminal, Error].err{observed.err}; }
     ret res[SubprocessTerminal, Error].ok{p.terminal};
 }
 
-fun capture_over_limit(p: *OwnedSubprocess) bool {
-    if (!p.has_capture) { ret false; }
+# whether the capture of `p` outgrew its limit, or the refusal to measure it
+fun capture_over_limit(p: *OwnedSubprocess) res[bool, Error] {
+    if (!p.has_capture) { ret res[bool, Error].ok{false}; }
     val mr: res[fs.Metadata, io_error.Error] = fs.stat_of(p.capture.file);
-    if (sel mr.err) { ret false; }
-    ret mr.ok.size > p.capture.limit;
+    if (sel mr.err) { ret res[bool, Error].err{failure(owner_identity(p), Cause.io{mr.err})}; }
+    ret res[bool, Error].ok{mr.ok.size > p.capture.limit};
 }
 
 # supervise `count` owners until one of them reaches its terminal, and return
@@ -767,7 +787,9 @@ pub fun wait_any(a: *A.Allocator, owners: *OwnedSubprocess, count: u32, scope: *
                     }
                     ret res[*OwnedSubprocess, Error].ok{p};
                 }
-                if (capture_over_limit(p)) {
+                val over: res[bool, Error] = capture_over_limit(p);
+                if (sel over.err) { ret res[*OwnedSubprocess, Error].err{over.err}; }
+                if (over.ok) {
                     val cr: res[SubprocessTerminal, Error] = cancel(a, p, 0);
                     if (sel cr.err) {
                         ret res[*OwnedSubprocess, Error].err{cr.err};
@@ -780,9 +802,8 @@ pub fun wait_any(a: *A.Allocator, owners: *OwnedSubprocess, count: u32, scope: *
                 }
                 val got: opt[exec.ExitStatus] = wr.ok;
                 if (sel got.some) {
-                    if (!observe_status(p, got.some)) {
-                        ret res[*OwnedSubprocess, Error].err{failure(owner_identity(p), Cause.invalid_status{})};
-                    }
+                    val observed: err[Error] = observe_status(p, got.some);
+                    if (sel observed.err) { ret res[*OwnedSubprocess, Error].err{observed.err}; }
                     ret res[*OwnedSubprocess, Error].ok{p};
                 }
             }
@@ -915,14 +936,17 @@ fun pid_string(buf: *u8, child_pid: i64) *u8 {
     ret buf;
 }
 
-fun actual_terminate(a: *A.Allocator, child: exec.Child, hard: bool) bool {
+# ask `child` to stop, or kill it when `hard`; nothing, or the refusal
+fun actual_terminate(a: *A.Allocator, child: exec.Child, hard: bool) err[Error] {
     if (hard) {
         val terminated: err[exec.Error] = exec.terminate_child(exec.Child{pid: child.pid});
-        ret sel terminated.ok;
+        if (sel terminated.err) { ret err[Error].err{failure("subprocess", Cause.exec{terminated.err})}; }
+        ret err[Error].ok{};
     }
     if (child.pgid != 0) {
         val grouped: err[exec.Error] = exec.terminate_group(child);
-        ret sel grouped.ok;
+        if (sel grouped.err) { ret err[Error].err{failure("subprocess", Cause.exec{grouped.err})}; }
+        ret err[Error].ok{};
     }
     var pid_buf:  [24]u8;
     val pid_arg:  *u8 = pid_string(?pid_buf[0], child.pid);
@@ -933,48 +957,46 @@ fun actual_terminate(a: *A.Allocator, child: exec.Child, hard: bool) bool {
     init(?helper);
     fin { dnit(a, ?helper); }
     val sr: err[Error] = spawn(a, ?helper, pathname, ?argv[0], exec.Environment.inherit{}, spawn_options());
-    if (sel sr.err) { ret false; }
+    if (sel sr.err) { ret sr; }
     val wr: res[SubprocessTerminal, Error] = wait(a, ?helper);
-    if (sel wr.err) { ret false; }
+    if (sel wr.err) { ret err[Error].err{wr.err}; }
     val terminal: SubprocessTerminal = wr.ok;
-    ret terminal.kind == STATE_EXITED && terminal.code == 0;
+    if (terminal.kind != STATE_EXITED || terminal.code != 0) { ret err[Error].err{failure(pathname::str, Cause.termination{})}; }
+    ret err[Error].ok{};
 }
 
-fun actual_wait(a: *A.Allocator, child_pid: i64, block: bool,
-    kind: *SubprocessState, code: *i32) i8 {
+# how the child `child_pid` ended, none while it runs and `block` is false, or
+# the refusal to wait for it
+fun actual_wait(a: *A.Allocator, child_pid: i64, block: bool) res[opt[SubprocessTerminal], Error] {
     val child: exec.Child = exec.Child{pid: child_pid, pgid: 0};
     var st:    exec.ExitStatus;
     if (block) {
         val br: res[exec.ExitStatus, exec.Error] = exec.wait(child);
-        if (sel br.err) { ret -1; }
+        if (sel br.err) { ret res[opt[SubprocessTerminal], Error].err{failure("subprocess", Cause.exec{br.err})}; }
         st = br.ok;
     }
     or {
         val pr: res[opt[exec.ExitStatus], exec.Error] = exec.try_wait(child);
-        if (sel pr.err) { ret -1; }
+        if (sel pr.err) { ret res[opt[SubprocessTerminal], Error].err{failure("subprocess", Cause.exec{pr.err})}; }
         val got: opt[exec.ExitStatus] = pr.ok;
-        if (sel got.none) { ret 0; }
+        if (sel got.none) { ret res[opt[SubprocessTerminal], Error].ok{opt[SubprocessTerminal].none{}}; }
         st = got.some;
     }
-    if (exec.signaled(st)) {
-        @kind = STATE_SIGNALED;
-        @code = exec.signal(st);
-    }
-    or (exec.exited(st)) {
-        @kind = STATE_EXITED;
-        @code = exec.code(st)::i32;
-    }
-    or { ret -1; }
-    ret 1;
+    val ended: opt[SubprocessTerminal] = status_terminal(st);
+    if (sel ended.none) { ret res[opt[SubprocessTerminal], Error].err{failure("subprocess", Cause.invalid_status{})}; }
+    ret res[opt[SubprocessTerminal], Error].ok{ended};
 }
 
 fun actual_sleep(a: *A.Allocator) {
     system_os.sleep(chrono_duration.MILLISECOND);
 }
 
+# a soft request that could not be sent, or a poll after it that failed,
+# escalates to the hard kill rather than failing; a hard kill that could not
+# be sent fails with its refusal unless the child ended anyway
 fun request_with[T](p: *OwnedSubprocess, a: *A.Allocator, request: Request, attempts: u32,
-    ctx: *T, terminate: fun(*T, exec.Child, bool) bool,
-    wait_child: fun(*T, i64, bool, *SubprocessState, *i32) i8,
+    ctx: *T, terminate: fun(*T, exec.Child, bool) err[Error],
+    wait_child: fun(*T, i64, bool) res[opt[SubprocessTerminal], Error],
     sleep: fun(*T)) res[SubprocessTerminal, Error] {
     if (ctx == nil || terminate == nil || wait_child == nil || sleep == nil) {
         ret res[SubprocessTerminal, Error].err{failure(owner_identity(p), Cause.incomplete{})};
@@ -987,44 +1009,38 @@ fun request_with[T](p: *OwnedSubprocess, a: *A.Allocator, request: Request, atte
     }
     p.requested = request;
 
-    val soft_sent: bool = terminate(ctx, p.child, false);
-    var i:         u32  = 0;
-    for (soft_sent && i < attempts) {
-        var kind: SubprocessState = STATE_EXITED;
-        var code: i32             = 0;
-        val wr:   i8              = wait_child(ctx, p.child.pid, false, ?kind, ?code);
-        if (wr > 0) {
-            if (!observe_terminal(p, kind, code) || !mark_reaped(p)) {
-                ret res[SubprocessTerminal, Error].err{failure(owner_identity(p), Cause.transition{})};
-            }
-            ret res[SubprocessTerminal, Error].ok{p.terminal};
-        }
-        if (wr < 0) { brk; }
+    val soft: err[Error] = terminate(ctx, p.child, false);
+    var i:    u32        = 0;
+    for (sel soft.ok && i < attempts) {
+        val wr: res[opt[SubprocessTerminal], Error] = wait_child(ctx, p.child.pid, false);
+        if (sel wr.err)     { brk; }
+        if (sel wr.ok.some) { ret reaped_as(p, wr.ok.some); }
         sleep(ctx);
         i = i + 1;
     }
 
-    if (!terminate(ctx, p.child, true)) {
-        var pkind:  SubprocessState = STATE_EXITED;
-        var pcode:  i32             = 0;
-        val polled: i8              = wait_child(ctx, p.child.pid, false, ?pkind, ?pcode);
-        if (polled <= 0) {
+    val hard: err[Error] = terminate(ctx, p.child, true);
+    if (sel hard.err) {
+        val polled: res[opt[SubprocessTerminal], Error] = wait_child(ctx, p.child.pid, false);
+        if (sel polled.err) { ret res[SubprocessTerminal, Error].err{polled.err}; }
+        if (sel polled.ok.none) {
             ret res[SubprocessTerminal, Error].err{failure(owner_identity(p), Cause.termination{})};
         }
-        if (!observe_terminal(p, pkind, pcode) || !mark_reaped(p)) {
-            ret res[SubprocessTerminal, Error].err{failure(owner_identity(p), Cause.transition{})};
-        }
-        ret res[SubprocessTerminal, Error].ok{p.terminal};
+        ret reaped_as(p, polled.ok.some);
     }
 
-    var kind: SubprocessState = STATE_EXITED;
-    var code: i32             = 0;
-    if (wait_child(ctx, p.child.pid, true, ?kind, ?code) <= 0) {
+    val waited: res[opt[SubprocessTerminal], Error] = wait_child(ctx, p.child.pid, true);
+    if (sel waited.err) { ret res[SubprocessTerminal, Error].err{waited.err}; }
+    if (sel waited.ok.none) {
         ret res[SubprocessTerminal, Error].err{failure(owner_identity(p), Cause.reap{})};
     }
-    if (!observe_terminal(p, kind, code) || !mark_reaped(p)) {
-        ret res[SubprocessTerminal, Error].err{failure(owner_identity(p), Cause.transition{})};
-    }
+    ret reaped_as(p, waited.ok.some);
+}
+
+# `p` reaped with the terminal `t` it reached
+fun reaped_as(p: *OwnedSubprocess, t: SubprocessTerminal) res[SubprocessTerminal, Error] {
+    val observed: err[Error] = observe_reaped(p, t.kind, t.code);
+    if (sel observed.err) { ret res[SubprocessTerminal, Error].err{observed.err}; }
     ret res[SubprocessTerminal, Error].ok{p.terminal};
 }
 
@@ -1079,27 +1095,26 @@ rec FakeLifecycle {
 }
 
 #[testing]
-fun fake_terminate(f: *FakeLifecycle, child: exec.Child, hard: bool) bool {
+fun fake_terminate(f: *FakeLifecycle, child: exec.Child, hard: bool) err[Error] {
+    var refused: bool = f.fail_soft;
     if (hard) {
-        f.hard = f.hard + 1;
-        ret !f.fail_hard;
+        f.hard  = f.hard + 1;
+        refused = f.fail_hard;
     }
-    if (child.pgid != 0) {
+    or (child.pgid != 0) {
         f.group_soft = f.group_soft + 1;
-        ret !f.fail_group_soft;
+        refused      = f.fail_group_soft;
     }
-    f.soft = f.soft + 1;
-    ret !f.fail_soft;
+    or           { f.soft = f.soft + 1; }
+    if (refused) { ret err[Error].err{failure("fake", Cause.termination{})}; }
+    ret err[Error].ok{};
 }
 
 #[testing]
-fun fake_wait(f: *FakeLifecycle, child_pid: i64, block: bool,
-    kind: *SubprocessState, code: *i32) i8 {
+fun fake_wait(f: *FakeLifecycle, child_pid: i64, block: bool) res[opt[SubprocessTerminal], Error] {
     f.polls = f.polls + 1;
-    if (!block && (f.finish_poll == 0 || f.polls < f.finish_poll)) { ret 0; }
-    @kind = f.kind;
-    @code = f.code;
-    ret 1;
+    if (!block && (f.finish_poll == 0 || f.polls < f.finish_poll)) { ret res[opt[SubprocessTerminal], Error].ok{opt[SubprocessTerminal].none{}}; }
+    ret res[opt[SubprocessTerminal], Error].ok{opt[SubprocessTerminal].some{SubprocessTerminal{kind: f.kind, code: f.code}}};
 }
 
 #[testing]
@@ -1271,15 +1286,23 @@ $if ($mach.build.os != $mach.os.windows) {
 test state__terminal_and_reap_happen_exactly_once {
     var u: OwnedSubprocess;
     init(?u);
-    if (observe_terminal(?u, STATE_EXITED, 0)) { ret 1; }
+    val unstarted: err[Cause] = observe_terminal(?u, STATE_EXITED, 0);
+    if (sel unstarted.ok) { ret 1; }
     var p: OwnedSubprocess;
     fake_owner(?p, 41);
-    if (observe_terminal(?p, STATE_UNSTARTED, 0))                                           { ret 1; }
-    if (mark_reaped(?p))                                                                    { ret 1; }
-    if (!observe_terminal(?p, STATE_EXITED, 7))                                             { ret 1; }
-    if (!mark_reaped(?p))                                                                   { ret 1; }
+    val not_terminal: err[Cause] = observe_terminal(?p, STATE_UNSTARTED, 0);
+    if (sel not_terminal.ok) { ret 1; }
+    val early: err[Cause] = mark_reaped(?p);
+    if (sel early.ok) { ret 1; }
+    val ended: err[Cause] = observe_terminal(?p, STATE_EXITED, 7);
+    if (sel ended.err) { ret 1; }
+    val reaped: err[Cause] = mark_reaped(?p);
+    if (sel reaped.err)                                                                     { ret 1; }
     if (p.state != STATE_REAPED || p.terminal.kind != STATE_EXITED || p.terminal.code != 7) { ret 1; }
-    if (p.reap_count != 1 || mark_reaped(?p) || observe_terminal(?p, STATE_SIGNALED, 9))    { ret 1; }
+    val again: err[Cause] = mark_reaped(?p);
+    if (p.reap_count != 1 || sel again.ok) { ret 1; }
+    val after: err[Cause] = observe_terminal(?p, STATE_SIGNALED, 9);
+    if (sel after.ok) { ret 1; }
     ret 0;
 }
 
@@ -1367,10 +1390,8 @@ $if ($mach.build.os != $mach.os.windows) {
         val second: res[SubprocessTerminal, Error] = wait(?alloc, ?p);
         if (sel second.ok) { bad = true; }
         if (sel second.err) {
-            val msg: str = text(?alloc, second.err);
-            if (!str_contains(msg, "/bin/true")) { bad = true; }
-            if (str_contains(msg, "XXXXXXXXX"))  { bad = true; }
-            str_free(?alloc, msg);
+            if (!str_contains(second.err.identity, "/bin/true")) { bad = true; }
+            if (str_contains(second.err.identity, "XXXXXXXXX"))  { bad = true; }
         }
         dnit(?alloc, ?p);
         if (bad) { ret 1; }
@@ -1611,9 +1632,9 @@ test capture__finish_and_release_refuse_the_wrong_order {
     p.has_capture = true;
     p.capture     = empty_capture(8);
     val fr: res[CaptureIoResult, Error] = finish_capture(?alloc, ?p, false);
-    if (sel fr.ok)                              { ret 2; }
-    if (!observe_terminal(?p, STATE_EXITED, 0)) { ret 3; }
-    if (!mark_reaped(?p))                       { ret 3; }
+    if (sel fr.ok) { ret 2; }
+    val reaped: err[Error] = observe_reaped(?p, STATE_EXITED, 0);
+    if (sel reaped.err) { ret 3; }
     val premature: err[Error] = release_capture(?alloc, ?p);
     if (sel premature.ok) { ret 4; }
     ret 0;
@@ -1745,8 +1766,9 @@ $if ($mach.build.os != $mach.os.windows) {
         if (sel sr.err) { bad = 1; }
         if (sel sr.ok) {
             if (p.child.pgid == 0 || p.child.pgid != p.child.pid) { bad = 2; }
-            if (!bound(?p, chrono_duration.SECOND))               { bad = 3; }
-            if (p.timeout != chrono_duration.SECOND)              { bad = 4; }
+            val bounded: err[Error] = bound(?p, chrono_duration.SECOND);
+            if (sel bounded.err)                     { bad = 3; }
+            if (p.timeout != chrono_duration.SECOND) { bad = 4; }
             val start_clock: time.InstantClock = time.instant();
             if (sel start_clock.err) { ret 1; }
             val started: time.Instant                 = start_clock.ok;
@@ -1870,7 +1892,8 @@ $if ($mach.build.os != $mach.os.windows) {
         var bad: i32        = 0;
         if (sel sr.err) { bad = 1; }
         if (sel sr.ok) {
-            if (!bound(?p, chrono_duration.SECOND * 30)) { bad = 2; }
+            val bounded: err[Error] = bound(?p, chrono_duration.SECOND * 30);
+            if (sel bounded.err) { bad = 2; }
             val wr: res[*OwnedSubprocess, Error] = wait_any(?alloc, ?p, 1, nil, nil);
             if (sel wr.err) { bad = 3; }
             if (sel wr.ok) {
@@ -1886,18 +1909,23 @@ $if ($mach.build.os != $mach.os.windows) {
 test bound__rejects_a_nonpositive_bound_and_a_finished_owner {
     var p: OwnedSubprocess;
     init(?p);
-    if (bound(?p, 0))                                               { ret 1; }
-    if (bound(?p, -1))                                              { ret 2; }
-    if (p.has_deadline || p.timeout != 0)                           { ret 3; }
-    if (!bound(?p, chrono_duration.SECOND * 4))                     { ret 4; }
+    val zero: err[Error] = bound(?p, 0);
+    if (sel zero.ok) { ret 1; }
+    val negative: err[Error] = bound(?p, -1);
+    if (sel negative.ok)                  { ret 2; }
+    if (p.has_deadline || p.timeout != 0) { ret 3; }
+    val four: err[Error] = bound(?p, chrono_duration.SECOND * 4);
+    if (sel four.err)                                               { ret 4; }
     if (!p.has_deadline || p.timeout != chrono_duration.SECOND * 4) { ret 5; }
     if (deadline_reached(?p, time.Instant{sec: 0, nsec: 0}))        { ret 6; }
 
     var q: OwnedSubprocess;
     fake_owner(?q, 90);
-    if (!bound(?q, chrono_duration.SECOND * 2)) { ret 7; }
+    val running_bound: err[Error] = bound(?q, chrono_duration.SECOND * 2);
+    if (sel running_bound.err) { ret 7; }
     q.state = STATE_REAPED;
-    if (bound(?q, chrono_duration.SECOND * 2)) { ret 8; }
+    val done_bound: err[Error] = bound(?q, chrono_duration.SECOND * 2);
+    if (sel done_bound.ok) { ret 8; }
     ret 0;
 }
 
@@ -1984,8 +2012,8 @@ $if ($mach.build.os == $mach.os.windows) {
 
 # an inheriting child receives a variable with no UTF-8 spelling unit for unit.
 # the test runs itself again as that child, which a marker variable tells apart
-test spawn__an_inheriting_child_receives_an_unspellable_variable_unchanged {
-    $if ($mach.build.os == $mach.os.windows) {
+$if ($mach.build.os == $mach.os.windows) {
+    test spawn__an_inheriting_child_receives_an_unspellable_variable_unchanged {
         if (t_is_set("M4707C")) {
             if (!t_holds_unspellable("M4707")) { ret 20; }
             ret 0;
@@ -2009,9 +2037,6 @@ test spawn__an_inheriting_child_receives_an_unspellable_variable_unchanged {
         dnit(?alloc, ?p);
         if (sel wr.err)                                    { ret 5; }
         if (wr.ok.kind != STATE_EXITED || wr.ok.code != 0) { ret 6; }
-        ret 0;
-    }
-    $or {
         ret 0;
     }
 }

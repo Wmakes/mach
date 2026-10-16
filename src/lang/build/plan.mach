@@ -762,7 +762,7 @@ fun plan_unit(a: *A.Allocator, itn: *intern.Interner, reg: *lang_target.TargetRe
     u.profile = pn_opt.some;
 
     val ter: res[*project.TargetEntry, A.Error] = A.allocate[project.TargetEntry](a, 1::usize);
-    if (sel ter.err) { ret oom_unit(); }
+    if (sel ter.err) { ret res[BuildUnit, fail.Fail].err{fail.refused(ter.err)}; }
     val te: *project.TargetEntry = ter.ok;
     te.name            = bu.target_name;
     te.os_name         = bu.target.os;
@@ -826,7 +826,7 @@ fun plan_unit(a: *A.Allocator, itn: *intern.Interner, reg: *lang_target.TargetRe
         var resolved: input.Input = lr.ok;
         if (!input.token_is_path(token::*u8)) { resolved.library = token; }
         val pr: res[usize, A.Error] = collections_vector.push[input.Input](?u.link_inputs, resolved);
-        if (sel pr.err) { ret oom_unit(); }
+        if (sel pr.err) { ret res[BuildUnit, fail.Fail].err{fail.refused(pr.err)}; }
         ti = ti + 1;
     }
 
@@ -855,16 +855,12 @@ fun collect_requires(a: *A.Allocator, itn: *intern.Interner, m: *manifest.Manife
             }
             val pr: res[usize, A.Error] = collections_vector.push[str](?u.requires, no.some);
             if (sel pr.err) {
-                ret err[fail.Fail].err{fail.message("out of memory")};
+                ret err[fail.Fail].err{fail.refused(pr.err)};
             }
         }
         j = j + 1;
     }
     ret err[fail.Fail].ok{};
-}
-
-fun oom_unit() res[BuildUnit, fail.Fail] {
-    ret res[BuildUnit, fail.Fail].err{fail.message("out of memory")};
 }
 
 fun join_template(a: *A.Allocator, itn: *intern.Interner, root: str, dir_id: intern.StrId, what: str) res[str, fail.Fail] {

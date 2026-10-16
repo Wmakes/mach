@@ -176,7 +176,7 @@ pub fun bind(sc: *sema_context.SemaContext, did: ast_id.DeclId) err[fail.Fail] {
 fun bound_of(sc: *sema_context.SemaContext, did: ast_id.DeclId) res[opt[comptime.CTValue], comptime.EvalFail] {
     val none: res[opt[comptime.CTValue], comptime.EvalFail] = res[opt[comptime.CTValue], comptime.EvalFail].ok{opt[comptime.CTValue].none{}};
     # a module read only through an instance of it is bound by its own typing
-    if (sc.view.constant_state == nil || ast_id.decl_index(did) >= sc.view.a.decls.len::u32) { ret none; }
+    if (sc.view.constant_state == nil || !sema_context.decl_in_view(sc, did)) { ret none; }
     val ix: u32 = ast_id.decl_index(did);
     val st: u8  = sc.view.constant_state[ix];
     if (st == CONSTANT_ACTIVE || st == CONSTANT_NONE) { ret none; }
@@ -400,7 +400,7 @@ pub fun is_aggregate(sc: *sema_context.SemaContext, eid: ast_id.ExprId) bool {
 
 # the type the walk gave an expression
 pub fun type_at(sc: *sema_context.SemaContext, eid: ast_id.ExprId) type.TypeId {
-    if (sc.view.expr_type == nil || ast_id.expr_index(eid)::usize >= sc.view.a.exprs.len) { ret type.TYPE_NIL; }
+    if (sc.view.expr_type == nil || ast_id.expr_is_nil(eid) || !sema_context.expr_in_view(sc, eid)) { ret type.TYPE_NIL; }
     ret sema_context.apply_subst(sc, sc.view.expr_type[ast_id.expr_index(eid)]);
 }
 

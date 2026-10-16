@@ -4,6 +4,7 @@ use std.types.bool.bool;
 use std.types.bool.false;
 use std.types.bool.true;
 use std.types.error.err;
+use std.types.option.opt;
 use std.types.result.res;
 use std.types.size.usize;
 use std.types.string.str;
@@ -19,56 +20,56 @@ use lang_checked: mach.lang.checked;
 use lang_alloc: mach.lang.alloc;
 use mach.lang.growth;
 
-# the builder's failure: the allocator refused, a length or capacity left
-# usize, or the builder was used after an earlier failure
+# the builder's failure: the allocator refused, or a length or capacity left usize
 pub tag Error: u8 {
     alloc: A.Error;
     overflow;
-    failed;
 }
 
 pub fun text(e: Error) str {
-    if (sel e.alloc)    { ret lang_alloc.text(e.alloc); }
-    or (sel e.overflow) { ret "text builder: length overflow"; }
-    ret "text builder: used after a prior failure";
+    if (sel e.alloc) { ret lang_alloc.text(e.alloc); }
+    ret "text builder: length overflow";
 }
 
+# text built one append at a time. the first failure is kept: every later append
+# and the finish refuse with it, so a writer may append a run of pieces and take
+# the failure once at `tb_finish` or `tb_fault`
 pub rec TextBuilder {
-    alloc:  *A.Allocator;
-    data:   *u8;
-    len:    usize;
-    cap:    usize;
-    failed: bool;
+    alloc: *A.Allocator;
+    data:  *u8;
+    len:   usize;
+    cap:   usize;
+    fault: opt[Error];
 }
 
 pub fun tb_init(a: *A.Allocator) TextBuilder {
     var b: TextBuilder;
-    b.alloc  = a;
-    b.data   = nil;
-    b.len    = 0;
-    b.cap    = 0;
-    b.failed = false;
+    b.alloc = a;
+    b.data  = nil;
+    b.len   = 0;
+    b.cap   = 0;
+    b.fault = opt[Error].none{};
     ret b;
+}
+
+fun tb_refuse(b: *TextBuilder, e: Error) err[Error] {
+    b.fault = opt[Error].some{e};
+    ret err[Error].err{e};
 }
 
 fun tb_grow(b: *TextBuilder, need: usize) err[Error] {
     val grown: err[A.Error] = growth.reserve_usize[u8](b.alloc, ?b.data, ?b.cap, need);
-    if (sel grown.err) {
-        b.failed = true;
-        ret err[Error].err{Error.alloc{grown.err}};
-    }
+    if (sel grown.err) { ret tb_refuse(b, Error.alloc{grown.err}); }
     ret err[Error].ok{};
 }
 
 pub fun tb_append(b: *TextBuilder, text: str) err[Error] {
-    if (b.failed) { ret err[Error].err{Error.failed{}}; }
+    val held: err[Error] = tb_fault(b);
+    if (sel held.err) { ret held; }
     val n: usize = str_len(text);
     if (n == 0) { ret err[Error].ok{}; }
     val need_r: res[usize, lang_checked.Cause] = lang_checked.usize_add(b.len, n);
-    if (sel need_r.err) {
-        b.failed = true;
-        ret err[Error].err{Error.overflow{}};
-    }
+    if (sel need_r.err) { ret tb_refuse(b, Error.overflow{}); }
     val need: usize      = need_r.ok;
     val gr:   err[Error] = tb_grow(b, need);
     if (sel gr.err) { ret gr; }
@@ -88,8 +89,10 @@ fun tb_append_all(b: *TextBuilder, parts: *str, count: usize) err[Error] {
     ret err[Error].ok{};
 }
 
-pub fun tb_failed(b: *TextBuilder) bool {
-    ret b.failed;
+# the builder's first failure, or ok when every append so far held
+pub fun tb_fault(b: *TextBuilder) err[Error] {
+    if (sel b.fault.some) { ret err[Error].err{b.fault.some}; }
+    ret err[Error].ok{};
 }
 
 pub fun tb_len(b: *TextBuilder) usize {
@@ -97,10 +100,11 @@ pub fun tb_len(b: *TextBuilder) usize {
 }
 
 pub fun tb_finish(b: *TextBuilder) res[str, Error] {
-    if (b.failed) { ret res[str, Error].err{Error.failed{}}; }
+    val held: err[Error] = tb_fault(b);
+    if (sel held.err) { ret res[str, Error].err{held.err}; }
     val fitted: err[A.Error] = growth.resize_usize[u8](b.alloc, ?b.data, ?b.cap, b.len + 1);
     if (sel fitted.err) {
-        b.failed = true;
+        tb_refuse(b, Error.alloc{fitted.err});
         ret res[str, Error].err{Error.alloc{fitted.err}};
     }
     val out: *u8 = b.data;
@@ -159,10 +163,19 @@ test tb_append__a_failed_reserve_poisons_the_builder_even_if_the_result_is_ignor
 
     var b: TextBuilder = tb_init(T.allocator_of(?t));
     tb_append(?b, "this will not fit");
-    if (!tb_failed(?b)) { ret 1; }
-    val more: err[Error] = tb_append(?b, "more");
-    if (sel more.ok) { ret 1; }
+    if (!t_alloc_refused(tb_fault(?b))) { ret 1; }
+    # a later append and the finish refuse with the first failure, not a stand-in
+    if (!t_alloc_refused(tb_append(?b, "more"))) { ret 1; }
     val fin: res[str, Error] = tb_finish(?b);
-    if (sel fin.ok) { ret 1; }
+    if (sel fin.ok)                                { ret 1; }
+    if (!t_alloc_refused(err[Error].err{fin.err})) { ret 1; }
     ret 0;
+}
+
+#[testing]
+fun t_alloc_refused(r: err[Error]) bool {
+    if (sel r.err) {
+        if (sel r.err.alloc) { ret true; }
+    }
+    ret false;
 }

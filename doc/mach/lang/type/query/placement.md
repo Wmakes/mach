@@ -9,7 +9,9 @@ argument is the whole target of a pointer, through arrays only. either may sit u
 a parameter that only flows into parameters that sit nowhere reaches no byte at all, so
 two instances that differ only there lay out and classify the same storage. the places
 are a least fixpoint over the declaration graph: every set starts empty and only grows,
-so passes repeat until one adds nothing
+so passes repeat until one adds nothing. beside its places, a parameter is reached when its
+argument appears anywhere an instance's fields lead, an empty array's element included,
+which is what a question about what a type contains reads
 
 ## def Place
 
@@ -83,6 +85,14 @@ pub fun bits(p: *Places, generic: type.TypeId, param: u32) u8;
 ```
 
 the places parameter `param` of a settled generic takes
+
+## fun reached
+
+```mach
+pub fun reached(p: *Places, generic: type.TypeId, param: u32) bool;
+```
+
+whether parameter `param` of a settled generic is reached, through storage or not
 
 ## fun via
 

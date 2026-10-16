@@ -37,6 +37,8 @@ use mach.lang.driver;
 use mach.lang.driver.cache;
 use mach.lang.driver.codec;
 #[testing]
+use driver_environment: mach.lang.driver.environment;
+#[testing]
 use mach.lang.driver.frontend;
 use mach.lang.driver.passes;
 use mach.lang.driver.project;
@@ -66,6 +68,8 @@ use lang_source: mach.lang.source;
 #[testing]
 use mach.lang.stack;
 use mach.lang.step;
+#[testing]
+use mach.lang.subprocess;
 use lang_target:       mach.lang.target;
 use catalog_artifact:  mach.lang.target.catalog.artifact;
 use catalog_subsystem: mach.lang.target.catalog.subsystem;
@@ -79,11 +83,14 @@ use std_format: std.format;
 #[testing]
 use std.print;
 #[testing]
-use std.process.exec;
+use std.process.env;
 #[testing]
+use std.process.exec;
 use std.system.panic.panic;
 #[testing]
 use std.text.string.str_dup;
+#[testing]
+use std.types.string.OwnedString;
 #[testing]
 use std.types.string.str_len;
 
@@ -191,7 +198,7 @@ pub fun execute(bp: *build_plan.BuildPlan, backing: *A.Allocator, oa: *A.Allocat
             readout.failure(sink, ?f, diagnostic.ORIGIN_BUILD);
             outcome.fold_fail(?bo, ?f);
             val pr: res[usize, A.Error] = collections_vector.push[str](?failed, unit.label);
-            if (sel pr.err) { ret res[outcome.BuildOutcome, fail.Fail].err{fail.message("out of memory")}; }
+            if (sel pr.err) { ret res[outcome.BuildOutcome, fail.Fail].err{fail.refused(pr.err)}; }
         }
         if (sel ur.ok) {
             var ubo:       outcome.BuildOutcome = ur.ok;
@@ -201,7 +208,7 @@ pub fun execute(bp: *build_plan.BuildPlan, backing: *A.Allocator, oa: *A.Allocat
             }
             if (ubo.severity != outcome.BUILD_OK) {
                 val fr: res[usize, A.Error] = collections_vector.push[str](?failed, unit.label);
-                if (sel fr.err) { ret res[outcome.BuildOutcome, fail.Fail].err{fail.message("out of memory")}; }
+                if (sel fr.err) { ret res[outcome.BuildOutcome, fail.Fail].err{fail.refused(fr.err)}; }
             }
             val mr: err[A.Error] = outcome.merge(?bo, ?ubo);
             if (sel mr.err) { ret res[outcome.BuildOutcome, fail.Fail].err{fail.message("failed to merge build outcome")}; }
@@ -613,6 +620,7 @@ fun plan_test_outputs(p: *project.Project) res[*str, fail.Fail] {
     ret res[*str, fail.Fail].ok{destinations};
 }
 
+# release the destination names `names`; a nil list owns nothing
 fun release_names(p: *project.Project, names: *str) {
     if (names == nil) { ret; }
     var i: usize = 0;
@@ -1431,7 +1439,7 @@ fun pcg_stable_err(p: *project.Project, msg: str) str {
 
 fun pcg_worker_main(arg: *u8) {
     val pc: *ParallelCodegen = arg::*ParallelCodegen;
-    if (pc == nil) { ret; }
+    if (pc == nil) { panic("a codegen worker started with no section"); }
     val wid_raw: i64 = atomic.fetch_add(?pc.worker_seq, 1::i64);
     if (wid_raw < 0 || wid_raw >= pc.nworkers::i64) { ret; }
     val wid: u32        = wid_raw::u32;
@@ -2925,12 +2933,58 @@ fun lib_manifest(alloc: *A.Allocator, id: str) str {
     ret "";
 }
 
-# run `program` from `cwd`, through `runner` unless it is empty, with `argc` arguments
-# counting its own name, and say whether a trap ended it and with what exit code it ended
+# the environment a fixture under `root` runs in: `inherited` with WINEPREFIX and
+# XDG_RUNTIME_DIR replaced by private directories under `root`, and WINEDLLOVERRIDES by
+# overrides that disable the wayland and x11 drivers and the debugger, so a wine runner
+# never opens the caller's prefix or display session. the runtime directory is made, the
+# prefix is left for wine to make
+# ---
+# ret: the entries, which the caller frees with driver_environment.strings_free
+#[testing]
+fun fixture_environment(a: *A.Allocator, root: str, inherited: exec.Environment) res[driver_environment.Strings, fail.Fail] {
+    val prefix: res[str, A.Error] = types_path.join(a, root, "wine-prefix");
+    if (sel prefix.err) { ret res[driver_environment.Strings, fail.Fail].err{fail.refused(prefix.err)}; }
+    fin { str_free(a, prefix.ok); }
+    val runtime: res[str, A.Error] = types_path.join(a, root, "xdg-runtime");
+    if (sel runtime.err) { ret res[driver_environment.Strings, fail.Fail].err{fail.refused(runtime.err)}; }
+    fin { str_free(a, runtime.ok); }
+    val made: err[fs.FsError] = fs.create_dir_all(a, runtime.ok, 448);
+    if (sel made.err) { ret res[driver_environment.Strings, fail.Fail].err{fail.message("the fixture's runtime directory could not be made")}; }
+    val cr: res[driver_environment.Environment, fail.Fail] = driver_environment.capture(a, inherited);
+    if (sel cr.err) { ret res[driver_environment.Strings, fail.Fail].err{cr.err}; }
+    var values: driver_environment.Environment = cr.ok;
+    fin { driver_environment.dnit(?values); }
+    var names: [3]str = [3]str{"WINEPREFIX", "XDG_RUNTIME_DIR", "WINEDLLOVERRIDES"};
+    var texts: [3]str = [3]str{prefix.ok, runtime.ok, "winewayland.drv=d;winex11.drv=d;winedbg.exe=d"};
+    var i:     usize  = 0;
+    for (i < 3) {
+        val put: err[fail.Fail] = driver_environment.put(?values, names[i], texts[i], true);
+        if (sel put.err) { ret res[driver_environment.Strings, fail.Fail].err{put.err}; }
+        i = i + 1;
+    }
+    ret driver_environment.to_strings(?values);
+}
+
+# run `program` from the fixture root `cwd`, through `runner` unless it is empty, with `argc`
+# arguments counting its own name, in the fixture_environment of `cwd`, and say whether a
+# trap ended it and with what exit code it ended
 # ---
 # ret: false when it could not be run or waited for
 #[testing]
-fun run_with_argc(cwd: str, runner: str, program: str, argc: usize, trapped: *bool, exit_code: *i32) bool {
+pub fun run_with_argc(cwd: str, runner: str, program: str, argc: usize, trapped: *bool, exit_code: *i32) bool {
+    ret run_fixture(cwd, runner, program, argc, exec.Environment.inherit{}, trapped, exit_code);
+}
+
+# run_with_argc over the caller environment `inherited`
+#[testing]
+fun run_fixture(cwd: str, runner: str, program: str, argc: usize, inherited: exec.Environment, trapped: *bool, exit_code: *i32) bool {
+    var a:    A.Allocator;
+    val made: err[A.Error] = page.make(?a);
+    if (sel made.err) { ret false; }
+    val er: res[driver_environment.Strings, fail.Fail] = fixture_environment(?a, cwd, inherited);
+    if (sel er.err) { ret false; }
+    var env: driver_environment.Strings = er.ok;
+    fin { driver_environment.strings_free(?a, ?env); }
     var argv:   [12]*u8;
     var n:      usize = 0;
     var launch: str   = program;
@@ -2948,27 +3002,31 @@ fun run_with_argc(cwd: str, runner: str, program: str, argc: usize, trapped: *bo
         extra   = extra + 1;
     }
     argv[n] = nil;
-    val spawned: res[exec.Child, exec.Error] = exec.spawn_in(launch, ?argv[0], exec.Environment.inherit{}, cwd);
+    var child: subprocess.OwnedSubprocess;
+    subprocess.init(?child);
+    fin { subprocess.dnit(?a, ?child); }
+    var options: subprocess.SpawnOptions = subprocess.spawn_options();
+    options.cwd = cwd;
+    val spawned: err[subprocess.Error] = subprocess.spawn_native(?a, ?child, launch, ?argv[0], exec.NativeEnvironment.given{env.items}, options);
     if (sel spawned.err) { ret false; }
-    val waited: res[exec.ExitStatus, exec.Error] = exec.wait(spawned.ok);
+    val waited: res[subprocess.SubprocessTerminal, subprocess.Error] = subprocess.wait(?a, ?child);
     if (sel waited.err) { ret false; }
-    val status: exec.ExitStatus = waited.ok;
+    val terminal: subprocess.SubprocessTerminal = waited.ok;
     @trapped   = false;
     @exit_code = -1;
-    if (exec.signaled(status)) {
-        val sig: i32 = exec.signal(status);
-        @trapped = sig == 4 || sig == 5 || sig == 8;
+    if (terminal.kind == subprocess.STATE_SIGNALED) {
+        @trapped = terminal.code == 4 || terminal.code == 5 || terminal.code == 8;
         ret true;
     }
-    if (!exec.exited(status)) { ret false; }
-    @exit_code = exec.code(status)::i32;
+    if (terminal.kind != subprocess.STATE_EXITED) { ret false; }
+    @exit_code = terminal.code;
     @trapped   = @exit_code == 132 || @exit_code == 133 || @exit_code == 136;
     ret true;
 }
 
 # build the fixture `program` for one target and profile under the manifest `manifest_text`,
 # with the `root_count` files `root_names` holds written at the project root, and run it; the
-# fixture exits 0 when every check holds. a runner that is absent skips the arm
+# fixture exits 0 when every check holds. a runner that is absent skips the arm with 77
 #[testing]
 fun native_case_files(alloc: *A.Allocator, manifest_text: str, root_names: *str, root_texts: *str, root_count: u32,
     target_name: str, runner_name: str, release: bool, program: str, label: str) i32 {
@@ -2979,7 +3037,7 @@ fun native_case_files(alloc: *A.Allocator, manifest_text: str, root_names: *str,
             print.print("tag-native: runner absent, arm skipped: ");
             print.print(runner_name);
             print.print("\n");
-            ret 0;
+            ret 77;
         }
         runner = found.ok;
     }
@@ -3037,18 +3095,20 @@ fun native_case(alloc: *A.Allocator, target_name: str, runner_name: str, release
     ret native_case_files(alloc, native_manifest(), nil, nil, 0, target_name, runner_name, release, program, label);
 }
 
-# one fixture on the three native linux targets in both profiles
+# one fixture on the three native linux targets in both profiles; 77 when an arm skipped and none failed
 #[testing]
 fun native_all(alloc: *A.Allocator, program: str, label: str) i32 {
+    var skipped: bool = false;
     var release: bool = false;
     var pass:    u32  = 0;
     for (pass < 2) {
-        if (native_case(alloc, "linux-x86_64", "", release, program, label) != 0)              { ret 1; }
-        if (native_case(alloc, "linux-arm64", "qemu-aarch64", release, program, label) != 0)   { ret 2; }
-        if (native_case(alloc, "linux-riscv64", "qemu-riscv64", release, program, label) != 0) { ret 3; }
+        if (testrun.arm_failed(native_case(alloc, "linux-x86_64", "", release, program, label), ?skipped))              { ret 1; }
+        if (testrun.arm_failed(native_case(alloc, "linux-arm64", "qemu-aarch64", release, program, label), ?skipped))   { ret 2; }
+        if (testrun.arm_failed(native_case(alloc, "linux-riscv64", "qemu-riscv64", release, program, label), ?skipped)) { ret 3; }
         release = true;
         pass    = pass + 1;
     }
+    if (skipped) { ret 77; }
     ret 0;
 }
 
@@ -3381,7 +3441,7 @@ test tag_corpus__verdict_matches_across_profiles {
 }
 
 # zero when the trap fixture built for `target_name` in one profile traps on every guarded access
-# under debug and reads or writes through under release; a runner that is absent skips the arm
+# under debug and reads or writes through under release; a runner that is absent skips the arm with 77
 #[testing]
 fun trap_target(alloc: *A.Allocator, target_name: str, runner_name: str, release: bool) i32 {
     var runner: str = "";
@@ -3391,7 +3451,7 @@ fun trap_target(alloc: *A.Allocator, target_name: str, runner_name: str, release
             print.print("tag-trap: runner absent, arm skipped: ");
             print.print(runner_name);
             print.print("\n");
-            ret 0;
+            ret 77;
         }
         runner = found.ok;
     }
@@ -3528,18 +3588,22 @@ $if ($mach.build.os == $mach.os.linux && $mach.build.arch == $mach.arch.x86_64) 
     test tag_native__packed_and_aligned_storage_is_legal {
         var alloc: A.Allocator;
         page.make(?alloc);
-        if (native_all(?alloc, tag_packed_program(), "packed tags") != 0)                   { ret 1; }
-        if (native_all(?alloc, tag_aligned_program(), "aligned tags") != 0)                 { ret 2; }
-        if (native_all(?alloc, tag_packed_record_program(), "tags in packed records") != 0) { ret 3; }
+        var skipped: bool = false;
+        if (testrun.arm_failed(native_all(?alloc, tag_packed_program(), "packed tags"), ?skipped))                   { ret 1; }
+        if (testrun.arm_failed(native_all(?alloc, tag_aligned_program(), "aligned tags"), ?skipped))                 { ret 2; }
+        if (testrun.arm_failed(native_all(?alloc, tag_packed_record_program(), "tags in packed records"), ?skipped)) { ret 3; }
+        if (skipped)                                                                                                 { ret 77; }
         ret 0;
     }
 
     test tag_native__transfer_generics_and_payload_kinds_round_trip {
         var alloc: A.Allocator;
         page.make(?alloc);
-        if (native_all(?alloc, tag_abi_program(), "by-value transfer") != 0)   { ret 1; }
-        if (native_all(?alloc, tag_generic_program(), "generic nesting") != 0) { ret 2; }
-        if (native_all(?alloc, tag_payloads_program(), "payload kinds") != 0)  { ret 3; }
+        var skipped: bool = false;
+        if (testrun.arm_failed(native_all(?alloc, tag_abi_program(), "by-value transfer"), ?skipped))   { ret 1; }
+        if (testrun.arm_failed(native_all(?alloc, tag_generic_program(), "generic nesting"), ?skipped)) { ret 2; }
+        if (testrun.arm_failed(native_all(?alloc, tag_payloads_program(), "payload kinds"), ?skipped))  { ret 3; }
+        if (skipped)                                                                                    { ret 77; }
         ret 0;
     }
 
@@ -3555,21 +3619,57 @@ $if ($mach.build.os == $mach.os.linux && $mach.build.arch == $mach.arch.x86_64) 
         val found: res[str, exec.Error] = exec.resolve(?alloc, "clang");
         if (sel found.err) {
             print.print("tag-native: clang absent, C controls skipped\n");
-            ret 0;
+            ret 77;
         }
         var names:   [2]str = [2]str{"probe.c", "cc-probe.sh"};
         var texts:   [2]str = [2]str{tag_c_probe(), tag_cc_script()};
         var release: bool   = false;
         var pass:    u32    = 0;
+        var skipped: bool   = false;
         for (pass < 2) {
-            if (native_case_files(?alloc, tag_c_manifest(), ?names[0], ?texts[0], 2, "linux-x86_64", "", release, tag_c_program(), "C controls") != 0)              { ret 1; }
-            if (native_case_files(?alloc, tag_c_manifest(), ?names[0], ?texts[0], 2, "linux-arm64", "qemu-aarch64", release, tag_c_program(), "C controls") != 0)   { ret 2; }
-            if (native_case_files(?alloc, tag_c_manifest(), ?names[0], ?texts[0], 2, "linux-riscv64", "qemu-riscv64", release, tag_c_program(), "C controls") != 0) { ret 3; }
-            if (native_case_files(?alloc, tag_c_manifest(), ?names[0], ?texts[0], 2, "windows-x86_64", "wine", release, tag_c_program(), "C controls") != 0)        { ret 4; }
+            if (testrun.arm_failed(native_case_files(?alloc, tag_c_manifest(), ?names[0], ?texts[0], 2, "linux-x86_64", "", release, tag_c_program(), "C controls"), ?skipped))              { ret 1; }
+            if (testrun.arm_failed(native_case_files(?alloc, tag_c_manifest(), ?names[0], ?texts[0], 2, "linux-arm64", "qemu-aarch64", release, tag_c_program(), "C controls"), ?skipped))   { ret 2; }
+            if (testrun.arm_failed(native_case_files(?alloc, tag_c_manifest(), ?names[0], ?texts[0], 2, "linux-riscv64", "qemu-riscv64", release, tag_c_program(), "C controls"), ?skipped)) { ret 3; }
+            if (testrun.arm_failed(native_case_files(?alloc, tag_c_manifest(), ?names[0], ?texts[0], 2, "windows-x86_64", "wine", release, tag_c_program(), "C controls"), ?skipped))        { ret 4; }
             release = true;
             pass    = pass + 1;
         }
+        if (skipped) { ret 77; }
         ret 0;
+    }
+
+    # a fixture runs with one WINEPREFIX, XDG_RUNTIME_DIR and WINEDLLOVERRIDES each, its own
+    # under its root, whatever the caller set, and the rest of the caller's environment
+    test fixture_environment__isolates_wine_from_the_caller {
+        var alloc: A.Allocator;
+        page.make(?alloc);
+        val shell: res[str, exec.Error] = exec.resolve(?alloc, "sh");
+        if (sel shell.err) { ret 1; }
+        var w:    WarmProject;
+        val made: err[fail.Fail] = warm_project_init(?w);
+        if (sel made.err) { ret 2; }
+        fin { warm_project_dnit(?w); }
+        var names:      [1]str         = [1]str{"main.mach"};
+        var texts:      [1]str         = [1]str{""};
+        val scaffolded: err[fail.Fail] = warm_project_scaffold(?w, native_manifest(), ?names[0], ?texts[0], 1);
+        if (sel scaffolded.err) { ret 3; }
+        val probe: res[str, std_format.FormatError] = std_format.sprint(?alloc, "[ \"$(env | grep -c '^WINEPREFIX=')\" = 1 ] || exit 11\n[ \"$(env | grep -c '^XDG_RUNTIME_DIR=')\" = 1 ] || exit 12\n[ \"$(env | grep -c '^WINEDLLOVERRIDES=')\" = 1 ] || exit 13\n[ \"$WINEPREFIX\" = \"{}/wine-prefix\" ] || exit 14\n[ \"$XDG_RUNTIME_DIR\" = \"{}/xdg-runtime\" ] && [ -d \"$XDG_RUNTIME_DIR\" ] || exit 15\n[ \"$WINEDLLOVERRIDES\" = \"winewayland.drv=d;winex11.drv=d;winedbg.exe=d\" ] || exit 16\n[ \"$KEPT\" = kept ] || exit 17\n", w.root, w.root);
+        if (sel probe.err) { ret 4; }
+        val path: res[str, A.Error] = types_path.join(?alloc, w.root, "probe.sh");
+        if (sel path.err) { ret 5; }
+        val wrote: err[fs.FsError] = fs.write_bytes(path.ok, probe.ok, str_len(probe.ok), 420);
+        if (sel wrote.err) { ret 6; }
+        val inherited: res[opt[OwnedString], env.EnvError] = env.value(?alloc, "PATH");
+        if (sel inherited.err)     { ret 9; }
+        if (sel inherited.ok.none) { ret 9; }
+        val search: res[str, std_format.FormatError] = std_format.sprint(?alloc, "PATH={}", inherited.ok.some.data);
+        if (sel search.err) { ret 10; }
+        var caller:  [6]*u8 = [6]*u8{search.ok, "WINEPREFIX=/caller/.wine", "XDG_RUNTIME_DIR=/run/user/caller", "WINEDLLOVERRIDES=caller", "KEPT=kept", nil};
+        var trapped: bool   = false;
+        var code:    i32    = 0;
+        if (!run_fixture(w.root, shell.ok, path.ok, 1, exec.Environment.given{?caller[0]}, ?trapped, ?code)) { ret 7; }
+        if (trapped)                                                                                         { ret 8; }
+        ret code;
     }
 
     test tag_native__comptime_values_match_runtime_bytes {
@@ -3613,13 +3713,15 @@ $if ($mach.build.os == $mach.os.linux && $mach.build.arch == $mach.arch.x86_64) 
         page.make(?alloc);
         var release: bool = false;
         var pass:    u32  = 0;
+        var skipped: bool = false;
         for (pass < 2) {
-            if (trap_target(?alloc, "linux-x86_64", "", release) != 0)              { ret 1; }
-            if (trap_target(?alloc, "linux-arm64", "qemu-aarch64", release) != 0)   { ret 2; }
-            if (trap_target(?alloc, "linux-riscv64", "qemu-riscv64", release) != 0) { ret 3; }
+            if (testrun.arm_failed(trap_target(?alloc, "linux-x86_64", "", release), ?skipped))              { ret 1; }
+            if (testrun.arm_failed(trap_target(?alloc, "linux-arm64", "qemu-aarch64", release), ?skipped))   { ret 2; }
+            if (testrun.arm_failed(trap_target(?alloc, "linux-riscv64", "qemu-riscv64", release), ?skipped)) { ret 3; }
             release = true;
             pass    = pass + 1;
         }
+        if (skipped) { ret 77; }
         ret 0;
     }
 

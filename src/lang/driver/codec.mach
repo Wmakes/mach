@@ -1,5 +1,6 @@
 use collections_vector: std.collections.vector;
 use std.memory;
+use std.system.panic.panic;
 use std.types.bool.bool;
 use std.types.bool.false;
 use std.types.bool.true;
@@ -27,6 +28,14 @@ use mach.lang.type;
 use mach.lang.wide;
 use mach.lang.wire;
 
+# the bytes of a handle product, which its encoder wrote `need` bytes long and the query
+# engine hands back only as published, so the read is total: a product shorter than its
+# encoding is a broken invariant of the driver, and it stops the compiler
+pub fun handle_bytes(value: *u8, value_len: u32, need: usize) *u8 {
+    if (value == nil || value_len::usize < need) { panic("driver: a handle product is shorter than its encoding\n"); }
+    ret value;
+}
+
 pub fun resolve_handle_encode(alloc: *A.Allocator, r: *resolve.ResolveResult) res[query.QueryOutput, fail.Fail] {
     val n:  u32               = $size_of(ptr)::u32;
     val rb: res[*u8, A.Error] = A.allocate[u8](alloc, n::usize);
@@ -45,8 +54,7 @@ pub fun resolve_handle_encode(alloc: *A.Allocator, r: *resolve.ResolveResult) re
 }
 
 pub fun resolve_handle_decode(e: query.QueryView) *resolve.ResolveResult {
-    if (e.value == nil || e.value_len::usize < $size_of(ptr)) { ret nil; }
-    val slot: *ptr = e.value::ptr::*ptr;
+    val slot: *ptr = handle_bytes(e.value, e.value_len, $size_of(ptr))::ptr::*ptr;
     ret slot[0]::*resolve.ResolveResult;
 }
 

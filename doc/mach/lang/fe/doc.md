@@ -36,3 +36,5 @@ pub fun component_iter(source: str, doc: lang_source.Span) DocComponentIter;
 pub fun component_next(it: *DocComponentIter, out: *DocComponent) bool;
 ```
 
+the next component written to `out`, false once none is left
+

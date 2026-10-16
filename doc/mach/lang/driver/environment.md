@@ -42,6 +42,8 @@ pub fun init(a: *A.Allocator) Environment;
 pub fun entry_free(a: *A.Allocator, entry: *Entry);
 ```
 
+release an entry's native text; an empty entry owns none
+
 ## fun dnit
 
 ```mach
@@ -113,6 +115,8 @@ the length of a native entry in units
 ```mach
 pub fun strings_free(a: *A.Allocator, strings: *Strings);
 ```
+
+release a list of native strings; an empty list owns nothing
 
 ## fun to_strings
 

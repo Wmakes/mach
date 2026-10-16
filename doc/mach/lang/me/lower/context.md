@@ -127,6 +127,8 @@ pub fun init_context(lc: *LowerContext, req: *LowerRequest, m: *me_ir.Module) er
 pub fun dnit_context(lc: *LowerContext);
 ```
 
+release a lowering context; a nil context holds nothing
+
 ## fun each_element_of
 
 ```mach
@@ -250,11 +252,17 @@ pub fun expression(lc: *LowerContext, eid: ast_id.ExprId) res[ast_expr.Expr, fai
 pub fun resolve_module_member_const(lc: *LowerContext, eid: ast_id.ExprId) res[opt[comptime.CTValue], comptime.EvalFail];
 ```
 
+a lowering capability; a nil context, which the capability check refuses before any call,
+answers as an evaluation with no lowering would
+
 ## fun comptime_ident_is_runtime
 
 ```mach
 pub fun comptime_ident_is_runtime(lc: *LowerContext, eid: ast_id.ExprId) bool;
 ```
+
+a lowering capability; a nil context, which the capability check refuses before any call,
+answers as an evaluation with no lowering would
 
 ## fun resolve_type_comparison_operand
 
@@ -262,17 +270,26 @@ pub fun comptime_ident_is_runtime(lc: *LowerContext, eid: ast_id.ExprId) bool;
 pub fun resolve_type_comparison_operand(lc: *LowerContext, eid: ast_id.ExprId) res[opt[u32], comptime.EvalFail];
 ```
 
+a lowering capability; a nil context, which the capability check refuses before any call,
+answers as an evaluation with no lowering would
+
 ## fun resolve_type_query
 
 ```mach
 pub fun resolve_type_query(lc: *LowerContext, tid: u32, which: u8) res[opt[comptime.CTValue], comptime.EvalFail];
 ```
 
+a lowering capability; a nil context, which the capability check refuses before any call,
+answers as an evaluation with no lowering would
+
 ## fun resolve_layout_intrinsic
 
 ```mach
 pub fun resolve_layout_intrinsic(lc: *LowerContext, eid: u32) res[opt[comptime.CTValue], comptime.EvalFail];
 ```
+
+a lowering capability; a nil context, which the capability check refuses before any call,
+answers as an evaluation with no lowering would
 
 ## fun field_offset
 

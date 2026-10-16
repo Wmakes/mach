@@ -333,7 +333,7 @@ fun dep_outdated(a: *A.Allocator, root: str, offline: bool, environ: exec.Enviro
     var op: package_closure.Operation = opened.ok;
     fin { package_closure.close(?op); }
     val mt_path_r: res[str, A.Error] = types_path.join(a, root, MANIFEST);
-    if (sel mt_path_r.err) { ret res[i64, fail.Fail].err{package_closure.oom()}; }
+    if (sel mt_path_r.err) { ret res[i64, fail.Fail].err{fail.refused(mt_path_r.err)}; }
     val mt_r: res[manifest.Doc, fail.Fail] = package_closure.parse_file(a, mt_path_r.ok);
     if (sel mt_r.err) { ret res[i64, fail.Fail].err{mt_r.err}; }
     var mt:       manifest.Doc                             = mt_r.ok;

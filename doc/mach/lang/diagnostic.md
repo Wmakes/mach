@@ -242,17 +242,24 @@ file_id: the file whose diagnostics go
 pub fun store_dnit(store: *DiagnosticStore);
 ```
 
+release a store and every diagnostic it holds; a nil store holds nothing and releases
+nothing
+
 ## fun len
 
 ```mach
 pub fun len(store: *DiagnosticStore) usize;
 ```
 
+how many diagnostics `store` holds; a nil store, as a walk that reports nowhere has, holds none
+
 ## fun error_count
 
 ```mach
 pub fun error_count(store: *DiagnosticStore) usize;
 ```
+
+how many errors `store` counts; a nil store counts none
 
 ## fun builder_init
 
@@ -285,6 +292,9 @@ a refused format becomes a failure
 ```mach
 pub fun builder_dnit(b: *DiagnosticBuilder);
 ```
+
+release what a builder owns; a nil builder, or one already committed or released, owns
+nothing
 
 ## fun attach_note
 
@@ -364,7 +374,8 @@ pub fun record(store: *DiagnosticStore, k: diagnostic_kind.Kind, file_id: lang_s
 ```
 
 a diagnostic of kind `k` reported where the reporter has no failure to
-return: one the store cannot take is counted lost, which fails the build
+return: one the store cannot take is counted lost, which fails the build. the
+store is live, as `live` holds
 
 ## fun record_unlocated
 
@@ -393,11 +404,16 @@ rather than vanishing
 pub fun note_lost(store: *DiagnosticStore);
 ```
 
+count a diagnostic `store` could not take, which fails the build; the store is live, as `live`
+holds
+
 ## fun lost_count
 
 ```mach
 pub fun lost_count(store: *DiagnosticStore) usize;
 ```
+
+how many diagnostics `store` could not take; a nil store lost none
 
 ## fun suggestion_build
 

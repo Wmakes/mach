@@ -72,14 +72,23 @@ pub fun failure(identity: str, cause: Cause) Error;
 
 the refusal `cause`, named by `identity`
 
-## fun text
+## fun cause_text
 
 ```mach
-pub fun text(a: *A.Allocator, e: Error) str;
+pub fun cause_text(c: Cause) str;
 ```
 
-"identity: cause", owned by `a` (released with str_free); the static
-fallback when even that cannot be formatted
+the text of what refused, static
+
+## fun refusal
+
+```mach
+pub fun refusal(a: *A.Allocator, k: diagnostic_kind.Kind, e: Error) fail.Fail;
+```
+
+the machine's refusal `e` as an environment failure under `k`, its text
+"identity: cause" owned by `a`; a refusal to format the text is the failure
+instead
 
 ## rec SubprocessTerminal
 
@@ -141,13 +150,13 @@ make `p` a fresh owner with nothing spawned
 ## fun bound
 
 ```mach
-pub fun bound(p: *OwnedSubprocess, timeout: chrono_duration.Duration) bool;
+pub fun bound(p: *OwnedSubprocess, timeout: chrono_duration.Duration) err[Error];
 ```
 
 give `p` a deadline `timeout` from now, which wait_any enforces
 
-ret: false when the timeout is not positive, the clock fails, or the owner
-     is done
+ret: nothing, or the refusal when the timeout is not positive, the clock
+     fails, or the owner is done
 
 ## fun expired
 

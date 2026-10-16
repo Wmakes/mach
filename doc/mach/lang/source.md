@@ -195,6 +195,8 @@ pub fun init(a: *A.Allocator) SourceMap;
 pub fun dnit(m: *SourceMap);
 ```
 
+release a source map and its files; a nil map holds nothing
+
 ## fun count
 
 ```mach
@@ -232,6 +234,9 @@ reserves its slot here so commit_load cannot fail
 ```mach
 pub fun discard_load(prepared: *PreparedLoad);
 ```
+
+release a load that was prepared and not committed; one already committed or discarded
+owns nothing
 
 ## fun commit_load
 

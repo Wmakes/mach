@@ -13,10 +13,9 @@ use std.collections.map.Map;
 use std.collections.vector.Vector;
 use std.data.toml;
 use std_format: std.format;
+use std.text.string.str_dup;
 use std.text.string.str_free;
 use std.types.bool.bool;
-use std.types.bool.false;
-use std.types.bool.true;
 use std.types.error.err;
 use std.types.option.opt;
 use types_path: std.types.path;
@@ -71,8 +70,9 @@ pub fun disagreements(op: *package_closure.Operation, reqs: *Vector[package_clos
         var dir: str = r.src_path;
         if (r.is_git) {
             val full: res[str, fail.Fail] = package.dep_full_of(a, op.root, r.id);
-            if (sel full.err)             { ret err[fail.Fail].err{full.err}; }
-            if (!kept(a, ?keep, full.ok)) { ret err[fail.Fail].err{package_closure.oom()}; }
+            if (sel full.err) { ret err[fail.Fail].err{full.err}; }
+            val held: err[fail.Fail] = kept(a, ?keep, full.ok);
+            if (sel held.err) { ret held; }
             dir = full.ok;
         }
         val read_r: err[fail.Fail] = project_pins(op, dir, ?seen, ?keep, out);
@@ -105,14 +105,23 @@ pub fun free_lines(a: *A.Allocator, lines: *Vector[str]) {
     collections_vector.dnit[str](lines);
 }
 
-# take ownership of `s` so it outlives the walk; false when the list refused it
-fun kept(a: *A.Allocator, keep: *Vector[str], s: str) bool {
+# take ownership of `s` so it outlives the walk, or the refusal of the list, `s` then released
+fun kept(a: *A.Allocator, keep: *Vector[str], s: str) err[fail.Fail] {
     val pushed: res[usize, A.Error] = collections_vector.push[str](keep, s);
     if (sel pushed.err) {
         str_free(a, s);
-        ret false;
+        ret err[fail.Fail].err{fail.refused(pushed.err)};
     }
-    ret true;
+    ret err[fail.Fail].ok{};
+}
+
+# a copy of `s` the walk keeps, or the refusal to copy or keep it
+fun kept_copy(a: *A.Allocator, keep: *Vector[str], s: str) res[str, fail.Fail] {
+    val copied: res[str, A.Error] = str_dup(a, s);
+    if (sel copied.err) { ret res[str, fail.Fail].err{fail.refused(copied.err)}; }
+    val held: err[fail.Fail] = kept(a, keep, copied.ok);
+    if (sel held.err) { ret res[str, fail.Fail].err{held.err}; }
+    ret res[str, fail.Fail].ok{copied.ok};
 }
 
 # the pins the project at `dir` records for the dependencies its manifest takes from git,
@@ -125,7 +134,7 @@ fun project_pins(op: *package_closure.Operation, dir: str, seen: *Map[str, Seen]
     if (sel inside.err) { ret err[fail.Fail].err{inside.err}; }
     if (!inside.ok)     { ret err[fail.Fail].ok{}; }
     val path_r: res[str, A.Error] = types_path.join(a, dir, package_closure.MANIFEST);
-    if (sel path_r.err) { ret err[fail.Fail].err{package_closure.oom()}; }
+    if (sel path_r.err) { ret err[fail.Fail].err{fail.refused(path_r.err)}; }
     val path: str = path_r.ok;
     fin { str_free(a, path); }
     val doc_r: res[manifest.Doc, fail.Fail] = package_closure.parse_file(a, path);
@@ -153,34 +162,38 @@ fun project_pins(op: *package_closure.Operation, dir: str, seen: *Map[str, Seen]
         if (sel pin_r.err) { ret err[fail.Fail].err{pin_r.err}; }
         val pin: opt[str] = pin_r.ok;
         if (sel pin.none) { cnt; }
-        val commit: str = package_closure.own(a, pin.some);
+        val commit_r: res[str, fail.Fail] = kept_copy(a, keep, pin.some);
         str_free(op.s.build_alloc, pin.some);
-        if (commit == nil || !kept(a, keep, commit)) { ret err[fail.Fail].err{package_closure.oom()}; }
-        val full: res[str, fail.Fail] = package.dep_full_of(a, dir, key);
-        if (sel full.err)            { ret err[fail.Fail].err{full.err}; }
-        if (!kept(a, keep, full.ok)) { ret err[fail.Fail].err{package_closure.oom()}; }
-        val id: str = package_closure.own(a, key);
-        if (id == nil || !kept(a, keep, id)) { ret err[fail.Fail].err{package_closure.oom()}; }
+        if (sel commit_r.err) { ret err[fail.Fail].err{commit_r.err}; }
+        val commit: str                 = commit_r.ok;
+        val full:   res[str, fail.Fail] = package.dep_full_of(a, dir, key);
+        if (sel full.err) { ret err[fail.Fail].err{full.err}; }
+        val full_held: err[fail.Fail] = kept(a, keep, full.ok);
+        if (sel full_held.err) { ret full_held; }
+        val id_r: res[str, fail.Fail] = kept_copy(a, keep, key);
+        if (sel id_r.err) { ret err[fail.Fail].err{id_r.err}; }
+        val id: str = id_r.ok;
 
         val group_r: res[str, std_format.FormatError] = std_format.sprint(a, "{}\n{}\n{}", key, url, package_closure.key_text(?value.data.table, "ref"));
-        if (sel group_r.err)            { ret err[fail.Fail].err{package_closure.oom()}; }
-        if (!kept(a, keep, group_r.ok)) { ret err[fail.Fail].err{package_closure.oom()}; }
+        if (sel group_r.err) { ret err[fail.Fail].err{fail.format_refused(group_r.err)}; }
+        val group_held: err[fail.Fail] = kept(a, keep, group_r.ok);
+        if (sel group_held.err) { ret group_held; }
         val group: str        = group_r.ok;
         val first: opt[*Seen] = map.get[str, Seen](seen, ?group);
         if (sel first.none) {
             val put: res[bool, A.Error] = map.insert[str, Seen](seen, group, Seen{commit: commit, place: full.ok});
-            if (sel put.err) { ret err[fail.Fail].err{package_closure.oom()}; }
+            if (sel put.err) { ret err[fail.Fail].err{fail.refused(put.err)}; }
             cnt;
         }
         if (str_equals(first.some.commit, commit)) { cnt; }
         val line: res[str, std_format.FormatError] = std_format.sprint(a,
             "dependency '{}' is pinned at two commits: {} at {}, and {} at {}; pin it at one commit across the closure",
             id, first.some.commit, first.some.place, commit, full.ok);
-        if (sel line.err) { ret err[fail.Fail].err{package_closure.oom()}; }
+        if (sel line.err) { ret err[fail.Fail].err{fail.format_refused(line.err)}; }
         val pushed: res[usize, A.Error] = collections_vector.push[str](out, line.ok);
         if (sel pushed.err) {
             str_free(a, line.ok);
-            ret err[fail.Fail].err{package_closure.oom()};
+            ret err[fail.Fail].err{fail.refused(pushed.err)};
         }
     }
     ret err[fail.Fail].ok{};

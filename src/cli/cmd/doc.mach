@@ -616,7 +616,7 @@ fun generate(alloc: *A.Allocator, p: *project.Project, doc_dir: str, stats: *Doc
     val create_dir_all_r: err[fs.FsError] = fs.create_dir_all(alloc, doc_dir, 0o755);
     if (sel create_dir_all_r.err) {
         val said: res[str, std_format.FormatError] = std_format.sprint(alloc, "could not create output directory: {}", fail.fs_text(create_dir_all_r.err));
-        if (sel said.err) { ret err[fail.Fail].err{fail.message("out of memory")}; }
+        if (sel said.err) { ret err[fail.Fail].err{fail.format_refused(said.err)}; }
         ret err[fail.Fail].err{fail.environment(diagnostic_kind.FS_CREATE, said.ok)};
     }
 

@@ -180,57 +180,55 @@ fun copy_entries_free(alloc: *A.Allocator, entries: *Vector[CopyEntry]) {
 
 # the directory a project's `[project].work` names, which is the template's leading
 # segment: `out/{target.name}/{profile.name}` is written under `out`. a template that
-# opens with a variable names no directory this can exclude, and falls back to the
-# conventional name
-fun out_dir_segment(alloc: *A.Allocator, template: str, out: *str, owned: *bool) {
-    @out   = "out";
-    @owned = false;
+# opens with a variable names no directory this can exclude, and names the conventional
+# one. the name is owned by `alloc`
+fun out_dir_segment(alloc: *A.Allocator, template: str) res[str, fail.Fail] {
     val n: usize = str_len(template);
     var i: usize = 0;
     for (i < n && template[i] != '/' && template[i] != '\\' && template[i] != '{') { i = i + 1; }
-    if (i == 0)                      { ret; }
-    if (i < n && template[i] == '{') { ret; }
-    val copied: res[str, types_string.StrError] = str_copy_slice(alloc, template, 0::usize, i);
-    if (sel copied.err) { ret; }
-    @out   = copied.ok;
-    @owned = true;
+    var copied: res[str, types_string.StrError] = str_copy_slice(alloc, template, 0::usize, i);
+    if (i == 0 || (i < n && template[i] == '{')) { copied = str_copy_slice(alloc, "out", 0::usize, 3); }
+    if (sel copied.err)                          { ret res[str, fail.Fail].err{fail.str_refused(copied.err)}; }
+    ret res[str, fail.Fail].ok{copied.ok};
 }
 
-# the work directory of a project directory: its manifest's `work`, or the
-# conventional name when there is no readable manifest. a directory without
-# a manifest is not a project and excludes nothing
+# the work directory of a project directory, owned by `alloc`: its manifest's `work`, or
+# the conventional name when the manifest names none. a directory without a manifest is
+# not a project and excludes nothing, so it answers none; a manifest that cannot be read
+# or does not parse is the failure
 # ---
 # dir:   the directory in native units
 # shown: its UTF-8 rendering, which the manifest's diagnostics name
-fun project_work_name(alloc: *A.Allocator, dir: *Unit, shown: str, out: *str, owned: *bool) bool {
+fun project_work_name(alloc: *A.Allocator, dir: *Unit, shown: str) res[opt[str], fail.Fail] {
     val leaf_r: res[*Unit, fail.Fail] = native_of(alloc, manifest.MANIFEST_FILE);
-    if (sel leaf_r.err) { ret false; }
+    if (sel leaf_r.err) { ret res[opt[str], fail.Fail].err{leaf_r.err}; }
     fin { native_free(alloc, leaf_r.ok); }
     val mf_r: res[*Unit, fail.Fail] = native_join(alloc, dir, leaf_r.ok);
-    if (sel mf_r.err) { ret false; }
+    if (sel mf_r.err) { ret res[opt[str], fail.Fail].err{mf_r.err}; }
     val mf: *Unit = mf_r.ok;
     fin { native_free(alloc, mf); }
     val present: res[bool, io_error.Error] = fs.is_file_native(mf);
-    if (sel present.err) { ret false; }
-    if (!present.ok)     { ret false; }
-    @out   = "out";
-    @owned = false;
+    if (sel present.err) { ret res[opt[str], fail.Fail].err{fail.environment(diagnostic_kind.FS_READ, fail.io_text(present.err))}; }
+    if (!present.ok)     { ret res[opt[str], fail.Fail].ok{opt[str].none{}}; }
     val bytes_r: res[Vector[u8], fs.FsError] = fs.read_bytes_native(alloc, mf);
-    if (sel bytes_r.err) { ret true; }
+    if (sel bytes_r.err) { ret res[opt[str], fail.Fail].err{fail.fs_environment(diagnostic_kind.FS_READ, bytes_r.err)}; }
     var bytes: Vector[u8] = bytes_r.ok;
     fin { collections_vector.dnit[u8](?bytes); }
     val shown_r: res[str, fail.Fail] = driver_load.join_path(alloc, shown, manifest.MANIFEST_FILE);
-    if (sel shown_r.err) { ret true; }
+    if (sel shown_r.err) { ret res[opt[str], fail.Fail].err{shown_r.err}; }
     val doc_r: res[manifest.Doc, fail.Fail] = manifest.doc_parse_bytes(alloc, shown_r.ok, bytes.data, bytes.len);
     str_free(alloc, shown_r.ok);
-    if (sel doc_r.err) { ret true; }
+    if (sel doc_r.err) { ret res[opt[str], fail.Fail].err{doc_r.err}; }
     var doc: manifest.Doc = doc_r.ok;
     fin { manifest.doc_dnit(alloc, ?doc); }
+    var template: str      = "out";
     val declared: opt[str] = toml.get_str(?doc.table, "project.work");
     if (sel declared.some) {
-        if (!str_empty(declared.some)) { out_dir_segment(alloc, declared.some, out, owned); }
+        if (!str_empty(declared.some)) { template = declared.some; }
     }
-    ret true;
+    val named: res[str, fail.Fail] = out_dir_segment(alloc, template);
+    if (sel named.err) { ret res[opt[str], fail.Fail].err{named.err}; }
+    ret res[opt[str], fail.Fail].ok{opt[str].some{named.ok}};
 }
 
 # what git considers part of a path dependency's source: its tracked files and the
@@ -460,11 +458,17 @@ fun copy_inventory(alloc: *A.Allocator, root: *Unit, rel: *Unit, shown: str, sou
     val dir: *Unit = dir_r.ok;
     fin { native_free(alloc, dir); }
     var out:     str  = nil;
-    var owned:   bool = false;
     var project: bool = false;
-    if (source) { project = project_work_name(alloc, dir, shown, ?out, ?owned); }
+    if (source) {
+        val work: res[opt[str], fail.Fail] = project_work_name(alloc, dir, shown);
+        if (sel work.err) { ret err[fail.Fail].err{work.err}; }
+        if (sel work.ok.some) {
+            project = true;
+            out     = work.ok.some;
+        }
+    }
     fin {
-        if (owned) { str_free(alloc, out); }
+        if (out != nil) { str_free(alloc, out); }
     }
     val listed: res[Vector[NativeName], fs.FsError] = fs.read_dir_native(alloc, dir);
     if (sel listed.err) { ret err[fail.Fail].err{fail.environment(diagnostic_kind.FS_READ, fail.fs_text(listed.err))}; }

@@ -156,6 +156,7 @@ fun scope_artifact_root(alloc: *A.Allocator, itn: *intern.Interner, s: *Scope, p
     ret owned;
 }
 
+# release `count` path strings; a nil list owns nothing
 fun free_path_strings(alloc: *A.Allocator, paths: *str, count: u32) {
     if (paths == nil) { ret; }
     var i: u32 = 0;

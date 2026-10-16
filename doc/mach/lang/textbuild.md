@@ -6,12 +6,10 @@
 pub tag Error: u8 {
     alloc: A.Error;
     overflow;
-    failed;
 }
 ```
 
-the builder's failure: the allocator refused, a length or capacity left
-usize, or the builder was used after an earlier failure
+the builder's failure: the allocator refused, or a length or capacity left usize
 
 ## fun text
 
@@ -25,6 +23,10 @@ pub fun text(e: Error) str;
 pub rec TextBuilder;
 ```
 
+text built one append at a time. the first failure is kept: every later append
+and the finish refuse with it, so a writer may append a run of pieces and take
+the failure once at `tb_finish` or `tb_fault`
+
 ## fun tb_init
 
 ```mach
@@ -37,11 +39,13 @@ pub fun tb_init(a: *A.Allocator) TextBuilder;
 pub fun tb_append(b: *TextBuilder, text: str) err[Error];
 ```
 
-## fun tb_failed
+## fun tb_fault
 
 ```mach
-pub fun tb_failed(b: *TextBuilder) bool;
+pub fun tb_fault(b: *TextBuilder) err[Error];
 ```
+
+the builder's first failure, or ok when every append so far held
 
 ## fun tb_len
 

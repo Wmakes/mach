@@ -50,6 +50,7 @@ pub fun init(a: *A.Allocator) Environment {
     ret Environment{entries: collections_vector.init[Entry](a)};
 }
 
+# release an entry's native text; an empty entry owns none
 pub fun entry_free(a: *A.Allocator, entry: *Entry) {
     if (entry.units == nil) { ret; }
     A.deallocate[Unit](a, entry.units, entry.length + 1);
@@ -245,6 +246,7 @@ pub fun units_length(units: *Unit) usize {
     ret n;
 }
 
+# release a list of native strings; an empty list owns nothing
 pub fun strings_free(a: *A.Allocator, strings: *Strings) {
     if (strings.items == nil) { ret; }
     var i: u32 = 0;

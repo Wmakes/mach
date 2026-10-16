@@ -30,6 +30,8 @@ pub rec LoadedImageOptions;
 pub fun dnit_image_options(a: *A.Allocator, loaded: *LoadedImageOptions);
 ```
 
+release loaded image options; nil options own nothing
+
 ## fun load_image_options
 
 ```mach
@@ -133,4 +135,6 @@ destinations: per emitted module, its test object's path, nil for a module witho
 ```mach
 pub fun free_inputs(a: *A.Allocator, inputs: *target_of.ObjectInput, n: u32, cap: u32);
 ```
+
+release `n` object inputs and their array of `cap`; a nil array owns nothing
 

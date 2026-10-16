@@ -36,11 +36,15 @@ pub rec Record;
 pub fun facts_dnit(alloc: *A.Allocator, f: *Facts);
 ```
 
+release recorded facts; nil facts hold nothing
+
 ## fun record_dnit
 
 ```mach
 pub fun record_dnit(alloc: *A.Allocator, r: *Record);
 ```
+
+release a record; a nil record holds nothing
 
 ## fun encode
 

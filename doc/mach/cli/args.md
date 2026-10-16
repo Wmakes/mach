@@ -509,7 +509,7 @@ pub rec Relation;
 ```
 
 one constraint between two option rows. the parser enforces it and help
-renders it, from relation_text, so the refusal and the help line are one text
+renders it, from relation_sentence, so the refusal and the help line are one text
 
 kind: the RELATION_* value
 row: the canonical row the relation is declared on
@@ -714,17 +714,24 @@ action: its action, or nil
 rel: an entry of RELATIONS
 ret: true when the schema accepts both its rows
 
-## fun relation_text
+## rec Sentence
 
 ```mach
-pub fun relation_text(a: *A.Allocator, rel: *Relation) res[str, fail.Fail];
+pub rec Sentence;
+```
+
+the sentence a relation reads as, `{row}{joint}{other}{tail}`, in its parts
+
+## fun relation_sentence
+
+```mach
+pub fun relation_sentence(rel: *Relation) Sentence;
 ```
 
 the sentence a relation reads as, both in help and in the refusal of an invocation that breaks it
 
-a: owns the text
 rel: the relation
-ret: the text, empty for RELATION_IMPLIES, which nothing breaks
+ret: its parts, all empty for RELATION_IMPLIES, which nothing breaks
 
 ## fun schema_valid
 
@@ -789,7 +796,7 @@ inv: the invocation
 ## fun action_list
 
 ```mach
-pub fun action_list(a: *A.Allocator, command: *CommandSpec) str;
+pub fun action_list(a: *A.Allocator, command: *CommandSpec) res[str, std_format.FormatError];
 ```
 
 a command's action names, comma separated, as a refusal naming a missing or unknown action lists
@@ -797,7 +804,7 @@ them
 
 a: owns the text
 command: the command
-ret: the names; what was listed before an allocation failed
+ret: the names, or the refusal to format them
 
 ## fun parse_command
 

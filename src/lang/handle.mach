@@ -56,6 +56,7 @@ pub fun chunk_init[T](a: *A.Allocator) StableChunks[T] {
     ret s;
 }
 
+# release a store and its chunks; a nil store holds nothing
 pub fun chunk_dnit[T](s: *StableChunks[T]) {
     if (s == nil) { ret; }
     var i: usize = 0;
@@ -92,6 +93,7 @@ pub fun chunk_editor[T](s: *StableChunks[T]) res[ChunkEditor[T], Error] {
     ret res[ChunkEditor[T], Error].ok{e};
 }
 
+# end an edit of a store; an editor that opened no store ends nothing
 pub fun chunk_editor_finish[T](e: *ChunkEditor[T]) {
     if (e == nil || e.store == nil) { ret; }
     e.store.editing = false;
@@ -192,6 +194,7 @@ pub fun table_init[T, Domain](a: *A.Allocator) res[HandleTable[T, Domain], Error
     ret res[HandleTable[T, Domain], Error].ok{t};
 }
 
+# release a table and its slots; a nil table holds nothing
 pub fun table_dnit[T, Domain](t: *HandleTable[T, Domain]) {
     if (t == nil) { ret; }
     chunk_dnit[HandleSlot[T]](?t.slots);
@@ -238,6 +241,7 @@ pub fun edit[T, Domain](t: *HandleTable[T, Domain]) res[HandleEditor[T, Domain],
     ret res[HandleEditor[T, Domain], Error].ok{e};
 }
 
+# end an edit of a table; an editor that opened no table ends nothing
 pub fun editor_finish[T, Domain](e: *HandleEditor[T, Domain]) {
     if (e == nil || e.table == nil) { ret; }
     e.table.editing = false;

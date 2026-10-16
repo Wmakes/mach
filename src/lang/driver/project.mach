@@ -201,7 +201,9 @@ pub rec ModuleEntry {
     # the scope lowering binds the module's constants in, once a lowering made it
     lower_scope:  comptime.ComptimeCtx;
     lower_scoped: bool;
-    test:         TestObject;
+    # where the module's `#[expect]` declarations stand, read once per parse of it
+    expects: expect.Index;
+    test:    TestObject;
 }
 
 # a module's test object, beside its normal object and never changing it: the
@@ -381,6 +383,7 @@ pub fun lower_scope_drop(m: *ModuleEntry) {
     m.lower_scoped = false;
 }
 
+# release a project and everything it owns; a nil project holds nothing
 pub fun dnit_project(p: *Project) {
     if (p == nil) { ret; }
     release_fresh_staged(p);
@@ -389,6 +392,7 @@ pub fun dnit_project(p: *Project) {
     for (i < module_count(p)) {
         val m: *ModuleEntry = module_at(p, i);
         lower_scope_drop(m);
+        expect.index_dnit(?m.expects);
         fe_load.module_dnit(p.alloc, ?m.load);
         i = i + 1;
     }
@@ -559,6 +563,8 @@ fun deallocate_config(c: *ProjectConfig, alloc: *A.Allocator) {
     c.step_order_count  = 0;
 }
 
+# release `count` dependency entries and their array of `capacity`; a nil array owns
+# nothing
 pub fun free_dep_entries(alloc: *A.Allocator, deps: *DepEntry, count: u32, capacity: usize) {
     if (deps == nil) { ret; }
     free_dep_entries_in_place(alloc, deps, count);
@@ -577,6 +583,7 @@ fun free_dep_entries_in_place(alloc: *A.Allocator, deps: *DepEntry, count: u32) 
     }
 }
 
+# release `count` artifact requirements; an empty list owns nothing
 fun free_artifact_reqs(alloc: *A.Allocator, reqs: *template.Requirement, count: u32) {
     if (reqs == nil || count == 0) { ret; }
     var ri: u32 = 0;

@@ -59,6 +59,7 @@ pub fun none(alloc: *A.Allocator) Template {
     ret t;
 }
 
+# release a template set; a nil one, or one never made, holds nothing
 pub fun dnit(t: *Template) {
     if (t == nil || t.alloc == nil) { ret; }
     ast.dnit(?t.a);

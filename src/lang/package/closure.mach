@@ -173,7 +173,7 @@ pub fun realize(op: *Operation, reqs: *Vector[Request], quiet: bool, offline: bo
     var mt:     *toml.Table = candidate;
     if (mt == nil) {
         val mt_path_r: res[str, A.Error] = types_path.join(a, op.root, MANIFEST);
-        if (sel mt_path_r.err) { ret err[fail.Fail].err{oom()}; }
+        if (sel mt_path_r.err) { ret err[fail.Fail].err{fail.refused(mt_path_r.err)}; }
         val mt_path: str = mt_path_r.ok;
         fin { str_free(a, mt_path); }
         val mt_r: res[manifest.Doc, fail.Fail] = parse_file(a, mt_path);
@@ -208,7 +208,7 @@ pub fun realize(op: *Operation, reqs: *Vector[Request], quiet: bool, offline: bo
             if (sel realized.err) { ret realized; }
         }
         val dep_full_r: res[str, fail.Fail] = package.dep_full_of(a, op.root, reqs.data[i].id);
-        if (sel dep_full_r.err) { ret err[fail.Fail].err{oom()}; }
+        if (sel dep_full_r.err) { ret err[fail.Fail].err{dep_full_r.err}; }
         val dep_full: str = dep_full_r.ok;
         fin { str_free(a, dep_full); }
         # a checkout cloned shallow holds none of what its selection is read by
@@ -230,7 +230,7 @@ pub fun realize(op: *Operation, reqs: *Vector[Request], quiet: bool, offline: bo
             ret err[fail.Fail].err{fail.user(diagnostic_kind.DEP_UNREALIZED, msg.ok)};
         }
         val sub_path_r: res[str, A.Error] = types_path.join(a, dep_full, MANIFEST);
-        if (sel sub_path_r.err) { ret err[fail.Fail].err{oom()}; }
+        if (sel sub_path_r.err) { ret err[fail.Fail].err{fail.refused(sub_path_r.err)}; }
         val sub_path: str = sub_path_r.ok;
         fin { str_free(a, sub_path); }
         val sub_r: res[manifest.Doc, fail.Fail] = parse_file(a, sub_path);
@@ -322,7 +322,7 @@ fun ensure_realized(op: *Operation, r: *Request, mode: u8, quiet: bool, offline:
     }
     val a:          *A.Allocator        = op.a;
     val dep_full_r: res[str, fail.Fail] = package.dep_full_of(a, op.root, r.id);
-    if (sel dep_full_r.err) { ret err[fail.Fail].err{oom()}; }
+    if (sel dep_full_r.err) { ret err[fail.Fail].err{dep_full_r.err}; }
     val dep_full: str = dep_full_r.ok;
     fin { str_free(a, dep_full); }
 
@@ -356,7 +356,7 @@ pub fun acquire(op: *Operation, r: *Request, mode: u8, accept: bool, quiet: bool
     if (realized.ok == package_source.REALIZED_NOTHING) { ret err[fail.Fail].ok{}; }
 
     val dep_full_r: res[str, fail.Fail] = package.dep_full_of(op.a, op.root, r.id);
-    if (sel dep_full_r.err) { ret err[fail.Fail].err{oom()}; }
+    if (sel dep_full_r.err) { ret err[fail.Fail].err{dep_full_r.err}; }
     val dep_full: str = dep_full_r.ok;
     fin { str_free(op.a, dep_full); }
     var note: str = "";
@@ -451,17 +451,17 @@ fun enqueue(a: *A.Allocator, reqs: *Vector[Request], manifest_dir: str, mt: *tom
         val value: *toml.Value = value_o.some;
         i = i + 1;
         if (value.tag != toml.TYPE_TABLE) {
-            ret err[fail.Fail].err{fail.user(diagnostic_kind.MANIFEST_VALUE_TYPE, concat3(a, "[dep.", key, "] is not a table"))};
+            ret err[fail.Fail].err{fail.formatted_user(a, diagnostic_kind.MANIFEST_VALUE_TYPE, "[dep.{}] is not a table", key)};
         }
         if (!manifest.is_valid_id(key)) {
-            ret err[fail.Fail].err{fail.user(diagnostic_kind.MANIFEST_INVALID_NAME, concat3(a, "dependency name '", key, "' must be a portable identifier (letters, digits, '_', '-')"))};
+            ret err[fail.Fail].err{fail.formatted_user(a, diagnostic_kind.MANIFEST_INVALID_NAME, "dependency name '{}' must be a portable identifier (letters, digits, '_', '-')", key)};
         }
         val git_src:  str  = key_text(?value.data.table, "git");
         val path_src: str  = key_text(?value.data.table, "path");
         val has_git:  bool = !str_empty(git_src);
         val has_path: bool = !str_empty(path_src);
         if (has_git == has_path) {
-            ret err[fail.Fail].err{fail.user(diagnostic_kind.DEP_SOURCE_COUNT, concat3(a, "[dep.", key, "] needs exactly one source key: 'git' or 'path'"))};
+            ret err[fail.Fail].err{fail.formatted_user(a, diagnostic_kind.DEP_SOURCE_COUNT, "[dep.{}] needs exactly one source key: 'git' or 'path'", key)};
         }
 
         var r:        Request;
@@ -469,8 +469,9 @@ fun enqueue(a: *A.Allocator, reqs: *Vector[Request], manifest_dir: str, mt: *tom
         fin {
             if (!retained) { free_request(a, ?r); }
         }
-        r.id = own(a, key);
-        if (r.id == nil) { ret err[fail.Fail].err{oom()}; }
+        val id_r: res[str, fail.Fail] = copied(a, key);
+        if (sel id_r.err) { ret err[fail.Fail].err{id_r.err}; }
+        r.id          = id_r.ok;
         r.root_decl   = root_decl;
         r.is_git      = has_git;
         r.via_release = via_release;
@@ -480,15 +481,21 @@ fun enqueue(a: *A.Allocator, reqs: *Vector[Request], manifest_dir: str, mt: *tom
         r.decl        = nil;
         r.copied      = COPY_NONE;
         if (has_git) {
-            r.url     = own(a, git_src);
-            r.ref     = own(a, key_text(?value.data.table, "ref"));
-            r.version = own(a, key_text(?value.data.table, "version"));
-            if (r.url == nil || r.ref == nil || r.version == nil) { ret err[fail.Fail].err{oom()}; }
+            val url_r: res[str, fail.Fail] = copied(a, git_src);
+            if (sel url_r.err) { ret err[fail.Fail].err{url_r.err}; }
+            r.url = url_r.ok;
+            val ref_r: res[str, fail.Fail] = copied(a, key_text(?value.data.table, "ref"));
+            if (sel ref_r.err) { ret err[fail.Fail].err{ref_r.err}; }
+            r.ref = ref_r.ok;
+            val version_r: res[str, fail.Fail] = copied(a, key_text(?value.data.table, "version"));
+            if (sel version_r.err) { ret err[fail.Fail].err{version_r.err}; }
+            r.version = version_r.ok;
         }
         or {
             if (types_path.is_abs(path_src)) {
-                r.src_path = own(a, path_src);
-                if (r.src_path == nil) { ret err[fail.Fail].err{oom()}; }
+                val src_r: res[str, fail.Fail] = copied(a, path_src);
+                if (sel src_r.err) { ret err[fail.Fail].err{src_r.err}; }
+                r.src_path = src_r.ok;
             }
             or {
                 val joined: res[str, A.Error] = types_path.join(a, manifest_dir, path_src);
@@ -497,16 +504,17 @@ fun enqueue(a: *A.Allocator, reqs: *Vector[Request], manifest_dir: str, mt: *tom
             }
         }
         val chain_r: res[str, std_format.FormatError] = std_format.sprint(a, "{} -> {}", chain, key);
-        if (sel chain_r.err) { ret err[fail.Fail].err{oom()}; }
-        r.chain    = chain_r.ok;
-        r.requirer = own(a, chain);
-        if (r.requirer == nil) { ret err[fail.Fail].err{oom()}; }
+        if (sel chain_r.err) { ret err[fail.Fail].err{fail.format_refused(chain_r.err)}; }
+        r.chain = chain_r.ok;
+        val requirer_r: res[str, fail.Fail] = copied(a, chain);
+        if (sel requirer_r.err) { ret err[fail.Fail].err{requirer_r.err}; }
+        r.requirer = requirer_r.ok;
         var decl_r: res[str, std_format.FormatError];
         if (!has_git)              { decl_r = std_format.sprint(a, "path = \"{}\"", path_src); }
         or (!str_empty(r.version)) { decl_r = std_format.sprint(a, "version = \"{}\"", r.version); }
         or (!str_empty(r.ref))     { decl_r = std_format.sprint(a, "ref = \"{}\"", r.ref); }
         or                         { decl_r = std_format.sprint(a, "git = \"{}\"", r.url); }
-        if (sel decl_r.err)        { ret err[fail.Fail].err{oom()}; }
+        if (sel decl_r.err)        { ret err[fail.Fail].err{fail.format_refused(decl_r.err)}; }
         r.decl = decl_r.ok;
 
         val existing: i64 = index(reqs, r.id);
@@ -542,13 +550,14 @@ fun note_root_override(a: *A.Allocator, e: *Request, r: *Request) err[fail.Fail]
     var asked_r: res[str, std_format.FormatError];
     if (r.is_git && (!e.is_git || !str_equals(e.url, r.url))) { asked_r = std_format.sprint(a, "git = \"{}\", {}", r.url, r.decl); }
     or                                                        { asked_r = std_format.sprint(a, "{}", r.decl); }
-    if (sel asked_r.err)                                      { ret err[fail.Fail].err{oom()}; }
-    val asked: str = asked_r.ok;
-    val chain: str = own(a, r.chain);
-    if (chain == nil) {
+    if (sel asked_r.err)                                      { ret err[fail.Fail].err{fail.format_refused(asked_r.err)}; }
+    val asked:   str                 = asked_r.ok;
+    val chain_r: res[str, fail.Fail] = copied(a, r.chain);
+    if (sel chain_r.err) {
         str_free(a, asked);
-        ret err[fail.Fail].err{oom()};
+        ret err[fail.Fail].err{chain_r.err};
     }
+    val chain:  str                 = chain_r.ok;
     val pushed: res[usize, A.Error] = collections_vector.push[Overridden](?e.overrode, Overridden{chain: chain, asked: asked});
     if (sel pushed.err) { ret err[fail.Fail].err{fail.refused(pushed.err)}; }
     ret err[fail.Fail].ok{};
@@ -723,10 +732,10 @@ fun seed_from_source(op: *Operation, source: str, rev: str, reqs: *Vector[Reques
         if (sel link.err) { ret err[fail.Fail].err{link.err}; }
         val pin: opt[str] = link.ok;
         if (sel pin.some) {
-            val kept: str = own(op.a, pin.some);
+            val kept: res[str, fail.Fail] = copied(op.a, pin.some);
             str_free(op.s.build_alloc, pin.some);
-            if (kept == nil) { ret err[fail.Fail].err{oom()}; }
-            child.seed = kept;
+            if (sel kept.err) { ret err[fail.Fail].err{kept.err}; }
+            child.seed = kept.ok;
         }
     }
     ret err[fail.Fail].ok{};
@@ -754,23 +763,36 @@ pub fun parse_file(a: *A.Allocator, p: str) res[manifest.Doc, fail.Fail] {
     val doc_r: res[manifest.Doc, fail.Fail] = manifest.doc_read(a, p);
     if (sel doc_r.ok) { ret doc_r; }
     val f: fail.Fail = doc_r.err;
-    if (fail.kind_of(f) == diagnostic_kind.FS_READ)        { ret res[manifest.Doc, fail.Fail].err{fail.environment(diagnostic_kind.FS_READ, concat3(a, "cannot read ", p, ""))}; }
-    if (fail.kind_of(f) == diagnostic_kind.TOML_MALFORMED) { ret res[manifest.Doc, fail.Fail].err{fail.with_text(f, concat3(a, p, ": ", fail.describe(f)))}; }
+    if (fail.kind_of(f) == diagnostic_kind.FS_READ) {
+        val said: res[str, fail.Fail] = fail.format(a, "cannot read {}", p);
+        if (sel said.err) { ret res[manifest.Doc, fail.Fail].err{said.err}; }
+        ret res[manifest.Doc, fail.Fail].err{fail.environment(diagnostic_kind.FS_READ, said.ok)};
+    }
+    if (fail.kind_of(f) == diagnostic_kind.TOML_MALFORMED) {
+        val said: res[str, fail.Fail] = fail.format(a, "{}: {}", p, fail.describe(f));
+        if (sel said.err) { ret res[manifest.Doc, fail.Fail].err{said.err}; }
+        ret res[manifest.Doc, fail.Fail].err{fail.with_text(f, said.ok)};
+    }
     ret doc_r;
 }
 
+# a copy of `s` owned by `a`, or the refusal to make it
+fun copied(a: *A.Allocator, s: str) res[str, fail.Fail] {
+    val res_dup: res[str, A.Error] = str_dup(a, s);
+    if (sel res_dup.err) { ret res[str, fail.Fail].err{fail.refused(res_dup.err)}; }
+    ret res[str, fail.Fail].ok{res_dup.ok};
+}
+
+#[testing]
 pub fun own(a: *A.Allocator, s: str) str {
     val res_dup: res[str, A.Error] = str_dup(a, s);
     if (sel res_dup.err) { ret nil; }
     ret res_dup.ok;
 }
 
+#[testing]
 pub fun concat3(a: *A.Allocator, s1: str, s2: str, s3: str) str {
     val r: res[str, std_format.FormatError] = std_format.sprint(a, "{}{}{}", s1, s2, s3);
     if (sel r.err) { ret s2; }
     ret r.ok;
-}
-
-pub fun oom() fail.Fail {
-    ret fail.message("out of memory");
 }

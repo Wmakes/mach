@@ -16,9 +16,10 @@ use mach.lang.driver.request;
 use mach.lang.fe.ast;
 use mach.lang.fe.comptime;
 use comptime_path: mach.lang.fe.comptime.path;
-use fe_lexer:      mach.lang.fe.lexer;
-use fe_load:       mach.lang.fe.load;
-use fe_parser:     mach.lang.fe.parser;
+use mach.lang.fe.expect;
+use fe_lexer:  mach.lang.fe.lexer;
+use fe_load:   mach.lang.fe.load;
+use fe_parser: mach.lang.fe.parser;
 use mach.lang.fe.parser.state;
 use mach.lang.fe.resolve;
 use mach.lang.intern;
@@ -145,6 +146,7 @@ fun host_add(ctx: ptr, fqn: intern.StrId, sid: session.StableModuleId) res[sessi
     m.test             = project.TestObject{};
     m.load             = fe_load.Module{};
     m.lower_scoped     = false;
+    m.expects          = expect.Index{};
     var cache_byte: usize = 0;
     for (cache_byte < 32) {
         m.cache_under[cache_byte] = 0;

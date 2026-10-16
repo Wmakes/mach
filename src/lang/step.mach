@@ -228,6 +228,7 @@ fun resolve_step_path(a: *A.Allocator, raw: str, project_work: str, v: *template
     ret res[StepPath, fail.Fail].ok{empty};
 }
 
+# release a list of strings; an empty list owns nothing
 fun step_strings_free(a: *A.Allocator, values: *StepStrings) {
     if (values.items == nil) { ret; }
     var i: u32 = 0;
@@ -422,13 +423,18 @@ fun execute_step_invocation(a: *A.Allocator, execution_root: str, program: str,
     var options: subprocess.SpawnOptions = subprocess.spawn_options();
     options.cwd     = execution_root;
     options.grouped = true;
+    if (timeout > 0) {
+        val bounded: err[subprocess.Error] = subprocess.bound(?child, timeout);
+        if (sel bounded.err) {
+            ret err[fail.Fail].err{fail.formatted_user(a, diagnostic_kind.STEP_SPAWN, "failed to bound build step executable '{}' by its timeout: {}: {}", program, bounded.err.identity, subprocess.cause_text(bounded.err.cause))};
+        }
+    }
     val spawn_r: err[subprocess.Error] = subprocess.spawn_native(a, ?child, program, invocation.argv.items,
         exec.NativeEnvironment.given{invocation.env.items}, options);
     if (sel spawn_r.err) {
-        val msg: fail.Fail = fail.formatted_user(a, diagnostic_kind.STEP_SPAWN, "failed to spawn build step executable '{}': {}", program, subprocess.text(a, spawn_r.err));
+        val msg: fail.Fail = fail.formatted_user(a, diagnostic_kind.STEP_SPAWN, "failed to spawn build step executable '{}': {}: {}", program, spawn_r.err.identity, subprocess.cause_text(spawn_r.err.cause));
         ret err[fail.Fail].err{msg};
     }
-    if (timeout > 0) { subprocess.bound(?child, timeout); }
 
     var scope: sync_cancel.Scope;
     sync_cancel.make_root(?scope, opt[time.Instant].none{});
@@ -442,13 +448,15 @@ fun execute_step_invocation(a: *A.Allocator, execution_root: str, program: str,
     if (has_source) { events.close(?source); }
     sync_cancel.destroy(?scope);
     if (sel wait_r.err) {
-        val wait_err: str                                                  = subprocess.text(a, wait_r.err);
+        val wait_err: subprocess.Error                                     = wait_r.err;
         val cancel_r: res[subprocess.SubprocessTerminal, subprocess.Error] = subprocess.cancel(a, ?child, 0);
         if (sel cancel_r.err) {
-            val msg: fail.Fail = fail.formatted_user(a, diagnostic_kind.STEP_WAIT, "failed to wait for build step executable '{}': {}; cancellation also failed: {}", program, wait_err, subprocess.text(a, cancel_r.err));
+            val msg: fail.Fail = fail.formatted_user(a, diagnostic_kind.STEP_WAIT, "failed to wait for build step executable '{}': {}: {}; cancellation also failed: {}: {}", program,
+                wait_err.identity, subprocess.cause_text(wait_err.cause), cancel_r.err.identity, subprocess.cause_text(cancel_r.err.cause));
             ret err[fail.Fail].err{msg};
         }
-        val msg: fail.Fail = fail.formatted_user(a, diagnostic_kind.STEP_WAIT, "failed to wait for build step executable '{}': {}; child was canceled and reaped", program, wait_err);
+        val msg: fail.Fail = fail.formatted_user(a, diagnostic_kind.STEP_WAIT, "failed to wait for build step executable '{}': {}: {}; child was canceled and reaped", program,
+            wait_err.identity, subprocess.cause_text(wait_err.cause));
         ret err[fail.Fail].err{msg};
     }
     if (subprocess.expired(?child)) {
@@ -2185,8 +2193,8 @@ test step_environment__inherits_overlays_and_owns_target_identity {
 # a build step runs while this process holds a variable with no UTF-8 spelling,
 # and the step's child receives it unit for unit. the test runs itself again
 # as the step, which the marker the step declares tells apart
-test execute_step_invocation__carries_an_unspellable_inherited_variable {
-    $if ($mach.build.os == $mach.os.windows) {
+$if ($mach.build.os == $mach.os.windows) {
+    test execute_step_invocation__carries_an_unspellable_inherited_variable {
         if (subprocess.t_is_set("M4719SC")) {
             if (!subprocess.t_holds_unspellable("M4719S")) { ret 20; }
             ret 0;
@@ -2231,9 +2239,6 @@ test execute_step_invocation__carries_an_unspellable_inherited_variable {
         fin { driver_environment.strings_free(?a, ?invocation.env); }
         val run: err[fail.Fail] = execute_step_invocation(?a, "", (?exe[0])::str, ?invocation, "unspellable", 0);
         if (sel run.err) { ret 6; }
-        ret 0;
-    }
-    $or {
         ret 0;
     }
 }

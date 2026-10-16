@@ -180,8 +180,8 @@ pub rec RunEnd;
 ```
 
 a test run ended: its results in collection order, the counts of passed,
-failed and timed-out tests, the run's wall time, and the gate tally over every
-result
+failed, skipped and timed-out tests, the run's wall time, and the gate tally
+over every result
 
 ## rec Growth
 
@@ -313,7 +313,9 @@ pub rec Progress;
 
 one unit's phase rows, timed as they run and sent to the sink as each closes.
 a parallel section's workers post their items to a queue that whichever
-thread holds the drain delivers, so a worker never waits on the sink
+thread holds the drain delivers, so a worker never waits on the sink. a run
+that shows no readout has no progress, and every phase, span and item given a
+nil one is not shown
 
 ## fun start
 

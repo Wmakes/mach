@@ -35,6 +35,8 @@ pub fun none(alloc: *A.Allocator) Template;
 pub fun dnit(t: *Template);
 ```
 
+release a template set; a nil one, or one never made, holds nothing
+
 ## rec Captured
 
 ```mach

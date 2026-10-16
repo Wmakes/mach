@@ -74,7 +74,7 @@ test identity__a_second_call_is_served_from_the_memo {
     var first: Identity;
     val found: err[Error] = identity(?alloc, ?first);
     if (sel found.err) {
-        if (found.err.kind == UNAVAILABLE) { ret 0; }
+        if (found.err.kind == UNAVAILABLE) { ret 77; }
         ret 2;
     }
     if (!memo_valid)                                                      { ret 3; }
@@ -105,7 +105,7 @@ test identity__is_the_mapped_build_id {
     var found: Identity;
     val got:   err[Error] = identity(?alloc, ?found);
     if (sel got.err) {
-        if (got.err.kind == UNAVAILABLE) { ret 0; }
+        if (got.err.kind == UNAVAILABLE) { ret 77; }
         ret 2;
     }
     if (found.source != SOURCE_BUILD_ID) { ret 3; }

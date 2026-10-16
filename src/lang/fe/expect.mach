@@ -46,37 +46,86 @@ pub fun arg_span(a: *ast.Ast, eid: ast_id.ExprId, fallback: lang_source.Span) la
     ret e.some.span;
 }
 
-# every `#[expect]` key in the module, one expectation each
-#
-# a:       the parsed module
-# s:       the session whose interner holds its keys
-# ctx:     the comptime scope whose gate decisions say which `$if` branch is taken, over the load's
-#          bindings that hold its keys
-# checked: the module was type checked this build, or its warnings replayed
-# out:     the list the expectations are appended to
-pub fun collect(s: *session.Session, a: *ast.Ast, ctx: *comptime.ComptimeCtx, checked: bool,
-    out: *Vector[diagnostic.Expectation]) err[fail.Fail] {
-    val root: opt[*ast_module.Module] = ast.get_module(a, a.root_module);
-    if (sel root.none) { ret err[fail.Fail].ok{}; }
-    ret collect_list(s, a, ctx, checked, root.some.decls_start, root.some.decls_len, out);
+# where a module's `#[expect]` declarations stand in its syntax, read once per parse so a
+# refresh of the diagnostics walks none of the module's declarations
+# ---
+# syntax:      the parsed module the sites were read from, nil before the first read
+# incarnation: that parse's incarnation
+# sites:       each declaration that carries `#[expect]`, in source order
+# steps:       the `$if` arms each site stands in, outermost first, as the sites' ranges name them
+# visited:     the declarations every read has walked, over the module's parses
+pub rec Index {
+    syntax:      *ast.Ast;
+    incarnation: u64;
+    sites:       Vector[Site];
+    steps:       Vector[Step];
+    visited:     u64;
 }
 
-fun collect_list(s: *session.Session, a: *ast.Ast, ctx: *comptime.ComptimeCtx, live: bool,
-    start: u32, len: u32, out: *Vector[diagnostic.Expectation]) err[fail.Fail] {
+# a declaration that carries `#[expect]`, and the run of steps that leads to it
+rec Site {
+    decl:        ast_id.DeclId;
+    steps_start: u32;
+    steps_len:   u32;
+}
+
+# one arm of a `$if` chain a site stands in
+rec Step {
+    chain:  ast_id.DeclId;
+    branch: u32;
+}
+
+pub fun index_dnit(idx: *Index) {
+    collections_vector.dnit[Site](?idx.sites);
+    collections_vector.dnit[Step](?idx.steps);
+    idx.syntax      = nil;
+    idx.incarnation = 0;
+}
+
+# how many declarations in the module the index holds carry `#[expect]`
+pub fun site_count(idx: *Index) usize {
+    ret idx.sites.len;
+}
+
+# bring the index up to the parsed module `a`, reading its sites when it was read from another
+# parse; a failed read leaves it unread, so the next one walks the module again
+pub fun index(s: *session.Session, a: *ast.Ast, idx: *Index) err[fail.Fail] {
+    if (idx.syntax == a && idx.incarnation == a.incarnation) { ret err[fail.Fail].ok{}; }
+    if (idx.sites.a == nil)                                  { idx.sites = collections_vector.init[Site](s.alloc); }
+    if (idx.steps.a == nil)                                  { idx.steps = collections_vector.init[Step](s.alloc); }
+    collections_vector.clear[Site](?idx.sites);
+    collections_vector.clear[Step](?idx.steps);
+    idx.syntax = nil;
+    var path: Vector[Step] = collections_vector.init[Step](s.alloc);
+    fin { collections_vector.dnit[Step](?path); }
+    val root: opt[*ast_module.Module] = ast.get_module(a, a.root_module);
+    if (sel root.some) {
+        val r: err[fail.Fail] = read_list(s, a, idx, ?path, root.some.decls_start, root.some.decls_len);
+        if (sel r.err) {
+            collections_vector.clear[Site](?idx.sites);
+            collections_vector.clear[Step](?idx.steps);
+            ret r;
+        }
+    }
+    idx.syntax      = a;
+    idx.incarnation = a.incarnation;
+    ret err[fail.Fail].ok{};
+}
+
+fun read_list(s: *session.Session, a: *ast.Ast, idx: *Index, path: *Vector[Step], start: u32, len: u32) err[fail.Fail] {
     var i: u32 = 0;
     for (i < len) {
         val pool_ix: u32 = start + i;
         if (pool_ix::usize >= a.decl_ids.len) { ret err[fail.Fail].err{fail.message("expect: declaration index out of range")}; }
-        val r: err[fail.Fail] = collect_decl(s, a, ctx, live, a.decl_ids.data[pool_ix], out);
+        val r: err[fail.Fail] = read_decl(s, a, idx, path, a.decl_ids.data[pool_ix]);
         if (sel r.err) { ret r; }
         i = i + 1;
     }
     ret err[fail.Fail].ok{};
 }
 
-# a declaration in an `$if` branch is live only on the branch its gate decided taken
-fun collect_decl(s: *session.Session, a: *ast.Ast, ctx: *comptime.ComptimeCtx, live: bool,
-    did: ast_id.DeclId, out: *Vector[diagnostic.Expectation]) err[fail.Fail] {
+fun read_decl(s: *session.Session, a: *ast.Ast, idx: *Index, path: *Vector[Step], did: ast_id.DeclId) err[fail.Fail] {
+    idx.visited = idx.visited + 1;
     val d_o: opt[*ast_decl.Decl] = ast.get_decl(a, did);
     if (sel d_o.none) { ret err[fail.Fail].err{fail.message("expect: declaration id out of range")}; }
     val d: *ast_decl.Decl = d_o.some;
@@ -87,31 +136,93 @@ fun collect_decl(s: *session.Session, a: *ast.Ast, ctx: *comptime.ComptimeCtx, l
         ret err[fail.Fail].err{fail.reported()};
     }
     if (d.kind == ast_decl.DECL_KIND_COMPTIME_IF) {
-        # the first branch whose gate is decided true is taken, and an undecided
-        # gate leaves every branch from it on untaken
-        var open: bool = true;
-        var b:    u32  = 0;
+        var b: u32 = 0;
         for (b < d.data.comptime_if.branches_len) {
             val ix: u32 = d.data.comptime_if.branches_start + b;
             if (ix::usize >= a.comptime_branches.len) { ret err[fail.Fail].err{fail.message("expect: comptime branch index out of range")}; }
-            val br:  *ast_decl.ComptimeBranch = ?a.comptime_branches.data[ix];
-            var now: bool                     = false;
-            if (open) {
-                if (ast_id.expr_is_nil(br.cond)) { now = true; }
-                or {
-                    val state: comptime.GateState = comptime.gate_state(ctx, br.cond);
-                    if (state == comptime.GATE_STATE_TRUE)  { now = true; }
-                    or (state != comptime.GATE_STATE_FALSE) { open = false; }
-                }
-            }
-            val r: err[fail.Fail] = collect_list(s, a, ctx, live && now, br.body_start, br.body_len, out);
+            val br:     *ast_decl.ComptimeBranch = ?a.comptime_branches.data[ix];
+            val pushed: res[usize, A.Error]      = collections_vector.push[Step](path, Step{chain: did, branch: b});
+            if (sel pushed.err) { ret err[fail.Fail].err{fail.refused(pushed.err)}; }
+            val r: err[fail.Fail] = read_list(s, a, idx, path, br.body_start, br.body_len);
+            path.len = path.len - 1;
             if (sel r.err) { ret r; }
-            if (now)       { open = false; }
             b = b + 1;
         }
         ret err[fail.Fail].ok{};
     }
     if (!decorator.admits(decorator.EXPECT, d)) { ret err[fail.Fail].ok{}; }
+    var carries: bool = false;
+    var i:       u32  = 0;
+    for (i < d.decorators_len && !carries) {
+        if (a.decorators.data[d.decorators_start + i].id == decorator.EXPECT) { carries = true; }
+        i = i + 1;
+    }
+    if (!carries) { ret err[fail.Fail].ok{}; }
+    val site: Site  = Site{decl: did, steps_start: idx.steps.len::u32, steps_len: path.len::u32};
+    var j:    usize = 0;
+    for (j < path.len) {
+        val step: res[usize, A.Error] = collections_vector.push[Step](?idx.steps, path.data[j]);
+        if (sel step.err) { ret err[fail.Fail].err{fail.refused(step.err)}; }
+        j = j + 1;
+    }
+    val added: res[usize, A.Error] = collections_vector.push[Site](?idx.sites, site);
+    if (sel added.err) { ret err[fail.Fail].err{fail.refused(added.err)}; }
+    ret err[fail.Fail].ok{};
+}
+
+# every `#[expect]` key at the sites the index read from `a`, one expectation each
+#
+# s:       the session whose interner holds its keys
+# a:       the parsed module the index was brought up to
+# idx:     the module's index
+# ctx:     the comptime scope whose gate decisions say which `$if` branch is taken, over the load's
+#          bindings that hold its keys
+# checked: the module was type checked this build, or its warnings replayed
+# out:     the list the expectations are appended to
+pub fun collect(s: *session.Session, a: *ast.Ast, idx: *Index, ctx: *comptime.ComptimeCtx, checked: bool,
+    out: *Vector[diagnostic.Expectation]) err[fail.Fail] {
+    if (idx.syntax != a || idx.incarnation != a.incarnation) { ret err[fail.Fail].err{fail.message("expect: the index was read from another parse")}; }
+    var i: usize = 0;
+    for (i < idx.sites.len) {
+        val site: *Site = ?idx.sites.data[i];
+        var live: bool  = checked;
+        var k:    u32   = 0;
+        for (live && k < site.steps_len) {
+            val taken: res[bool, fail.Fail] = arm_taken(a, ctx, idx.steps.data[site.steps_start + k]);
+            if (sel taken.err) { ret err[fail.Fail].err{taken.err}; }
+            live = taken.ok;
+            k    = k + 1;
+        }
+        val r: err[fail.Fail] = collect_site(s, a, ctx, live, site.decl, out);
+        if (sel r.err) { ret r; }
+        i = i + 1;
+    }
+    ret err[fail.Fail].ok{};
+}
+
+# the first arm of a `$if` chain whose gate is decided true is taken, and an undecided gate
+# leaves every arm from it on untaken
+fun arm_taken(a: *ast.Ast, ctx: *comptime.ComptimeCtx, step: Step) res[bool, fail.Fail] {
+    val d_o: opt[*ast_decl.Decl] = ast.get_decl(a, step.chain);
+    if (sel d_o.none) { ret res[bool, fail.Fail].err{fail.message("expect: an indexed `$if` chain is not in the parse")}; }
+    val d: *ast_decl.Decl = d_o.some;
+    var b: u32            = 0;
+    for (b <= step.branch) {
+        val br: *ast_decl.ComptimeBranch = ?a.comptime_branches.data[d.data.comptime_if.branches_start + b];
+        if (ast_id.expr_is_nil(br.cond)) { ret res[bool, fail.Fail].ok{b == step.branch}; }
+        val state: comptime.GateState = comptime.gate_state(ctx, br.cond);
+        if (state == comptime.GATE_STATE_TRUE)  { ret res[bool, fail.Fail].ok{b == step.branch}; }
+        if (state != comptime.GATE_STATE_FALSE) { ret res[bool, fail.Fail].ok{false}; }
+        b = b + 1;
+    }
+    ret res[bool, fail.Fail].ok{false};
+}
+
+fun collect_site(s: *session.Session, a: *ast.Ast, ctx: *comptime.ComptimeCtx, live: bool,
+    did: ast_id.DeclId, out: *Vector[diagnostic.Expectation]) err[fail.Fail] {
+    val d_o: opt[*ast_decl.Decl] = ast.get_decl(a, did);
+    if (sel d_o.none) { ret err[fail.Fail].err{fail.message("expect: declaration id out of range")}; }
+    val d: *ast_decl.Decl = d_o.some;
 
     var start: usize = d.span.offset;
     if (d.doc.len > 0 && d.doc.offset < start) { start = d.doc.offset; }

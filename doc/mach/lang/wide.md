@@ -133,17 +133,47 @@ pub fun mul_u64(a: u64, b: u64) Wide;
 pub fun mul(a: Wide, b: Wide) Wide;
 ```
 
+## rec QuotRem
+
+```mach
+pub rec QuotRem;
+```
+
+a quotient and its remainder
+
 ## fun divmod_u
 
 ```mach
-pub fun divmod_u(a: Wide, b: Wide, q: *Wide, r: *Wide) bool;
+pub fun divmod_u(a: Wide, b: Wide) opt[QuotRem];
 ```
+
+a / b and a % b unsigned, none when b is zero
 
 ## fun divmod_s
 
 ```mach
-pub fun divmod_s(a: Wide, b: Wide, q: *Wide, r: *Wide) bool;
+pub fun divmod_s(a: Wide, b: Wide) opt[QuotRem];
 ```
+
+a / b and a % b signed, rounding toward zero, none when b is zero
+
+## fun quot_rem_u
+
+```mach
+pub fun quot_rem_u(a: Wide, b: Wide) QuotRem;
+```
+
+a / b and a % b unsigned. total over a nonzero `b`: a zero divisor is a
+broken precondition of the caller, and it stops the compiler
+
+## fun quot_rem_s
+
+```mach
+pub fun quot_rem_s(a: Wide, b: Wide) QuotRem;
+```
+
+a / b and a % b signed, rounding toward zero, total over a nonzero `b` as
+quot_rem_u is
 
 ## fun shl
 

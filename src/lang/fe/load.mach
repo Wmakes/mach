@@ -1935,6 +1935,7 @@ pub fun walked(m: *Module, did: ast_id.DeclId) bool {
     ret walked_at(m, FRAME_BUILD, did);
 }
 
+# release a module's walked frames; a module with no frames owns none
 fun frames_drop(l: *Loader, m: *Module) {
     if (m.frame_walked != nil) { A.deallocate[bool](l.alloc, m.frame_walked, (m.frame_count * m.decl_count)::usize); }
     m.frame_walked = nil;

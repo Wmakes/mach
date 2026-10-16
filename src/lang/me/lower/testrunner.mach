@@ -65,6 +65,7 @@ pub fun collect_module(s: *session.Session, c: *Collected, mod: *me_ir.Module, m
     ret err[fail.Fail].ok{};
 }
 
+# release a collection; a nil collection holds nothing
 pub fun free(s: *session.Session, c: *Collected) {
     if (c == nil) { ret; }
 

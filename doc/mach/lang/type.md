@@ -711,6 +711,8 @@ pub fun init(ti: *TypeInterner, a: *A.Allocator) err[fail.Fail];
 pub fun dnit(ti: *TypeInterner);
 ```
 
+release a type store; a nil store holds nothing
+
 ## fun get
 
 ```mach

@@ -148,6 +148,7 @@ pub fun bindings_init(alloc: *A.Allocator) Bindings {
     };
 }
 
+# release a binding list; a nil list, or one never made, holds nothing
 pub fun bindings_dnit(b: *Bindings) {
     if (b == nil || b.alloc == nil)               { ret; }
     if (b.entries != nil && b.entries_cap > 0)    { A.deallocate[NamedConst](b.alloc, b.entries, b.entries_cap::usize); }
@@ -343,7 +344,8 @@ pub fun set_source_context(c: *ComptimeCtx, sources: *lang_source.SourceMap, mod
     c.env.source = SourceFacts{sources: sources, module_fqn: module, file: file, owner_id: owner_id, owner_ver: owner_ver};
 }
 
-# release the scope's own bindings; what it reads below belongs to the stages that made it
+# release the scope's own bindings; what it reads below belongs to the stages that made it.
+# a nil scope holds nothing
 pub fun dnit(c: *ComptimeCtx) {
     if (c == nil) { ret; }
     bindings_dnit(?c.own);
