@@ -127,8 +127,10 @@ pub fun releases(s: *session.Session, offline: bool, local: str) res[package_sou
     var remotes: git_tags.Remotes                = opened.ok;
     val held:    res[*git_tags.Remotes, A.Error] = A.allocate[git_tags.Remotes](s.build_alloc, 1);
     if (sel held.err) {
-        git_tags.close(?remotes);
-        ret res[package_source.Releases, fail.Fail].err{fail.refused(held.err)};
+        val refused: fail.Fail      = fail.refused(held.err);
+        val closed:  err[fail.Fail] = git_tags.close(?remotes);
+        if (sel closed.err) { ret res[package_source.Releases, fail.Fail].err{fail.with_secondary(s.build_alloc, refused, closed.err)}; }
+        ret res[package_source.Releases, fail.Fail].err{refused};
     }
     held.ok[0] = remotes;
     ret res[package_source.Releases, fail.Fail].ok{package_source.Releases{ctx: held.ok::ptr, list: git_tags.releases,
@@ -143,11 +145,12 @@ fun remember(ctx: ptr, url: str, dir: str) err[fail.Fail] {
     ret git_tags.remember(ctx::*git_tags.Remotes, url, dir);
 }
 
-fun releases_close(ctx: ptr) {
-    val r: *git_tags.Remotes = ctx::*git_tags.Remotes;
-    val a: *A.Allocator      = r.s.build_alloc;
-    git_tags.close(r);
+fun releases_close(ctx: ptr) err[fail.Fail] {
+    val r:      *git_tags.Remotes = ctx::*git_tags.Remotes;
+    val a:      *A.Allocator      = r.s.build_alloc;
+    val closed: err[fail.Fail]    = git_tags.close(r);
     A.deallocate[git_tags.Remotes](a, r, 1);
+    ret closed;
 }
 
 # the pin table of git: a pin is the gitlink the enclosing repository stages at dep/<id>

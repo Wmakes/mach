@@ -112,6 +112,21 @@ fun lock_listed(locks: *Vector[resolver.Lock], id: str) bool {
 # requirement the root overrides
 pub fun versions(op: *package_closure.Operation, doc: *manifest.Doc, lowest: bool, lock: bool, unlocked: str,
     root_notes: bool, walk: *package_closure.Walk) res[Resolution, fail.Fail] {
+    val opened: res[package_source.Releases, fail.Fail] = git_member.releases(op.s, walk.offline, "");
+    if (sel opened.err) { ret res[Resolution, fail.Fail].err{opened.err}; }
+    var releases: package_source.Releases    = opened.ok;
+    val resolved: res[Resolution, fail.Fail] = versions_listed(op, doc, lowest, lock, unlocked, root_notes, walk, ?releases);
+    val closed:   err[fail.Fail]             = releases.close(releases.ctx);
+    if (sel closed.err) {
+        if (sel resolved.err) { ret res[Resolution, fail.Fail].err{fail.with_secondary(op.a, resolved.err, closed.err)}; }
+        ret res[Resolution, fail.Fail].err{closed.err};
+    }
+    ret resolved;
+}
+
+# `versions` reading the releases each identity offers from `releases`
+fun versions_listed(op: *package_closure.Operation, doc: *manifest.Doc, lowest: bool, lock: bool, unlocked: str,
+    root_notes: bool, walk: *package_closure.Walk, releases: *package_source.Releases) res[Resolution, fail.Fail] {
     val s:       *session.Session                  = op.s;
     val a:       *A.Allocator                      = op.a;
     val offline: bool                              = walk.offline;
@@ -127,11 +142,7 @@ pub fun versions(op: *package_closure.Operation, doc: *manifest.Doc, lowest: boo
     var fixed_own: Vector[bool]          = collections_vector.init[bool](a);
     var locks:     Vector[resolver.Lock] = collections_vector.init[resolver.Lock](a);
     fin { locks_free(s.build_alloc, ?locks); }
-    val opened: res[package_source.Releases, fail.Fail] = git_member.releases(s, offline, "");
-    if (sel opened.err) { ret res[Resolution, fail.Fail].err{opened.err}; }
-    var releases: package_source.Releases = opened.ok;
-    fin { releases.close(releases.ctx); }
-    var nd:      Needs = Needs{s: s, releases: ?releases, root: ?m, local_root: op.root};
+    var nd:      Needs = Needs{s: s, releases: releases, root: ?m, local_root: op.root};
     var root_id: str   = package_closure.key_text(?doc.table, "project.id");
     if (str_empty(root_id)) { root_id = "(project)"; }
 
@@ -214,7 +225,7 @@ pub fun versions(op: *package_closure.Operation, doc: *manifest.Doc, lowest: boo
     var problem: resolver.Problem = resolver.Problem{root: root_id, needs: needs_of.data, need_count: needs_of.len::u32,
         fixed: fixed.data, fixed_count: fixed.len::u32, compiler: lang_version.MACH_VERSION, lowest: lowest,
         locks: locks.data, lock_count: locks.len::u32};
-    val solved: res[Vector[resolver.Choice], fail.Fail] = resolver.resolve(a, ?releases, needs, (?nd)::ptr, ?problem);
+    val solved: res[Vector[resolver.Choice], fail.Fail] = resolver.resolve(a, releases, needs, (?nd)::ptr, ?problem);
     if (sel solved.err) { ret res[Resolution, fail.Fail].err{solved.err}; }
     out.picks = solved.ok;
     if (fixed.len > 0) {
@@ -349,8 +360,7 @@ pub fun outdated(op: *package_closure.Operation, doc: *manifest.Doc, offline: bo
     val opened: res[package_source.Releases, fail.Fail] = git_member.releases(s, offline, "");
     if (sel opened.err) { ret res[Outdated, fail.Fail].err{opened.err}; }
     var releases: package_source.Releases = opened.ok;
-    fin { releases.close(releases.ctx); }
-    var i: usize = 0;
+    var i:        usize                   = 0;
     for (i < picks.len) {
         val pick: *resolver.Choice = ?picks.data[i];
         i = i + 1;
@@ -382,5 +392,7 @@ pub fun outdated(op: *package_closure.Operation, doc: *manifest.Doc, offline: bo
         }
         collections_vector.push[OutdatedRow](?out.rows, OutdatedRow{id: pick.id, pinned: pinned, compatible: pick.version, latest: latest});
     }
+    val closed: err[fail.Fail] = releases.close(releases.ctx);
+    if (sel closed.err) { ret res[Outdated, fail.Fail].err{closed.err}; }
     ret res[Outdated, fail.Fail].ok{out};
 }
