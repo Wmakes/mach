@@ -229,7 +229,7 @@ pub fun hold_failure(s: *Session, failure: fail.Fail, lost: *bool) fail.Fail {
         }
         if (sel copied.ok) {
             s.query_failure_places = copied.ok;
-            held                   = copied.ok;
+            held                   = fail.borrowing_places(copied.ok);
         }
     }
     ret held;
