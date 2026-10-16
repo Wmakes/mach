@@ -45,7 +45,11 @@ use lang_source: mach.lang.source;
 # compiler recovers from none of them at the site that met them. a failure
 # that carries text records whether it owns it: owned text was allocated
 # through the allocator `dnit` is given and is released there, borrowed text
-# (a literal, an interned text, storage someone else releases) never is
+# (a literal, an interned text, storage someone else releases) never is. a
+# failure that points somewhere records whether it owns its places in the same
+# way, all of them or none: `places_retain`, `retain` and the constructors that
+# copy a place through an allocator own them, and every constructor that
+# borrows a place leaves them borrowed
 pub tag Fail: u8 {
     reported;
     message:     Message;
@@ -70,6 +74,8 @@ rec Message {
 # also:  the other places the failure names, none when it names no other
 # fix:   the rewrite of the input that clears the failure, none when the
 #        rewrite is not mechanical
+# held:  whether the failure owns its places: `at`'s path, `also`'s array and
+#        paths, and `fix`'s label, replacement and path
 rec Keyed {
     kind:  diagnostic_kind.Kind;
     text:  str;
@@ -77,6 +83,7 @@ rec Keyed {
     at:    Place;
     also:  Related;
     fix:   Fix;
+    held:  bool;
 }
 
 # a machine-applicable rewrite of the file a failure points into: the bytes at
@@ -208,8 +215,9 @@ pub fun span_only(s: lang_source.Span) Place {
 }
 
 # the same failure with its ranges resolved in `text`, the file at `path`, as
-# `located` places them: its own and each related one still without a file. a
-# failure without a range, or one already resolved, is returned as it is
+# `located` places them: its own and each related one still without a file.
+# the failure owns its places through `a` as `located` leaves them. a failure
+# without a range, or one already resolved, is returned as it is
 pub fun placed(a: *A.Allocator, f: Fail, path: str, text: str) Fail {
     ret placed_bytes(a, f, path, text::*u8, str_len(text));
 }
@@ -230,9 +238,20 @@ pub fun placed_bytes(a: *A.Allocator, f: Fail, path: str, data: *u8, n: usize) F
     if (sel lines_r.err) { ret refused(lines_r.err); }
     var lines: lang_source.Lines = lines_r.ok;
     fin { lang_source.lines_dnit(a, ?lines); }
+    val own_r: res[Fail, A.Error] = places_owned(a, f);
+    if (sel own_r.err) { ret refused(own_r.err); }
+    val own:    Fail = own_r.ok;
+    val copied: bool = !k.held;
+    var handed: bool = false;
+    fin {
+        if (copied && !handed) { places_dnit(a, own); }
+    }
+    val owned_o: opt[Keyed] = keyed(own);
+    if (sel owned_o.none) { ret f; }
+    var owned: Keyed = owned_o.some;
     i = 0;
-    for (i < k.also.count) {
-        val r: *Place = ?k.also.items[i];
+    for (i < owned.also.count) {
+        val r: *Place = ?owned.also.items[i];
         if (r.spanned && r.path == nil) {
             val path_r: res[str, A.Error] = str_dup(a, path);
             if (sel path_r.err) { ret refused(path_r.err); }
@@ -240,16 +259,19 @@ pub fun placed_bytes(a: *A.Allocator, f: Fail, path: str, data: *u8, n: usize) F
         }
         i = i + 1;
     }
-    var out: Fail = f;
-    if (k.fix.at.spanned && k.fix.at.path == nil) {
+    if (owned.fix.at.spanned && owned.fix.at.path == nil) {
         val path_r: res[str, A.Error] = str_dup(a, path);
         if (sel path_r.err) { ret refused(path_r.err); }
-        var fixed: Keyed = k;
-        fixed.fix.at = place(path_r.ok, ?lines, k.fix.at.span);
-        out          = rekeyed(f, fixed);
+        owned.fix.at = place(path_r.ok, ?lines, owned.fix.at.span);
     }
-    if (!k.at.spanned || k.at.path != nil) { ret out; }
-    ret located(a, out, place(path, ?lines, k.at.span));
+    val out: Fail = rekeyed(f, owned);
+    if (!owned.at.spanned || owned.at.path != nil) {
+        handed = true;
+        ret out;
+    }
+    val pointed: Fail = located(a, out, place(path, ?lines, owned.at.span));
+    handed = owns_places(pointed);
+    ret pointed;
 }
 
 # the same failure pointing at `p`, a place a model recorded: one without a
@@ -265,9 +287,9 @@ pub fun at(a: *A.Allocator, f: Fail, p: Place) Fail {
 }
 
 # the same failure naming the `n` places at `ps` as its related places, in
-# order, each copied through `a` as `at` copies a place; an unspanned place is
-# skipped. a failure that already names related places keeps them, and one
-# whose copy is refused is that refusal
+# order, each copied through `a`, the failure owning its places as `located`
+# leaves them; an unspanned place is skipped. a failure that already names
+# related places keeps them, and one whose copy is refused is that refusal
 pub fun with_related(a: *A.Allocator, f: Fail, ps: *Place, n: usize) Fail {
     val k_o: opt[Keyed] = keyed(f);
     if (sel k_o.none)             { ret f; }
@@ -279,6 +301,14 @@ pub fun with_related(a: *A.Allocator, f: Fail, ps: *Place, n: usize) Fail {
         i = i + 1;
     }
     if (count == 0) { ret f; }
+    val own_r: res[Fail, A.Error] = places_owned(a, f);
+    if (sel own_r.err) { ret refused(own_r.err); }
+    val own:    Fail = own_r.ok;
+    val copied: bool = !k_o.some.held;
+    var handed: bool = false;
+    fin {
+        if (copied && !handed) { places_dnit(a, own); }
+    }
     val items_r: res[*Place, A.Error] = A.allocate[Place](a, count);
     if (sel items_r.err) { ret refused(items_r.err); }
     var also: Related = Related{items: items_r.ok, count: 0};
@@ -299,15 +329,19 @@ pub fun with_related(a: *A.Allocator, f: Fail, ps: *Place, n: usize) Fail {
         }
         i = i + 1;
     }
-    var k: Keyed = k_o.some;
+    val owned_o: opt[Keyed] = keyed(own);
+    if (sel owned_o.none) { ret f; }
+    var k: Keyed = owned_o.some;
     k.also = also;
+    handed = true;
     ret rekeyed(f, k);
 }
 
 # the same failure carrying the rewrite `label` names, which replaces the span
 # `s` of the file it points into, or the bytes it points at when `s` is nil, with
-# `replacement`. a failure with no kind carries none, and one that already
-# carries a fix keeps it
+# `replacement`, both borrowed, so the failure borrows its places: ones it owned
+# before are the caller's to release. a failure with no kind carries none, and
+# one that already carries a fix keeps it
 pub fun with_fix(f: Fail, label: str, s: opt[lang_source.Span], replacement: str) Fail {
     val k_o: opt[Keyed] = keyed(f);
     if (sel k_o.none)              { ret f; }
@@ -316,6 +350,7 @@ pub fun with_fix(f: Fail, label: str, s: opt[lang_source.Span], replacement: str
     k.fix.label       = label;
     k.fix.replacement = replacement;
     k.fix.at          = Place{};
+    k.held            = false;
     if (sel s.some) { k.fix.at = span_only(s.some); }
     ret rekeyed(f, k);
 }
@@ -362,20 +397,50 @@ fun related_dnit(a: *A.Allocator, also: Related, cap: usize) {
     A.deallocate[Place](a, also.items, cap);
 }
 
-# the same failure pointing at `at`, its path copied through `a` so the failure
-# owns it as it owns its text. a failure with no kind points nowhere, and one
-# whose copy is refused is that refusal
+# the same failure pointing at `at`, its path copied through `a`, so the failure
+# owns its places through `a`: one that borrowed them owns copies of the rest
+# too, and one that owned them releases the place `at` replaces. a failure with
+# no kind points nowhere, and one whose copy is refused is that refusal
 pub fun located(a: *A.Allocator, f: Fail, at: Place) Fail {
-    if (!sel f.user && !sel f.environment) { ret f; }
-    if (at.path == nil)                    { ret f; }
+    val k_o: opt[Keyed] = keyed(f);
+    if (sel k_o.none)   { ret f; }
+    if (at.path == nil) { ret f; }
+    var k: Keyed = k_o.some;
+    if (!k.held) {
+        k.at = at;
+        val own_r: res[Fail, A.Error] = places_retain(a, rekeyed(f, k));
+        if (sel own_r.err) { ret refused(own_r.err); }
+        ret own_r.ok;
+    }
     val path_r: res[str, A.Error] = str_dup(a, at.path);
-    if (sel path_r.err) { ret refused(path_r.err); }
-    var owned: Place = at;
-    owned.path = path_r.ok;
+    if (sel path_r.err)   { ret refused(path_r.err); }
+    if (k.at.path != nil) { str_free(a, k.at.path); }
+    k.at      = at;
+    k.at.path = path_r.ok;
+    ret rekeyed(f, k);
+}
+
+# the same failure owning its places through `a`: one that owns them already is
+# returned as it is, and one that borrows them owns copies
+fun places_owned(a: *A.Allocator, f: Fail) res[Fail, A.Error] {
+    if (owns_places(f)) { ret res[Fail, A.Error].ok{f}; }
+    ret places_retain(a, f);
+}
+
+# the same failure borrowing its places, for a view of places a holder owns:
+# the places it owned before are the caller's to release
+pub fun borrowing_places(f: Fail) Fail {
     var out: Fail = f;
-    if (sel out.user)        { out.user.at = owned; }
-    or (sel out.environment) { out.environment.at = owned; }
+    if (sel out.user)        { out.user.held = false; }
+    or (sel out.environment) { out.environment.held = false; }
     ret out;
+}
+
+# whether the failure owns its places
+fun owns_places(f: Fail) bool {
+    if (sel f.user)        { ret f.user.held; }
+    or (sel f.environment) { ret f.environment.held; }
+    ret false;
 }
 
 # the span `s` of the file at `path` whose line index is `lines`, as a place;
@@ -514,8 +579,8 @@ pub fun retain(a: *A.Allocator, f: Fail) res[Fail, A.Error] {
     ret placed_r;
 }
 
-# release what a retained failure owns through `a`: its text when it owns it,
-# and its places
+# release what a failure owns through `a`: its text and its places, each when
+# it owns them
 pub fun dnit(a: *A.Allocator, f: Fail) {
     text_free(a, f);
     places_dnit(a, f);
@@ -566,6 +631,7 @@ pub fun places_retain(a: *A.Allocator, f: Fail) res[Fail, A.Error] {
         k.fix = fix_r.ok;
     }
     handed = true;
+    k.held = true;
     ret res[Fail, A.Error].ok{rekeyed(f, k)};
 }
 
@@ -595,8 +661,9 @@ fun fix_retain(a: *A.Allocator, fx: Fix) res[Fix, A.Error] {
 }
 
 # release the places a failure owns through `a`, as `places_retain` made them;
-# a failure carrying no fix owns no fix text
+# borrowed places are left alone, and a failure carrying no fix owns no fix text
 pub fun places_dnit(a: *A.Allocator, f: Fail) {
+    if (!owns_places(f)) { ret; }
     val k_o: opt[Keyed] = keyed(f);
     if (sel k_o.none)            { ret; }
     if (k_o.some.at.path != nil) { str_free(a, k_o.some.at.path); }
@@ -617,6 +684,7 @@ pub fun without_places(f: Fail) Fail {
     k.at   = Place{};
     k.also = Related{items: nil, count: 0};
     k.fix  = Fix{};
+    k.held = false;
     ret rekeyed(f, k);
 }
 
@@ -1351,5 +1419,39 @@ test dnit__frees_only_the_text_a_failure_owns {
     if (!owns_text(kept_owned) || !str_equals(describe(kept_owned), "bad tag")) { ret 7; }
     dnit(a, kept_owned);
     if (!T.clean(?t)) { ret 8; }
+    ret 0;
+}
+
+test dnit__frees_only_the_places_a_failure_owns {
+    var t:    T.Testing;
+    val made: err[A.Error] = T.make(?t);
+    if (sel made.err) { ret 1; }
+    fin { T.dnit(?t); }
+    val a:        *A.Allocator = T.allocator_of(?t);
+    var also:     [1]Place     = [1]Place{Place{path: "dep.toml", spanned: true, span: lang_source.span(0, 3)}};
+    val borrowed: Fail         = Fail.user{Keyed{
+        kind: diagnostic_kind.VERSION_INVALID_RANGE,
+        text: "bad range",
+        at:   Place{path: "mach.toml", spanned: true, span: lang_source.span(17, 4)},
+        also: Related{items: ?also[0], count: 1},
+        fix:  Fix{label: "widen the range", replacement: "^1"},
+    }};
+    if (owns_places(borrowed)) { ret 2; }
+    dnit(a, borrowed);
+    if (T.total_count(?t) != 0 || T.double_free_count(?t) != 0) { ret 3; }
+    val kept_r: res[Fail, A.Error] = retain(a, borrowed);
+    if (sel kept_r.err)                                   { ret 4; }
+    if (!owns_places(kept_r.ok) || T.live_count(?t) != 6) { ret 5; }
+    dnit(a, kept_r.ok);
+    val placed_r: res[Fail, A.Error] = places_retain(a, borrowed);
+    if (sel placed_r.err)                                                                       { ret 6; }
+    if (!owns_places(placed_r.ok) || owns_text(placed_r.ok) || T.live_count(?t) != 5)           { ret 7; }
+    if (owns_places(without_places(placed_r.ok)) || owns_places(borrowing_places(placed_r.ok))) { ret 8; }
+    dnit(a, placed_r.ok);
+    val fixed:   Fail = with_fix(user(diagnostic_kind.VERSION_INVALID_RANGE, "bad range"), "widen the range", opt[lang_source.Span].none{}, "^1");
+    val pointed: Fail = located(a, fixed, Place{path: "mach.toml", spanned: true});
+    if (owns_places(fixed) || !owns_places(pointed) || T.live_count(?t) != 3) { ret 9; }
+    dnit(a, pointed);
+    if (!T.clean(?t)) { ret 10; }
     ret 0;
 }
