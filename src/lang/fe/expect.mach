@@ -188,7 +188,9 @@ pub fun collect(s: *session.Session, a: *ast.Ast, idx: *Index, ctx: *comptime.Co
         var live: bool  = checked;
         var k:    u32   = 0;
         for (live && k < site.steps_len) {
-            live = arm_taken(a, ctx, idx.steps.data[site.steps_start + k]);
+            val taken: res[bool, fail.Fail] = arm_taken(a, ctx, idx.steps.data[site.steps_start + k]);
+            if (sel taken.err) { ret err[fail.Fail].err{taken.err}; }
+            live = taken.ok;
             k    = k + 1;
         }
         val r: err[fail.Fail] = collect_site(s, a, ctx, live, site.decl, out);
@@ -200,20 +202,20 @@ pub fun collect(s: *session.Session, a: *ast.Ast, idx: *Index, ctx: *comptime.Co
 
 # the first arm of a `$if` chain whose gate is decided true is taken, and an undecided gate
 # leaves every arm from it on untaken
-fun arm_taken(a: *ast.Ast, ctx: *comptime.ComptimeCtx, step: Step) bool {
+fun arm_taken(a: *ast.Ast, ctx: *comptime.ComptimeCtx, step: Step) res[bool, fail.Fail] {
     val d_o: opt[*ast_decl.Decl] = ast.get_decl(a, step.chain);
-    if (sel d_o.none) { ret false; }
+    if (sel d_o.none) { ret res[bool, fail.Fail].err{fail.message("expect: an indexed `$if` chain is not in the parse")}; }
     val d: *ast_decl.Decl = d_o.some;
     var b: u32            = 0;
     for (b <= step.branch) {
         val br: *ast_decl.ComptimeBranch = ?a.comptime_branches.data[d.data.comptime_if.branches_start + b];
-        if (ast_id.expr_is_nil(br.cond)) { ret b == step.branch; }
+        if (ast_id.expr_is_nil(br.cond)) { ret res[bool, fail.Fail].ok{b == step.branch}; }
         val state: comptime.GateState = comptime.gate_state(ctx, br.cond);
-        if (state == comptime.GATE_STATE_TRUE)  { ret b == step.branch; }
-        if (state != comptime.GATE_STATE_FALSE) { ret false; }
+        if (state == comptime.GATE_STATE_TRUE)  { ret res[bool, fail.Fail].ok{b == step.branch}; }
+        if (state != comptime.GATE_STATE_FALSE) { ret res[bool, fail.Fail].ok{false}; }
         b = b + 1;
     }
-    ret false;
+    ret res[bool, fail.Fail].ok{false};
 }
 
 fun collect_site(s: *session.Session, a: *ast.Ast, ctx: *comptime.ComptimeCtx, live: bool,
