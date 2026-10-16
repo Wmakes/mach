@@ -48,8 +48,8 @@ pub fun f64_signbit(f: f64) bool {
     ret (f64_bits(f) >> 63) != 0;
 }
 
-# what a conversion between two float formats makes of a NaN, a fact of the target's
-# conversion instructions that comptime folds by (see doc/language/operators.md)
+# what the target makes of a NaN it computes, a conversion between two float formats
+# among them, which comptime folds by (see doc/language/operators.md)
 pub def NanRule: u8;
 
 # no rule declared: a machine model that leaves it here is refused
@@ -61,9 +61,12 @@ pub val NAN_CANONICAL: NanRule = 2;
 # not a conversion but a value carried between its own format and binary64, whose
 # NaN keeps every bit it has
 val NAN_CARRY: NanRule = 3;
+# no NaN the target computes is specified, so comptime folds none: SPIR-V under
+# Vulkan with no float-controls execution mode
+pub val NAN_UNSPECIFIED: NanRule = 4;
 
 pub fun nan_rule_valid(r: NanRule) bool {
-    ret r == NAN_PRESERVE || r == NAN_CANONICAL;
+    ret r == NAN_PRESERVE || r == NAN_CANONICAL || r == NAN_UNSPECIFIED;
 }
 
 # the binary32 encoding of binary64 bits that carry a binary32 value: rounded to

@@ -319,9 +319,9 @@ fun emit_arith(h: *Half, k: ir_instruction.InstrKind, a: value.Value, b: value.V
 # correctly rounded binary16 result for + - * / (the 2p+2 bound). the
 # conversion quiets a signaling operand, so the path is taken only where that
 # leaves the NaN result as the exact operands give it: the units return the
-# first NaN whatever signals, or every NaN is the canonical one
+# first NaN whatever signals, or no NaN keeps its payload anyway
 fun through_f32(h: *Half) bool {
-    if (!h.model.nan_first_operand && h.nan != float.NAN_CANONICAL) { ret false; }
+    if (!h.model.nan_first_operand && h.nan == float.NAN_PRESERVE) { ret false; }
     ret converts_f32(h);
 }
 

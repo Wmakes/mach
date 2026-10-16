@@ -192,8 +192,9 @@ pub val MACHINE: target_model.Machine = target_model.Machine{
     # without float16 the expansion needs neither int64 nor float64
     half_binary32: true,
     flen_bits:     64,
-    # OpFConvert leaves a NaN's payload unspecified, so comptime folds to the canonical NaN
-    nan_rule:             float.NAN_CANONICAL,
+    # vulkan leaves every NaN result unspecified without a float-controls execution
+    # mode, which mach never emits, so comptime folds no NaN
+    nan_rule:             float.NAN_UNSPECIFIED,
     nan_first_operand:    false,
     extensions:           0,
     extension_table:      ?extension_spirv.TABLE,
