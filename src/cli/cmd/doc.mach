@@ -701,7 +701,14 @@ pub fun run(cx: *args.Call) res[i64, fail.Fail] {
     val root: str = loc_r.ok.root;
 
     val res_session: res[session.Session, fail.Fail] = toolchain.session_init(alloc);
-    if (sel res_session.err) { ret res[i64, fail.Fail].err{fail.message("failed to initialise compiler session")}; }
+    if (sel res_session.err) {
+        # the context goes in front of the cause, which keeps its kind
+        val cause: fail.Fail = res_session.err;
+        if (fail.is_reported(cause)) { ret res[i64, fail.Fail].err{cause}; }
+        val joined: res[str, fail.Fail] = fail.join(alloc, "failed to initialise compiler session: ", fail.describe(cause));
+        if (sel joined.err) { ret res[i64, fail.Fail].err{cause}; }
+        ret res[i64, fail.Fail].err{fail.with_text(cause, joined.ok)};
+    }
     var s: session.Session = res_session.ok;
     fin { session.dnit(?s); }
 

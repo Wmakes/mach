@@ -236,7 +236,12 @@ fun execute_unit_cold(bp: *build_plan.BuildPlan, unit_index: usize, backing: *A.
     # the unit's session reads the plan's names, so its manifest and cells read as planned
     val res_session: res[session.Session, fail.Fail] = toolchain.session_init_over(?u_alloc, bp.names);
     if (sel res_session.err) {
-        val f: fail.Fail = fail.message_of(fail.join(?u_alloc, "failed to initialise compiler session: ", fail.describe(res_session.err)));
+        # the context goes in front of the cause, which keeps its kind
+        var f:      fail.Fail           = res_session.err;
+        val joined: res[str, fail.Fail] = fail.join(?u_alloc, "failed to initialise compiler session: ", fail.describe(f));
+        if (sel joined.ok) {
+            if (!fail.is_reported(f)) { f = fail.with_text(f, joined.ok); }
+        }
         r = cold_fail(oa, sink, f);
     }
     if (sel res_session.ok) {

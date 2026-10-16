@@ -203,7 +203,14 @@ val SCAFFOLD_DEPS:      [1]ScaffoldDep = [1]ScaffoldDep{
 fun dependency_stage(r: *cli_diagnostic.Report, a: *A.Allocator, root: str, no_deps: bool, no_git: bool, quiet: bool, deps: *ScaffoldDep,
     dep_count: usize, environ: exec.Environment) res[i64, fail.Fail] {
     val sr: res[session.Session, fail.Fail] = toolchain.session_init(a);
-    if (sel sr.err) { ret res[i64, fail.Fail].err{fail.message("failed to initialize project setup")}; }
+    if (sel sr.err) {
+        # the context goes in front of the cause, which keeps its kind
+        val cause: fail.Fail = sr.err;
+        if (fail.is_reported(cause)) { ret res[i64, fail.Fail].err{cause}; }
+        val joined: res[str, fail.Fail] = fail.join(a, "failed to initialize project setup: ", fail.describe(cause));
+        if (sel joined.err) { ret res[i64, fail.Fail].err{cause}; }
+        ret res[i64, fail.Fail].err{fail.with_text(cause, joined.ok)};
+    }
     var s: session.Session = sr.ok;
     fin { session.dnit(?s); }
     s.environ = environ;

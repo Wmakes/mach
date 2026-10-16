@@ -274,7 +274,14 @@ pub fun run(cx: *args.Call) res[i64, fail.Fail] {
 # a session for a dependency action, running git in environ
 fun dep_session(a: *A.Allocator, environ: exec.Environment) res[session.Session, fail.Fail] {
     val sr: res[session.Session, fail.Fail] = toolchain.session_init(a);
-    if (sel sr.err) { ret res[session.Session, fail.Fail].err{fail.message("failed to initialise a session")}; }
+    if (sel sr.err) {
+        # the context goes in front of the cause, which keeps its kind
+        val cause: fail.Fail = sr.err;
+        if (fail.is_reported(cause)) { ret res[session.Session, fail.Fail].err{cause}; }
+        val joined: res[str, fail.Fail] = fail.join(a, "failed to initialise a session: ", fail.describe(cause));
+        if (sel joined.err) { ret res[session.Session, fail.Fail].err{cause}; }
+        ret res[session.Session, fail.Fail].err{fail.with_text(cause, joined.ok)};
+    }
     var s: session.Session = sr.ok;
     s.environ = environ;
     ret res[session.Session, fail.Fail].ok{s};
