@@ -3822,7 +3822,7 @@ fun t_deep_source(alloc: *A.Allocator, opens: usize) opt[str] {
 #[testing]
 fun t_driver_parse_outcome(alloc: *A.Allocator, root: str, diags_out: *diagnostic.DiagnosticStore) opt[fail.Fail] {
     val sr: res[session.Session, fail.Fail] = toolchain.session_init(alloc);
-    if (sel sr.err) { ret opt[fail.Fail].some{fail.message("session")}; }
+    if (sel sr.err) { ret opt[fail.Fail].some{sr.err}; }
     var s:       session.Session                 = sr.ok;
     var pick:    manifest.Selectors              = manifest.t_selectors("", "", "");
     val pr:      res[project.Project, fail.Fail] = driver.build_project(?s, root, ?pick);
