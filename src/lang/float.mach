@@ -44,6 +44,10 @@ pub fun f64_neg(f: f64) f64 {
     ret bits_f64(f64_bits(f) ^ 0x8000000000000000);
 }
 
+pub fun f64_signbit(f: f64) bool {
+    ret (f64_bits(f) >> 63) != 0;
+}
+
 # what a conversion between two float formats makes of a NaN, a fact of the target's
 # conversion instructions that comptime folds by (see doc/language/operators.md)
 pub def NanRule: u8;
