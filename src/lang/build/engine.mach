@@ -83,11 +83,15 @@ use std_format: std.format;
 #[testing]
 use std.print;
 #[testing]
+use process_env: std.process.env;
+#[testing]
 use std.process.exec;
 #[testing]
 use std.system.panic.panic;
 #[testing]
 use std.text.string.str_dup;
+#[testing]
+use std.types.string.OwnedString;
 #[testing]
 use std.types.string.str_len;
 
@@ -3655,7 +3659,12 @@ $if ($mach.build.os == $mach.os.linux && $mach.build.arch == $mach.arch.x86_64) 
         if (sel path.err) { ret 5; }
         val wrote: err[fs.FsError] = fs.write_bytes(path.ok, probe.ok, str_len(probe.ok), 420);
         if (sel wrote.err) { ret 6; }
-        var caller:  [6]*u8 = [6]*u8{"PATH=/usr/bin:/bin", "WINEPREFIX=/caller/.wine", "XDG_RUNTIME_DIR=/run/user/caller", "WINEDLLOVERRIDES=caller", "KEPT=kept", nil};
+        val inherited: res[opt[OwnedString], process_env.EnvError] = process_env.value(?alloc, "PATH");
+        if (sel inherited.err)     { ret 9; }
+        if (sel inherited.ok.none) { ret 9; }
+        val search: res[str, std_format.FormatError] = std_format.sprint(?alloc, "PATH={}", inherited.ok.some.data);
+        if (sel search.err) { ret 10; }
+        var caller:  [6]*u8 = [6]*u8{search.ok, "WINEPREFIX=/caller/.wine", "XDG_RUNTIME_DIR=/run/user/caller", "WINEDLLOVERRIDES=caller", "KEPT=kept", nil};
         var trapped: bool   = false;
         var code:    i32    = 0;
         if (!run_fixture(w.root, shell.ok, path.ok, 1, exec.Environment.given{?caller[0]}, ?trapped, ?code)) { ret 7; }
