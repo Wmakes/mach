@@ -331,7 +331,7 @@ pub val RELATION_REQUIRES: RelationKind = 1;
 pub val RELATION_IMPLIES: RelationKind = 2;
 
 # one constraint between two option rows. the parser enforces it and help
-# renders it, from relation_text, so the refusal and the help line are one text
+# renders it, from relation_sentence, so the refusal and the help line are one text
 # ---
 # kind:  the RELATION_* value
 # row:   the canonical row the relation is declared on
@@ -589,17 +589,32 @@ pub fun relation_active(command: *CommandSpec, action: *ActionSpec, rel: *Relati
     ret schema_accepts(command, action, rel.row) && schema_accepts(command, action, rel.other);
 }
 
+# the sentence a relation reads as, `{row}{joint}{other}{tail}`, in its parts
+pub rec Sentence {
+    row:   str;
+    joint: str;
+    other: str;
+    tail:  str;
+}
+
 # the sentence a relation reads as, both in help and in the refusal of an invocation that breaks it
+# ---
+# rel: the relation
+# ret: its parts, all empty for RELATION_IMPLIES, which nothing breaks
+pub fun relation_sentence(rel: *Relation) Sentence {
+    if (rel.kind == RELATION_CONFLICTS) { ret Sentence{row: rel.row.name, joint: " and ", other: rel.other.name, tail: " cannot be combined"}; }
+    if (rel.kind == RELATION_REQUIRES)  { ret Sentence{row: rel.row.name, joint: " is valid only with ", other: rel.other.name, tail: ""}; }
+    ret Sentence{row: "", joint: "", other: "", tail: ""};
+}
+
+# a relation's sentence as one text
 # ---
 # a:   owns the text
 # rel: the relation
-# ret: the text, empty for RELATION_IMPLIES, which nothing breaks
-pub fun relation_text(a: *A.Allocator, rel: *Relation) res[str, fail.Fail] {
-    var said: res[str, std_format.FormatError] = res[str, std_format.FormatError].ok{""};
-    if (rel.kind == RELATION_CONFLICTS) { said = std_format.sprint(a, "{} and {} cannot be combined", rel.row.name, rel.other.name); }
-    or (rel.kind == RELATION_REQUIRES)  { said = std_format.sprint(a, "{} is valid only with {}", rel.row.name, rel.other.name); }
-    if (sel said.err)                   { ret res[str, fail.Fail].err{fail.format_refused(said.err)}; }
-    ret res[str, fail.Fail].ok{said.ok};
+# ret: the text, or the refusal to format it
+fun relation_text(a: *A.Allocator, rel: *Relation) res[str, std_format.FormatError] {
+    val said: Sentence = relation_sentence(rel);
+    ret std_format.sprint(a, "{}{}{}{}", said.row, said.joint, said.other, said.tail);
 }
 
 fun spelling_count(tables: *TableRef, table_n: usize, name: str) usize {
@@ -1082,9 +1097,7 @@ fun refuse_relations(a: *A.Allocator, inv: *ParsedInvocation, rels: *Relation, r
         if ((rel.kind == RELATION_CONFLICTS && both) || (rel.kind == RELATION_REQUIRES && orphan)) {
             var k: diagnostic_kind.Kind = diagnostic_kind.CLI_FLAG_CONFLICT;
             if (rel.kind == RELATION_REQUIRES) { k = diagnostic_kind.CLI_FLAG_INAPPLICABLE; }
-            val text: res[str, fail.Fail] = relation_text(a, rel);
-            if (sel text.ok) { refuse_once(inv, fail.user(k, text.ok)); }
-            or               { refuse_once(inv, text.err); }
+            refuse_said(inv, k, relation_text(a, rel));
             ret;
         }
         i = i + 1;
