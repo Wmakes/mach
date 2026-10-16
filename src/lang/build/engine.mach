@@ -252,7 +252,7 @@ fun cold_fail(oa: *A.Allocator, sink: *readout.Sink, f: fail.Fail) res[outcome.B
 # a warm build of a scaffolded project: a session over the toolchain catalog,
 # the project root, its manifest and its plan; it must not move once made
 #[testing]
-pub rec WarmProject {
+rec WarmProject {
     alloc:     A.Allocator;
     s:         session.Session;
     published: publication.Publications;
@@ -263,7 +263,7 @@ pub rec WarmProject {
 
 # the allocator and the session, released with warm_project_dnit once made
 #[testing]
-pub fun warm_project_init(w: *WarmProject) err[fail.Fail] {
+fun warm_project_init(w: *WarmProject) err[fail.Fail] {
     val made: err[A.Error] = page.make(?w.alloc);
     if (sel made.err) { ret err[fail.Fail].err{fail.refused(made.err)}; }
     val s: res[session.Session, fail.Fail] = toolchain.session_init(?w.alloc);
@@ -277,7 +277,7 @@ pub fun warm_project_init(w: *WarmProject) err[fail.Fail] {
 # the project of the manifest `text` and the `n` sources under src, whose root
 # warm_project_dnit removes
 #[testing]
-pub fun warm_project_scaffold(w: *WarmProject, text: str, names: *str, texts: *str, n: u32) err[fail.Fail] {
+fun warm_project_scaffold(w: *WarmProject, text: str, names: *str, texts: *str, n: u32) err[fail.Fail] {
     val root: res[str, fail.Fail] = driver.scaffold(?w.alloc, text, names, texts, n);
     if (sel root.err) { ret err[fail.Fail].err{root.err}; }
     w.root = root.ok;
@@ -286,7 +286,7 @@ pub fun warm_project_scaffold(w: *WarmProject, text: str, names: *str, texts: *s
 
 # the manifest loaded from the project root, and `rq` planned over it there
 #[testing]
-pub fun warm_project_plan(w: *WarmProject, rq: request.BuildRequest) err[fail.Fail] {
+fun warm_project_plan(w: *WarmProject, rq: request.BuildRequest) err[fail.Fail] {
     val loaded: res[manifest.Manifest, fail.Fail] = driver.load_manifest(?w.s, w.root);
     if (sel loaded.err) { ret err[fail.Fail].err{loaded.err}; }
     w.m = loaded.ok;
@@ -299,7 +299,7 @@ pub fun warm_project_plan(w: *WarmProject, rq: request.BuildRequest) err[fail.Fa
 }
 
 #[testing]
-pub fun warm_project_dnit(w: *WarmProject) {
+fun warm_project_dnit(w: *WarmProject) {
     if (w.root != nil) { fs.remove_all(?w.alloc, w.root); }
     publication.dnit(?w.published);
     session.dnit(?w.s);
@@ -1250,7 +1250,7 @@ fun pcg_enabled(p: *project.Project) bool {
 # ---
 # p:   the project whose session holds the query db
 # ret: ok, or the fingerprint or query failure
-pub fun set_link_config_input(p: *project.Project, out_path: *u8, product: *u8, out_kind: u32,
+fun set_link_config_input(p: *project.Project, out_path: *u8, product: *u8, out_kind: u32,
     ext: *target_of.ObjectInput, ext_count: u32,
     dynlibs: *target_of.DynLib, dynlib_count: u32,
     image: *build_emit.LoadedImageOptions) err[fail.Fail] {
@@ -5280,16 +5280,25 @@ fun step_objects(s: *session.Session, alloc: *A.Allocator, root: str, no_cache: 
     var bp:        build_plan.BuildPlan     = planned.ok;
     var published: publication.Publications = publication.init(alloc);
     fin { publication.dnit(?published); }
-    val built: res[outcome.BuildOutcome, fail.Fail] = execute_warm(?bp, 0, s, ?published, alloc, nil);
+    var rd: readout.Recording;
+    readout.recording_init(?rd, alloc, readout.LEVEL_ITEMS);
+    fin { readout.recording_dnit(?rd); }
+    val built: res[outcome.BuildOutcome, fail.Fail] = execute_warm(?bp, 0, s, ?published, alloc, ?rd.sink);
     if (sel built.err) { ret opt[str].some{fail.describe(built.err)}; }
     var bo:    outcome.BuildOutcome = built.ok;
     val clean: bool                 = bo.severity == outcome.BUILD_OK;
     outcome.outcome_dnit(?bo);
     if (clean) { ret opt[str].none{}; }
+    # what the build reported: its failures and its diagnostics, one to a line
     var text: str   = "";
     var i:    usize = 0;
-    for (i < diagnostic.len(?s.diags)) {
-        text = driver.joined(alloc, text, s.diags.items.data[i].message, "\n");
+    for (i < rd.failures.len) {
+        text = driver.joined(alloc, text, rd.failures.data[i], "\n");
+        i    = i + 1;
+    }
+    i = 0;
+    for (i < rd.diagnostics.len) {
+        text = driver.joined(alloc, text, rd.diagnostics.data[i].message, "\n");
         i    = i + 1;
     }
     ret opt[str].some{text};

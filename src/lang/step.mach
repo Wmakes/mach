@@ -1228,7 +1228,7 @@ fun dep_resolve_relative_root(alloc: *A.Allocator, cwd: str, rel: str) res[str, 
     ret res[str, fail.Fail].ok{out_r.ok};
 }
 
-pub fun dependency_out_home(alloc: *A.Allocator, project_root: str, root_out: str) res[str, fail.Fail] {
+fun dependency_out_home(alloc: *A.Allocator, project_root: str, root_out: str) res[str, fail.Fail] {
     if (types_path.is_abs(project_root)) {
         val resolve_r: res[types_path.Path, A.Error] = types_path.resolve(alloc, project_root, root_out);
         if (sel resolve_r.err) { ret res[str, fail.Fail].err{fail.refused(resolve_r.err)}; }

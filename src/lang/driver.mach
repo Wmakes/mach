@@ -956,7 +956,7 @@ pub fun begin_loaded(s: *session.Session, req: *request.BuildRequest) res[projec
 # over every artifact's closure on the cell `target` names, the default when empty, as far
 # as `phase`; the project comes back whatever its phases decided
 #[testing]
-pub fun union_analysis(s: *session.Session, root: str, target: str, phase: FrontendPhase) res[project.Project, fail.Fail] {
+fun union_analysis(s: *session.Session, root: str, target: str, phase: FrontendPhase) res[project.Project, fail.Fail] {
     val read: res[manifest.Manifest, fail.Fail] = load_manifest(s, root);
     if (sel read.err) { ret res[project.Project, fail.Fail].err{read.err}; }
     var m: manifest.Manifest = read.ok;
@@ -970,7 +970,7 @@ pub fun union_analysis(s: *session.Session, root: str, target: str, phase: Front
 # a project under a fresh temporary root, as `scaffold` writes it, analyzed as
 # `union_analysis` does on the default cell; the root is removed before this returns
 #[testing]
-pub fun scaffold_union(s: *session.Session, alloc: *A.Allocator, text: str, names: *str, texts: *str, n: u32,
+fun scaffold_union(s: *session.Session, alloc: *A.Allocator, text: str, names: *str, texts: *str, n: u32,
     phase: FrontendPhase) res[project.Project, fail.Fail] {
     val root: res[str, fail.Fail] = scaffold(alloc, text, names, texts, n);
     if (sel root.err) { ret res[project.Project, fail.Fail].err{root.err}; }
