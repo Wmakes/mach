@@ -285,6 +285,20 @@ pub fun with_text(f: Fail, text: str) Fail;
 the same failure carrying `text` instead: the class, the kind and the places
 are kept (a caller that copies the message into storage it owns)
 
+## fun with_secondary
+
+```mach
+pub fun with_secondary(a: *A.Allocator, f: Fail, secondary: Fail) Fail;
+```
+
+the same failure also naming `secondary`, a failure met while releasing what
+the failing path held (a child cancelled, a file removed, a source closed):
+the text gains "; cleanup also failed: " and the secondary's, formatted
+through `a`, and the class, kind and places stay the failure's. a reported
+failure has no text to carry it, so the secondary goes out in its place, the
+reported diagnostics already recorded, and a reported secondary already
+named itself. a refusal to format is that refusal
+
 ## fun retain
 
 ```mach
