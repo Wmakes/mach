@@ -1,4 +1,8 @@
 use std.types.bool.bool;
+#[testing]
+use std.types.bool.false;
+#[testing]
+use std.types.bool.true;
 use std.types.error.err;
 use std.types.result.res;
 use std.types.size.usize;
@@ -33,7 +37,11 @@ pub rec TestArtifact {
     profile: *u8;
 }
 
-# how a test ran: passed, disagreed with what it checks, or could not be judged
+# the exit status a test reports a skip with: 0 is a pass, this is a skip, and
+# any other status is a failure
+pub val EXIT_SKIP: i32 = 77;
+
+# how a test ran: passed, skipped, disagreed with what it checks, or could not be judged
 pub def GateResultKind: u8;
 
 pub val RESULT_PASS:                   GateResultKind = 0;
@@ -43,6 +51,7 @@ pub val RESULT_TOOL_UNAVAILABLE:       GateResultKind = 3;
 pub val RESULT_INFRASTRUCTURE_FAILURE: GateResultKind = 4;
 pub val RESULT_RESOURCE_EXHAUSTION:    GateResultKind = 5;
 val     RESULT_INVALID_INJECTION:      GateResultKind = 6;
+pub val RESULT_SKIP:                   GateResultKind = 7;
 
 # what decided a result's kind
 pub def GateCause: u8;
@@ -62,6 +71,7 @@ pub val CAUSE_ORACLE_CAPTURE:       GateCause = 7;
 pub val CAUSE_ORACLE_SIGNAL:        GateCause = 8;
 pub val CAUSE_ORACLE_EXIT:          GateCause = 9;
 pub val CAUSE_INVALID_TERMINAL:     GateCause = 10;
+pub val CAUSE_SKIP:                 GateCause = 11;
 
 # one test's result; the tally owns a recorded result's detail
 pub rec GateResult {
@@ -82,6 +92,7 @@ pub rec GateTally {
     infrastructure_failure: u32;
     resource_exhaustion:    u32;
     invalid_injection:      u32;
+    skip:                   u32;
     results:                Vector[GateResult];
 }
 
@@ -94,6 +105,7 @@ pub fun gate_tally_init(a: *A.Allocator) GateTally {
     gt.infrastructure_failure = 0;
     gt.resource_exhaustion    = 0;
     gt.invalid_injection      = 0;
+    gt.skip                   = 0;
     gt.results                = collections_vector.init[GateResult](a);
     ret gt;
 }
@@ -115,6 +127,7 @@ pub fun gate_tally_dnit(gt: *GateTally) {
     gt.infrastructure_failure = 0;
     gt.resource_exhaustion    = 0;
     gt.invalid_injection      = 0;
+    gt.skip                   = 0;
 }
 
 pub fun record_gate(gt: *GateTally, a: *A.Allocator, r: GateResult) err[A.Error] {
@@ -138,13 +151,25 @@ pub fun record_gate(gt: *GateTally, a: *A.Allocator, r: GateResult) err[A.Error]
     or (r.kind == RESULT_INFRASTRUCTURE_FAILURE) { gt.infrastructure_failure = gt.infrastructure_failure + 1; }
     or (r.kind == RESULT_RESOURCE_EXHAUSTION)    { gt.resource_exhaustion = gt.resource_exhaustion + 1; }
     or (r.kind == RESULT_INVALID_INJECTION)      { gt.invalid_injection = gt.invalid_injection + 1; }
+    or (r.kind == RESULT_SKIP)                   { gt.skip = gt.skip + 1; }
     ret err[A.Error].ok{};
 }
 
 #[testing]
 pub fun gate_tally_total(gt: *GateTally) u32 {
     ret gt.pass + gt.semantic_mismatch + gt.unsupported_input + gt.tool_unavailable
-        + gt.infrastructure_failure + gt.resource_exhaustion + gt.invalid_injection;
+        + gt.infrastructure_failure + gt.resource_exhaustion + gt.invalid_injection + gt.skip;
+}
+
+# whether one arm of a test that checks several failed; an arm that skipped sets
+# skipped and is no failure, so the test reports a skip once every arm has run
+#[testing]
+pub fun arm_failed(status: i32, skipped: *bool) bool {
+    if (status == EXIT_SKIP) {
+        @skipped = true;
+        ret false;
+    }
+    ret status != 0;
 }
 
 #[testing]
@@ -169,6 +194,7 @@ test gate_tally__counts_and_retains_identity_for_every_kind {
     if (t_refused(record_gate(?gt, ?a, gate_result(RESULT_INFRASTRUCTURE_FAILURE, CAUSE_ORACLE_CAPTURE, nil))))   { ret 5; }
     if (t_refused(record_gate(?gt, ?a, gate_result(RESULT_RESOURCE_EXHAUSTION, CAUSE_ORACLE_OUTPUT_LIMIT, nil)))) { ret 6; }
     if (t_refused(record_gate(?gt, ?a, gate_result(RESULT_INVALID_INJECTION, CAUSE_INVALID_INJECTOR, nil))))      { ret 7; }
+    if (t_refused(record_gate(?gt, ?a, gate_result(RESULT_SKIP, CAUSE_SKIP, nil))))                               { ret 8; }
 
     var bad: i32 = 0;
     if (gt.pass != 1)                                              { bad = 1; }
@@ -178,8 +204,9 @@ test gate_tally__counts_and_retains_identity_for_every_kind {
     or (gt.infrastructure_failure != 1)                            { bad = 1; }
     or (gt.resource_exhaustion != 1)                               { bad = 1; }
     or (gt.invalid_injection != 1)                                 { bad = 1; }
-    or (gate_tally_total(?gt) != 7)                                { bad = 1; }
-    or (gt.results.len != 7)                                       { bad = 1; }
+    or (gt.skip != 1)                                              { bad = 1; }
+    or (gate_tally_total(?gt) != 8)                                { bad = 1; }
+    or (gt.results.len != 8)                                       { bad = 1; }
     or (!str_equals(gt.results.data[1].detail_identity, "case-a")) { bad = 1; }
 
     gate_tally_dnit(?gt);
