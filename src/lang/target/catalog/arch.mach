@@ -129,6 +129,13 @@ pub fun host_id() u32 {
     $or                                          { ret UNKNOWN; }
 }
 
+# mink's architecture row the instruction set `id` means, nil for an unknown id
+pub fun owner_of(id: u32) *mink_arch.Arch {
+    val spec: *Row = row_of(id);
+    if (spec == nil) { ret nil; }
+    ret spec.owner;
+}
+
 pub fun name_for(id: u32) str {
     val spec: *Row = row_of(id);
     if (spec == nil) { ret "unknown"; }

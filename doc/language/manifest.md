@@ -1044,6 +1044,7 @@ reused for a different kind: see [the registry](diagnostics.md#the-registry).
 | `target.skipped` | multi-target analysis skips a declared target this build does not support | no |
 | `vector.scalarize` | a vector operation falls back to scalar code on the target (see `simd`); portable code silences it | no |
 | `expect.unfulfilled` | an `#[expect]` names a key decided by source and no such warning is raised inside its declaration | no |
+| `secret.target_unenforceable` | an `#[oblivious]` function compiles for a target whose instruction set masc says cannot guarantee constant-time execution (wasm) | no |
 
 A kind decided by source warns or not from the source text alone, whatever the
 target, goal or profile. Only such a key is reported when an `#[expect]`

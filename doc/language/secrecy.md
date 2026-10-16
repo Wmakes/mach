@@ -661,12 +661,22 @@ release. The guarantee becomes load-bearing only if such a pass is added, and th
 taint is what would hold that pass to it. `mach.lang.driver:secret_store_taint_survives_lower`
 pins the taint.
 
-The contract is only offered where mach emits the instructions that execute.
-A target whose back half hands a module to a downstream compiler instead — the
-experimental SPIR-V backend — **rejects `#[oblivious]`**: neither that
-translation nor the device's timing behaviour is covered by the leakage model,
-so the obligation could be neither validated nor upheld. Compile constant-time
-code for a machine target and pass such a target only public data.
+What a target offers is read at the `#[oblivious]` mark from masc's instruction
+set for the target's architecture, which says whether its rows classify their
+timing, whether it cannot guarantee timing at all, or whether it classifies none:
+
+- **Its rows classify their timing** (x86_64, riscv64, riscv32): the walk below
+  validates the function.
+- **It cannot guarantee timing** (wasm, whose runtime decides the instructions that
+  execute): the function compiles, with the warning `secret.target_unenforceable`
+  at the mark that the target cannot practically enforce constant-time execution.
+- **It classifies none** (SPIR-V, whose module a downstream compiler translates):
+  the function is **refused** under `secret.target_unverifiable`, since neither
+  that translation nor the device's timing behaviour is covered by the leakage
+  model. Compile constant-time code for a machine target and pass such a target
+  only public data.
+
+masc registers no aarch64 set yet, so aarch64 keeps mach's own walk until it does.
 
 ## Constant-time multiply by instruction set
 
