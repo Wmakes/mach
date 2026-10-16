@@ -306,21 +306,19 @@ fun eval_int_arith(k: ir_instruction.InstrKind, x: wide.Wide, y: wide.Wide, raw_
     if (k == ir_instruction.OP_OR)  { ret IntFold.value{wide.or (x, y)}; }
     if (k == ir_instruction.OP_XOR) { ret IntFold.value{wide.xor(x, y)}; }
     if (k == ir_instruction.OP_DIV_U || k == ir_instruction.OP_REM_U) {
-        var q: wide.Wide;
-        var r: wide.Wide;
-        if (!wide.divmod_u(x, y, ?q, ?r)) { ret IntFold.declined{}; }
-        if (k == ir_instruction.OP_DIV_U) { ret IntFold.value{q}; }
-        ret IntFold.value{r};
+        val qr: opt[wide.QuotRem] = wide.divmod_u(x, y);
+        if (sel qr.none)                  { ret IntFold.declined{}; }
+        if (k == ir_instruction.OP_DIV_U) { ret IntFold.value{qr.some.q}; }
+        ret IntFold.value{qr.some.r};
     }
     if (k == ir_instruction.OP_DIV_S || k == ir_instruction.OP_REM_S) {
         val sa: wide.Wide = wide.sext(x, bits);
         val sb: wide.Wide = wide.sext(y, bits);
         if (div_overflows(sa, sb, bits)) { ret IntFold.declined{}; }
-        var q: wide.Wide;
-        var r: wide.Wide;
-        if (!wide.divmod_s(sa, sb, ?q, ?r)) { ret IntFold.declined{}; }
-        if (k == ir_instruction.OP_DIV_S)   { ret IntFold.value{wide.trunc(q, bits)}; }
-        ret IntFold.value{wide.trunc(r, bits)};
+        val qr: opt[wide.QuotRem] = wide.divmod_s(sa, sb);
+        if (sel qr.none)                  { ret IntFold.declined{}; }
+        if (k == ir_instruction.OP_DIV_S) { ret IntFold.value{wide.trunc(qr.some.q, bits)}; }
+        ret IntFold.value{wide.trunc(qr.some.r, bits)};
     }
     if (k == ir_instruction.OP_SHL || k == ir_instruction.OP_SHR_S || k == ir_instruction.OP_SHR_U) {
         # a count at or above the width saturates, the same answer the lowered

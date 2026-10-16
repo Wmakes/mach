@@ -420,22 +420,19 @@ fun apply_signed_arith(op: ast_expr.BinOp, a: wide.Wide, b: wide.Wide) res[CTVal
         if (wide.mul_overflows_s(a, b)) { ret reject(diagnostic_kind.COMPTIME_OVERFLOW, "comptime integer overflow in '*'"); }
         ret make_int_wide(wide.mul(a, b), false);
     }
+    if (op != ast_expr.BIN_DIV && op != ast_expr.BIN_MOD) { ret reject(diagnostic_kind.COMPTIME_NOT_EVALUABLE, "unsupported integer operator"); }
     val min_by_minus_one: bool = wide.eq(a, wide.min_s()) && wide.eq(b, wide.from_i64(-1));
-    var q:                wide.Wide;
-    var r:                wide.Wide;
-    if (op == ast_expr.BIN_DIV) {
-        if (wide.is_zero(b))  { ret reject(diagnostic_kind.COMPTIME_DIVISION_BY_ZERO, "integer division by zero"); }
-        if (min_by_minus_one) { ret reject(diagnostic_kind.COMPTIME_OVERFLOW, "integer division overflow (INT128_MIN / -1)"); }
-        wide.divmod_s(a, b, ?q, ?r);
-        ret make_int_wide(q, false);
-    }
-    if (op == ast_expr.BIN_MOD) {
-        if (wide.is_zero(b))  { ret reject(diagnostic_kind.COMPTIME_DIVISION_BY_ZERO, "integer modulo by zero"); }
-        if (min_by_minus_one) { ret reject(diagnostic_kind.COMPTIME_OVERFLOW, "integer modulo overflow (INT128_MIN % -1)"); }
-        wide.divmod_s(a, b, ?q, ?r);
-        ret make_int_wide(r, false);
-    }
-    ret reject(diagnostic_kind.COMPTIME_NOT_EVALUABLE, "unsupported integer operator");
+    if (min_by_minus_one && op == ast_expr.BIN_DIV) { ret reject(diagnostic_kind.COMPTIME_OVERFLOW, "integer division overflow (INT128_MIN / -1)"); }
+    if (min_by_minus_one)                           { ret reject(diagnostic_kind.COMPTIME_OVERFLOW, "integer modulo overflow (INT128_MIN % -1)"); }
+    ret quotient_or_remainder(op, wide.divmod_s(a, b), false);
+}
+
+# the quotient for `/` or the remainder for `%` of a division, which refuses a zero divisor
+fun quotient_or_remainder(op: ast_expr.BinOp, qr: opt[wide.QuotRem], unsigned: bool) res[CTValue, comptime_failure.EvalFail] {
+    if (sel qr.none && op == ast_expr.BIN_DIV) { ret reject(diagnostic_kind.COMPTIME_DIVISION_BY_ZERO, "integer division by zero"); }
+    if (sel qr.none)                           { ret reject(diagnostic_kind.COMPTIME_DIVISION_BY_ZERO, "integer modulo by zero"); }
+    if (op == ast_expr.BIN_DIV)                { ret make_int_wide(qr.some.q, unsigned); }
+    ret make_int_wide(qr.some.r, unsigned);
 }
 
 fun apply_unsigned_arith(op: ast_expr.BinOp, a: wide.Wide, b: wide.Wide) res[CTValue, comptime_failure.EvalFail] {
@@ -454,16 +451,7 @@ fun apply_unsigned_arith(op: ast_expr.BinOp, a: wide.Wide, b: wide.Wide) res[CTV
         if (wide.mul_overflows_u(a, b)) { ret reject(diagnostic_kind.COMPTIME_OVERFLOW, "comptime integer overflow in '*'"); }
         ret make_int_wide(wide.mul(a, b), true);
     }
-    var q: wide.Wide;
-    var r: wide.Wide;
-    if (op == ast_expr.BIN_DIV) {
-        if (!wide.divmod_u(a, b, ?q, ?r)) { ret reject(diagnostic_kind.COMPTIME_DIVISION_BY_ZERO, "integer division by zero"); }
-        ret make_int_wide(q, true);
-    }
-    if (op == ast_expr.BIN_MOD) {
-        if (!wide.divmod_u(a, b, ?q, ?r)) { ret reject(diagnostic_kind.COMPTIME_DIVISION_BY_ZERO, "integer modulo by zero"); }
-        ret make_int_wide(r, true);
-    }
+    if (op == ast_expr.BIN_DIV || op == ast_expr.BIN_MOD) { ret quotient_or_remainder(op, wide.divmod_u(a, b), true); }
     ret reject(diagnostic_kind.COMPTIME_NOT_EVALUABLE, "unsupported integer operator");
 }
 
