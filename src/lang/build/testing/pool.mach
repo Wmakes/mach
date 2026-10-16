@@ -218,7 +218,7 @@ fun execute(a: *A.Allocator, sink: *readout.Sink, results: *readout.TestResult, 
         for (inflight < window && spawned < n) {
             val idx: u32 = spawned;
             spawned = spawned + 1;
-            val spawn_fail: opt[testrun.GateResult] = spawn_one(a, processes, slots, window, ?results[idx], idx, runner,
+            val spawn_fail: opt[testrun.GateResult] = spawn_one(a, sink, processes, slots, window, ?results[idx], idx, runner,
                 timeout);
             if (sel spawn_fail.none) {
                 inflight = inflight + 1;
@@ -245,6 +245,10 @@ fun execute(a: *A.Allocator, sink: *readout.Sink, results: *readout.TestResult, 
                         if (sel one.err) {
                             val canceled: res[subprocess.SubprocessTerminal, subprocess.Error] = subprocess.cancel(a, ?processes[eidx], 0);
                             if (sel canceled.ok) { cleaned = true; }
+                            if (sel canceled.err) {
+                                var stuck: fail.Fail = subprocess.refusal(a, diagnostic_kind.PROCESS_WAIT, canceled.err);
+                                readout.failure(sink, ?stuck, diagnostic.ORIGIN_TEST);
+                            }
                         }
                         if (cleaned) { finalize_slot(a, ?processes[eidx], ?slots[sx], results, level, want_bytes); }
                         or {
@@ -281,14 +285,22 @@ fun execute(a: *A.Allocator, sink: *readout.Sink, results: *readout.TestResult, 
         }
     }
 
-    if (has_source) { events.close(?source); }
+    if (has_source) {
+        val closed: err[io_error.Error] = events.close(?source);
+        if (sel closed.err) {
+            var unrestored: fail.Fail = fail.environment_of(diagnostic_kind.PROCESS_WAIT, fail.format(a, "failed to restore the process event handlers: {}", fail.io_text(closed.err)));
+            readout.failure(sink, ?unrestored, diagnostic.ORIGIN_TEST);
+        }
+    }
+    # a root scope made here holds no child, registration or waiter once the run ends, so destroy cannot refuse
     sync_cancel.destroy(?scope);
 }
 
 # spawn the test at position idx into a free slot, its output captured to its log
 # ---
-# ret: none when it is running, otherwise the result it settles with
-fun spawn_one(a: *A.Allocator, processes: *subprocess.OwnedSubprocess, slots: *Slot,
+# sink: receives a log that stays behind a test that could not start
+# ret:  none when it is running, otherwise the result it settles with
+fun spawn_one(a: *A.Allocator, sink: *readout.Sink, processes: *subprocess.OwnedSubprocess, slots: *Slot,
     window: u32, t: *readout.TestResult, idx: u32, runner: *u8,
     timeout: chrono_duration.Duration) opt[testrun.GateResult] {
     var s: u32 = 0;
@@ -337,7 +349,7 @@ fun spawn_one(a: *A.Allocator, processes: *subprocess.OwnedSubprocess, slots: *S
         empty_cap.owned        = false;
         val result: testrun.GateResult = build_testing.classify_subprocess(?term, false, true, ?empty_cap);
         subprocess.dnit(a, ?processes[idx]);
-        fs.remove_file(t.log);
+        log_removed(a, sink, t.log);
         ret opt[testrun.GateResult].some{result};
     }
 
@@ -388,7 +400,18 @@ fun finalize_slot(a: *A.Allocator, process: *subprocess.OwnedSubprocess, slot: *
     if (t.result.kind == testrun.RESULT_SEMANTIC_MISMATCH || t.result.kind == testrun.RESULT_SKIP) { t.code = process.terminal.code; }
 
     subprocess.dnit(a, process);
+    # a passing test's log that stays is never read, and the next run clears the log directory before it starts
     if (!is_failure(?t.result) && t.log != nil) { fs.remove_file(t.log); }
+}
+
+# remove the log of a test that could not start; a log the spawn never made is
+# no failure, and one that stays is reported beside the test's own result
+fun log_removed(a: *A.Allocator, sink: *readout.Sink, log: str) {
+    val removed: err[io_error.Error] = fs.remove_file(log);
+    if (sel removed.ok)                         { ret; }
+    if (removed.err.kind == io_error.NOT_FOUND) { ret; }
+    var stayed: fail.Fail = fail.environment_of(diagnostic_kind.FS_REMOVE, fail.format(a, "cannot remove the log of a test that could not start '{}': {}", log, fail.io_text(removed.err)));
+    readout.failure(sink, ?stayed, diagnostic.ORIGIN_TEST);
 }
 
 # whether a result fails its run: anything but a pass or a skip
@@ -450,7 +473,14 @@ fun prepare_logs(a: *A.Allocator, log_dir: *u8, total: u32) err[fail.Fail] {
     var idx: u32 = 0;
     for (idx < total) {
         val lp_r: res[str, fail.Fail] = log_path(a, log_dir, idx);
-        if (sel lp_r.ok) { fs.remove_file(lp_r.ok); }
+        if (sel lp_r.err) { ret err[fail.Fail].err{lp_r.err}; }
+        val removed: err[io_error.Error] = fs.remove_file(lp_r.ok);
+        var stale:   err[fail.Fail]      = err[fail.Fail].ok{};
+        if (sel removed.err) {
+            if (removed.err.kind != io_error.NOT_FOUND) { stale = err[fail.Fail].err{fail.environment_of(diagnostic_kind.FS_REMOVE, fail.format(a, "cannot clear the earlier test log '{}': {}", lp_r.ok, fail.io_text(removed.err)))}; }
+        }
+        str_free(a, lp_r.ok);
+        if (sel stale.err) { ret stale; }
         idx = idx + 1;
     }
     ret err[fail.Fail].ok{};
@@ -553,7 +583,7 @@ fun t_run_one_bounded(a: *A.Allocator, body: str, timeout: chrono_duration.Durat
     var slot: Slot;
     slot.active = false;
 
-    val spawn_fail: opt[testrun.GateResult] = spawn_one(a, ?process, ?slot, 1, ?results[0], 0, "/bin/sh"::*u8, timeout);
+    val spawn_fail: opt[testrun.GateResult] = spawn_one(a, nil, ?process, ?slot, 1, ?results[0], 0, "/bin/sh"::*u8, timeout);
     if (sel spawn_fail.some) { ret 4; }
 
     val wr: res[*subprocess.OwnedSubprocess, subprocess.Error] = subprocess.wait_any(a, ?process, 1, nil, nil);

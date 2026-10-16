@@ -21,8 +21,11 @@ pub fun open(s: *session.Session, offline: bool, local: str) res[Remotes, fail.F
 ## fun close
 
 ```mach
-pub fun close(c: *Remotes);
+pub fun close(c: *Remotes) err[fail.Fail];
 ```
+
+release the table; a candidate scratch that stays is the failure, once
+everything else is released
 
 ## fun remember
 

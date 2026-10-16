@@ -326,6 +326,7 @@ pub fun check_dep_root(project_root: str) res[bool, fail.Fail] {
     var root_fd: usize = system_os.INVALID_HANDLE;
     val opened:  i64   = remove.open_path(project_root, ?root_fd);
     if (opened < 0) { ret res[bool, fail.Fail].err{fail.environment(diagnostic_kind.FS_READ, system_os.error_message(opened))}; }
+    # a directory opened read-only loses nothing to a refused close
     fin { system_os.close(root_fd); }
     var st:     system_os.stat_t;
     val probed: i64 = system_os.stat_path(root_fd, DEP_DIR, ?st, system_os.AT_SYMLINK_NOFOLLOW);

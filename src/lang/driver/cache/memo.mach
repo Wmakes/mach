@@ -119,6 +119,7 @@ pub fun stamp(p: str) opt[Stamp] {
     val opened: res[fs.File, io_error.Error] = fs.open(p);
     if (sel opened.err) { ret opt[Stamp].none{}; }
     var f: fs.File = opened.ok;
+    # a file opened read-only loses nothing to a refused close
     fin { fs.close(?f); }
     val meta: res[fs.Metadata, io_error.Error] = fs.stat_of(f);
     if (sel meta.err) { ret opt[Stamp].none{}; }

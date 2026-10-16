@@ -71,6 +71,7 @@ pub fun relative(root_fd: usize, rel: str) Removal {
         var end: usize = start;
         for (end < n && rel[end] != '/'::u8) { end = end + 1; }
         if (end - start >= 256) {
+            # a directory opened read-only loses nothing to a refused close
             if (held) { system_os.close(fd); }
             ret refused(io_error.NAME_TOO_LONG);
         }
@@ -83,6 +84,7 @@ pub fun relative(root_fd: usize, rel: str) Removal {
         if (end >= n) {
             var removed: usize              = 0;
             val result:  err[removal.Error] = removal.tree(fd, ?name[0], ?removed, MAX_DEPTH);
+            # a directory opened read-only loses nothing to a refused close
             if (held) { system_os.close(fd); }
             if (sel result.err) {
                 val e: removal.Error = result.err;
@@ -92,6 +94,7 @@ pub fun relative(root_fd: usize, rel: str) Removal {
         }
         var next:   usize = system_os.INVALID_HANDLE;
         val opened: i64   = open_dir(fd, ?name[0], ?next);
+        # a directory opened read-only loses nothing to a refused close
         if (held)                                               { system_os.close(fd); }
         if (system_os.error_kind(opened) == io_error.NOT_FOUND) { ret Removal{}; }
         if (opened < 0)                                         { ret native_failure(opened); }
@@ -99,6 +102,7 @@ pub fun relative(root_fd: usize, rel: str) Removal {
         held  = true;
         start = end + 1;
     }
+    # a directory opened read-only loses nothing to a refused close
     if (held) { system_os.close(fd); }
     ret refused(io_error.INVALID);
 }

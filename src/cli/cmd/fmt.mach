@@ -133,6 +133,7 @@ fun os_failure(a: *A.Allocator, name: str, code: i64) fail.Fail {
 fun finish_dir(a: *A.Allocator, fd: usize, name: str, result: err[fail.Fail]) err[fail.Fail] {
     val closed: i64 = system_os.close(fd);
     if (closed < 0) {
+        # a directory opened read-only loses nothing to a refused close, so the failure going out stands alone
         if (sel result.err) { ret result; }
         ret err[fail.Fail].err{os_failure(a, name, closed)};
     }
@@ -222,11 +223,14 @@ fun replace_source(a: *A.Allocator, dirfd: usize, leaf: str, name: str, text: st
     var failure: i64 = write_all(fd, text);
     if (host.PERMISSIONS && failure == 0) { failure = system_os.set_mode(fd, mode); }
     val closed: i64 = system_os.close(fd);
+    # a refused close after a failed write adds nothing: the temporary is unlinked either way
     if (failure == 0 && closed < 0) { failure = closed; }
     if (failure == 0)               { failure = system_os.rename(dirfd, tmp, dirfd, leaf); }
     if (failure < 0) {
-        system_os.unlink(dirfd, tmp, 0);
-        ret err[fail.Fail].err{os_failure(a, name, failure)};
+        val written: fail.Fail = os_failure(a, name, failure);
+        val removed: i64       = system_os.unlink(dirfd, tmp, 0);
+        if (removed < 0) { ret err[fail.Fail].err{fail.with_secondary(a, written, os_failure(a, tmp, removed))}; }
+        ret err[fail.Fail].err{written};
     }
     ret err[fail.Fail].ok{};
 }
@@ -294,6 +298,7 @@ fun open_and_format(a: *A.Allocator, dirfd: usize, leaf: str, name: str, sink: S
     if (sel opened.err) { ret opened; }
     var result: err[fail.Fail] = format_open_file(a, fd, dirfd, leaf, name, sink, report);
     val closed: i64            = system_os.close(fd);
+    # a source opened read-only loses nothing to a refused close, so the failure going out stands alone
     if (closed < 0 && sel result.ok) { result = err[fail.Fail].err{os_failure(a, name, closed)}; }
     ret result;
 }
@@ -390,6 +395,7 @@ fun walk(a: *A.Allocator, dirfd: usize, name: str, sink: Sink, depth: usize, rep
             }
         }
         val closed: i64 = system_os.directory_close(?cursor);
+        # a directory read loses nothing to a refused close, so the failure going out stands alone
         if (closed < 0 && sel result.ok) { result = err[fail.Fail].err{os_failure(a, name, closed)}; }
     }
     val listed: bool = sel result.ok;
