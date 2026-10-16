@@ -4,7 +4,8 @@
 # multiply, a select on a constant condition or between equal choices, a
 # lane-bound mask, and a phi whose incomings agree. a fold that would trap or
 # overflow on the machine (a division by zero, MIN / -1) is declined and left
-# to run. it repeats until nothing folds, then turns a branch on a constant
+# to run, and so is a float operation giving a NaN on a target that leaves that
+# NaN unspecified. it repeats until nothing folds, then turns a branch on a constant
 # into a jump and drops the phi incomings from the edge it removed
 use mach.lang.fail;
 use std.allocator.page;
@@ -55,7 +56,9 @@ fun fold_function(request: *pass.Function, alloc: *A.Allocator) res[bool, fail.F
     if (sel res_init.err) { ret res[bool, fail.Fail].err{res_init.err}; }
     fin { mutate.rewrite_dnit(?rw, alloc); }
 
-    val folded_r: res[bool, fail.Fail] = fold_to_fixpoint(m, fn, ?rw);
+    # a target that leaves a computed NaN unspecified runs every operation that makes one
+    val nan_folds: bool                 = request.target == nil || request.target.model.nan_rule != float.NAN_UNSPECIFIED;
+    val folded_r:  res[bool, fail.Fail] = fold_to_fixpoint(m, fn, ?rw, nan_folds);
     if (sel folded_r.err) { ret folded_r; }
     val applied:            bool                 = folded_r.ok && mutate.rewrite_apply(fn, ?rw);
     val branches_changed_r: res[bool, fail.Fail] = simplify_branches(m, fn, ?rw);
@@ -64,7 +67,7 @@ fun fold_function(request: *pass.Function, alloc: *A.Allocator) res[bool, fail.F
     ret res[bool, fail.Fail].ok{applied || branches_changed_r.ok};
 }
 
-fun fold_to_fixpoint(m: *me_ir.Module, fn: *me_ir.Function, rw: *mutate.Rewrite) res[bool, fail.Fail] {
+fun fold_to_fixpoint(m: *me_ir.Module, fn: *me_ir.Function, rw: *mutate.Rewrite, nan_folds: bool) res[bool, fail.Fail] {
     var changed: bool = true;
     var any:     bool = false;
     for (changed) {
@@ -74,7 +77,7 @@ fun fold_to_fixpoint(m: *me_ir.Module, fn: *me_ir.Function, rw: *mutate.Rewrite)
             if (mutate.rewrite_has(rw, ir_id.instruction(i)) == false) {
                 val inst:   *ir_instruction.Instruction = ?fn.instrs[i];
                 var out:    value.Value;
-                val folded: res[bool, fail.Fail]        = try_fold(m, fn, inst, i, rw, ?out);
+                val folded: res[bool, fail.Fail]        = try_fold(m, fn, inst, i, rw, ?out, nan_folds);
                 if (sel folded.err) { ret folded; }
                 if (folded.ok) {
                     mutate.replace_value(rw, ir_id.instruction(i), out);
@@ -89,7 +92,7 @@ fun fold_to_fixpoint(m: *me_ir.Module, fn: *me_ir.Function, rw: *mutate.Rewrite)
 }
 
 fun try_fold(m: *me_ir.Module, fn: *me_ir.Function, inst: *ir_instruction.Instruction, self_id: u32,
-    rw: *mutate.Rewrite, out: *value.Value) res[bool, fail.Fail] {
+    rw: *mutate.Rewrite, out: *value.Value, nan_folds: bool) res[bool, fail.Fail] {
     val k: ir_instruction.InstrKind = inst.kind;
 
     if (k == ir_instruction.OP_PHI) {
@@ -140,7 +143,7 @@ fun try_fold(m: *me_ir.Module, fn: *me_ir.Function, inst: *ir_instruction.Instru
             ret fold_int_binary(m, k, a, b, inst.ty, out);
         }
         if (a.kind == value.VAL_CONST_FLOAT && b.kind == value.VAL_CONST_FLOAT && is_float_binary(k)) {
-            ret fold_float_binary(m, k, a, b, inst.ty, out);
+            ret fold_float_binary(m, k, a, b, inst.ty, out, nan_folds);
         }
         ret res[bool, fail.Fail].ok{false};
     }
@@ -367,7 +370,7 @@ fun eval_int_compare(k: ir_instruction.InstrKind, a: wide.Wide, b: wide.Wide, bi
 }
 
 fun fold_float_binary(m: *me_ir.Module, k: ir_instruction.InstrKind, a: value.Value, b: value.Value,
-    res_ty: ir_type.IrTypeId, out: *value.Value) res[bool, fail.Fail] {
+    res_ty: ir_type.IrTypeId, out: *value.Value, nan_folds: bool) res[bool, fail.Fail] {
     if (is_compare(k)) {
         if (is_f64(m, a.ty) == false) { ret res[bool, fail.Fail].ok{false}; }
         val cmp: opt[bool] = eval_float_compare(k, a.data.float_lit, b.data.float_lit);
@@ -380,7 +383,8 @@ fun fold_float_binary(m: *me_ir.Module, k: ir_instruction.InstrKind, a: value.Va
 
     if (is_f64(m, res_ty) == false) { ret res[bool, fail.Fail].ok{false}; }
     val r: opt[f64] = eval_float_arith(k, a.data.float_lit, b.data.float_lit);
-    if (sel r.none) { ret res[bool, fail.Fail].err{opdesc.unknown_kind(m.alloc, k, "the float arithmetic fold")}; }
+    if (sel r.none)                     { ret res[bool, fail.Fail].err{opdesc.unknown_kind(m.alloc, k, "the float arithmetic fold")}; }
+    if (!nan_folds && r.some != r.some) { ret res[bool, fail.Fail].ok{false}; }
     @out = value.const_float(r.some, res_ty);
     ret res[bool, fail.Fail].ok{true};
 }
@@ -517,7 +521,7 @@ fun t_fold(m: *me_ir.Module, inst: *ir_instruction.Instruction, rw: *mutate.Rewr
     var bare: me_ir.Function;
     bare.instrs    = nil;
     bare.instr_len = 0;
-    ret try_fold(m, ?bare, inst, 0, rw, out);
+    ret try_fold(m, ?bare, inst, 0, rw, out, true);
 }
 
 #[testing]
