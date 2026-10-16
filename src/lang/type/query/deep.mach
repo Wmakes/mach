@@ -13,7 +13,13 @@ use std.types.size.usize;
 use A: std.allocator;
 
 use mach.lang.fail;
+#[testing]
+use mach.lang.intern;
+#[testing]
+use mach.lang.module;
 use mach.lang.session;
+#[testing]
+use lang_source: mach.lang.source;
 use mach.lang.type;
 use type_query: mach.lang.type.query;
 use mach.lang.type.query.placement;
@@ -62,7 +68,7 @@ val DEEP_FLOAT:  DeepProp = 1;
 # a pointer can mint a fresh instance at every level (`rec L[T] { next: *L[*T]; }`), so the
 # instances are unbounded but the declarations are not. a nominal's own fields are walked
 # once with its parameters reaching nothing, and an instance adds the arguments of the
-# parameters its generic places anywhere, which the placement fixpoint settles. a nominal
+# parameters its generic reaches anywhere, which the placement fixpoint settles. a nominal
 # or instance met again adds nothing, so the walk is a plain reachability search
 rec DeepQuery {
     q:      *type_query.Query;
@@ -165,7 +171,7 @@ fun deep_eval(dq: *DeepQuery, tid: type.TypeId) bool {
         val args_len:   u32 = t.data.instance.args_len;
         var j:          u32 = 0;
         for (j < args_len) {
-            if (placement.bits(?dq.places, generic, j) != 0) {
+            if (placement.reached(?dq.places, generic, j)) {
                 val arg: opt[type.TypeId] = type.get_param(dq.q.types, args_start + j);
                 if (!sel arg.some) {
                     fail.internal(dq.q.status, "deep query: an argument list runs past the store");
@@ -255,5 +261,77 @@ test contains_float__finds_a_float_through_an_array {
     fin { session.dnit(?s); }
     if (t_array_holds_float(?s, type.TYPE_F32) != 1) { ret 2; }
     if (t_array_holds_float(?s, type.TYPE_U32) != 0) { ret 3; }
+    ret 0;
+}
+
+# a record `name` owned by `at` with the single field `field`
+#[testing]
+fun t_record(types: *type.TypeInterner, at: type.TypeOwner, name: u32, field: type.TypeId) res[type.TypeId, fail.Fail] {
+    val made: res[type.TypeId, fail.Fail] = type.intern_nominal(types, intern.str_id(name), at, type.TYPE_REC);
+    if (sel made.err) { ret made; }
+    val staged: res[u32, fail.Fail] = type.field_table_stage(types, 1);
+    if (sel staged.err) { ret res[type.TypeId, fail.Fail].err{staged.err}; }
+    val pushed: err[fail.Fail] = type.field_table_stage_push(types, intern.str_id(name + 1), field);
+    if (sel pushed.err) { ret res[type.TypeId, fail.Fail].err{pushed.err}; }
+    val published: err[fail.Fail] = type.field_table_publish(types, made.ok, staged.ok, 1);
+    if (sel published.err) { ret res[type.TypeId, fail.Fail].err{published.err}; }
+    ret made;
+}
+
+# 1 when `[0]` of a record holding `leaf`, and the instance of `rec G[T] { a: [0]T; }` over
+# that record, both answer `prop`; 0 when neither does; -1 when they disagree or fail
+#[testing]
+fun t_empty_array_reaches(s: *session.Session, leaf: type.TypeId, prop: DeepProp, base: u32) i32 {
+    val at:     type.TypeOwner              = type.TypeOwner{module: module.stable_id(3), file: lang_source.file_id(1)};
+    val holder: res[type.TypeId, fail.Fail] = t_record(?s.types, at, base, leaf);
+    if (sel holder.err) { ret -1; }
+    val empty: res[type.TypeId, fail.Fail] = type.intern_array(?s.types, holder.ok, 0);
+    if (sel empty.err) { ret -1; }
+    val concrete: res[type.TypeId, fail.Fail] = t_record(?s.types, at, base + 2, empty.ok);
+    if (sel concrete.err) { ret -1; }
+
+    val param: res[type.TypeId, fail.Fail] = type.intern_generic_param(?s.types, intern.str_id(base + 5), at, intern.str_id(base + 4), type.TYPE_REC, 0);
+    if (sel param.err) { ret -1; }
+    val of_param: res[type.TypeId, fail.Fail] = type.intern_array(?s.types, param.ok, 0);
+    if (sel of_param.err) { ret -1; }
+    val generic: res[type.TypeId, fail.Fail] = t_record(?s.types, at, base + 4, of_param.ok);
+    if (sel generic.err) { ret -1; }
+    var arg: [1]type.TypeId;
+    arg[0] = holder.ok;
+    val inst: res[type.TypeId, fail.Fail] = type.intern_instance(?s.types, generic.ok, ?arg[0], 1);
+    if (sel inst.err) { ret -1; }
+
+    var c: res[bool, fail.Fail] = contains_secret(s, concrete.ok);
+    var g: res[bool, fail.Fail] = contains_secret(s, inst.ok);
+    if (prop == DEEP_FLOAT) {
+        c = contains_float(s, concrete.ok);
+        g = contains_float(s, inst.ok);
+    }
+    if (!sel c.ok)    { ret -1; }
+    if (!sel g.ok)    { ret -1; }
+    if (c.ok != g.ok) { ret -1; }
+    if (c.ok)         { ret 1; }
+    ret 0;
+}
+
+# an empty array's element is reached whatever the length, in a concrete record and through a
+# generic's parameter alike, for a secret and a float
+test deep__an_empty_array_reaches_its_element {
+    var alloc: A.Allocator;
+    page.make(?alloc);
+    val sr: res[session.Session, fail.Fail] = session.init(?alloc);
+    if (sel sr.err) { ret 1; }
+    var s: session.Session = sr.ok;
+    fin { session.dnit(?s); }
+    val u: opt[type.TypeId] = type.prim(?s.types, type.TYPE_U32);
+    val f: opt[type.TypeId] = type.prim(?s.types, type.TYPE_F32);
+    if (!sel u.some) { ret 2; }
+    if (!sel f.some) { ret 2; }
+    val secret: res[type.TypeId, fail.Fail] = type.intern_secret(?s.types, u.some);
+    if (sel secret.err)                                              { ret 2; }
+    if (t_empty_array_reaches(?s, secret.ok, DEEP_SECRET, 100) != 1) { ret 3; }
+    if (t_empty_array_reaches(?s, f.some, DEEP_FLOAT, 200) != 1)     { ret 4; }
+    if (t_empty_array_reaches(?s, u.some, DEEP_SECRET, 300) != 0)    { ret 5; }
+    if (t_empty_array_reaches(?s, u.some, DEEP_FLOAT, 400) != 0)     { ret 6; }
     ret 0;
 }
