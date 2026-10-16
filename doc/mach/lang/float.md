@@ -64,12 +64,6 @@ pub fun bits_f64(bits: u64) f64;
 pub fun f64_neg(f: f64) f64;
 ```
 
-## fun f64_signbit
-
-```mach
-pub fun f64_signbit(f: f64) bool;
-```
-
 ## def NanRule
 
 ```mach

@@ -235,30 +235,6 @@ pub fun is_pow2(a: Wide) bool;
 pub fun mul_add_small(a: Wide, m: u64, d: u64, overflow: *bool) Wide;
 ```
 
-## fun to_f64_u
-
-```mach
-pub fun to_f64_u(a: Wide) f64;
-```
-
-## fun to_f64_s
-
-```mach
-pub fun to_f64_s(a: Wide) f64;
-```
-
-## fun from_f64_u
-
-```mach
-pub fun from_f64_u(f: f64) Wide;
-```
-
-## fun from_f64_s
-
-```mach
-pub fun from_f64_s(f: f64) Wide;
-```
-
 ## fun format_u
 
 ```mach

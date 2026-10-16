@@ -79,6 +79,14 @@ pub fun flt(op: Opcode, w: float.FloatWidth, x: f64, y: f64, n: u32) Answer;
 a float operation at width `w` over one or two operands, each the f64 that holds
 its value at that width
 
+## fun convert
+
+```mach
+pub fun convert(op: Opcode, from: Kind, x: wide.Wide, to: Kind) Answer;
+```
+
+a conversion of `x`, read as `from`, to `to` by mirl's conversion row `op`
+
 ## fun first
 
 ```mach
