@@ -2130,7 +2130,7 @@ fun zeroize_shape(len_type: str) str {
     ret r.ok;
 }
 
-test regression__inlined_asm_loop_compares_public_under_secret_caller {
+test inlined_asm__a_loop_compares_public_under_a_secret_caller {
     val public: str = zeroize_shape("u64");
     val secret: str = zeroize_shape("^u64");
     if (public == nil || secret == nil) { ret 1; }
@@ -2882,7 +2882,7 @@ fun rv32_legal_sweep(mem: *u8) i32 {
     ret bad;
 }
 
-test regression__rv32_wide_index_sub_word_widen_and_double_argument {
+test rv32__wide_index_sub_word_widen_and_double_argument {
     var bad:    i32          = 0;
     var alloc:  A.Allocator;
     val make_r: err[A.Error] = page.make(?alloc);
@@ -4384,7 +4384,7 @@ fun right_operand_overwrite_program() str {
 }
 
 $if ($mach.build.os == $mach.os.linux && $mach.build.arch == $mach.arch.x86_64) {
-    test regression__right_operand_overwritten_by_result {
+    test binary_op__the_result_never_overwrites_the_right_operand {
         var alloc:  A.Allocator;
         val make_r: err[A.Error] = page.make(?alloc);
         if (sel make_r.err)                                                                                                        { ret 1; }

@@ -1331,7 +1331,7 @@ $if ($mach.build.os != $mach.os.windows) {
 }
 
 $if ($mach.build.os != $mach.os.windows) {
-    test regression__spawn_copies_the_pathname_and_argv {
+    test spawn__copies_the_pathname_and_argv {
         var alloc:  A.Allocator;
         val make_r: err[A.Error] = page.make(?alloc);
         if (sel make_r.err) { ret 1; }
@@ -1379,7 +1379,7 @@ $if ($mach.build.os != $mach.os.windows) {
 }
 
 $if ($mach.build.os != $mach.os.windows) {
-    test regression__spawn_copies_the_capture_identity {
+    test spawn__copies_the_capture_identity {
         var alloc:  A.Allocator;
         val make_r: err[A.Error] = page.make(?alloc);
         if (sel make_r.err) { ret 1; }

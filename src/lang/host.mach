@@ -755,7 +755,7 @@ $if ($mach.build.os == $mach.os.linux) {
         ret buildid.DIGEST_LEN;
     }
 
-    test auxiliary_vector_names_the_program_headers {
+    test auxiliary_vector__names_the_program_headers {
         val phdr: u64 = auxval(AT_PHDR);
         if (phdr == 0 || auxval(AT_PHNUM) == 0 || auxval(AT_PHENT) != PHDR64_SIZE) { ret 1; }
         if (auxval(6) == 0)                                                        { ret 2; }
@@ -889,7 +889,7 @@ $if ($mach.build.os == $mach.os.darwin) {
         ret false;
     }
 
-    test darwin_mapping_layout_and_bounds {
+    test darwin_mapping__layout_and_bounds {
         if ($size_of(Region) != 96 || $size_of(VnodeStat) != 136 || $size_of(Vnode) != 152
             || $size_of(RegionPath) != 1272 || $offset_of(Region, address) != 80
             || $offset_of(RegionPath, vnode) != 96 || $offset_of(RegionPath, path) != 248

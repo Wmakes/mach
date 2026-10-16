@@ -1054,7 +1054,7 @@ fun t_chain_probe(n: u32, r0: str, tail: str, needle: str) i32 {
     ret sema_checked.sema_diag(text, needle);
 }
 
-test regression__uni_instance_walk_scales_with_the_type_graph {
+test uni_instance_walk__scales_with_the_type_graph {
     val n:    u32 = 320;
     val tail: str = "uni U[T] { a: T; b: u32; }\nfun e(p: *R319) u32 { ret 0; }\nfun main() i32 { ret 0; }\n";
     if (t_chain_probe(n, "a: ^u32;", tail, "") != 0)                                                 { ret 1; }
@@ -2124,7 +2124,7 @@ test secret_variadic__non_values_get_their_own_refusal {
     ret 0;
 }
 
-test regression__deep_secret_walk_scales_with_the_type_graph {
+test deep_secret_walk__scales_with_the_type_graph {
     val n:    u32 = 320;
     val tail: str = "fun e(p: *R319) ptr { ret p::ptr; }\nfun main() i32 { ret 0; }\n";
     if (t_chain_probe(n, "a: u32;", tail, "") != 0)                                        { ret 1; }
@@ -2187,7 +2187,7 @@ fun t_pair_probe(n: u32, a_last: str, b_last: str, tail: str, needle: str) i32 {
     ret sema_checked.sema_diag(text, needle);
 }
 
-test regression__secrecy_pair_walk_scales_with_the_type_graph {
+test secrecy_pair_walk__scales_with_the_type_graph {
     val n:     u32 = 200;
     val agree: str = "uni V { x: AP; y: BP; }\nfun main() i32 { var v: V; ret 0; }\n";
     val cast:  str = "fun f(p: *AP) *BP { ret p :~ *BP; }\nfun main() i32 { ret 0; }\n";
@@ -2347,7 +2347,7 @@ test testing_mark__refuses_misplaced_or_malformed {
 
 # a gate the load decides on another module's constant, beside a positional case payload the
 # same ast resolves: the payload binds whatever decided the gate
-test regression__loaded_gate_leaves_a_case_payload_bound {
+test loaded_gate__leaves_a_case_payload_bound {
     val lib:  str = "pub def flag: u8;\npub val ON: flag = 1;\n";
     val main: str = "use t.lib;\n$if (lib.ON) { fun selected() i64 { ret 1; } }\ntag wrap[E]: u8 { err: E; ok; }\ntag Cause: u8 { missing; refused: i32; }\nfun check(key: i64) wrap[Cause] {\n    if (key == 0) { ret wrap[Cause].err{Cause.missing{}}; }\n    if (key < 0)  { ret wrap[Cause].err{Cause.refused{-1}}; }\n    ret wrap[Cause].ok{};\n}\nfun main() i64 { val r: wrap[Cause] = check(0); if (!sel r.err) { ret 1; } ret 0; }\n";
     if (!sema_checked.sema_clean2(main, lib)) { ret 1; }

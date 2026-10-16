@@ -2108,7 +2108,7 @@ $if ($mach.build.os != $mach.os.windows) {
     }
 }
 
-test expanded_step_environment_inherits_overlays_and_owns_target_identity {
+test step_environment__inherits_overlays_and_owns_target_identity {
     var a:      A.Allocator;
     val make_r: err[A.Error] = page.make(?a);
     if (sel make_r.err) { ret 1; }

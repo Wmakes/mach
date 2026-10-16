@@ -1884,7 +1884,7 @@ test render_fail__classifies_exit_code_and_suppresses_reported_output {
 
 # an allocation refusal met by the driver stays an internal failure (exit 2),
 # never an environmental one (exit 3)
-test regression__an_allocation_refusal_met_by_the_driver_exits_internal {
+test exit_status__an_allocation_refusal_met_by_the_driver_is_internal {
     var sink: io_writer.Memory;
     var w:    io_writer.Writer;
     fixture.mem_writer(?w, ?sink);
@@ -2238,7 +2238,7 @@ test size_split__binary_thresholds_and_rounding {
 # failure record, printed as its own `error:` line) counts in the one summary
 # beside the stores' diagnostics: `1 error / 1 warning`, never `0 errors / 1
 # warning` above exit 2
-test regression__the_tally_counts_a_failure_record_beside_the_stores {
+test tally__counts_a_failure_record_beside_the_stores {
     var a: A.Allocator;
     page.make(?a);
     val session_r: res[session.Session, fail.Fail] = toolchain.session_init(?a);
@@ -2324,7 +2324,7 @@ fun t_scaffold(a: *A.Allocator, manifest_text: str, source_text: str) res[str, f
 # the refusal is one located error on the store, so the rendered outcome ends
 # `1 error / 0 warnings` and the exit code is the user's, not `0 errors` beside
 # a nonzero exit
-test regression__the_tally_counts_a_codegen_rejection {
+test tally__counts_a_codegen_rejection {
     var a:      A.Allocator;
     val make_r: err[A.Error] = page.make(?a);
     if (sel make_r.err) { ret 1; }

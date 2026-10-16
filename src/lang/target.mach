@@ -854,7 +854,7 @@ fun unregistered[T](reg: *TargetRegistry, ax: *target_registry.Axis[T], name: st
     ret fail.formatted(?reg.alloc, "no {} implementation registered for '{}' (registered: {})", ax.noun, name, names);
 }
 
-test registry_enumeration_agrees_with_lookup {
+test registry__enumeration_agrees_with_lookup {
     val reg: *TargetRegistry = t_registry();
 
     if (reg.isa.count < 2) { ret 1; }
@@ -877,7 +877,7 @@ test registry_enumeration_agrees_with_lookup {
     ret 0;
 }
 
-test elf_covered_isa_declares_a_reloc_seam {
+test registry__an_elf_covered_isa_declares_a_reloc_seam {
     val reg:   *TargetRegistry          = t_registry();
     val elf_r: opt[*target_of.OfVTable] = target_registry.find[target_of.OfVTable](?reg.of, "elf");
     if (sel elf_r.none) { ret 1; }
@@ -1982,7 +1982,7 @@ test artifact_naming__compatibility_key_matches_only_the_same_object_format {
     ret 0;
 }
 
-test every_isa_declares_its_index_and_vector_axes {
+test registry__every_isa_declares_its_index_and_vector_axes {
     val reg: *TargetRegistry = t_registry();
     var ii:  u32             = 0;
     for (ii < reg.isa.count) {

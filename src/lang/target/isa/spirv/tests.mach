@@ -4281,7 +4281,7 @@ fun spv_names(w: *u32, n: u32, opcode: u32, text: str) bool {
 # a handle a module declares for another target is inert here: it carries the words sema
 # recorded rather than types, and the cross-module inliner may not read a constructor
 # schema for it
-test regression__inert_handle_crosses_a_module_boundary {
+test inert_handle__crosses_a_module_boundary {
     var alloc:  A.Allocator;
     val make_r: err[A.Error] = page.make(?alloc);
     if (sel make_r.err) { ret 1; }
@@ -5354,7 +5354,7 @@ fun ret_chain_module(alloc: *A.Allocator, src: str, sels: u32, loops: u32) i32 {
     ret 0;
 }
 
-test regression__ret_chain_inlined_is_structured {
+test ret_chain__inlined_is_structured {
     var alloc:  A.Allocator;
     val make_r: err[A.Error] = page.make(?alloc);
     if (sel make_r.err) { ret 1; }
