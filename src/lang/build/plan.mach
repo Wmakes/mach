@@ -401,7 +401,7 @@ fun in_dependency(a: *A.Allocator, owner_chain: str, f: fail.Fail) fail.Fail {
     if (sel carried.none) { ret f; }
     val joined: res[str, fail.Fail] = fail.join(a, "dependency ", owner_chain, ": ", carried.some);
     if (sel joined.err) { ret joined.err; }
-    ret fail.with_text(f, joined.ok);
+    ret fail.owning(fail.with_text(f, joined.ok));
 }
 
 # locate the root's dependency closure, once, into the plan, and add the cells a

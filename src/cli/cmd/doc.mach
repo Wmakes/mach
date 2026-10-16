@@ -584,7 +584,7 @@ fun write_index(ctx: *IndexCtx, dst: *io_writer.Writer) err[io_writer.WriteError
             ctx.failed  = true;
             ctx.failure = documented_r.err;
             val said: res[str, std_format.FormatError] = std_format.sprint(alloc, "failed to write page for {}: {}", fqn::str, fail.describe(documented_r.err));
-            if (sel said.ok) { ctx.failure = fail.with_text(documented_r.err, said.ok); }
+            if (sel said.ok) { ctx.failure = fail.owning(fail.with_text(documented_r.err, said.ok)); }
             ret err[io_writer.WriteError].err{io_writer.WriteError.stalled{0}};
         }
         val documented: i64 = documented_r.ok;
@@ -638,7 +638,7 @@ fun generate(alloc: *A.Allocator, p: *project.Project, doc_dir: str, stats: *Doc
         if (ctx.failed) { ret err[fail.Fail].err{ctx.failure}; }
         val said: res[str, std_format.FormatError] = std_format.sprint(alloc, "could not publish the documentation index: {}", fail.describe(published.err));
         if (sel said.err) { ret published; }
-        ret err[fail.Fail].err{fail.with_text(published.err, said.ok)};
+        ret err[fail.Fail].err{fail.owning(fail.with_text(published.err, said.ok))};
     }
     ret err[fail.Fail].ok{};
 }

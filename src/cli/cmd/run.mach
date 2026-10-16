@@ -152,7 +152,7 @@ pub fun run(cx: *args.Call) res[i64, fail.Fail] {
         if (sel res_runner.err) {
             val said: res[str, std_format.FormatError] = std_format.sprint(alloc, "--runner '{}': {}", name::str, fail.describe(res_runner.err));
             if (sel said.err) { ret res[i64, fail.Fail].err{fail.format_refused(said.err)}; }
-            ret res[i64, fail.Fail].err{fail.with_text(res_runner.err, said.ok)};
+            ret res[i64, fail.Fail].err{fail.owning(fail.with_text(res_runner.err, said.ok))};
         }
         runner = res_runner.ok;
     }
@@ -221,7 +221,7 @@ pub fun run(cx: *args.Call) res[i64, fail.Fail] {
     if (sel res_wait.err) {
         val said:        res[str, std_format.FormatError] = std_format.sprint(alloc, "failed to wait for the executed process: {}", fail.describe(res_wait.err));
         var waited_fail: fail.Fail                        = res_wait.err;
-        if (sel said.ok)                 { waited_fail = fail.with_text(res_wait.err, said.ok); }
+        if (sel said.ok)                 { waited_fail = fail.owning(fail.with_text(res_wait.err, said.ok)); }
         if (!subprocess.running(?child)) { ret res[i64, fail.Fail].err{waited_fail}; }
         val cancelled: res[subprocess.SubprocessTerminal, subprocess.Error] = subprocess.cancel(alloc, ?child, 0);
         if (sel cancelled.err) { ret res[i64, fail.Fail].err{fail.with_secondary(alloc, waited_fail, subprocess.refusal(alloc, diagnostic_kind.PROCESS_WAIT, cancelled.err))}; }

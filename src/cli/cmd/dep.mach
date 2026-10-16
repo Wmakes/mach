@@ -254,7 +254,7 @@ pub fun run(cx: *args.Call) res[i64, fail.Fail] {
     if (sel loc_r.err) {
         val said: res[str, std_format.FormatError] = std_format.sprint(cx.a, "mach dep {} project '{}': {}", inv.action.name, project::str, fail.describe(loc_r.err));
         if (sel said.err) { ret res[i64, fail.Fail].err{loc_r.err}; }
-        ret res[i64, fail.Fail].err{fail.with_text(loc_r.err, said.ok)};
+        ret res[i64, fail.Fail].err{fail.owning(fail.with_text(loc_r.err, said.ok))};
     }
     val root: str = loc_r.ok.root;
     var name: *u8 = nil;
