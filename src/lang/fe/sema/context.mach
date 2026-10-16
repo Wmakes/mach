@@ -100,6 +100,7 @@ pub rec UniReports {
     len:  u32;
 }
 
+# whether a report about `key` goes out: the first time it is marked, or always with no record
 pub fun uni_report_mark(ur: *UniReports, key: type.TypeId) bool {
     if (ur == nil) { ret true; }
     var i: u32 = 0;
@@ -156,6 +157,11 @@ pub rec Offer {
 # module:              the stable id of the module being typed
 # values:              the store the module's constant values are built in, which its
 #                      interface publishes
+# a walk outside a module's typing, as a check of one construct is, leaves the parts it does
+# without nil, and each reads as absent: with no `deps` no imported surface is acquired, with no
+# `insts` the walk records no instance or frame and types the template, with no
+# `logical_seen` no type is refused for a logical-addressing target, with no `uni_reports`
+# every report goes out, and with no `deps.watch.expanded` nothing hears of a growing cycle
 pub rec Typing {
     deps:           *sema_product.SemaDeps;
     caps:           comptime.PhaseCapabilities[SemaContext];
@@ -177,7 +183,12 @@ pub rec Typing {
 }
 
 # the module a walk reads and the typing tables it writes: the module being typed, or the
-# declaring module of an instance
+# declaring module of an instance. a walk over one construct, as a check is, may leave a table
+# it does without nil: with no `rr` no name is resolved and no deferred name is reported, a
+# table nil is not written and reads as unrecorded, an expression typed through no `expr_type`
+# has no comptime operand type, and a type read through no `type_resolved_ty` is the error type
+# with the failure recorded. `inferred_len`, `layout_state`, `type_resolved_memo` and the
+# constant tables are the module's own and nil in a view of another module
 pub rec ModuleView {
     a:          *ast.Ast;
     rr:         *resolve.ResolveResult;
@@ -328,10 +339,17 @@ pub fun report_deferred_type(sc: *SemaContext, ast_tid: ast_id.TypeId) {
 # a type is consumed whole, often from the memo, so every deferred name anywhere inside it is
 # reached from here: its arguments, pointee, element, length, parameters and fields
 fun report_deferred_subtree(sc: *SemaContext, ast_tid: ast_id.TypeId, depth: u32) {
-    if (depth > 64 || ast_id.type_is_nil(ast_tid))                                                                   { ret; }
-    if (sc.view.rr == nil || sc.view.rr.type_resolved == nil || ast_id.type_index(ast_tid) >= sc.view.rr.type_count) { ret; }
+    if (depth > 64 || ast_id.type_is_nil(ast_tid))            { ret; }
+    if (sc.view.rr == nil || sc.view.rr.type_resolved == nil) { ret; }
     val t_opt: opt[*ast_type.Type] = ast.get_type(sc.view.a, ast_tid);
-    if (!sel t_opt.some) { ret; }
+    if (!sel t_opt.some) {
+        fail.internal(?sc.status, "a type node lies outside its module's syntax");
+        ret;
+    }
+    if (ast_id.type_index(ast_tid) >= sc.view.rr.type_count) {
+        fail.internal(?sc.status, "a type node lies outside its module's resolution");
+        ret;
+    }
     val t: *ast_type.Type = t_opt.some;
     if (resolve.symbol_same(sc.view.rr.type_resolved[ast_id.type_index(ast_tid)], resolve.SYMBOL_DEFERRED_TYPE)) {
         sc.walk.deferred_hits = sc.walk.deferred_hits + 1;
@@ -388,9 +406,11 @@ fun report_deferred_length(sc: *SemaContext, eid: ast_id.ExprId) {
 }
 
 pub fun resolved_type_of(sc: *SemaContext, ast_tid: ast_id.TypeId) type.TypeId {
-    if (ast_id.type_is_nil(ast_tid))                            { ret type.TYPE_NIL; }
-    if (sc.view.type_resolved_ty == nil)                        { ret type.TYPE_ERROR; }
-    if (ast_id.type_index(ast_tid) >= sc.view.a.types.len::u32) { ret type.TYPE_ERROR; }
+    if (ast_id.type_is_nil(ast_tid)) { ret type.TYPE_NIL; }
+    if (sc.view.type_resolved_ty == nil || ast_id.type_index(ast_tid) >= sc.view.a.types.len::u32) {
+        fail.internal(?sc.status, "a type node has no resolved type in this view");
+        ret type.TYPE_ERROR;
+    }
     report_deferred_type(sc, ast_tid);
     if (sc.instance.subst != nil && sc.typing.annotation_check_fn != nil) {
         sc.typing.annotation_check_fn(sc, ast_tid);
@@ -576,7 +596,11 @@ pub fun inst_worklist_dnit(sc: *SemaContext) {
 # the type the walk gives expression `eid`, recorded in its frame when the frame is not
 # the module's own typing
 pub fun expr_type_set(sc: *SemaContext, eid: ast_id.ExprId, ty: type.TypeId) {
-    if (sc.view.expr_type == nil || ast_id.expr_index(eid)::usize >= sc.view.a.exprs.len) { ret; }
+    if (sc.view.expr_type == nil) { ret; }
+    if (ast_id.expr_index(eid)::usize >= sc.view.a.exprs.len) {
+        fail.internal(?sc.status, "a typed expression lies outside its module's syntax");
+        ret;
+    }
     sc.view.expr_type[ast_id.expr_index(eid)] = ty;
     logical_check(sc, ty, sc.view.a.exprs.data[ast_id.expr_index(eid)].span);
     if (!frame_records_typing(sc)) { ret; }
@@ -585,7 +609,11 @@ pub fun expr_type_set(sc: *SemaContext, eid: ast_id.ExprId, ty: type.TypeId) {
 }
 
 pub fun decl_type_set(sc: *SemaContext, did: ast_id.DeclId, ty: type.TypeId) {
-    if (sc.view.decl_type == nil || ast_id.decl_index(did)::usize >= sc.view.a.decls.len) { ret; }
+    if (sc.view.decl_type == nil) { ret; }
+    if (ast_id.decl_index(did)::usize >= sc.view.a.decls.len) {
+        fail.internal(?sc.status, "a typed declaration lies outside its module's syntax");
+        ret;
+    }
     sc.view.decl_type[ast_id.decl_index(did)] = ty;
     val d: *ast_decl.Decl = ?sc.view.a.decls.data[ast_id.decl_index(did)];
     if (d.kind == ast_decl.DECL_KIND_VAL || d.kind == ast_decl.DECL_KIND_VAR) { logical_check(sc, ty, d.span); }
@@ -687,7 +715,10 @@ pub fun decl_type_for(sc: *SemaContext, sym: *resolve.Symbol) type.TypeId {
     if (sym.kind == resolve.SYM_PARAM)   { ret param_type_for(sc, sym); }
     if (sym.kind == resolve.SYM_GENERIC) { ret generic_param_type_for(sc, sym); }
     if (module.same(resolve.origin_of(sc.s, sym), sc.view.own_module)) {
-        if (sc.view.decl_type == nil || ast_id.decl_is_nil(sym.decl) || ast_id.decl_index(sym.decl) >= sc.view.a.decls.len::u32) { ret type.TYPE_ERROR; }
+        if (sc.view.decl_type == nil || ast_id.decl_is_nil(sym.decl) || ast_id.decl_index(sym.decl) >= sc.view.a.decls.len::u32) {
+            fail.internal(?sc.status, "a declared symbol has no declaration type in this view");
+            ret type.TYPE_ERROR;
+        }
         ret sc.view.decl_type[ast_id.decl_index(sym.decl)];
     }
     val exported: opt[sema_product.TypeExport] = public_type_for(sc, sym);
@@ -698,9 +729,13 @@ pub fun decl_type_for(sc: *SemaContext, sym: *resolve.Symbol) type.TypeId {
     ret exported.some.ty;
 }
 
+# the symbol an expression names, none when it names none
 pub fun symbol_for_expr(sc: *SemaContext, eid: ast_id.ExprId) opt[*resolve.Symbol] {
     if (sc.view.rr == nil || sc.view.rr.expr_resolved == nil) { ret opt[*resolve.Symbol].none{}; }
-    if (ast_id.expr_index(eid) >= sc.view.rr.expr_count)      { ret opt[*resolve.Symbol].none{}; }
+    if (ast_id.expr_index(eid) >= sc.view.rr.expr_count) {
+        fail.internal(?sc.status, "an expression lies outside its module's resolution");
+        ret opt[*resolve.Symbol].none{};
+    }
     val sid: resolve.SymbolId = sc.view.rr.expr_resolved[ast_id.expr_index(eid)];
     ret symbol_by_id(sc, sid);
 }
@@ -712,17 +747,24 @@ pub fun comptime_ident_is_runtime(sc: *SemaContext, eid: ast_id.ExprId) bool {
     ret resolve.symbol_is_runtime(opt_sym.some);
 }
 
+# the symbol a type names, none when it names none
 pub fun symbol_for_type(sc: *SemaContext, tid: ast_id.TypeId) opt[*resolve.Symbol] {
     if (sc.view.rr == nil || sc.view.rr.type_resolved == nil) { ret opt[*resolve.Symbol].none{}; }
-    if (ast_id.type_index(tid) >= sc.view.rr.type_count)      { ret opt[*resolve.Symbol].none{}; }
+    if (ast_id.type_index(tid) >= sc.view.rr.type_count) {
+        fail.internal(?sc.status, "a type node lies outside its module's resolution");
+        ret opt[*resolve.Symbol].none{};
+    }
     val sid: resolve.SymbolId = sc.view.rr.type_resolved[ast_id.type_index(tid)];
     ret symbol_by_id(sc, sid);
 }
 
 fun symbol_by_id(sc: *SemaContext, sid: resolve.SymbolId) opt[*resolve.Symbol] {
-    if (resolve.symbol_is_nil(sid))                           { ret opt[*resolve.Symbol].none{}; }
-    if (sc.view.rr == nil || sc.view.rr.symbols == nil)       { ret opt[*resolve.Symbol].none{}; }
-    if (resolve.symbol_index(sid) >= sc.view.rr.symbol_count) { ret opt[*resolve.Symbol].none{}; }
+    if (resolve.symbol_is_sentinel(sid))                { ret opt[*resolve.Symbol].none{}; }
+    if (sc.view.rr == nil || sc.view.rr.symbols == nil) { ret opt[*resolve.Symbol].none{}; }
+    if (resolve.symbol_index(sid) >= sc.view.rr.symbol_count) {
+        fail.internal(?sc.status, "a resolved name points past its module's symbols");
+        ret opt[*resolve.Symbol].none{};
+    }
     ret opt[*resolve.Symbol].some{?sc.view.rr.symbols[resolve.symbol_index(sid)]};
 }
 
@@ -933,10 +975,15 @@ pub fun type_store(sc: *SemaContext) *type.TypeInterner {
     ret ?sc.s.types;
 }
 
+# the type of an operand of a type comparison, none when the walk has no typing of it
 pub fun resolve_type_comparison_operand(sc: *SemaContext, eid: ast_id.ExprId) res[opt[u32], comptime.EvalFail] {
-    if (sc == nil)                                                                     { ret res[opt[u32], comptime.EvalFail].ok{opt[u32].none{}}; }
-    if (sc.view.expr_type == nil)                                                      { ret res[opt[u32], comptime.EvalFail].ok{opt[u32].none{}}; }
-    if (ast_id.expr_is_nil(eid) || ast_id.expr_index(eid) >= sc.view.a.exprs.len::u32) { ret res[opt[u32], comptime.EvalFail].ok{opt[u32].none{}}; }
+    if (sc == nil)                { ret res[opt[u32], comptime.EvalFail].ok{opt[u32].none{}}; }
+    if (sc.view.expr_type == nil) { ret res[opt[u32], comptime.EvalFail].ok{opt[u32].none{}}; }
+    if (ast_id.expr_is_nil(eid))  { ret res[opt[u32], comptime.EvalFail].ok{opt[u32].none{}}; }
+    if (ast_id.expr_index(eid) >= sc.view.a.exprs.len::u32) {
+        fail.internal(?sc.status, "a compared operand lies outside its module's syntax");
+        ret res[opt[u32], comptime.EvalFail].ok{opt[u32].none{}};
+    }
     val t: type.TypeId = apply_subst(sc, sc.view.expr_type[ast_id.expr_index(eid)]);
     if (type.is_nil(t) || type.is_error(t)) { ret res[opt[u32], comptime.EvalFail].ok{opt[u32].none{}}; }
     if (awaits_instance(sc, t)) {
@@ -953,14 +1000,20 @@ pub fun gated_member_const_message(sc: *SemaContext, name: intern.StrId, dep_pat
         intern.text(?sc.s.interner, name), intern.text(?sc.s.interner, dep_path));
 }
 
+# the value of a module member constant an expression names, none when it names none or the walk
+# has no resolution
 pub fun resolve_module_member_const(sc: *SemaContext, eid: ast_id.ExprId) res[opt[comptime.CTValue], comptime.EvalFail] {
     if (sc == nil) { ret res[opt[comptime.CTValue], comptime.EvalFail].ok{opt[comptime.CTValue].none{}}; }
     val rr: *resolve.ResolveResult = sc.view.rr;
-    if (rr == nil || rr.expr_resolved == nil || eid::u32 >= rr.expr_count) {
+    if (rr == nil || rr.expr_resolved == nil) { ret res[opt[comptime.CTValue], comptime.EvalFail].ok{opt[comptime.CTValue].none{}}; }
+    if (eid::u32 >= rr.expr_count) {
+        fail.internal(?sc.status, "an expression lies outside its module's resolution");
         ret res[opt[comptime.CTValue], comptime.EvalFail].ok{opt[comptime.CTValue].none{}};
     }
     val sid: resolve.SymbolId = rr.expr_resolved[ast_id.expr_index(eid)];
-    if (resolve.symbol_is_nil(sid) || sid::u32 >= rr.symbol_count) {
+    if (resolve.symbol_is_sentinel(sid)) { ret res[opt[comptime.CTValue], comptime.EvalFail].ok{opt[comptime.CTValue].none{}}; }
+    if (sid::u32 >= rr.symbol_count) {
+        fail.internal(?sc.status, "a resolved name points past its module's symbols");
         ret res[opt[comptime.CTValue], comptime.EvalFail].ok{opt[comptime.CTValue].none{}};
     }
     val sym: *resolve.Symbol = ?rr.symbols[resolve.symbol_index(sid)];
@@ -1031,6 +1084,7 @@ pub fun each_set(sc: *SemaContext, sid: ast_id.StmtId, array: comptime.CTValue) 
     if (sel put.err) { fail.internal(?sc.status, fail.describe(put.err)); }
 }
 
+# the syntax of module `origin`, nil when it cannot be had, the reason recorded in the status
 pub fun definition_ast(sc: *SemaContext, origin: session.ModuleId) *ast.Ast {
     if (module.same(origin, sc.view.own_module)) { ret sc.view.a; }
     if (sc.typing.deps == nil) {
@@ -1080,6 +1134,7 @@ pub fun generic_owner_of_decl(s: *session.Session, a: *ast.Ast, origin: session.
 }
 
 pub fun generic_param_type_for(sc: *SemaContext, sym: *resolve.Symbol) type.TypeId {
+    # definition_ast records why it found no syntax
     val a: *ast.Ast = definition_ast(sc, resolve.origin_of(sc.s, sym));
     if (a == nil) { ret type.TYPE_ERROR; }
     val who_r: res[type.GenericOwner, fail.Fail] = generic_owner_of_decl(sc.s, a, resolve.origin_of(sc.s, sym), sym.decl);
