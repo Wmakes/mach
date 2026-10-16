@@ -1,3 +1,12 @@
 [submodule "dep/std"]
 	path = dep/std
 	url = https://github.com/briar-systems/mach-std
+[submodule "dep/mink"]
+	path = dep/mink
+	url = https://github.com/briar-systems/mink
+[submodule "dep/masc"]
+	path = dep/masc
+	url = https://github.com/briar-systems/masc
+[submodule "dep/mirl"]
+	path = dep/mirl
+	url = https://github.com/briar-systems/mirl
