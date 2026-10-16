@@ -118,7 +118,9 @@ pub fun cast_scalar(types: *type.TypeInterner, pointer_width: u32, nan_rule: flo
 from_ty: type.TypeId, to_ty: type.TypeId, reinterpret: bool) res[CTValue, comptime_failure.EvalFail];
 ```
 
-a numeric conversion folds through mirl's conversion rows. a NaN converted to
+a numeric conversion folds through mirl's conversion rows, but for float to
+int, which keeps mach's own conversion until its out-of-range answer is ruled
+on. a NaN converted to
 another float width on a target whose rule gives the canonical NaN keeps mach's
 conversion, since mirl's row quiets the NaN it is given whatever the target
 

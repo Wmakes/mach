@@ -2991,6 +2991,12 @@ pub val TARGET_RETIRED_SPELLING:          Kind = 506
 pub val SECRET_TARGET_UNENFORCEABLE:      Kind = 507
 ```
 
+## val TARGET_BASELINE_REQUIRED
+
+```mach
+pub val TARGET_BASELINE_REQUIRED:         Kind = 508
+```
+
 ## rec Spec
 
 ```mach
@@ -3008,7 +3014,7 @@ retired: nothing raises the kind any more; the row stays so its key is
 ## val COUNT
 
 ```mach
-pub val COUNT: usize       = 507
+pub val COUNT: usize       = 508
 ```
 
 ## fun at

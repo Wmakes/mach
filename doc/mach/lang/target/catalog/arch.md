@@ -76,8 +76,8 @@ pub fun id_for(name: str) u32;
 pub fun default_baseline(id: u32) str;
 ```
 
-the baseline a target of the instruction set `id` stands on when it names none, in
-masc's spelling; nil when its catalog spells no selection, so it takes no baseline
+the baseline a hosted target of the instruction set `id` stands on when it names
+none, in masc's spelling; nil when its catalog spells no selection, so it takes no baseline
 
 ## fun host_id
 
