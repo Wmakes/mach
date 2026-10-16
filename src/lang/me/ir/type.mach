@@ -661,6 +661,7 @@ fun describe_node(t: *IrTypeTable, id: u32) layout.Node {
     if (ir.kind == IRT_INT || ir.kind == IRT_FLOAT) {
         var n: layout.Node = layout.node(layout.NODE_SCALAR);
         n.bytes = bits_to_bytes(ir.data.bits);
+        n.float = ir.kind == IRT_FLOAT;
         ret n;
     }
     if (ir.kind == IRT_PTR || ir.kind == IRT_FN || ir.kind == IRT_HANDLE) { ret layout.node(layout.NODE_POINTER); }

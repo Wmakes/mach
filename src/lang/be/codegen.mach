@@ -388,7 +388,7 @@ fun pack_image(s: *CodegenContext, tgt: *lang_target.Binding, irmod: *me_ir.Modu
         req.program.sources       = ?s.session.sources;
         req.program.ir_module     = irmod;
         req.program.mir_module    = mirmod;
-        req.program.layout        = layout.machine(tgt.target.model.pointer_width, tgt.target.model.vector_bits, target_model.vector_register_bits(?tgt.target.model));
+        req.program.layout        = resolved.layout_machine(?tgt.target);
         req.program.pointer_width = tgt.isa.pointer_width;
         req.program.dwarf_reg     = tgt.arch.dwarf_reg;
         req.program.frame_ptr_reg = tgt.arch.frame_ptr_reg;

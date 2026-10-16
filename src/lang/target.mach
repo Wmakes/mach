@@ -31,6 +31,7 @@ use std.text.string.str_free;
 use mach.lang.ct;
 use lang_fingerprint: mach.lang.fingerprint;
 use mach.lang.intern;
+use mach.lang.layout;
 use lang_mir:  mach.lang.mir;
 use mir_debug: mach.lang.mir.debug;
 use mach.lang.target.abi;
@@ -58,12 +59,15 @@ use mach.lang.target.of.macho;
 use lang_target_os:   mach.lang.target.os;
 use target_os_darwin: mach.lang.target.os.darwin;
 use target_os_linux:  mach.lang.target.os.linux;
+use target_owner:     mach.lang.target.owner;
 use target_registry:  mach.lang.target.registry;
 use mach.lang.target.resolved;
 use target_testing: mach.lang.target.testing;
 use mach.lang.target.tuple;
 use mach.lang.textbuild;
 use mach.lang.wire;
+
+use mirl_target: mirl.target;
 
 fwd target_model.ENDIAN_LITTLE;
 fwd target_model.ENDIAN_BIG;
@@ -486,6 +490,16 @@ pub fun resolve(reg: *TargetRegistry, req: *TargetRequest) res[binding.Binding, 
         if (b.debug.shape != target_of.debug_shape_for(of_vt) || b.debug.supports == nil || !b.debug.supports(?debug_target)) {
             ret res[binding.Binding, fail.Fail].err{fail.message("target: selected debug model is incompatible with the target tuple")};
         }
+    }
+
+    t.scalars = layout.scalars_none();
+    val row_r: res[opt[*mirl_target.Target], fail.Fail] = target_owner.row_for(?reg.alloc, os_vt.id, arch_vt.id, abi_vt.id);
+    if (sel row_r.err) { ret res[binding.Binding, fail.Fail].err{row_r.err}; }
+    if (sel row_r.ok.some) {
+        val held: res[layout.Scalars, fail.Fail] = target_owner.scalars_of(?reg.alloc, row_r.ok.some);
+        if (sel held.err) { ret res[binding.Binding, fail.Fail].err{held.err}; }
+        t.scalars = held.ok;
+        if (sel held.ok.pointer.some) { t.pointer_width = held.ok.pointer.some.size; }
     }
 
     t.model              = selected_model;

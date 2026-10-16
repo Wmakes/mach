@@ -85,6 +85,9 @@ pub rec Target {
     # every extension vocabulary the registered instruction sets declare, which
     # `#[extensions(...)]` names are read against beside the selected one
     vocabulary: extension.Vocabulary;
+    # the extents the target's owner row lays each primitive out at, none held for a
+    # cell no owner has a row for yet
+    scalars: layout.Scalars;
 }
 
 # the layout machine of a resolved target. total over what resolve produces,
@@ -93,7 +96,7 @@ pub fun layout_machine(tgt: *Target) layout.Machine {
     if (tgt == nil) {
         panic("target.resolved: layout query needs a resolved target with an instruction set\n");
     }
-    ret layout.machine(tgt.pointer_width, tgt.model.vector_bits, target_model.vector_register_bits(?tgt.model));
+    ret layout.with_scalars(layout.machine(tgt.pointer_width, tgt.model.vector_bits, target_model.vector_register_bits(?tgt.model)), tgt.scalars);
 }
 
 # whether the target guarantees the data-independent-timing mode a DIT_MODE
@@ -132,6 +135,8 @@ pub rec Facts {
     has_assembly:  bool;
     # whether a pointer is an address, or on a logical target a reference to a declared type
     flat_addressing: bool;
+    # the extents the target's owner row lays each primitive out at
+    scalars: layout.Scalars;
 }
 
 pub fun facts(tgt: *Target) Facts {
@@ -140,7 +145,8 @@ pub fun facts(tgt: *Target) Facts {
         vector_bits: tgt.model.vector_bits, register_bits: target_model.vector_register_bits(?tgt.model),
         has_float:   tgt.model.has_float, va_list_size: tgt.va_list_size, va_list_align: tgt.va_list_align,
         defs:        tgt.defs, ct_mul: ct_mul_admitted(tgt), extensions: target_model.extension_view(?tgt.model),
-        vocabulary:  tgt.vocabulary, nan_rule: tgt.model.nan_rule, has_assembly: tgt.has_assembly, flat_addressing: tgt.model.flat_addressing
+        vocabulary:  tgt.vocabulary, nan_rule: tgt.model.nan_rule, has_assembly: tgt.has_assembly, flat_addressing: tgt.model.flat_addressing,
+        scalars:     tgt.scalars
     };
 }
 
@@ -151,7 +157,8 @@ pub fun facts_none() Facts {
         os_id:        0, arch_id: 0, abi_id: 0, pointer_width: 8, vector_bits: 128, register_bits: 128, has_float: true,
         va_list_size: 0, va_list_align: 0, defs: nil, ct_mul: ct.mul_mask_none(),
         extensions:   target_model.ExtensionView{selected: 0, table: nil, count: 0},
-        vocabulary:   extension.vocabulary_empty(), nan_rule: float.NAN_RULE_NONE, has_assembly: true, flat_addressing: true
+        vocabulary:   extension.vocabulary_empty(), nan_rule: float.NAN_RULE_NONE, has_assembly: true, flat_addressing: true,
+        scalars:      layout.scalars_none()
     };
 }
 
@@ -178,6 +185,7 @@ pub fun described(model: *target_model.Machine, arch_id: u32) Target {
     t.passing       = catalog_abi.PASSING_CARRIERS;
     t.page_size     = 4096;
     t.vocabulary    = extension.vocabulary_empty();
+    t.scalars       = layout.scalars_none();
     if (!extension.vocabulary_add(?t.vocabulary, model.extension_table, model.extension_count)) {
         panic("target.resolved: a described model's vocabulary does not fit\n");
     }
