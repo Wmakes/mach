@@ -29,11 +29,15 @@ use mach.lang.manifest.model.Manifest;
 use mach.lang.manifest.model.TargetDef;
 use mach.lang.manifest.model.id_of;
 use mach.lang.manifest.model.optional_id_of;
+use mach.lang.manifest.refusal.element_sites;
 use mach.lang.manifest.refusal.fail_at;
 use mach.lang.manifest.refusal.refuse;
 use mach.lang.manifest.refusal.sfmt;
 use mach.lang.manifest.refusal.span_site;
 use mach.lang.manifest.refusal.t_fmt;
+use mach.lang.manifest.schema.StrArr;
+use mach.lang.manifest.schema.element_span;
+use mach.lang.manifest.schema.ids_of;
 use mach.lang.manifest.schema.key_span;
 use mach.lang.manifest.schema.key_text;
 
@@ -113,6 +117,13 @@ pub fun parse_targets(alloc: *A.Allocator, itn: *intern.Interner, t: *toml.Table
     if (sel res_targets.err) { ret err[fail.Fail].err{fail.refused(res_targets.err)}; }
     m.targets      = res_targets.ok;
     m.target_count = n::u32;
+    var cleared: usize = 0;
+    for (cleared < n) {
+        m.targets[cleared].runner       = nil;
+        m.targets[cleared].runner_count = 0;
+        m.targets[cleared].runner_at    = nil;
+        cleared                         = cleared + 1;
+    }
 
     var i: usize = 0;
     for (i < n) {
@@ -126,12 +137,10 @@ pub fun parse_targets(alloc: *A.Allocator, itn: *intern.Interner, t: *toml.Table
         }
         val label: res[str, fail.Fail] = sfmt(alloc, "[target.{}]", name);
         if (sel label.err) { ret err[fail.Fail].err{label.err}; }
-        var d:       TargetDef;
-        val decoded: err[fail.Fail] = target_decode(alloc, itn, tab, i, label.ok, ?d);
+        val decoded: err[fail.Fail] = target_decode(alloc, itn, tab, i, label.ok, ?m.targets[i]);
         str_free(alloc, label.ok);
         if (sel decoded.err) { ret decoded; }
-        m.targets[i] = d;
-        i            = i + 1;
+        i = i + 1;
     }
     ret err[fail.Fail].ok{};
 }
@@ -246,7 +255,30 @@ fun target_decode(alloc: *A.Allocator, itn: *intern.Interner, tab: *toml.Table, 
     d.base          = integer_or_zero(sub, "base");
     d.stack_reserve = integer_or_zero(sub, "stack_reserve");
     d.stack_commit  = integer_or_zero(sub, "stack_commit");
-    ret parse_target_extensions(alloc, itn, sub, label, d);
+    val extended: err[fail.Fail] = parse_target_extensions(alloc, itn, sub, label, d);
+    if (sel extended.err) { ret extended; }
+    ret parse_target_runner(alloc, itn, sub, label, d);
+}
+
+# `[target.X].runner`: the argv templates the target's programs are launched
+# through, nonempty with an executable first. the templates are checked when the
+# manifest loads, with every other template
+fun parse_target_runner(alloc: *A.Allocator, itn: *intern.Interner, sub: *toml.Table, label: str, d: *TargetDef) err[fail.Fail] {
+    val v_o: opt[*toml.Value] = toml.get(sub, "runner");
+    if (sel v_o.none) { ret err[fail.Fail].ok{}; }
+    val arr:     *toml.Array            = ?v_o.some.data.array;
+    val decoded: res[StrArr, fail.Fail] = ids_of(alloc, itn, arr, label, "runner");
+    if (sel decoded.err) { ret err[fail.Fail].err{decoded.err}; }
+    d.runner       = decoded.ok.items;
+    d.runner_count = decoded.ok.count;
+    val placed: res[*fail.Place, fail.Fail] = element_sites(alloc, arr);
+    if (sel placed.err) { ret err[fail.Fail].err{placed.err}; }
+    d.runner_at = placed.ok;
+    if (d.runner_count == 0) { ret fail_at(refuse(alloc, diagnostic_kind.MANIFEST_INVALID_VALUE, "mach.toml: {}.runner must be nonempty", label), v_o.some.span); }
+    if (str_len(intern.text(itn, d.runner[0])) == 0) {
+        ret fail_at(refuse(alloc, diagnostic_kind.MANIFEST_INVALID_VALUE, "mach.toml: {}.runner[0] must name an executable", label), element_span(arr, 0));
+    }
+    ret err[fail.Fail].ok{};
 }
 
 # an optional integer key's value, 0 when it is not written
@@ -326,6 +358,9 @@ pub fun make_native_target(alloc: *A.Allocator, itn: *intern.Interner) res[*Targ
     host.stack_reserve   = 0;
     host.stack_commit    = 0;
     host.extension_count = 0;
+    host.runner          = nil;
+    host.runner_count    = 0;
+    host.runner_at       = nil;
     val owned: res[*TargetDef, A.Error] = A.allocate[TargetDef](alloc, 1);
     if (sel owned.err) { ret res[*TargetDef, fail.Fail].err{fail.refused(owned.err)}; }
     @owned.ok = host;

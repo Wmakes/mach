@@ -159,8 +159,8 @@ val PROJECT_KEYS:      [6]KeyRow = [6]KeyRow{
     KeyRow{key: "out", shape: SHAPE_STRING, rule: RULE_REMOVED, note: "the work directory is `work`, written from `{project.work}` in a template", migrate: out_migrate},
 };
 
-val TARGET_KEY_COUNT: usize      = 12;
-val TARGET_KEYS:      [12]KeyRow = [12]KeyRow{
+val TARGET_KEY_COUNT: usize      = 13;
+val TARGET_KEYS:      [13]KeyRow = [13]KeyRow{
     KeyRow{key: "isa", shape: SHAPE_STRING, rule: RULE_REQUIRED, note: ""},
     KeyRow{key: "baseline", shape: SHAPE_STRING, rule: RULE_OPTIONAL, note: "the isa's default baseline"},
     KeyRow{key: "os", shape: SHAPE_STRING, rule: RULE_REQUIRED, note: ""},
@@ -172,6 +172,7 @@ val TARGET_KEYS:      [12]KeyRow = [12]KeyRow{
     KeyRow{key: "stack_reserve", shape: SHAPE_INTEGER, rule: RULE_OPTIONAL, note: "the object format's stack reserve"},
     KeyRow{key: "stack_commit", shape: SHAPE_INTEGER, rule: RULE_OPTIONAL, note: "the object format's stack commit"},
     KeyRow{key: "extensions", shape: SHAPE_STRINGS, rule: RULE_OPTIONAL, note: "no extension selected"},
+    KeyRow{key: "runner", shape: SHAPE_STRINGS, rule: RULE_OPTIONAL, note: "the host runs its own programs, and no other target's"},
     KeyRow{key: "default", shape: SHAPE_BOOL, rule: RULE_REMOVED, note: "with no -t a command takes the target matching the host; select another with -t"},
 };
 
