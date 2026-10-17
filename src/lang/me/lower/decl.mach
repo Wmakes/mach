@@ -11,7 +11,6 @@ use types_string: std.types.string;
 use std.types.string.str;
 use std.types.string.str_equals;
 use std.types.string.str_join;
-use std.types.string.str_len;
 
 use A: std.allocator;
 
@@ -699,25 +698,6 @@ fun free_pack_param_bufs(ctx: *lower_context.LowerContext, params: *value.Value,
     if (slots != nil && type_len > 0) { A.deallocate[value.Value](ctx.s.alloc, slots, type_len::usize); }
 }
 
-fun diag_named(ctx: *lower_context.LowerContext, k: diagnostic_kind.Kind, span: lang_source.Span, name_id: intern.StrId, prefix: str, suffix: str, fallback: str) err[fail.Fail] {
-    fail.reject(?ctx.status);
-    val opt_name: opt[str] = intern.get(?ctx.s.interner, name_id);
-    if (sel opt_name.none) {
-        ret diagnostic.report(ctx.diags, k, ctx.scope.a.file_id, span, fallback);
-    }
-    val name: str = opt_name.some;
-
-    val res_msg: res[str, types_string.StrError] = str_join(ctx.s.alloc, prefix, name, suffix);
-    if (sel res_msg.err) {
-        ret err[fail.Fail].err{fail.str_refused(res_msg.err)};
-    }
-    val buf: str = res_msg.ok;
-
-    val res_emit: err[fail.Fail] = diagnostic.report(ctx.diags, k, ctx.scope.a.file_id, span, buf);
-    A.deallocate[u8](ctx.s.alloc, buf::*u8, str_len(buf) + 1);
-    ret res_emit;
-}
-
 fun lower_test(ctx: *lower_context.LowerContext, did: ast_id.DeclId, d: *ast_decl.Decl) err[fail.Fail] {
     val res_i32: res[ir_type.IrTypeId, fail.Fail] = ir_type.intern_int(?ctx.m.types, 32);
     if (sel res_i32.err) { ret err[fail.Fail].err{res_i32.err}; }
@@ -982,10 +962,9 @@ fun fold_global_value(ctx: *lower_context.LowerContext, did: ast_id.DeclId, eid:
         val reported: err[fail.Fail] = diagnostic.report(ctx.diags, eval_failure.diag, ctx.scope.a.file_id, ie.span, eval_failure.message);
         if (sel reported.err) { ret res[value.Value, fail.Fail].err{reported.err}; }
     }
-    or (eval_failure.kind == comptime.EVAL_FAIL_UNBOUND || eval_failure.kind == comptime.EVAL_FAIL_NEEDS_MEMBER
-        || eval_failure.kind == comptime.EVAL_FAIL_NEEDS_TYPES || eval_failure.kind == comptime.EVAL_FAIL_NEEDS_LAYOUT) {
-        val reported: err[fail.Fail] = diag_named(ctx, diagnostic_kind.GLOBAL_INIT_NOT_CONSTANT, ie.span, name,
-            "global initialiser of `", "` must be a constant expression", "a global initialiser must be a constant expression");
+    or (comptime.not_constant(eval_failure.kind)) {
+        fail.reject(?ctx.status);
+        val reported: err[fail.Fail] = comptime.init_not_constant_report(ctx.s.alloc, ctx.diags, ctx.scope.a.file_id, ie.span, intern.get(?ctx.s.interner, name));
         if (sel reported.err) { ret res[value.Value, fail.Fail].err{reported.err}; }
     }
     or { ret res[value.Value, fail.Fail].err{fail.message("lower: invalid comptime evaluation failure kind")}; }

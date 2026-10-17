@@ -20,6 +20,7 @@ pub fun refusals_report(sc: *sema_context.SemaContext, iface: *interface.Interfa
 
 reports the refusal each module `val` and `var` the interface publishes holds, as lowering
 the global reports it: a refused member of an aggregate or address value under any kind, and
-a refused value of its own only as the evaluator's rejection lowering's own fold meets again.
+a refused value of its own only as lowering's own fold meets it again, the evaluator's
+rejection as it is and an initializer that needs a value no constant gives as no constant.
 a `nil` initializer lowers as null and folds nothing
 

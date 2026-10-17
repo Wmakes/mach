@@ -10,11 +10,12 @@ of constant values, which its interface publishes
 ## val CONSTANT_PENDING
 
 ```mach
-pub val CONSTANT_PENDING: u8 = 0
+pub val CONSTANT_PENDING:     u8 = 0
 ```
 
 pending: not bound yet, and tried again on the next read; none: no constant, for good;
-refused: no constant, for good, since the evaluator rejected its initializer
+refused: no constant, for good, since the evaluator rejected its initializer; unevaluable:
+no constant, for good, since its initializer needs a value no constant gives
 
 ## fun named
 
@@ -42,7 +43,7 @@ pub fun bind(sc: *sema_context.SemaContext, did: ast_id.DeclId) err[fail.Fail];
 
 binds the module `val` `did` declares when its initializer is a compile-time constant. this
 is the last try, so an initializer the evaluator rejects is marked refused, which its
-published value reports
+published value reports, and one that is no constant is marked unevaluable
 
 ## fun rejected
 
@@ -51,6 +52,14 @@ pub fun rejected(sc: *sema_context.SemaContext, did: ast_id.DeclId) bool;
 ```
 
 whether the evaluator rejected the initializer of the module `val` `did` when it was bound
+
+## fun unevaluable
+
+```mach
+pub fun unevaluable(sc: *sema_context.SemaContext, did: ast_id.DeclId) bool;
+```
+
+whether the initializer of the module `val` `did` was no constant when it was bound
 
 ## fun settle
 
