@@ -13,7 +13,8 @@ of constant values, which its interface publishes
 pub val CONSTANT_PENDING: u8 = 0
 ```
 
-pending: not bound yet, and tried again on the next read; none: no constant, for good
+pending: not bound yet, and tried again on the next read; none: no constant, for good;
+refused: no constant, for good, since the evaluator rejected its initializer
 
 ## fun named
 
@@ -39,7 +40,17 @@ imported constant itself
 pub fun bind(sc: *sema_context.SemaContext, did: ast_id.DeclId) err[fail.Fail];
 ```
 
-binds the module `val` `did` declares when its initializer is a compile-time constant
+binds the module `val` `did` declares when its initializer is a compile-time constant. this
+is the last try, so an initializer the evaluator rejects is marked refused, which its
+published value reports
+
+## fun rejected
+
+```mach
+pub fun rejected(sc: *sema_context.SemaContext, did: ast_id.DeclId) bool;
+```
+
+whether the evaluator rejected the initializer of the module `val` `did` when it was bound
 
 ## fun settle
 

@@ -111,18 +111,29 @@ pub fun awaiting(kind: comptime_failure.EvalFailKind, diag: diagnostic_kind.Kind
 pub fun cast_int(bits: wide.Wide, width: u32, signed: bool) res[CTValue, comptime_failure.EvalFail];
 ```
 
+## fun nan_unspecified
+
+```mach
+pub fun nan_unspecified(itn: *intern.Interner, arch_id: u32) res[CTValue, comptime_failure.EvalFail];
+```
+
+the refusal of a float operation whose result is a NaN on the instruction set `arch_id`,
+whose NaN results are unspecified: no constant has that value
+
 ## fun cast_scalar
 
 ```mach
-pub fun cast_scalar(types: *type.TypeInterner, pointer_width: u32, nan_rule: float.NanRule, value: CTValue,
-from_ty: type.TypeId, to_ty: type.TypeId, reinterpret: bool) res[CTValue, comptime_failure.EvalFail];
+pub fun cast_scalar(types: *type.TypeInterner, itn: *intern.Interner, pointer_width: u32, nan_rule: float.NanRule, arch_id: u32,
+value: CTValue, from_ty: type.TypeId, to_ty: type.TypeId, reinterpret: bool) res[CTValue, comptime_failure.EvalFail];
 ```
 
-a numeric conversion folds through mirl's conversion rows, but for float to
-int, which keeps mach's own conversion until its out-of-range answer is ruled
-on. a NaN converted to
+a numeric conversion folds through mirl's conversion rows. a float to int cast
+whose value is NaN or truncates outside the integer's range is refused, so the
+saturation mirl's row gives such a value is never folded. a NaN converted to
 another float width on a target whose rule gives the canonical NaN keeps mach's
-conversion, since mirl's row quiets the NaN it is given whatever the target
+conversion, since mirl's row quiets the NaN it is given whatever the target, and
+on a target whose rule leaves the NaN unspecified it is refused, naming the
+target's instruction set `arch_id`
 
 ## fun is_descriptor
 

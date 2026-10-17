@@ -15,10 +15,11 @@ pub fun run(cx: *args.Call) res[i64, fail.Fail];
 ```
 
 `mach run`: execute the project's already-built binary, forwarding the arguments after
-`--` to it; `--runner <cmd>` executes
-`<cmd> <binary> <args>` instead, which is required when the target is not runnable on
-this host; `--timeout <duration>` runs the program in its own process group and
-terminates it after the duration
+`--` to it. a target that declares a `runner` launches the expanded runner followed by
+the arguments instead, and `--runner <cmd>` replaces it for this run with
+`<cmd> <binary> <args>`; a target that is not the host's and has neither is refused.
+`--timeout <duration>` runs the program in its own process group and terminates it
+after the duration
 
 cx: the call
 ret: the program's exit code; 128 plus the signal number when it was killed by a signal;

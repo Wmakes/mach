@@ -76,8 +76,8 @@ pub fun f64_signbit(f: f64) bool;
 pub def NanRule: u8
 ```
 
-what a conversion between two float formats makes of a NaN, a fact of the target's
-conversion instructions that comptime folds by (see doc/language/operators.md)
+what the target makes of a NaN it computes, a conversion between two float formats
+among them, which comptime folds by (see doc/language/operators.md)
 
 ## val NAN_RULE_NONE
 
@@ -102,6 +102,15 @@ pub val NAN_CANONICAL: NanRule = 2
 ```
 
 the canonical NaN, positive and quiet with an empty payload: RISC-V
+
+## val NAN_UNSPECIFIED
+
+```mach
+pub val NAN_UNSPECIFIED: NanRule = 4
+```
+
+no NaN the target computes is specified, so comptime folds none: SPIR-V under
+Vulkan with no float-controls execution mode
 
 ## fun nan_rule_valid
 

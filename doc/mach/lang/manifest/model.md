@@ -70,6 +70,10 @@ stack_commit: the `stack_commit` byte count, 0 when absent
 extensions: the `extensions` names, each an identifier and listed once; the isa
                  refuses a name its vocabulary does not hold when the target resolves
 extension_count: how many of `extensions` are set
+runner: the `runner` argv templates the target's programs are launched
+                 through; nil when absent. freed by `dnit`
+runner_count: length of `runner`
+runner_at: where each `runner` entry is written
 at: where the table's key is written
 
 ## rec ArtifactDef
