@@ -107,6 +107,13 @@ pub fun nans_of_rule(r: NanRule) Nans {
     ret n;
 }
 
+# the rule of the format of width `w`, binary64 for any other width
+pub fun nans_at(n: *Nans, w: FloatWidth) capability.Nans {
+    if (w == FLOAT_W_16) { ret n.formats[0]; }
+    if (w == FLOAT_W_32) { ret n.formats[1]; }
+    ret n.formats[2];
+}
+
 # whether any format's rule is stated, as it is wherever a target is selected
 pub fun nans_held(n: *Nans) bool {
     var i: usize = 0;

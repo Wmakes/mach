@@ -16,6 +16,7 @@ use lang_source:  mach.lang.source;
 use catalog_arch: mach.lang.target.catalog.arch;
 use mach.lang.type;
 use mach.lang.wide;
+use mirl.target.capability;
 use A: std.allocator;
 use std.allocator.page;
 use std.text.string.str_free;
@@ -197,12 +198,24 @@ fun float_to_int_refused(types: *type.TypeInterner, itn: *intern.Interner, v: f6
     ret reject(diagnostic_kind.COMPTIME_CAST_RANGE, intern.text(itn, id.ok));
 }
 
-# the refusal of a float operation whose result is a NaN on the instruction set `arch_id`,
-# whose NaN results are unspecified: no constant has that value
-pub fun nan_unspecified(itn: *intern.Interner, arch_id: u32) res[CTValue, comptime_failure.EvalFail] {
-    var why: str = "the target states no rule for the NaN its float operations return in this format";
-    if (arch_id == catalog_arch.SPIRV) { why = "Vulkan leaves a NaN result unspecified without a float-controls execution mode"; }
-    val text: res[str, fail.Fail] = diagnostic.format(itn.a, "comptime NaN has no value on `{}`: {}", catalog_arch.name_for(arch_id), why);
+# the refusal of a float operation whose result is a NaN at width `w` on the instruction
+# set `arch_id`, whose rule `nans` gives no defined NaN for it: no constant has that value.
+# a rule stated unspecified is the target model's, and one not stated is a gap of mirl's
+pub fun nan_unspecified(itn: *intern.Interner, arch_id: u32, nans: float.Nans, w: float.FloatWidth) res[CTValue, comptime_failure.EvalFail] {
+    val target: str              = catalog_arch.name_for(arch_id);
+    var at:     float.FloatWidth = w;
+    if (at == float.FLOAT_W_NONE) { at = float.FLOAT_W_64; }
+    var rules: float.Nans      = nans;
+    val rule:  capability.Nans = float.nans_at(?rules, at);
+    var text:  res[str, fail.Fail];
+    if (sel rule.unspecified) {
+        text = diagnostic.format(itn.a, "comptime NaN has no value on `{}`: mirl's target model states its NaN result as unspecified", target);
+    }
+    or {
+        val format: str = float.width_name(at);
+        text = diagnostic.format(itn.a, "comptime NaN has no value on `{}` at `{}`: mirl states no NaN rule for `{}` on `{}` yet, which is a toolchain gap, not a property of the target",
+            target, format, format, target);
+    }
     if (sel text.err) { ret internal_failure(fail.describe(text.err)); }
     fin { str_free(itn.a, text.ok); }
     val id: res[intern.StrId, A.Error] = intern.add(itn, text.ok);
@@ -250,7 +263,7 @@ pub fun cast_scalar(types: *type.TypeInterner, itn: *intern.Interner, pointer_wi
                 if (!float.nans_held(?nans)) {
                     ret reject(diagnostic_kind.COMPTIME_CAST, "a NaN converted to another float width folds only for a selected target");
                 }
-                ret nan_unspecified(itn, arch_id);
+                ret nan_unspecified(itn, arch_id, nans, fw);
             }
             if (!(sel got.folded)) { ret res[CTValue, comptime_failure.EvalFail].err{comptime_failure.eval_internal("the constant folder refused a comptime conversion")}; }
             ret float_value(float.value_of_bits(got.folded[0].lo, fw), fw);

@@ -143,6 +143,14 @@ pub fun nans_of_rule(r: NanRule) Nans;
 
 the rule of a target cell no owner assembles yet, read from mach's own (#4779)
 
+## fun nans_at
+
+```mach
+pub fun nans_at(n: *Nans, w: FloatWidth) capability.Nans;
+```
+
+the rule of the format of width `w`, binary64 for any other width
+
 ## fun nans_held
 
 ```mach

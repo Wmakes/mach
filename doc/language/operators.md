@@ -431,19 +431,23 @@ depends on when the cast is evaluated:
 ### A NaN in a constant on a target that leaves it unspecified
 
 A compile-time float operation whose result is a NaN gives the NaN the target's
-own operation returns, by the rule the target states for the result's format:
-the canonical NaN on riscv, and the first NaN operand, quieted, on x86-64.
-Vulkan leaves the NaN unspecified unless the module states a float-controls
-execution mode, and mach never states one. aarch64 states none yet, and neither
-does a format a target holds no rule for, such as binary16 on x86-64. On such a
-target a float operation whose result would be a NaN, arithmetic or a
-conversion between float widths, is not folded at compile time:
+own operation returns, by the rule mirl's target model states for the result's
+format: the canonical NaN on riscv with hardware floats, and the first NaN
+operand, quieted, on x86-64. Where the model gives no defined NaN result, a
+float operation whose result would be a NaN, arithmetic or a conversion between
+float widths, is not folded at compile time, so it is never miscompiled. SPIR-V
+is the case the target itself leaves unspecified: Vulkan defines no NaN result
+unless the module states a float-controls execution mode, and mach never states
+one. Every other refusal is a toolchain gap, a rule mirl does not state yet
+(aarch64's, binary16 on x86-64, and riscv without hardware floats), and it
+closes as mirl states the rule.
 
 - **Where a constant is required**, a module `val`, an array length, a `$if`
   condition or a comptime argument, it has no value and is refused
-  (`comptime.nan_unspecified`). The error names the target and the reason. This
-  holds for a NaN anywhere in the expression, so `$if` over a comparison of such
-  a NaN is refused too.
+  (`comptime.nan_unspecified`). The error names the target, and says whether
+  the target model states the NaN as unspecified or states no rule for the
+  format yet. This holds for a NaN anywhere in the expression, so `$if` over a
+  comparison of such a NaN is refused too.
 - **In a function body** on spirv the operation runs on the device, as it
   would with operands known only at run time.
 
@@ -516,7 +520,7 @@ because it is what the target's own conversion instruction does:
 
 A conversion folded at compile time follows the build target's rule, so a folded
 `::` gives the bits the same `::` gives at run time on that target. Where the
-target states no rule for the format converted to, as spirv and aarch64, the
+toolchain's target model gives no defined NaN for the format converted to, the
 NaN has no rule to follow, so a constant that converts one is refused
 ([A NaN in a constant on a target that leaves it unspecified](#a-nan-in-a-constant-on-a-target-that-leaves-it-unspecified)). An `f16`
 conversion the target has no instruction for follows the same rule. `:~` never
