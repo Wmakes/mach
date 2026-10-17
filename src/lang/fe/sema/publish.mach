@@ -47,16 +47,16 @@ pub fun interface_of(sc: *sema_context.SemaContext) res[interface.Interface, fai
     ret res[interface.Interface, fail.Fail].ok{iface};
 }
 
-# reports the refusal each module `val` the interface publishes holds, as lowering the global
-# reports it: a refused member of an aggregate or address value under any kind, and a refused
-# value of its own only when binding it met the evaluator's rejection, which lowering's own
-# fold meets again. a `nil` initializer lowers as null and folds nothing
+# reports the refusal each module `val` and `var` the interface publishes holds, as lowering
+# the global reports it: a refused member of an aggregate or address value under any kind, and
+# a refused value of its own only as the evaluator's rejection lowering's own fold meets again.
+# a `nil` initializer lowers as null and folds nothing
 pub fun refusals_report(sc: *sema_context.SemaContext, iface: *interface.Interface) {
     var i: usize = 0;
     for (i < iface.declarations.len) {
         val decl: *interface.Declaration = ?iface.declarations.data[i];
         i = i + 1;
-        if (decl.kind != resolve.SYM_VAL || decl.value == interface.NONE) { cnt; }
+        if ((decl.kind != resolve.SYM_VAL && decl.kind != resolve.SYM_VAR) || decl.value == interface.NONE) { cnt; }
         val d_opt: opt[*ast_decl.Decl] = ast.get_decl(sc.view.a, decl.decl);
         if (sel d_opt.none)                              { cnt; }
         if (is_null_init(sc, d_opt.some.data.bind.init)) { cnt; }
@@ -64,11 +64,19 @@ pub fun refusals_report(sc: *sema_context.SemaContext, iface: *interface.Interfa
         val refused: opt[u32]            = comptime_deep.refused_within(?iface.values, decl.value);
         if (sel refused.none) { cnt; }
         val r: comptime_deep.Refusal = comptime_deep.node_at(?iface.values, refused.some).refusal;
-        if (n.kind == comptime_deep.NODE_REFUSED && !sema_constant.rejected(sc, decl.decl)) { cnt; }
+        if (n.kind == comptime_deep.NODE_REFUSED && !own_rejected(sc, decl, r)) { cnt; }
         fail.reject(?sc.status);
         val reported: err[fail.Fail] = diagnostic.report(sc.diags, r.diag, r.at.file, r.at.span, intern.text(?sc.s.interner, r.message));
         if (sel reported.err) { fail.internal(?sc.status, fail.describe(reported.err)); }
     }
+}
+
+# whether the evaluation lowering folds a refused value of its own with is rejected: a `val`'s
+# binding, the last evaluation of it, and a `var`'s initializer, which only its published value
+# evaluated
+fun own_rejected(sc: *sema_context.SemaContext, decl: *interface.Declaration, r: comptime_deep.Refusal) bool {
+    if (decl.kind == resolve.SYM_VAL) { ret sema_constant.rejected(sc, decl.decl); }
+    ret r.kind == comptime.EVAL_FAIL_REJECTED;
 }
 
 fun is_null_init(sc: *sema_context.SemaContext, eid: ast_id.ExprId) bool {
