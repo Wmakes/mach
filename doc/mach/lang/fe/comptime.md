@@ -99,6 +99,22 @@ fwd comptime_failure.eval_from_refusal
 
 forwards [`mach.lang.fe.comptime.failure.eval_from_refusal`](comptime/failure.md#fun-eval_from_refusal)
 
+## fwd comptime_failure.init_not_constant_report
+
+```mach
+fwd comptime_failure.init_not_constant_report
+```
+
+forwards [`mach.lang.fe.comptime.failure.init_not_constant_report`](comptime/failure.md#fun-init_not_constant_report)
+
+## fwd comptime_failure.not_constant
+
+```mach
+fwd comptime_failure.not_constant
+```
+
+forwards [`mach.lang.fe.comptime.failure.not_constant`](comptime/failure.md#fun-not_constant)
+
 ## fwd comptime_value.CTKind
 
 ```mach
