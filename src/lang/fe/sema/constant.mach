@@ -40,12 +40,14 @@ use std.types.string.str;
 use A: std.allocator;
 
 # pending: not bound yet, and tried again on the next read; none: no constant, for good;
-# refused: no constant, for good, since the evaluator rejected its initializer
-pub val CONSTANT_PENDING: u8 = 0;
-val     CONSTANT_ACTIVE:  u8 = 1;
-val     CONSTANT_BOUND:   u8 = 2;
-val     CONSTANT_NONE:    u8 = 3;
-val     CONSTANT_REFUSED: u8 = 4;
+# refused: no constant, for good, since the evaluator rejected its initializer; unevaluable:
+# no constant, for good, since its initializer needs a value no constant gives
+pub val CONSTANT_PENDING:     u8 = 0;
+val     CONSTANT_ACTIVE:      u8 = 1;
+val     CONSTANT_BOUND:       u8 = 2;
+val     CONSTANT_NONE:        u8 = 3;
+val     CONSTANT_REFUSED:     u8 = 4;
+val     CONSTANT_UNEVALUABLE: u8 = 5;
 
 # the value of the module constant the bare name `eid` names: one of this module's, bound on
 # first read, or one an imported module published
@@ -168,13 +170,14 @@ fun reads_published(sc: *sema_context.SemaContext, sym: *resolve.Symbol) bool {
 
 # binds the module `val` `did` declares when its initializer is a compile-time constant. this
 # is the last try, so an initializer the evaluator rejects is marked refused, which its
-# published value reports
+# published value reports, and one that is no constant is marked unevaluable
 pub fun bind(sc: *sema_context.SemaContext, did: ast_id.DeclId) err[fail.Fail] {
     val made: res[opt[comptime.CTValue], comptime.EvalFail] = bound_or_refused(sc, did);
     if (sel made.ok) { ret err[fail.Fail].ok{}; }
     val failure: comptime.EvalFail = made.err;
     if (failure.kind == comptime.EVAL_FAIL_INTERNAL) { ret err[fail.Fail].err{fail.message(failure.message)}; }
     if (failure.kind == comptime.EVAL_FAIL_REJECTED) { sc.view.constant_state[ast_id.decl_index(did)] = CONSTANT_REFUSED; }
+    or (comptime.not_constant(failure.kind))         { sc.view.constant_state[ast_id.decl_index(did)] = CONSTANT_UNEVALUABLE; }
     ret err[fail.Fail].ok{};
 }
 
@@ -182,6 +185,12 @@ pub fun bind(sc: *sema_context.SemaContext, did: ast_id.DeclId) err[fail.Fail] {
 pub fun rejected(sc: *sema_context.SemaContext, did: ast_id.DeclId) bool {
     if (sc.view.constant_state == nil || !sema_context.decl_in_view(sc, did)) { ret false; }
     ret sc.view.constant_state[ast_id.decl_index(did)] == CONSTANT_REFUSED;
+}
+
+# whether the initializer of the module `val` `did` was no constant when it was bound
+pub fun unevaluable(sc: *sema_context.SemaContext, did: ast_id.DeclId) bool {
+    if (sc.view.constant_state == nil || !sema_context.decl_in_view(sc, did)) { ret false; }
+    ret sc.view.constant_state[ast_id.decl_index(did)] == CONSTANT_UNEVALUABLE;
 }
 
 # the constant `did` binds, none while it reads as no constant: a reader reports that it read
@@ -200,7 +209,7 @@ fun bound_or_refused(sc: *sema_context.SemaContext, did: ast_id.DeclId) res[opt[
     if (sc.view.constant_state == nil || !sema_context.decl_in_view(sc, did)) { ret none; }
     val ix: u32 = ast_id.decl_index(did);
     val st: u8  = sc.view.constant_state[ix];
-    if (st == CONSTANT_ACTIVE || st == CONSTANT_NONE || st == CONSTANT_REFUSED) { ret none; }
+    if (st == CONSTANT_ACTIVE || st == CONSTANT_NONE || st == CONSTANT_REFUSED || st == CONSTANT_UNEVALUABLE) { ret none; }
 
     val d_opt: opt[*ast_decl.Decl] = ast.get_decl(sc.view.a, did);
     if (!sel d_opt.some) { ret none; }

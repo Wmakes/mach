@@ -7627,8 +7627,8 @@ test instance__lowers_from_the_exporter_interface_not_its_tree {
     ret 0;
 }
 
-# a same-module global cycle is refused at each global, and the rejected module leaves no
-# lower query product behind
+# a same-module global cycle is refused at each global when it is typed, and the rejected
+# module leaves no lower query product behind
 test global_init__cycle_is_refused_with_no_lower_product {
     var alloc: A.Allocator;
     page.make(?alloc);
@@ -7643,7 +7643,8 @@ test global_init__cycle_is_refused_with_no_lower_product {
     var p: project.Project = built.ok;
     fin { project.dnit_project(?p); }
     val typed: err[fail.Fail] = run_sema_pass(?p);
-    if (sel typed.err) { ret 3; }
+    if (sel typed.ok)                 { ret 3; }
+    if (!fail.is_reported(typed.err)) { ret 3; }
     val lowered: err[fail.Fail] = run_lower_pass(?p);
     if (sel lowered.ok)                                                                              { ret 4; }
     if (!fail.is_reported(lowered.err))                                                              { ret 5; }

@@ -101,3 +101,21 @@ a failure a walk with no place of its own returned to an evaluation: a refusal o
 is rejected under its own kind, which the evaluation reports at the node it stands on, and
 any other failure reads as eval_from_fail reads it
 
+## fun not_constant
+
+```mach
+pub fun not_constant(kind: EvalFailKind) bool;
+```
+
+whether a failure of a global initializer's own evaluation means it is no constant: it needs a
+value, a member, the types or a layout no constant gives it
+
+## fun init_not_constant_report
+
+```mach
+pub fun init_not_constant_report(alloc: *A.Allocator, diags: *diagnostic.DiagnosticStore, file: lang_source.FileId, span: lang_source.Span, name: opt[str]) err[fail.Fail];
+```
+
+reports the initializer at `span` of the global `name` as no constant, the one report check
+and lowering both give it; a decorator argument has no name
+
