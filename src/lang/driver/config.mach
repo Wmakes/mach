@@ -43,6 +43,7 @@ use driver_load:    mach.lang.driver.load;
 use mach.lang.driver.project;
 use mach.lang.driver.toolchain;
 use mach.lang.driver.union;
+use mach.lang.manifest.runner;
 use mach.lang.output;
 use mach.lang.output.layout;
 
@@ -71,10 +72,17 @@ pub fun resolve_artifact_path(alloc: *A.Allocator, reg: *lang_target.TargetRegis
     ret res[str, fail.Fail].ok{abs_r.ok};
 }
 
+# the program `mach run` launches
+# ---
+# path:          the built executable, or `-o`
+# host_runnable: the target's os and isa are the host's
+# target_name:   the target's declared name
+# runner:        the runner the target declares, none when it declares none
 pub rec RunArtifact {
     path:          str;
     host_runnable: bool;
     target_name:   str;
+    runner:        runner.Runner;
 }
 
 # the built executable `mach run` launches: the one (artifact, target, profile)
@@ -113,6 +121,11 @@ pub fun resolve_run_artifact(alloc: *A.Allocator, reg: *lang_target.TargetRegist
     var ra: RunArtifact;
     ra.host_runnable = manifest.target_matches_host(?itn, bu.target, lang_target.host_os_id(), lang_target.host_arch_id());
     ra.target_name   = intern.text(?itn, bu.target.name);
+    val work_r: res[str, fail.Fail] = driver_load.join_path(alloc, project_root, intern.text(?itn, bu.out_root));
+    if (sel work_r.err) { ret res[RunArtifact, fail.Fail].err{work_r.err}; }
+    val declared: res[runner.Runner, fail.Fail] = runner.declared(alloc, ?itn, bu.target, intern.text(?itn, bu.profile_name), work_r.ok);
+    if (sel declared.err) { ret res[RunArtifact, fail.Fail].err{declared.err}; }
+    ra.runner = declared.ok;
 
     if (output_override != nil) {
         if (str_empty(output_override)) {

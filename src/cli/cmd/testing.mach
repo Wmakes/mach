@@ -39,6 +39,7 @@ use mach.lang.duration;
 use mach.lang.fail;
 use mach.lang.host;
 use mach.lang.manifest;
+use mach.lang.manifest.runner;
 use mach.lang.session;
 use mach.lang.testrun;
 
@@ -62,7 +63,7 @@ val VERBOSITY_DOCS: [args.VERBOSITY_N]str = [args.VERBOSITY_N]str{
 # what `--jobs` sets for a test run
 val WORKERS_DOCS: [args.WORKERS_N]str = [args.WORKERS_N]str{"set concurrent test processes and codegen workers; 1 serialises"};
 # what `--runner` launches in a test run
-val RUNNERS_DOCS: [args.RUNNERS_N]str = [args.RUNNERS_N]str{"launch each test through a command name or path resolved on PATH"};
+val RUNNERS_DOCS: [args.RUNNERS_N]str = [args.RUNNERS_N]str{"launch each test through a command name or path resolved on PATH, in place of the target's runner"};
 # what `--timeout` bounds in a test run
 val TIMEOUTS_DOCS: [args.TIMEOUTS_N]str = [args.TIMEOUTS_N]str{"terminate a test process and its process group after the duration (30ms, 30s, 5m, 1h)"};
 
@@ -100,7 +101,7 @@ val CONSTRAINTS_N: usize = 3;
 val CONSTRAINTS: [CONSTRAINTS_N]str = [CONSTRAINTS_N]str{
     args.SELECTOR_CONSTRAINT,
     "-o and --runner require the selection to resolve to exactly one (artifact, target, profile)",
-    "every selected combination is built; its tests run only when the target's os and isa are the host's or --runner is given, and a run that executes none exits 1 unless --allow-unrunnable is given",
+    "every selected combination is built; its tests run when the target is the host's, declares a runner or --runner is given, and a run that executes none exits 1 unless --allow-unrunnable is given",
 };
 
 # length of EXITS
@@ -179,6 +180,9 @@ fun run_reported(cx: *args.Call) i64 {
     if (sel plan_r.err) { ret cli_diagnostic.report_fail(r, plan_r.err, diagnostic.ORIGIN_BUILD); }
     var planned: build.Planned = plan_r.ok;
 
+    var groups: Vector[Group] = group_cells(a, ?planned.cells);
+    val many:   bool          = groups.len > 1;
+
     # every selected combination is built before any test runs, and none runs
     # when one failed to build
     var collected: Vector[testrun.TestArtifact] = collections_vector.init[testrun.TestArtifact](a);
@@ -215,11 +219,10 @@ fun run_reported(cx: *args.Call) i64 {
                 ti = ti + 1;
             }
         }
+        val declared: err[fail.Fail] = declare_runners(a, ?planned, ?groups);
+        if (sel declared.err) { ret cli_diagnostic.report_fail(r, declared.err, diagnostic.ORIGIN_TEST); }
     }
     if (built != exit.OK) { ret built; }
-
-    var groups: Vector[Group] = group_cells(a, ?planned.cells);
-    val many:   bool          = groups.len > 1;
 
     if (list) {
         var gi: usize = 0;
@@ -239,7 +242,6 @@ fun run_reported(cx: *args.Call) i64 {
         ret exit.OK;
     }
 
-    var runner: *u8 = nil;
     if (sel opt_runner.some) {
         val name:        *u8                 = opt_runner.some;
         val res_resolve: res[*u8, fail.Fail] = host.program_resolve(a, name);
@@ -248,31 +250,46 @@ fun run_reported(cx: *args.Call) i64 {
             if (sel said.err) { ret cli_diagnostic.report_fail(r, fail.format_refused(said.err), diagnostic.ORIGIN_TEST); }
             ret cli_diagnostic.report_fail(r, fail.owning(fail.with_text(res_resolve.err, said.ok)), diagnostic.ORIGIN_TEST);
         }
-        runner = res_resolve.ok;
+        val g: *Group = ?groups.data[0];
+        g.runner = runner.overriding(res_resolve.ok, g.target);
     }
 
-    # a (target, profile) whose programs the host cannot run is built and not run;
-    # only --runner, over a single selection, launches it anyway
+    # a (target, profile) whose programs the host cannot run is built and not run
+    # unless its target declares a runner, or --runner over a single selection
+    # launches it
     var code:     i64   = exit.OK;
     var executed: u32   = 0;
     var gi:       usize = 0;
     for (gi < groups.len) {
         val g: *Group = ?groups.data[gi];
         gi = gi + 1;
-        if (!g.native && runner == nil) {
+        val through: bool = runner.given(?g.runner);
+        if (!g.native && !through) {
             report_skip(a, r, g);
             cnt;
         }
         executed = executed + 1;
         if (many) { print.printf("{} ({}):\n", g.target, g.profile); }
         var run: Vector[testrun.TestArtifact] = group_tests(a, g, ?collected);
-        code = exit.worst(code, run_group(a, r, ?run, runner, level, jobs, timeout));
+        if (through && run.len > 0) {
+            # a runner that names no program refuses the group once, not once per test
+            var index: *u8                            = "0";
+            var probe: res[runner.Command, fail.Fail] = runner.command(a, ?g.runner, run.data[0].exe::str, ?index, 1);
+            if (sel probe.err) {
+                code = exit.worst(code, cli_diagnostic.report_fail(r, probe.err, diagnostic.ORIGIN_TEST));
+                cnt;
+            }
+            runner.command_free(a, ?probe.ok);
+        }
+        var launcher: *runner.Runner = nil;
+        if (through) { launcher = ?g.runner; }
+        code = exit.worst(code, run_group(a, r, ?run, launcher, level, jobs, timeout));
     }
     if (executed == 0 && !allow_none) {
         val host: res[str, fail.Fail] = manifest.host_tuple(a);
         if (sel host.err) { ret cli_diagnostic.report_fail(r, host.err, diagnostic.ORIGIN_TEST); }
         val said: res[str, std_format.FormatError] = std_format.sprint(a,
-            "nothing was runnable on this host ({}): every selected target's os or isa differs from the host's, so its tests were built and not run; select a target native to this host with -t, or pass --runner for a single selection",
+            "nothing was runnable on this host ({}): every selected target's os or isa differs from the host's and it declares no runner, so its tests were built and not run; select a target native to this host with -t, declare `runner` in its [target], or pass --runner for a single selection",
             host.ok);
         if (sel said.err) { ret cli_diagnostic.report_fail(r, fail.format_refused(said.err), diagnostic.ORIGIN_TEST); }
         ret cli_diagnostic.report_fail(r, fail.user(diagnostic_kind.TARGET_NOT_RUNNABLE, said.ok), diagnostic.ORIGIN_TEST);
@@ -285,10 +302,12 @@ fun run_reported(cx: *args.Call) i64 {
 # target:  the declared target name
 # profile: the profile name
 # native:  the target's os and isa are the host's
+# runner:  what the group's tests are launched through, none to run themselves
 rec Group {
     target:  str;
     profile: str;
     native:  bool;
+    runner:  runner.Runner;
 }
 
 # the (target, profile) pairs the cells cover, in cell order
@@ -303,10 +322,37 @@ fun group_cells(a: *A.Allocator, cells: *Vector[manifest.Cell]) Vector[Group] {
             if (str_equals(groups.data[j].target, c.target_name) && str_equals(groups.data[j].profile, c.profile)) { seen = true; }
             j = j + 1;
         }
-        if (!seen) { collections_vector.push[Group](?groups, Group{target: c.target_name, profile: c.profile, native: c.native}); }
+        if (!seen) { collections_vector.push[Group](?groups, Group{target: c.target_name, profile: c.profile, native: c.native, runner: runner.none()}); }
         i = i + 1;
     }
     ret groups;
+}
+
+# each group's runner, the one its target declares in the root manifest, with
+# `{project.work}` the work directory the plans resolved for the group
+fun declare_runners(a: *A.Allocator, planned: *build.Planned, groups: *Vector[Group]) err[fail.Fail] {
+    var gi: usize = 0;
+    for (gi < groups.len) {
+        val g: *Group = ?groups.data[gi];
+        gi = gi + 1;
+        var pi: usize = 0;
+        for (pi < planned.plans.len) {
+            val bp: *build_plan.BuildPlan = ?planned.plans.data[pi];
+            pi = pi + 1;
+            var ui: usize = 0;
+            for (ui < bp.units.len) {
+                val u: *build_plan.BuildUnit = ?bp.units.data[ui];
+                ui = ui + 1;
+                if (str_len(u.owner) != 0 || !str_equals(u.sel_target, g.target) || !str_equals(u.profile, g.profile)) { cnt; }
+                val t:        *manifest.TargetDef           = manifest.find_target_by_name(bp.names, planned.manifest, g.target);
+                val declared: res[runner.Runner, fail.Fail] = runner.declared(a, bp.names, t, g.profile, u.out_dir);
+                if (sel declared.err) { ret err[fail.Fail].err{declared.err}; }
+                g.runner = declared.ok;
+                brk;
+            }
+        }
+    }
+    ret err[fail.Fail].ok{};
 }
 
 # the group's tests, each qualified name once: a test several selected artifacts
@@ -346,12 +392,12 @@ fun report_skip(a: *A.Allocator, r: *cli_diagnostic.Report, g: *Group) {
 # ---
 # ret: exit.OK when every test passed, exit.USER for a failed test, exit.INTERNAL
 #      for an infrastructure failure
-fun run_group(a: *A.Allocator, r: *cli_diagnostic.Report, tests: *Vector[testrun.TestArtifact], runner: *u8,
+fun run_group(a: *A.Allocator, r: *cli_diagnostic.Report, tests: *Vector[testrun.TestArtifact], launcher: *runner.Runner,
     level: u8, jobs: u32, timeout: chrono_duration.Duration) i64 {
     var rd: cli_diagnostic.Readout;
     cli_diagnostic.readout_init(?rd, r, 1, false, level);
 
-    var config: testing_pool.Config                 = testing_pool.Config{runner: runner, jobs: jobs, timeout: timeout, level: level, bytes: true};
+    var config: testing_pool.Config                 = testing_pool.Config{runner: launcher, jobs: jobs, timeout: timeout, level: level, bytes: true};
     val ran:    res[testing_pool.Counts, fail.Fail] = testing_pool.run(a, ?rd.sink, tests.data, tests.len::u32, ?config);
     if (sel ran.err) { ret cli_diagnostic.report_fail(r, ran.err, diagnostic.ORIGIN_TEST); }
     ret exit_code(ran.ok);

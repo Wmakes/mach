@@ -37,6 +37,7 @@ use mach.lang.driver.toolchain;
 use mach.lang.duration;
 use mach.lang.host;
 use mach.lang.manifest;
+use mach.lang.manifest.runner;
 use mach.lang.subprocess;
 use lang_target: mach.lang.target;
 
@@ -89,10 +90,11 @@ val EXITS: [EXITS_N]exit.Note = [EXITS_N]exit.Note{
 pub val COMMAND: args.CommandSpec = args.CommandSpec{name: "run", aliases: nil, alias_n: 0, grammar: " <path> [options] [-- args...]", summary: "execute a built project artifact", effect: "resolve an existing built executable and run it without rebuilding", exits: ?EXITS[0], exit_n: EXITS_N, terminator: "arguments after -- are forwarded to the program", tables: ?TABLES[0], table_n: TABLES_N, refused: ?REFUSED[0], refused_n: REFUSED_N, refusal: "run executes an existing artifact", relations: nil, relation_n: 0, constraints: ?CONSTRAINTS[0], constraint_n: CONSTRAINTS_N, operand_min: 0, operand_max: args.OPERANDS_ANY, truncate_at_sep: true, actions: nil, action_n: 0, examples: nil, example_n: 0, run: run};
 
 # `mach run`: execute the project's already-built binary, forwarding the arguments after
-# `--` to it; `--runner <cmd>` executes
-# `<cmd> <binary> <args>` instead, which is required when the target is not runnable on
-# this host; `--timeout <duration>` runs the program in its own process group and
-# terminates it after the duration
+# `--` to it. a target that declares a `runner` launches the expanded runner followed by
+# the arguments instead, and `--runner <cmd>` replaces it for this run with
+# `<cmd> <binary> <args>`; a target that is not the host's and has neither is refused.
+# `--timeout <duration>` runs the program in its own process group and terminates it
+# after the duration
 # ---
 # cx:  the call
 # ret: the program's exit code; 128 plus the signal number when it was killed by a signal;
@@ -144,8 +146,8 @@ pub fun run(cx: *args.Call) res[i64, fail.Fail] {
         ret refused(alloc, diagnostic_kind.ARTIFACT_NOT_BUILT, std_format.sprint(alloc, "no built artifact at '{}'; run `mach build` first", output_path));
     }
 
-    var runner:       *u8      = nil;
-    val runner_given: opt[*u8] = args.value(inv, argv, ?args.RUNNER);
+    var launcher:     runner.Runner = ra.runner;
+    val runner_given: opt[*u8]      = args.value(inv, argv, ?args.RUNNER);
     if (sel runner_given.some) {
         val name:       *u8                 = runner_given.some;
         val res_runner: res[*u8, fail.Fail] = host.program_resolve(alloc, name);
@@ -154,11 +156,12 @@ pub fun run(cx: *args.Call) res[i64, fail.Fail] {
             if (sel said.err) { ret res[i64, fail.Fail].err{fail.format_refused(said.err)}; }
             ret res[i64, fail.Fail].err{fail.owning(fail.with_text(res_runner.err, said.ok))};
         }
-        runner = res_runner.ok;
+        launcher = runner.overriding(res_runner.ok, ra.target_name);
     }
-    or {
+    or (!runner.given(?launcher)) {
         if (!ra.host_runnable) {
-            ret refused(alloc, diagnostic_kind.TARGET_NOT_RUNNABLE, std_format.sprint(alloc, "target '{}' is not runnable on this host; pass --runner", ra.target_name));
+            ret refused(alloc, diagnostic_kind.TARGET_NOT_RUNNABLE, std_format.sprint(alloc,
+                "target '{}' is not runnable on this host and declares no execution command; declare `runner` in [target.{}] or pass --runner", ra.target_name, ra.target_name));
         }
         val executable_r: res[str, fail.Fail] = host.program_resolve(alloc, output_path);
         if (sel executable_r.err) {
@@ -170,25 +173,29 @@ pub fun run(cx: *args.Call) res[i64, fail.Fail] {
     var fwd_len: usize = 0;
     if (sep < inv.argc) { fwd_len = inv.argc - sep - 1; }
 
-    var lead: usize = 0;
-    if (runner != nil) { lead = 1; }
-
-    val child_len:      usize              = lead + 1 + fwd_len + 1;
-    val res_child_argv: res[**u8, A.Error] = A.allocate[*u8](alloc, child_len);
-    if (sel res_child_argv.err) { ret res[i64, fail.Fail].err{fail.refused(res_child_argv.err)}; }
-    val child_argv: **u8 = res_child_argv.ok;
-
-    if (runner != nil) { child_argv[0] = runner; }
-    child_argv[lead] = output_path;
-    var i: usize = 0;
-    for (i < fwd_len) {
-        child_argv[lead + 1 + i] = argv[sep + 1 + i];
-        i                        = i + 1;
+    val through: bool = runner.given(?launcher);
+    var fwd:     **u8 = nil;
+    if (fwd_len > 0) { fwd = ?argv[sep + 1]; }
+    var cmd: runner.Command;
+    if (through) {
+        val made: res[runner.Command, fail.Fail] = runner.command(alloc, ?launcher, output_path, fwd, fwd_len);
+        if (sel made.err) { ret res[i64, fail.Fail].err{made.err}; }
+        cmd = made.ok;
     }
-    child_argv[lead + 1 + fwd_len] = nil;
-
-    var exe: *u8 = output_path;
-    if (runner != nil) { exe = runner; }
+    or {
+        val res_child_argv: res[**u8, A.Error] = A.allocate[*u8](alloc, fwd_len + 2);
+        if (sel res_child_argv.err) { ret res[i64, fail.Fail].err{fail.refused(res_child_argv.err)}; }
+        cmd         = runner.Command{argv: res_child_argv.ok, len: fwd_len + 1, lead: 1};
+        cmd.argv[0] = output_path;
+        var i: usize = 0;
+        for (i < fwd_len) {
+            cmd.argv[1 + i] = fwd[i];
+            i               = i + 1;
+        }
+        cmd.argv[1 + fwd_len] = nil;
+    }
+    val child_argv: **u8 = cmd.argv;
+    val exe:        *u8  = cmd.argv[0];
 
     var child: subprocess.OwnedSubprocess;
     subprocess.init(?child);
@@ -201,7 +208,7 @@ pub fun run(cx: *args.Call) res[i64, fail.Fail] {
     }
     val res_spawn: err[subprocess.Error] = subprocess.spawn(alloc, ?child, exe::str, child_argv, inv.environ, options);
     if (sel res_spawn.err) {
-        if (runner != nil) { ret res[i64, fail.Fail].err{fail.user(diagnostic_kind.PROCESS_SPAWN, "failed to execute the runner")}; }
+        if (through) { ret res[i64, fail.Fail].err{fail.user(diagnostic_kind.PROCESS_SPAWN, "failed to execute the runner")}; }
         ret res[i64, fail.Fail].err{fail.user(diagnostic_kind.PROCESS_SPAWN, "failed to execute the built binary")};
     }
 

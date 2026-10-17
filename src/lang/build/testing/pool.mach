@@ -32,6 +32,7 @@ use build_testing: mach.lang.build.testing;
 use mach.lang.diagnostic;
 use diagnostic_kind: mach.lang.diagnostic.kind;
 use mach.lang.fail;
+use mach.lang.manifest.runner;
 use mach.lang.output;
 use mach.lang.readout;
 use mach.lang.subprocess;
@@ -42,13 +43,13 @@ val CAPTURE_LIMIT: usize = 65536;
 
 # how a run executes its tests
 # ---
-# runner:  the program each test runs under, or nil to run the test itself
+# runner:  what each test is launched through, or nil for the test to run itself
 # jobs:    how many tests run at once, at least one
 # timeout: each test's bound, 0 for none
 # level:   the readout level; a passing test's output is kept only at the items level
 # bytes:   whether a test's captured output is kept for the renderer
 pub rec Config {
-    runner:  *u8;
+    runner:  *runner.Runner;
     jobs:    u32;
     timeout: chrono_duration.Duration;
     level:   u8;
@@ -72,10 +73,9 @@ pub rec Counts {
 # config: how they run
 # ret:    the run's counts; err when the run could not start, before any test ran
 pub fun run(a: *A.Allocator, sink: *readout.Sink, arts: *testrun.TestArtifact, n: u32, config: *Config) res[Counts, fail.Fail] {
-    val runner: *u8 = config.runner;
     if (n == 0) {
         var empty_tally: testrun.GateTally = testrun.gate_tally_init(a);
-        readout.run_start(sink, nil, 0, runner::str);
+        readout.run_start(sink, nil, 0);
         readout.run_end(sink, readout.RunEnd{tests: nil, count: 0, passed: 0, failed: 0, skipped: 0, timed_out: 0, wall: 0, tally: ?empty_tally});
         ret res[Counts, fail.Fail].ok{Counts{failed: 0, infrastructure: 0}};
     }
@@ -97,13 +97,14 @@ pub fun run(a: *A.Allocator, sink: *readout.Sink, arts: *testrun.TestArtifact, n
     var i: u32 = 0;
     for (i < n) {
         settle(?results[i], ?arts[i], testrun.gate_result(testrun.RESULT_PASS, testrun.CAUSE_PASS, nil));
-        results[i].done = false;
-        results[i].log  = nil;
-        i               = i + 1;
+        results[i].done   = false;
+        results[i].log    = nil;
+        results[i].launch = nil;
+        i                 = i + 1;
     }
 
     val run_start: readout.Instant = readout.sample();
-    readout.run_start(sink, results, n, runner::str);
+    readout.run_start(sink, results, n);
     execute(a, sink, results, n, log_dir, config);
     val wall: chrono_duration.Duration = readout.elapsed(run_start);
 
@@ -170,7 +171,7 @@ fun settle_exhausted(sink: *readout.Sink, results: *readout.TestResult, n: u32, 
 # run every test, up to jobs at once, its output captured under log_dir, and
 # report each to sink the moment it is reaped, in the order the tests finish
 fun execute(a: *A.Allocator, sink: *readout.Sink, results: *readout.TestResult, n: u32, log_dir: str, config: *Config) {
-    val runner:     *u8                      = config.runner;
+    val launcher:   *runner.Runner           = config.runner;
     val level:      u8                       = config.level;
     val want_bytes: bool                     = config.bytes;
     val timeout:    chrono_duration.Duration = config.timeout;
@@ -219,7 +220,7 @@ fun execute(a: *A.Allocator, sink: *readout.Sink, results: *readout.TestResult, 
             val idx: u32 = spawned;
             spawned = spawned + 1;
             val spawn_fail: opt[testrun.GateResult] = spawn_one(a, sink, processes, slots, window, ?results[idx], idx, log_dir,
-                runner, timeout);
+                launcher, timeout);
             if (sel spawn_fail.none) {
                 inflight = inflight + 1;
             }
@@ -299,38 +300,51 @@ fun execute(a: *A.Allocator, sink: *readout.Sink, results: *readout.TestResult, 
 # spawn the test at position idx into a free slot, its output captured to its
 # log under log_dir
 # ---
-# sink: receives why a test could not start when its result cannot say it, a log
-#       path that could not be made or a log that stays behind
+# sink: receives why a test could not start when its result cannot say it, a runner
+#       command that could not be made, a log path that could not be made or a log
+#       that stays behind
 # ret:  none when it is running, otherwise the result it settles with
 fun spawn_one(a: *A.Allocator, sink: *readout.Sink, processes: *subprocess.OwnedSubprocess, slots: *Slot,
-    window: u32, t: *readout.TestResult, idx: u32, log_dir: str, runner: *u8,
+    window: u32, t: *readout.TestResult, idx: u32, log_dir: str, launcher: *runner.Runner,
     timeout: chrono_duration.Duration) opt[testrun.GateResult] {
     var s: u32 = 0;
     for (s < window && slots[s].active) { s = s + 1; }
     if (s == window) { ret opt[testrun.GateResult].some{build_testing.classify_setup_failure()}; }
-    val art:  *testrun.TestArtifact = t.art;
-    val lp_r: res[str, fail.Fail]   = log_path(a, log_dir, idx);
+    val art: *testrun.TestArtifact = t.art;
+
+    var ibuf: [16]u8;
+    write_index(?ibuf[0], 16, art.idx);
+
+    var index:      *u8  = ?ibuf[0];
+    var child_argv: [3]*u8;
+    var argv:       **u8 = ?child_argv[0];
+    var cmd:        runner.Command;
+    cmd.argv = nil;
+    fin { runner.command_free(a, ?cmd); }
+    if (launcher != nil && runner.given(launcher)) {
+        val made: res[runner.Command, fail.Fail] = runner.command(a, launcher, art.exe::str, ?index, 1);
+        if (sel made.err) {
+            var unlaunched: fail.Fail = made.err;
+            readout.failure(sink, ?unlaunched, diagnostic.ORIGIN_TEST);
+            ret opt[testrun.GateResult].some{build_testing.classify_setup_failure()};
+        }
+        cmd  = made.ok;
+        argv = cmd.argv;
+        val said: res[str, fail.Fail] = runner.line(a, ?cmd);
+        if (sel said.ok) { t.launch = said.ok; }
+    }
+    or {
+        child_argv[0] = art.exe;
+        child_argv[1] = index;
+        child_argv[2] = nil;
+    }
+
+    val lp_r: res[str, fail.Fail] = log_path(a, log_dir, idx);
     if (sel lp_r.err) {
         log_unmade(a, sink, art, lp_r.err);
         ret opt[testrun.GateResult].some{build_testing.classify_setup_failure()};
     }
     t.log = lp_r.ok;
-
-    var ibuf: [16]u8;
-    write_index(?ibuf[0], 16, art.idx);
-
-    var child_argv: [4]*u8;
-    if (runner != nil) {
-        child_argv[0] = runner;
-        child_argv[1] = art.exe;
-        child_argv[2] = ?ibuf[0];
-        child_argv[3] = nil;
-    }
-    or {
-        child_argv[0] = art.exe;
-        child_argv[1] = ?ibuf[0];
-        child_argv[2] = nil;
-    }
 
     var options: subprocess.SpawnOptions = subprocess.spawn_options();
     options.grouped        = true;
@@ -343,7 +357,7 @@ fun spawn_one(a: *A.Allocator, sink: *readout.Sink, processes: *subprocess.Owned
     }
     val start: readout.Instant       = readout.sample();
     val res_c: err[subprocess.Error] = subprocess.spawn(
-        a, ?processes[idx], child_argv[0], ?child_argv[0], exec.Environment.inherit{}, options);
+        a, ?processes[idx], argv[0], argv, exec.Environment.inherit{}, options);
     if (sel res_c.err) {
         val term:      subprocess.SubprocessTerminal = processes[idx].terminal;
         var empty_cap: subprocess.CaptureIoResult;
@@ -648,7 +662,8 @@ fun t_run_one_bounded(a: *A.Allocator, body: str, timeout: chrono_duration.Durat
     var slot: Slot;
     slot.active = false;
 
-    val spawn_fail: opt[testrun.GateResult] = spawn_one(a, nil, ?process, ?slot, 1, ?results[0], 0, pr.log_dir, "/bin/sh"::*u8, timeout);
+    var shell:      runner.Runner           = runner.overriding("/bin/sh"::*u8, "t");
+    val spawn_fail: opt[testrun.GateResult] = spawn_one(a, nil, ?process, ?slot, 1, ?results[0], 0, pr.log_dir, ?shell, timeout);
     if (sel spawn_fail.some) { ret 4; }
 
     val wr: res[*subprocess.OwnedSubprocess, subprocess.Error] = subprocess.wait_any(a, ?process, 1, nil, nil);
