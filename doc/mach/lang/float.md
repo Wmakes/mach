@@ -118,47 +118,6 @@ Vulkan with no float-controls execution mode
 pub fun nan_rule_valid(r: NanRule) bool;
 ```
 
-## rec Nans
-
-```mach
-pub rec Nans;
-```
-
-the nan a target's float operations return in each format, binary16, binary32
-and binary64 at the index of mirl's format, which mirl's folder reads
-
-## fun nans_none
-
-```mach
-pub fun nans_none() Nans;
-```
-
-no format's rule stated, as where no target is selected
-
-## fun nans_of_rule
-
-```mach
-pub fun nans_of_rule(r: NanRule) Nans;
-```
-
-the rule of a target cell no owner assembles yet, read from mach's own (#4779)
-
-## fun nans_at
-
-```mach
-pub fun nans_at(n: *Nans, w: FloatWidth) capability.Nans;
-```
-
-the rule of the format of width `w`, binary64 for any other width
-
-## fun nans_held
-
-```mach
-pub fun nans_held(n: *Nans) bool;
-```
-
-whether any format's rule is stated, as it is wherever a target is selected
-
 ## fun f64_to_f32_bits
 
 ```mach

@@ -32,13 +32,3 @@ what the owners state of the cell of `os_id`, `arch_id` and `abi_id` under the
 selection `bits` of mach's extension table `t`, none for a cell no owner
 assembles yet
 
-## fun scalars_of
-
-```mach
-pub fun scalars_of(a: *A.Allocator, row: *mirl_target.Target, basis: opt[*mirl_target.Basis]) res[layout.Scalars, fail.Fail];
-```
-
-the extents mirl's data layout of `row` gives every primitive under the build
-`basis` opened, and the vector registers it fits vectors to. a pointer mirl
-holds logically, with no representation in memory, has none
-
