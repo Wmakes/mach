@@ -12,3 +12,14 @@ pub fun interface_of(sc: *sema_context.SemaContext) res[interface.Interface, fai
 
 the interface takes over the module's store of constant values, which its typing built in
 
+## fun refusals_report
+
+```mach
+pub fun refusals_report(sc: *sema_context.SemaContext, iface: *interface.Interface);
+```
+
+reports the refusal each module `val` the interface publishes holds, as lowering the global
+reports it: a refused member of an aggregate or address value under any kind, and a refused
+value of its own only when binding it met the evaluator's rejection, which lowering's own
+fold meets again. a `nil` initializer lowers as null and folds nothing
+
