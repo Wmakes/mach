@@ -14,10 +14,11 @@ use mach.lang.float;
 use mach.lang.intern;
 use lang_source:  mach.lang.source;
 use catalog_arch: mach.lang.target.catalog.arch;
+use mach.lang.target.resolved;
 use mach.lang.type;
 use mach.lang.wide;
-use mirl.target.capability;
-use A: std.allocator;
+use mirl_capability: mirl.target.capability;
+use A:               std.allocator;
 use std.allocator.page;
 use std.text.string.str_free;
 use std.types.bool.bool;
@@ -148,7 +149,7 @@ fun cast_desc(types: *type.TypeInterner, tid: type.TypeId, pointer_width: u32) r
 
 # the value mirl's conversion row `op` gives `x`, read as `from`, at `to`
 fun converted(op: opcodes.Opcode, from: comptime_fold.Kind, x: wide.Wide, to: comptime_fold.Kind) res[wide.Wide, comptime_failure.EvalFail] {
-    val got: comptime_fold.Answer = comptime_fold.convert(op, from, x, to, float.nans_none());
+    val got: comptime_fold.Answer = comptime_fold.convert(op, from, x, to, resolved.nans_none());
     if (sel got.folded) { ret res[wide.Wide, comptime_failure.EvalFail].ok{got.folded[0]}; }
     ret res[wide.Wide, comptime_failure.EvalFail].err{comptime_failure.eval_internal("the constant folder refused a comptime conversion")};
 }
@@ -201,12 +202,12 @@ fun float_to_int_refused(types: *type.TypeInterner, itn: *intern.Interner, v: f6
 # the refusal of a float operation whose result is a NaN at width `w` on the instruction
 # set `arch_id`, whose rule `nans` gives no defined NaN for it: no constant has that value.
 # a rule stated unspecified is the target model's, and one not stated is a gap of mirl's
-pub fun nan_unspecified(itn: *intern.Interner, arch_id: u32, nans: float.Nans, w: float.FloatWidth) res[CTValue, comptime_failure.EvalFail] {
+pub fun nan_unspecified(itn: *intern.Interner, arch_id: u32, nans: resolved.Nans, w: float.FloatWidth) res[CTValue, comptime_failure.EvalFail] {
     val target: str              = catalog_arch.name_for(arch_id);
     var at:     float.FloatWidth = w;
     if (at == float.FLOAT_W_NONE) { at = float.FLOAT_W_64; }
-    var rules: float.Nans      = nans;
-    val rule:  capability.Nans = float.nans_at(?rules, at);
+    var rules: resolved.Nans        = nans;
+    val rule:  mirl_capability.Nans = resolved.nans_at(?rules, at);
     var text:  res[str, fail.Fail];
     if (sel rule.unspecified) {
         text = diagnostic.format(itn.a, "comptime NaN has no value on `{}`: mirl's target model states its NaN result as unspecified", target);
@@ -229,7 +230,7 @@ pub fun nan_unspecified(itn: *intern.Interner, arch_id: u32, nans: float.Nans, w
 # another float width is made by the target's rule `nans` for the format it is
 # converted to, and where the rule leaves it unknown it is refused, naming the
 # target's instruction set `arch_id`
-pub fun cast_scalar(types: *type.TypeInterner, itn: *intern.Interner, pointer_width: u32, nans: float.Nans, arch_id: u32,
+pub fun cast_scalar(types: *type.TypeInterner, itn: *intern.Interner, pointer_width: u32, nans: resolved.Nans, arch_id: u32,
     value: CTValue, from_ty: type.TypeId, to_ty: type.TypeId, reinterpret: bool) res[CTValue, comptime_failure.EvalFail] {
     val from_r: res[type.PrimDesc, comptime_failure.EvalFail] = cast_desc(types, from_ty, pointer_width);
     if (sel from_r.err) { ret res[CTValue, comptime_failure.EvalFail].err{from_r.err}; }
@@ -260,7 +261,7 @@ pub fun cast_scalar(types: *type.TypeInterner, itn: *intern.Interner, pointer_wi
             if (to.bits > from.bits) { op = opcodes.FPROMOTE; }
             val got: comptime_fold.Answer = comptime_fold.convert(op, comptime_fold.Kind.float{source_fw}, source_bits, comptime_fold.Kind.float{fw}, nans);
             if (sel got.nan) {
-                if (!float.nans_held(?nans)) {
+                if (!resolved.nans_held(?nans)) {
                     ret reject(diagnostic_kind.COMPTIME_CAST, "a NaN converted to another float width folds only for a selected target");
                 }
                 ret nan_unspecified(itn, arch_id, nans, fw);
@@ -380,7 +381,7 @@ pub fun apply_equality(op: ast_expr.BinOp, lhs: CTValue, rhs: CTValue) res[CTVal
     if (lhs.kind == CT_KIND_INT) { eq = ct_int_eq(lhs, rhs); }
     or (lhs.kind == CT_KIND_FLOAT) {
         val w: float.FloatWidth = float.unify_width(lhs.float_width, rhs.float_width);
-        eq = comptime_fold.holds(comptime_fold.flt(opcodes.FEQ_O, w, float.round_at(lhs.data.f, w), float.round_at(rhs.data.f, w), 2, float.nans_none()), 0);
+        eq = comptime_fold.holds(comptime_fold.flt(opcodes.FEQ_O, w, float.round_at(lhs.data.f, w), float.round_at(rhs.data.f, w), 2, resolved.nans_none()), 0);
     }
     or (lhs.kind == CT_KIND_STR)  { eq = intern.str_same(lhs.data.s, rhs.data.s); }
     or (lhs.kind == CT_KIND_TYPE) { eq = lhs.data.t == rhs.data.t; }
@@ -411,14 +412,14 @@ pub fun apply_compare(op: ast_expr.BinOp, lhs: CTValue, rhs: CTValue) res[CTValu
         if (op == ast_expr.BIN_LT)  { row = opcodes.FLT_O; }
         or (op == ast_expr.BIN_LEQ) { row = opcodes.FLE_O; }
         or (op == ast_expr.BIN_GT)  { row = opcodes.FGT_O; }
-        ret u8_value(if_u8(comptime_fold.holds(comptime_fold.flt(row, w, l, r, 2, float.nans_none()), 0)));
+        ret u8_value(if_u8(comptime_fold.holds(comptime_fold.flt(row, w, l, r, 2, resolved.nans_none()), 0)));
     }
     ret reject(diagnostic_kind.COMPTIME_OPERAND_TYPE, "ordered comparison requires numeric operands");
 }
 
 # `nans` is the target's rule for the nan a float operation returns, and a nan result it
 # leaves unknown is refused as comptime.nan_unspecified
-pub fun apply_arith(op: ast_expr.BinOp, lhs: CTValue, rhs: CTValue, nans: float.Nans) res[CTValue, comptime_failure.EvalFail] {
+pub fun apply_arith(op: ast_expr.BinOp, lhs: CTValue, rhs: CTValue, nans: resolved.Nans) res[CTValue, comptime_failure.EvalFail] {
     if (lhs.kind != rhs.kind) {
         ret reject(diagnostic_kind.COMPTIME_OPERAND_TYPE, "arithmetic requires operands of the same kind");
     }
@@ -427,7 +428,7 @@ pub fun apply_arith(op: ast_expr.BinOp, lhs: CTValue, rhs: CTValue, nans: float.
     ret reject(diagnostic_kind.COMPTIME_OPERAND_TYPE, "arithmetic requires numeric operands");
 }
 
-fun apply_float_arith(op: ast_expr.BinOp, lhs: CTValue, rhs: CTValue, nans: float.Nans) res[CTValue, comptime_failure.EvalFail] {
+fun apply_float_arith(op: ast_expr.BinOp, lhs: CTValue, rhs: CTValue, nans: resolved.Nans) res[CTValue, comptime_failure.EvalFail] {
     if (!float.widths_agree(lhs.float_width, rhs.float_width)) {
         ret reject(diagnostic_kind.COMPTIME_FLOAT_WIDTH_MISMATCH, FLOAT_WIDTH_MISMATCH_MSG);
     }
@@ -595,7 +596,7 @@ fun negated(x: wide.Wide) wide.Wide {
 
 # the negation of a float at width `w`, folded
 pub fun float_negated(x: f64, w: float.FloatWidth) f64 {
-    ret comptime_fold.float_of(comptime_fold.flt(opcodes.FNEG, w, x, 0.0, 1, float.nans_none()), w);
+    ret comptime_fold.float_of(comptime_fold.flt(opcodes.FNEG, w, x, 0.0, 1, resolved.nans_none()), w);
 }
 
 # the bitwise complement of an integer, folded at comptime's width
@@ -736,8 +737,8 @@ pub fun ct_zero_int(unsigned: bool, width: u8) CTValue {
 
 # the rule of a target whose float operations return the first nan operand, quieted
 #[testing]
-pub fun t_nans() float.Nans {
-    ret float.nans_of_rule(float.NAN_PRESERVE);
+pub fun t_nans() resolved.Nans {
+    ret resolved.nans_of_rule(float.NAN_PRESERVE);
 }
 
 #[testing]
@@ -1101,7 +1102,7 @@ test apply_arith__agrees_with_the_folder_over_edge_values {
             val y:      wide.Wide                               = T_EDGES[(i + 4) % 9];
             val at:     comptime_fold.Kind                      = comptime_fold.Kind.integer{widths[w]};
             val whole:  wide.Wide                               = comptime_fold.first(comptime_fold.int(opcodes.ADD, x, y, 2));
-            val narrow: comptime_fold.Answer                    = comptime_fold.fold_op(opcodes.ADD, at, [3]wide.Wide{comptime_fold.at_width(x, widths[w], false), comptime_fold.at_width(y, widths[w], false), wide.zero()}, 2, opt[comptime_fold.Kind].none{}, float.nans_none());
+            val narrow: comptime_fold.Answer                    = comptime_fold.fold_op(opcodes.ADD, at, [3]wide.Wide{comptime_fold.at_width(x, widths[w], false), comptime_fold.at_width(y, widths[w], false), wide.zero()}, 2, opt[comptime_fold.Kind].none{}, resolved.nans_none());
             val cut:    res[CTValue, comptime_failure.EvalFail] = cast_int(whole, widths[w], false);
             if (sel cut.err) { ret 25; }
             if (sel cut.ok) {

@@ -1,7 +1,7 @@
 use std_format: std.format;
 use std.math.bignum;
 use std.math.ieee;
-use std.text.parse;
+use text_parse: std.text.parse;
 use std.types.bool.bool;
 use std.types.bool.false;
 use std.types.bool.true;
@@ -9,8 +9,6 @@ use std.types.option.opt;
 use std.types.result.res;
 use std.types.size.usize;
 use std.types.string.str;
-
-use mirl.target.capability;
 
 pub def FloatWidth: u8;
 
@@ -73,55 +71,6 @@ pub val NAN_UNSPECIFIED: NanRule = 4;
 
 pub fun nan_rule_valid(r: NanRule) bool {
     ret r == NAN_PRESERVE || r == NAN_CANONICAL || r == NAN_UNSPECIFIED;
-}
-
-# the nan a target's float operations return in each format, binary16, binary32
-# and binary64 at the index of mirl's format, which mirl's folder reads
-pub rec Nans {
-    formats: [3]capability.Nans;
-}
-
-# no format's rule stated, as where no target is selected
-pub fun nans_none() Nans {
-    var n: Nans;
-    var i: usize = 0;
-    for (i < 3) {
-        n.formats[i] = capability.Nans.unstated{};
-        i            = i + 1;
-    }
-    ret n;
-}
-
-# the rule of a target cell no owner assembles yet, read from mach's own (#4779)
-pub fun nans_of_rule(r: NanRule) Nans {
-    var rule: capability.Nans = capability.Nans.unstated{};
-    if (r == NAN_PRESERVE)    { rule = capability.Nans.propagate{}; }
-    if (r == NAN_CANONICAL)   { rule = capability.Nans.canonical{}; }
-    if (r == NAN_UNSPECIFIED) { rule = capability.Nans.unspecified{}; }
-    var n: Nans  = nans_none();
-    var i: usize = 0;
-    for (i < 3) {
-        n.formats[i] = rule;
-        i            = i + 1;
-    }
-    ret n;
-}
-
-# the rule of the format of width `w`, binary64 for any other width
-pub fun nans_at(n: *Nans, w: FloatWidth) capability.Nans {
-    if (w == FLOAT_W_16) { ret n.formats[0]; }
-    if (w == FLOAT_W_32) { ret n.formats[1]; }
-    ret n.formats[2];
-}
-
-# whether any format's rule is stated, as it is wherever a target is selected
-pub fun nans_held(n: *Nans) bool {
-    var i: usize = 0;
-    for (i < 3) {
-        if (!(sel n.formats[i].unstated)) { ret true; }
-        i = i + 1;
-    }
-    ret false;
 }
 
 # the binary32 encoding of binary64 bits that carry a binary32 value: rounded to
@@ -316,7 +265,7 @@ pub fun parse_decimal(s: str, len: usize, w: FloatWidth) opt[f64] {
     or (w == FLOAT_W_32) { f = ieee.F32; }
     # parse's work for the widest format a decimal rounds into, its four bignums of f64's limbs
     var work: [4 * ieee.F64_LIMBS]u32;
-    val got:  res[u128, parse.ParseError] = parse.parse_float(f, parse.Radix.decimal{}, s, len, true, ?work[0]);
+    val got:  res[u128, text_parse.ParseError] = text_parse.parse_float(f, text_parse.Radix.decimal{}, s, len, true, ?work[0]);
     if (sel got.err) { ret opt[f64].none{}; }
     ret opt[f64].some{value_of_bits(got.ok::u64, w)};
 }

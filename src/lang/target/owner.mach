@@ -23,10 +23,10 @@ use std.allocator.page;
 use std.collections.slice.Slice;
 
 use mirl.ir.module.Tuple;
-use types:       mirl.ir.type;
-use mirl_target: mirl.target;
-use mirl_basis:  mirl.target.basis;
-use mirl.target.capability;
+use types:           mirl.ir.type;
+use mirl_target:     mirl.target;
+use mirl_basis:      mirl.target.basis;
+use mirl_capability: mirl.target.capability;
 
 use mach.lang.fail;
 use mach.lang.float;
@@ -35,6 +35,7 @@ use catalog_abi:  mach.lang.target.catalog.abi;
 use catalog_arch: mach.lang.target.catalog.arch;
 use catalog_os:   mach.lang.target.catalog.os;
 use mach.lang.target.extension;
+use mach.lang.target.resolved;
 
 # one mach target cell and the tuple its owners spell it by
 # ---
@@ -126,7 +127,7 @@ fun added_names(t: *extension.Table, bits: u64, out: *str, cap: usize) usize {
 # nans:    the nan each float format's operations return
 pub rec Owned {
     scalars: layout.Scalars;
-    nans:    float.Nans;
+    nans:    resolved.Nans;
 }
 
 # the most extensions a build adds over a cell's baseline
@@ -165,11 +166,11 @@ pub fun owned_for(a: *A.Allocator, os_id: u32, arch_id: u32, abi_id: u32, t: *ex
 
 # the nan each float format's operations return on `target` under `basis`,
 # unstated for a format it holds under no row
-fun nans_of(target: *mirl_target.Target, basis: opt[*mirl_target.Basis]) float.Nans {
-    var out: float.Nans = float.nans_none();
-    var i:   usize      = 0;
+fun nans_of(target: *mirl_target.Target, basis: opt[*mirl_target.Basis]) resolved.Nans {
+    var out: resolved.Nans = resolved.nans_none();
+    var i:   usize         = 0;
     for (i < 3) {
-        val got: res[capability.Nans, mirl_basis.Error] = mirl_target.nans(basis, ?target.caps, format_of(layout.FLOAT_WIDTHS[i]));
+        val got: res[mirl_capability.Nans, mirl_basis.Error] = mirl_target.nans(basis, ?target.caps, format_of(layout.FLOAT_WIDTHS[i]));
         if (sel got.ok) { out.formats[i] = got.ok; }
         i = i + 1;
     }
@@ -196,9 +197,9 @@ fun format_of(bits: u32) types.Format {
 # it states no register fit. spir-v's rule aligns a vector to its element, which
 # mach's logical lowering does not take yet, so mach keeps its own there
 fun registers_of(row: *mirl_target.Target, basis: opt[*mirl_target.Basis]) opt[layout.Registers] {
-    val rule: capability.VectorRule = row.data.vectors;
+    val rule: mirl_capability.VectorRule = row.data.vectors;
     if (!(sel rule.register)) { ret opt[layout.Registers].none{}; }
-    val widest: res[u64, capability.Unread] = capability.widest_register(mirl_target.context_of(basis), rule.register);
+    val widest: res[u64, mirl_capability.Unread] = mirl_capability.widest_register(mirl_target.context_of(basis), rule.register);
     if (sel widest.err) { ret opt[layout.Registers].none{}; }
     ret opt[layout.Registers].some{layout.Registers{narrow: rule.register.narrow, widest: widest.ok::u32}};
 }
@@ -206,7 +207,7 @@ fun registers_of(row: *mirl_target.Target, basis: opt[*mirl_target.Basis]) opt[l
 # the extents mirl's data layout of `row` gives every primitive under the build
 # `basis` opened, and the vector registers it fits vectors to. a pointer mirl
 # holds logically, with no representation in memory, has none
-pub fun scalars_of(a: *A.Allocator, row: *mirl_target.Target, basis: opt[*mirl_target.Basis]) res[layout.Scalars, fail.Fail] {
+fun scalars_of(a: *A.Allocator, row: *mirl_target.Target, basis: opt[*mirl_target.Basis]) res[layout.Scalars, fail.Fail] {
     var t: types.Table = types.init(a);
     fin { types.dnit(?t); }
     var l: mirl_target.Layout = mirl_target.of(row, ?t, mirl_target.context_of(basis));
