@@ -144,7 +144,7 @@ fun read_decl(s: *session.Session, a: *ast.Ast, idx: *Index, path: *Vector[Step]
             val pushed: res[usize, A.Error]      = collections_vector.push[Step](path, Step{chain: did, branch: b});
             if (sel pushed.err) { ret err[fail.Fail].err{fail.refused(pushed.err)}; }
             val r: err[fail.Fail] = read_list(s, a, idx, path, br.body_start, br.body_len);
-            path.len = path.len - 1;
+            collections_vector.truncate[Step](path, path.len - 1);
             if (sel r.err) { ret r; }
             b = b + 1;
         }

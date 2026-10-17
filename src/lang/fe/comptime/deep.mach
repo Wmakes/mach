@@ -236,8 +236,8 @@ pub fun clone(to: *Store, from: *Store, node: u32) res[u32, fail.Fail] {
     val members: usize               = to.members.len;
     val copied:  res[u32, fail.Fail] = clone_tree(to, from, node);
     if (sel copied.err) {
-        to.nodes.len   = nodes;
-        to.members.len = members;
+        collections_vector.truncate[Node](?to.nodes, nodes);
+        collections_vector.truncate[Member](?to.members, members);
     }
     ret copied;
 }
@@ -295,8 +295,8 @@ pub fun zero_node(s: *Store, types: *type.TypeInterner, pointer_width: u32, ty: 
         if (sel put.ok) { ret built; }
         kept = res[u32, fail.Fail].err{fail.refused(put.err)};
     }
-    s.nodes.len   = nodes;
-    s.members.len = members;
+    collections_vector.truncate[Node](?s.nodes, nodes);
+    collections_vector.truncate[Member](?s.members, members);
     ret kept;
 }
 

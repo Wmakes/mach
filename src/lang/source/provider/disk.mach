@@ -70,7 +70,7 @@ pub fun package_add(d: *Disk, p: Package) err[fail.Fail] {
 }
 
 pub fun packages_clear(d: *Disk) {
-    d.packages.len = 0;
+    collections_vector.truncate[Package](?d.packages, 0);
 }
 
 pub fun provider_of(d: *Disk) provider.Provider {

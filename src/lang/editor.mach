@@ -1416,7 +1416,7 @@ fun release_roots(es: *EditorSession, all: bool) err[fail.Fail] {
         if (sel released.err) { ret released; }
         str_free(es.alloc, entry.root);
         es.root_retainers.data[i] = es.root_retainers.data[es.root_retainers.len - 1];
-        es.root_retainers.len     = es.root_retainers.len - 1;
+        collections_vector.truncate[RootRetainer](?es.root_retainers, es.root_retainers.len - 1);
     }
     ret retention.retire(?es.s.retention, ?es.s.queries);
 }

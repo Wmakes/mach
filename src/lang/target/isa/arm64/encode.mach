@@ -1,4 +1,5 @@
 # MIR lowered to arm64 instructions, with the frame each function lays out
+use collections_vector: std.collections.vector;
 use mach.lang.fail;
 use std.allocator.page;
 use io_writer: std.io.writer;
@@ -2517,7 +2518,7 @@ test frame__callee_saved_gp_prologue_and_epilogue {
     if (isa_encode.word_read(?st.buf, 12) != 0x910003BF) { bad = 1; }
     if (isa_encode.word_read(?st.buf, 16) != 0xA8C17BFD) { bad = 1; }
 
-    st.buf.bytes.len = 0;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     var g: lang_mir.MirFunction;
     g.callee_mask         = (1::u32 << 19) | (1::u32 << 20) | (1::u32 << 21);
     g.callee_mask_fp      = 0;
@@ -2620,48 +2621,48 @@ test encode_fp_arith__op_and_width {
     var ops: [3]lang_mir.MirOperand;
     var mi:  lang_mir.MirInstr = lang_mir.instr(lang_mir.MIR_ADD, ?ops[0], 3, 0, 0);
 
-    ops[0]           = tvec(0);
-    ops[1]           = tvec(1);
-    ops[2]           = tvec(2);
-    mi.opcode        = lang_mir.MIR_FADD;
-    mi.width         = 4;
-    mi.src_width     = 4;
-    st.buf.bytes.len = 0;
+    ops[0]       = tvec(0);
+    ops[1]       = tvec(1);
+    ops[2]       = tvec(2);
+    mi.opcode    = lang_mir.MIR_FADD;
+    mi.width     = 4;
+    mi.src_width = 4;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     encode_fp_arith(?st, ?f, ?mi);
     if (isa_encode.word_read(?st.buf, 0) != 0x1E222820) { bad = 1; }
-    ops[0]           = tvec(13);
-    ops[1]           = tvec(17);
-    ops[2]           = tvec(20);
-    mi.width         = 8;
-    mi.src_width     = 8;
-    st.buf.bytes.len = 0;
+    ops[0]       = tvec(13);
+    ops[1]       = tvec(17);
+    ops[2]       = tvec(20);
+    mi.width     = 8;
+    mi.src_width = 8;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     encode_fp_arith(?st, ?f, ?mi);
     if (isa_encode.word_read(?st.buf, 0) != 0x1E742A2D) { bad = 1; }
-    ops[0]           = tvec(3);
-    ops[1]           = tvec(4);
-    ops[2]           = tvec(5);
-    mi.opcode        = lang_mir.MIR_FSUB;
-    mi.width         = 4;
-    mi.src_width     = 4;
-    st.buf.bytes.len = 0;
+    ops[0]       = tvec(3);
+    ops[1]       = tvec(4);
+    ops[2]       = tvec(5);
+    mi.opcode    = lang_mir.MIR_FSUB;
+    mi.width     = 4;
+    mi.src_width = 4;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     encode_fp_arith(?st, ?f, ?mi);
     if (isa_encode.word_read(?st.buf, 0) != 0x1E253883) { bad = 1; }
-    ops[0]           = tvec(6);
-    ops[1]           = tvec(7);
-    ops[2]           = tvec(8);
-    mi.opcode        = lang_mir.MIR_FMUL;
-    mi.width         = 8;
-    mi.src_width     = 8;
-    st.buf.bytes.len = 0;
+    ops[0]       = tvec(6);
+    ops[1]       = tvec(7);
+    ops[2]       = tvec(8);
+    mi.opcode    = lang_mir.MIR_FMUL;
+    mi.width     = 8;
+    mi.src_width = 8;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     encode_fp_arith(?st, ?f, ?mi);
     if (isa_encode.word_read(?st.buf, 0) != 0x1E6808E6) { bad = 1; }
-    ops[0]           = tvec(9);
-    ops[1]           = tvec(10);
-    ops[2]           = tvec(11);
-    mi.opcode        = lang_mir.MIR_FDIV;
-    mi.width         = 4;
-    mi.src_width     = 4;
-    st.buf.bytes.len = 0;
+    ops[0]       = tvec(9);
+    ops[1]       = tvec(10);
+    ops[2]       = tvec(11);
+    mi.opcode    = lang_mir.MIR_FDIV;
+    mi.width     = 4;
+    mi.src_width = 4;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     encode_fp_arith(?st, ?f, ?mi);
     if (isa_encode.word_read(?st.buf, 0) != 0x1E2B1949) { bad = 1; }
 
@@ -2678,29 +2679,29 @@ test encode_fp_neg_and_fmov__widths {
     var ops: [2]lang_mir.MirOperand;
     var mi:  lang_mir.MirInstr = lang_mir.instr(lang_mir.MIR_ADD, ?ops[0], 2, 0, 0);
 
-    ops[0]           = tvec(12);
-    ops[1]           = tvec(13);
-    mi.opcode        = lang_mir.MIR_FNEG;
-    mi.width         = 4;
-    mi.src_width     = 4;
-    st.buf.bytes.len = 0;
+    ops[0]       = tvec(12);
+    ops[1]       = tvec(13);
+    mi.opcode    = lang_mir.MIR_FNEG;
+    mi.width     = 4;
+    mi.src_width = 4;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     encode_fp_neg(?st, ?f, ?mi);
     if (isa_encode.word_read(?st.buf, 0) != 0x1E2141AC) { bad = 1; }
-    mi.width         = 8;
-    mi.src_width     = 8;
-    st.buf.bytes.len = 0;
+    mi.width     = 8;
+    mi.src_width = 8;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     encode_fp_neg(?st, ?f, ?mi);
     if (isa_encode.word_read(?st.buf, 0) != 0x1E6141AC) { bad = 1; }
 
-    ops[0]           = tvec(16);
-    ops[1]           = tvec(17);
-    mi.opcode        = arm64.FMOV::u32;
-    mi.width         = 4;
-    st.buf.bytes.len = 0;
+    ops[0]    = tvec(16);
+    ops[1]    = tvec(17);
+    mi.opcode = arm64.FMOV::u32;
+    mi.width  = 4;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     encode_fmov(?st, ?f, ?mi);
     if (isa_encode.word_read(?st.buf, 0) != 0x1E204230) { bad = 1; }
-    mi.width         = 8;
-    st.buf.bytes.len = 0;
+    mi.width = 8;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     encode_fmov(?st, ?f, ?mi);
     if (isa_encode.word_read(?st.buf, 0) != 0x1E604230) { bad = 1; }
 
@@ -2730,18 +2731,18 @@ test store__every_destination_kind_keeps_the_bank {
     var gval:  lang_mir.MirOperand = lang_mir.op_preg(lang_mir.preg_id(isa_inst.regid_make(isa_inst.REG_CLASS_ID_GP, 2)));
 
     var pmem: lang_mir.MirOperand = lang_mir.op_mem_preg(lang_mir.preg_id(isa_inst.regid_make(isa_inst.REG_CLASS_ID_GP, 1)), 0);
-    st.buf.bytes.len = 0;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     emit_store_mem(?st, ?f, ?pmem, ?vval, 8);
     if ((isa_encode.word_read(?st.buf, 0) & v_bit) == 0) { bad = 1; }
-    st.buf.bytes.len = 0;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     emit_store_mem(?st, ?f, ?pmem, ?gval, 8);
     if ((isa_encode.word_read(?st.buf, 0) & v_bit) != 0) { bad = 1; }
 
     var smem: lang_mir.MirOperand = lang_mir.op_sym(intern.str_id(9), 0);
-    st.buf.bytes.len = 0;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     emit_store_mem(?st, ?f, ?smem, ?vval, 8);
     if ((isa_encode.word_read(?st.buf, 4) & v_bit) == 0) { bad = 1; }
-    st.buf.bytes.len = 0;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     emit_store_mem(?st, ?f, ?smem, ?gval, 8);
     if ((isa_encode.word_read(?st.buf, 4) & v_bit) != 0) { bad = 1; }
 
@@ -2749,7 +2750,7 @@ test store__every_destination_kind_keeps_the_bank {
     lops[0] = tvec(2);
     lops[1] = lang_mir.op_sym(intern.str_id(9), 0);
     var ld: lang_mir.MirInstr = lang_mir.instr(lang_mir.MIR_LOAD, ?lops[0], 2, 8, 8);
-    st.buf.bytes.len = 0;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     if (!t_accepted(encode_load(?st, ?f, ?ld), ?st.buf)) { bad = 1; }
     or {
         if ((isa_encode.word_read(?st.buf, 4) & v_bit) == 0) { bad = 1; }
@@ -2795,42 +2796,42 @@ test float_width__refusals_emit_nothing {
     ops[2] = tvec(14);
 
     var mv: lang_mir.MirInstr = lang_mir.instr(arm64.FMOV::u32, ?ops[0], 2, 12, 0);
-    st.buf.bytes.len = 0;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     if (!t_refused(encode_fmov(?st, ?f, ?mv), ?st.buf)) { bad = 1; }
-    mv.width         = 32;
-    st.buf.bytes.len = 0;
+    mv.width = 32;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     if (!t_refused(encode_fmov(?st, ?f, ?mv), ?st.buf)) { bad = 1; }
-    mv.width         = 0;
-    st.buf.bytes.len = 0;
+    mv.width = 0;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     if (!t_refused(encode_fmov(?st, ?f, ?mv), ?st.buf)) { bad = 1; }
-    mv.width         = 1;
-    st.buf.bytes.len = 0;
+    mv.width = 1;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     if (!t_refused(encode_fmov(?st, ?f, ?mv), ?st.buf)) { bad = 1; }
 
-    mv.width         = 4;
-    st.buf.bytes.len = 0;
+    mv.width = 4;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     if (!t_accepted(encode_fmov(?st, ?f, ?mv), ?st.buf)) { bad = 1; }
-    mv.width         = 8;
-    st.buf.bytes.len = 0;
+    mv.width = 8;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     if (!t_accepted(encode_fmov(?st, ?f, ?mv), ?st.buf)) { bad = 1; }
-    mv.width         = 16;
-    st.buf.bytes.len = 0;
+    mv.width = 16;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     if (!t_accepted(encode_fmov(?st, ?f, ?mv), ?st.buf)) { bad = 1; }
 
     var ar: lang_mir.MirInstr = lang_mir.instr(lang_mir.MIR_FADD, ?ops[0], 3, 16, 0);
-    st.buf.bytes.len = 0;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     if (!t_refused(encode_fp_arith(?st, ?f, ?ar), ?st.buf)) { bad = 1; }
-    ar.width         = 4;
-    st.buf.bytes.len = 0;
+    ar.width = 4;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     if (!t_accepted(encode_fp_arith(?st, ?f, ?ar), ?st.buf)) { bad = 1; }
 
     var ng: lang_mir.MirInstr = lang_mir.instr(lang_mir.MIR_FNEG, ?ops[0], 2, 16, 0);
-    ng.src_width     = 16;
-    st.buf.bytes.len = 0;
+    ng.src_width = 16;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     if (!t_refused(encode_fp_neg(?st, ?f, ?ng), ?st.buf)) { bad = 1; }
-    ng.width         = 8;
-    ng.src_width     = 8;
-    st.buf.bytes.len = 0;
+    ng.width     = 8;
+    ng.src_width = 8;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     if (!t_accepted(encode_fp_neg(?st, ?f, ?ng), ?st.buf)) { bad = 1; }
 
     var cops: [3]lang_mir.MirOperand;
@@ -2838,48 +2839,48 @@ test float_width__refusals_emit_nothing {
     cops[1] = tvec(13);
     cops[2] = tvec(14);
     var cm: lang_mir.MirInstr = lang_mir.instr(lang_mir.MIR_FCMP, ?cops[0], 3, 16, 0);
-    cm.src_width     = lang_mir.FCC_EQ;
-    st.buf.bytes.len = 0;
+    cm.src_width = lang_mir.FCC_EQ;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     if (!t_refused(encode_fp_cmp(?st, ?f, ?cm), ?st.buf)) { bad = 1; }
-    cm.width         = 8;
-    st.buf.bytes.len = 0;
+    cm.width = 8;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     if (!t_accepted(encode_fp_cmp(?st, ?f, ?cm), ?st.buf)) { bad = 1; }
 
     var cv: lang_mir.MirInstr = lang_mir.instr(lang_mir.MIR_FP_TRUNC, ?ops[0], 2, 16, 0);
-    cv.src_width     = 8;
-    st.buf.bytes.len = 0;
+    cv.src_width = 8;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     if (!t_refused(encode_fp_conv(?st, ?f, ?cv), ?st.buf)) { bad = 1; }
-    cv.width         = 4;
-    cv.src_width     = 16;
-    st.buf.bytes.len = 0;
+    cv.width     = 4;
+    cv.src_width = 16;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     if (!t_refused(encode_fp_conv(?st, ?f, ?cv), ?st.buf)) { bad = 1; }
-    cv.width         = 4;
-    cv.src_width     = 8;
-    st.buf.bytes.len = 0;
+    cv.width     = 4;
+    cv.src_width = 8;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     if (!t_accepted(encode_fp_conv(?st, ?f, ?cv), ?st.buf)) { bad = 1; }
 
     var iops: [2]lang_mir.MirOperand;
     iops[0] = tvec(12);
     iops[1] = lang_mir.op_preg(lang_mir.preg_id(isa_inst.regid_make(isa_inst.REG_CLASS_ID_GP, 1)));
     var i2f: lang_mir.MirInstr = lang_mir.instr(lang_mir.MIR_SI_TO_FP, ?iops[0], 2, 16, 0);
-    i2f.src_width    = 8;
-    st.buf.bytes.len = 0;
+    i2f.src_width = 8;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     if (!t_refused(encode_fp_conv(?st, ?f, ?i2f), ?st.buf)) { bad = 1; }
-    i2f.width        = 8;
-    i2f.src_width    = 1;
-    st.buf.bytes.len = 0;
+    i2f.width     = 8;
+    i2f.src_width = 1;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     if (!t_accepted(encode_fp_conv(?st, ?f, ?i2f), ?st.buf)) { bad = 1; }
 
     var fops: [2]lang_mir.MirOperand;
     fops[0] = lang_mir.op_preg(lang_mir.preg_id(isa_inst.regid_make(isa_inst.REG_CLASS_ID_GP, 0)));
     fops[1] = tvec(13);
     var f2i: lang_mir.MirInstr = lang_mir.instr(lang_mir.MIR_FP_TO_SI, ?fops[0], 2, 8, 0);
-    f2i.src_width    = 16;
-    st.buf.bytes.len = 0;
+    f2i.src_width = 16;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     if (!t_refused(encode_fp_conv(?st, ?f, ?f2i), ?st.buf)) { bad = 1; }
-    f2i.width        = 1;
-    f2i.src_width    = 8;
-    st.buf.bytes.len = 0;
+    f2i.width     = 1;
+    f2i.src_width = 8;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     if (!t_accepted(encode_fp_conv(?st, ?f, ?f2i), ?st.buf)) { bad = 1; }
 
     isa_encode.buf_dnit(?st.buf);
@@ -2893,104 +2894,104 @@ test access_width__refusals_emit_nothing {
     arm64_emit.tbuf(?st, ?alloc);
     var f: lang_mir.MirFunction;
 
-    st.buf.bytes.len = 0;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     if (!t_refused(emit_fp_mem(?st, 0, 1, 0, 32, true), ?st.buf)) { bad = 1; }
-    st.buf.bytes.len = 0;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     if (!t_refused(emit_fp_mem(?st, 0, 1, 0, 32, false), ?st.buf)) { bad = 1; }
-    st.buf.bytes.len = 0;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     if (!t_refused(emit_fp_mem(?st, 0, 1, 0, 0, true), ?st.buf)) { bad = 1; }
-    st.buf.bytes.len = 0;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     if (!t_refused(emit_fp_mem(?st, 0, 1, 0, 12, true), ?st.buf)) { bad = 1; }
-    st.buf.bytes.len = 0;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     if (!t_refused(emit_fp_mem(?st, 0, 1, 100000, 32, true), ?st.buf)) { bad = 1; }
 
-    st.buf.bytes.len = 0;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     if (!t_accepted(emit_fp_mem(?st, 0, 1, 16, 1, true), ?st.buf)) { bad = 1; }
     if (isa_encode.word_read(?st.buf, 0) != 0x3D404020)            { bad = 1; }
-    st.buf.bytes.len = 0;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     emit_fp_mem(?st, 0, 1, 16, 1, false);
     if (isa_encode.word_read(?st.buf, 0) != 0x3D004020) { bad = 1; }
-    st.buf.bytes.len = 0;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     emit_fp_mem(?st, 0, 1, 16, 2, true);
     if (isa_encode.word_read(?st.buf, 0) != 0x7D402020) { bad = 1; }
-    st.buf.bytes.len = 0;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     emit_fp_mem(?st, 0, 1, 0 - 8, 1, true);
     if (isa_encode.word_read(?st.buf, 0) != 0x3C5F8020) { bad = 1; }
 
-    st.buf.bytes.len = 0;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     if (!t_accepted(emit_fp_mem(?st, 0, 1, 16, 4, true), ?st.buf)) { bad = 1; }
     if (isa_encode.word_read(?st.buf, 0) != 0xBD401020)            { bad = 1; }
-    st.buf.bytes.len = 0;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     emit_fp_mem(?st, 0, 1, 16, 8, true);
     if (isa_encode.word_read(?st.buf, 0) != 0xFD400820) { bad = 1; }
-    st.buf.bytes.len = 0;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     emit_fp_mem(?st, 0, 1, 16, 16, true);
     if (isa_encode.word_read(?st.buf, 0) != 0x3DC00420) { bad = 1; }
-    st.buf.bytes.len = 0;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     emit_fp_mem(?st, 0, 1, 16, 16, false);
     if (isa_encode.word_read(?st.buf, 0) != 0x3D800420) { bad = 1; }
-    st.buf.bytes.len = 0;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     emit_fp_mem(?st, 0, 1, 0 - 8, 16, true);
     if (isa_encode.word_read(?st.buf, 0) != 0x3CDF8020) { bad = 1; }
-    st.buf.bytes.len = 0;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     emit_fp_mem(?st, 0, 1, 0 - 8, 16, false);
     if (isa_encode.word_read(?st.buf, 0) != 0x3C9F8020) { bad = 1; }
 
-    st.buf.bytes.len = 0;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     if (!t_refused(arm64_emit.mem_access(?st, 0, 1, 0, 16, true), ?st.buf)) { bad = 1; }
-    st.buf.bytes.len = 0;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     if (!t_refused(arm64_emit.mem_access(?st, 0, 1, 0, 16, false), ?st.buf)) { bad = 1; }
-    st.buf.bytes.len = 0;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     if (!t_refused(arm64_emit.mem_access(?st, 0, 1, 0, 3, true), ?st.buf)) { bad = 1; }
-    st.buf.bytes.len = 0;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     if (!t_refused(arm64_emit.mem_access(?st, 0, 1, 0, 32, true), ?st.buf)) { bad = 1; }
-    st.buf.bytes.len = 0;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     if (!t_refused(arm64_emit.mem_access(?st, 0, 1, 0, 0, true), ?st.buf)) { bad = 1; }
-    st.buf.bytes.len = 0;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     if (!t_refused(arm64_emit.mem_access(?st, 0, 1, 0, 0, false), ?st.buf)) { bad = 1; }
 
     var lops: [2]lang_mir.MirOperand;
     lops[0] = tvec(0);
     lops[1] = lang_mir.op_mem_preg(lang_mir.preg_id(isa_inst.regid_make(isa_inst.REG_CLASS_ID_GP, 1)), 0);
     var ld: lang_mir.MirInstr = lang_mir.instr(lang_mir.MIR_LOAD, ?lops[0], 2, 32, 0);
-    ld.src_width     = 32;
-    st.buf.bytes.len = 0;
+    ld.src_width = 32;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     if (!t_refused(encode_load(?st, ?f, ?ld), ?st.buf)) { bad = 1; }
-    ld.width         = 16;
-    ld.src_width     = 16;
-    st.buf.bytes.len = 0;
+    ld.width     = 16;
+    ld.src_width = 16;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     if (!t_accepted(encode_load(?st, ?f, ?ld), ?st.buf)) { bad = 1; }
 
     var sops: [2]lang_mir.MirOperand;
-    sops[0]          = lang_mir.op_mem_preg(lang_mir.preg_id(isa_inst.regid_make(isa_inst.REG_CLASS_ID_GP, 1)), 0);
-    sops[1]          = tvec(0);
-    st.buf.bytes.len = 0;
+    sops[0] = lang_mir.op_mem_preg(lang_mir.preg_id(isa_inst.regid_make(isa_inst.REG_CLASS_ID_GP, 1)), 0);
+    sops[1] = tvec(0);
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     if (!t_refused(emit_store_mem(?st, ?f, ?sops[0], ?sops[1], 32), ?st.buf)) { bad = 1; }
-    st.buf.bytes.len = 0;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     if (!t_accepted(emit_store_mem(?st, ?f, ?sops[0], ?sops[1], 16), ?st.buf)) { bad = 1; }
 
     var sym: lang_mir.MirOperand = lang_mir.op_preg(lang_mir.preg_id(isa_inst.regid_make(isa_inst.REG_CLASS_ID_GP, 0)));
     sym.kind = lang_mir.MIR_OP_SYM;
     sym.sym  = intern.str_id(1);
     var sgp: lang_mir.MirOperand = lang_mir.op_preg(lang_mir.preg_id(isa_inst.regid_make(isa_inst.REG_CLASS_ID_GP, 0)));
-    st.buf.bytes.len = 0;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     if (!t_refused(emit_global_load(?st, 0, ?sym, 16, false), ?st.buf)) { bad = 1; }
-    st.buf.bytes.len = 0;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     if (!t_refused(emit_global_store(?st, ?f, ?sym, ?sgp, 16), ?st.buf)) { bad = 1; }
-    st.buf.bytes.len = 0;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     if (!t_refused(emit_global_load(?st, 0, ?sym, 0, false), ?st.buf)) { bad = 1; }
-    st.buf.bytes.len = 0;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     if (!t_refused(emit_global_load_got(?st, 0, ?sym, 0, false), ?st.buf)) { bad = 1; }
-    st.buf.bytes.len = 0;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     if (!t_refused(emit_global_store_got(?st, ?f, ?sym, ?sops[1], 0), ?st.buf)) { bad = 1; }
-    st.buf.bytes.len = 0;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     if (!t_refused(emit_global_load(?st, 0, ?sym, 0, true), ?st.buf)) { bad = 1; }
-    st.buf.bytes.len = 0;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     if (!t_accepted(emit_global_store(?st, ?f, ?sym, ?sops[1], 16), ?st.buf)) { bad = 1; }
-    st.buf.bytes.len = 0;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     if (!t_accepted(emit_global_load(?st, 0, ?sym, 16, true), ?st.buf)) { bad = 1; }
 
-    st.buf.bytes.len = 0;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     if (!t_refused(emit_fp_const(?st, 0, 0x123456789ABCDEF, 16), ?st.buf)) { bad = 1; }
 
     isa_encode.buf_dnit(?st.buf);
@@ -3006,44 +3007,44 @@ test encode_fp_cmp__condition_mapping {
     var ops: [3]lang_mir.MirOperand;
     var mi:  lang_mir.MirInstr = lang_mir.instr(lang_mir.MIR_ADD, ?ops[0], 3, 0, 0);
 
-    ops[0]           = lang_mir.op_preg(lang_mir.preg_id(isa_inst.regid_make(isa_inst.REG_CLASS_ID_GP, 0)));
-    ops[1]           = tvec(14);
-    ops[2]           = tvec(15);
-    mi.opcode        = lang_mir.MIR_FCMP;
-    mi.width         = 8;
-    mi.src_width     = lang_mir.FCC_EQ;
-    st.buf.bytes.len = 0;
+    ops[0]       = lang_mir.op_preg(lang_mir.preg_id(isa_inst.regid_make(isa_inst.REG_CLASS_ID_GP, 0)));
+    ops[1]       = tvec(14);
+    ops[2]       = tvec(15);
+    mi.opcode    = lang_mir.MIR_FCMP;
+    mi.width     = 8;
+    mi.src_width = lang_mir.FCC_EQ;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     encode_fp_cmp(?st, ?f, ?mi);
     if (isa_encode.word_read(?st.buf, 0) != 0x1E6F21C0) { bad = 1; }
     if (isa_encode.word_read(?st.buf, 4) != 0x1A9F17E0) { bad = 1; }
 
-    mi.src_width     = lang_mir.FCC_NE;
-    st.buf.bytes.len = 0;
+    mi.src_width = lang_mir.FCC_NE;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     encode_fp_cmp(?st, ?f, ?mi);
     if (isa_encode.word_read(?st.buf, 4) != 0x1A9F07E0) { bad = 1; }
-    mi.src_width     = lang_mir.FCC_LT;
-    st.buf.bytes.len = 0;
+    mi.src_width = lang_mir.FCC_LT;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     encode_fp_cmp(?st, ?f, ?mi);
     if (isa_encode.word_read(?st.buf, 4) != 0x1A9F57E0) { bad = 1; }
-    mi.src_width     = lang_mir.FCC_LE;
-    st.buf.bytes.len = 0;
+    mi.src_width = lang_mir.FCC_LE;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     encode_fp_cmp(?st, ?f, ?mi);
     if (isa_encode.word_read(?st.buf, 4) != 0x1A9F87E0) { bad = 1; }
-    mi.src_width     = lang_mir.FCC_GT;
-    st.buf.bytes.len = 0;
+    mi.src_width = lang_mir.FCC_GT;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     encode_fp_cmp(?st, ?f, ?mi);
     if (isa_encode.word_read(?st.buf, 4) != 0x1A9FD7E0) { bad = 1; }
-    mi.src_width     = lang_mir.FCC_GE;
-    st.buf.bytes.len = 0;
+    mi.src_width = lang_mir.FCC_GE;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     encode_fp_cmp(?st, ?f, ?mi);
     if (isa_encode.word_read(?st.buf, 4) != 0x1A9FB7E0) { bad = 1; }
 
-    ops[0]           = lang_mir.op_preg(lang_mir.preg_id(isa_inst.regid_make(isa_inst.REG_CLASS_ID_GP, 3)));
-    ops[1]           = tvec(21);
-    ops[2]           = tvec(9);
-    mi.width         = 4;
-    mi.src_width     = lang_mir.FCC_LT;
-    st.buf.bytes.len = 0;
+    ops[0]       = lang_mir.op_preg(lang_mir.preg_id(isa_inst.regid_make(isa_inst.REG_CLASS_ID_GP, 3)));
+    ops[1]       = tvec(21);
+    ops[2]       = tvec(9);
+    mi.width     = 4;
+    mi.src_width = lang_mir.FCC_LT;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     encode_fp_cmp(?st, ?f, ?mi);
     if (isa_encode.word_read(?st.buf, 0) != 0x1E2922A0) { bad = 1; }
     if (isa_encode.word_read(?st.buf, 4) != 0x1A9F57E3) { bad = 1; }
@@ -3061,31 +3062,31 @@ test encode_fp_conv__int_to_float {
     var ops: [2]lang_mir.MirOperand;
     var mi:  lang_mir.MirInstr = lang_mir.instr(lang_mir.MIR_ADD, ?ops[0], 2, 0, 0);
 
-    ops[0]           = tvec(0);
-    ops[1]           = lang_mir.op_preg(lang_mir.preg_id(isa_inst.regid_make(isa_inst.REG_CLASS_ID_GP, 1)));
-    mi.opcode        = lang_mir.MIR_SI_TO_FP;
-    mi.width         = 4;
-    mi.src_width     = 4;
-    st.buf.bytes.len = 0;
+    ops[0]       = tvec(0);
+    ops[1]       = lang_mir.op_preg(lang_mir.preg_id(isa_inst.regid_make(isa_inst.REG_CLASS_ID_GP, 1)));
+    mi.opcode    = lang_mir.MIR_SI_TO_FP;
+    mi.width     = 4;
+    mi.src_width = 4;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     encode_fp_conv(?st, ?f, ?mi);
     if (isa_encode.word_read(?st.buf, 0) != 0x1E220020) { bad = 1; }
-    mi.opcode        = lang_mir.MIR_UI_TO_FP;
-    mi.width         = 8;
-    mi.src_width     = 4;
-    st.buf.bytes.len = 0;
+    mi.opcode    = lang_mir.MIR_UI_TO_FP;
+    mi.width     = 8;
+    mi.src_width = 4;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     encode_fp_conv(?st, ?f, ?mi);
     if (isa_encode.word_read(?st.buf, 0) != 0x1E630020) { bad = 1; }
-    mi.width         = 4;
-    mi.src_width     = 8;
-    st.buf.bytes.len = 0;
+    mi.width     = 4;
+    mi.src_width = 8;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     encode_fp_conv(?st, ?f, ?mi);
     if (isa_encode.word_read(?st.buf, 0) != 0x9E230020) { bad = 1; }
-    ops[0]           = tvec(22);
-    ops[1]           = lang_mir.op_preg(lang_mir.preg_id(isa_inst.regid_make(isa_inst.REG_CLASS_ID_GP, 13)));
-    mi.opcode        = lang_mir.MIR_SI_TO_FP;
-    mi.width         = 8;
-    mi.src_width     = 8;
-    st.buf.bytes.len = 0;
+    ops[0]       = tvec(22);
+    ops[1]       = lang_mir.op_preg(lang_mir.preg_id(isa_inst.regid_make(isa_inst.REG_CLASS_ID_GP, 13)));
+    mi.opcode    = lang_mir.MIR_SI_TO_FP;
+    mi.width     = 8;
+    mi.src_width = 8;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     encode_fp_conv(?st, ?f, ?mi);
     if (isa_encode.word_read(?st.buf, 0) != 0x9E6201B6) { bad = 1; }
 
@@ -3102,31 +3103,31 @@ test encode_fp_conv__float_to_int {
     var ops: [2]lang_mir.MirOperand;
     var mi:  lang_mir.MirInstr = lang_mir.instr(lang_mir.MIR_ADD, ?ops[0], 2, 0, 0);
 
-    ops[0]           = lang_mir.op_preg(lang_mir.preg_id(isa_inst.regid_make(isa_inst.REG_CLASS_ID_GP, 0)));
-    ops[1]           = tvec(1);
-    mi.opcode        = lang_mir.MIR_FP_TO_SI;
-    mi.width         = 4;
-    mi.src_width     = 4;
-    st.buf.bytes.len = 0;
+    ops[0]       = lang_mir.op_preg(lang_mir.preg_id(isa_inst.regid_make(isa_inst.REG_CLASS_ID_GP, 0)));
+    ops[1]       = tvec(1);
+    mi.opcode    = lang_mir.MIR_FP_TO_SI;
+    mi.width     = 4;
+    mi.src_width = 4;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     encode_fp_conv(?st, ?f, ?mi);
     if (isa_encode.word_read(?st.buf, 0) != 0x1E380020) { bad = 1; }
-    mi.opcode        = lang_mir.MIR_FP_TO_UI;
-    mi.width         = 8;
-    mi.src_width     = 4;
-    st.buf.bytes.len = 0;
+    mi.opcode    = lang_mir.MIR_FP_TO_UI;
+    mi.width     = 8;
+    mi.src_width = 4;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     encode_fp_conv(?st, ?f, ?mi);
     if (isa_encode.word_read(?st.buf, 0) != 0x9E390020) { bad = 1; }
-    mi.width         = 4;
-    mi.src_width     = 8;
-    st.buf.bytes.len = 0;
+    mi.width     = 4;
+    mi.src_width = 8;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     encode_fp_conv(?st, ?f, ?mi);
     if (isa_encode.word_read(?st.buf, 0) != 0x1E790020) { bad = 1; }
-    ops[0]           = lang_mir.op_preg(lang_mir.preg_id(isa_inst.regid_make(isa_inst.REG_CLASS_ID_GP, 13)));
-    ops[1]           = tvec(22);
-    mi.opcode        = lang_mir.MIR_FP_TO_SI;
-    mi.width         = 8;
-    mi.src_width     = 8;
-    st.buf.bytes.len = 0;
+    ops[0]       = lang_mir.op_preg(lang_mir.preg_id(isa_inst.regid_make(isa_inst.REG_CLASS_ID_GP, 13)));
+    ops[1]       = tvec(22);
+    mi.opcode    = lang_mir.MIR_FP_TO_SI;
+    mi.width     = 8;
+    mi.src_width = 8;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     encode_fp_conv(?st, ?f, ?mi);
     if (isa_encode.word_read(?st.buf, 0) != 0x9E7802CD) { bad = 1; }
 
@@ -3143,32 +3144,32 @@ test encode_fp_conv__precision_and_bitcast {
     var ops: [2]lang_mir.MirOperand;
     var mi:  lang_mir.MirInstr = lang_mir.instr(lang_mir.MIR_ADD, ?ops[0], 2, 0, 0);
 
-    ops[0]           = tvec(18);
-    ops[1]           = tvec(19);
-    mi.opcode        = lang_mir.MIR_FP_EXT;
-    mi.width         = 8;
-    mi.src_width     = 4;
-    st.buf.bytes.len = 0;
+    ops[0]       = tvec(18);
+    ops[1]       = tvec(19);
+    mi.opcode    = lang_mir.MIR_FP_EXT;
+    mi.width     = 8;
+    mi.src_width = 4;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     encode_fp_conv(?st, ?f, ?mi);
     if (isa_encode.word_read(?st.buf, 0) != 0x1E22C272) { bad = 1; }
-    mi.opcode        = lang_mir.MIR_FP_TRUNC;
-    mi.width         = 4;
-    mi.src_width     = 8;
-    st.buf.bytes.len = 0;
+    mi.opcode    = lang_mir.MIR_FP_TRUNC;
+    mi.width     = 4;
+    mi.src_width = 8;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     encode_fp_conv(?st, ?f, ?mi);
     if (isa_encode.word_read(?st.buf, 0) != 0x1E624272) { bad = 1; }
 
-    ops[0]           = tvec(0);
-    ops[1]           = lang_mir.op_preg(lang_mir.preg_id(isa_inst.regid_make(isa_inst.REG_CLASS_ID_GP, 1)));
-    mi.opcode        = arm64.FMOV::u32;
-    mi.width         = 4;
-    st.buf.bytes.len = 0;
+    ops[0]    = tvec(0);
+    ops[1]    = lang_mir.op_preg(lang_mir.preg_id(isa_inst.regid_make(isa_inst.REG_CLASS_ID_GP, 1)));
+    mi.opcode = arm64.FMOV::u32;
+    mi.width  = 4;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     encode_fmov(?st, ?f, ?mi);
     if (isa_encode.word_read(?st.buf, 0) != 0x1E270020) { bad = 1; }
-    ops[0]           = lang_mir.op_preg(lang_mir.preg_id(isa_inst.regid_make(isa_inst.REG_CLASS_ID_GP, 0)));
-    ops[1]           = tvec(1);
-    mi.width         = 8;
-    st.buf.bytes.len = 0;
+    ops[0]   = lang_mir.op_preg(lang_mir.preg_id(isa_inst.regid_make(isa_inst.REG_CLASS_ID_GP, 0)));
+    ops[1]   = tvec(1);
+    mi.width = 8;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     encode_fmov(?st, ?f, ?mi);
     if (isa_encode.word_read(?st.buf, 0) != 0x9E660020) { bad = 1; }
 
@@ -3186,27 +3187,27 @@ test encode_fmov__constant_materialization {
     var ops: [3]lang_mir.MirOperand;
     var mi:  lang_mir.MirInstr = lang_mir.instr(lang_mir.MIR_ADD, ?ops[0], 2, 0, 0);
 
-    ops[0]           = tvec(0);
-    ops[1]           = lang_mir.op_imm(0);
-    mi.opcode        = arm64.FMOV::u32;
-    mi.width         = 8;
-    st.buf.bytes.len = 0;
+    ops[0]    = tvec(0);
+    ops[1]    = lang_mir.op_imm(0);
+    mi.opcode = arm64.FMOV::u32;
+    mi.width  = 8;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     encode_fmov(?st, ?f, ?mi);
     if (st.buf.bytes.len != 4)                          { bad = 1; }
     if (isa_encode.word_read(?st.buf, 0) != 0x9E6703E0) { bad = 1; }
     if (st.const_count != 0)                            { bad = 1; }
     if (st.reloc_count != 0)                            { bad = 1; }
 
-    ops[1]           = lang_mir.op_imm(0x4000000000000000);
-    st.buf.bytes.len = 0;
+    ops[1] = lang_mir.op_imm(0x4000000000000000);
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     encode_fmov(?st, ?f, ?mi);
     if (st.buf.bytes.len != 4)                          { bad = 1; }
     if (isa_encode.word_read(?st.buf, 0) != 0x1E601000) { bad = 1; }
     if (st.const_count != 0)                            { bad = 1; }
     if (st.reloc_count != 0)                            { bad = 1; }
 
-    ops[1]           = lang_mir.op_imm(0x7FF0000000000000);
-    st.buf.bytes.len = 0;
+    ops[1] = lang_mir.op_imm(0x7FF0000000000000);
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     encode_fmov(?st, ?f, ?mi);
     if (st.buf.bytes.len != 8)                          { bad = 1; }
     if (isa_encode.word_read(?st.buf, 0) != 0xD2EFFE10) { bad = 1; }
@@ -3214,8 +3215,8 @@ test encode_fmov__constant_materialization {
     if (st.const_count != 0)                            { bad = 1; }
     if (st.reloc_count != 0)                            { bad = 1; }
 
-    ops[1]           = lang_mir.op_imm(0x3FB999999999999A);
-    st.buf.bytes.len = 0;
+    ops[1] = lang_mir.op_imm(0x3FB999999999999A);
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     encode_fmov(?st, ?f, ?mi);
     if (st.buf.bytes.len != 8)                          { bad = 1; }
     if (isa_encode.word_read(?st.buf, 0) != 0x90000010) { bad = 1; }
@@ -3236,9 +3237,9 @@ test encode_fmov__constant_materialization {
         if (st.consts[0].bytes[7] != 0x3F) { bad = 1; }
     }
 
-    ops[1]           = lang_mir.op_imm(0x3DCCCCCD);
-    mi.width         = 4;
-    st.buf.bytes.len = 0;
+    ops[1]   = lang_mir.op_imm(0x3DCCCCCD);
+    mi.width = 4;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     val reloc_before: u32 = st.reloc_count;
     encode_fmov(?st, ?f, ?mi);
     if (st.buf.bytes.len != 8)                          { bad = 1; }
@@ -3251,7 +3252,7 @@ test encode_fmov__constant_materialization {
     }
     if (st.consts[1].len != 4 || st.consts[1].align != 4) { bad = 1; }
 
-    st.buf.bytes.len = 0;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     encode_fmov(?st, ?f, ?mi);
     if (st.const_count != 2) { bad = 1; }
 
@@ -3262,7 +3263,7 @@ test encode_fmov__constant_materialization {
     mi.opcode        = lang_mir.MIR_FMUL;
     mi.width         = 8;
     mi.src_width     = 8;
-    st.buf.bytes.len = 0;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     encode_fp_arith(?st, ?f, ?mi);
     if (st.buf.bytes.len != 8)                          { bad = 1; }
     if (isa_encode.word_read(?st.buf, 0) != 0x1E60101E) { bad = 1; }
@@ -3306,9 +3307,9 @@ test fmov_imm8__encodable_and_boundary {
     imm8 = fmov_imm8(0x7FF0000000000000, true);
     if (sel imm8.some) { bad = 1; }
 
-    ops[1]           = lang_mir.op_imm(0x3FB0000000000000);
-    mi.width         = 8;
-    st.buf.bytes.len = 0;
+    ops[1]   = lang_mir.op_imm(0x3FB0000000000000);
+    mi.width = 8;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     encode_fmov(?st, ?f, ?mi);
     if (st.buf.bytes.len != 8) { bad = 1; }
 
@@ -3321,9 +3322,9 @@ test fmov_imm8__encodable_and_boundary {
 #[testing]
 fun t_fmov_imm(st: *isa_encode.EncodeState, f: *lang_mir.MirFunction, mi: *lang_mir.MirInstr,
     src: *lang_mir.MirOperand, bits: i64, w: u8, want: u32) i32 {
-    @src             = lang_mir.op_imm(bits);
-    mi.width         = w;
-    st.buf.bytes.len = 0;
+    @src     = lang_mir.op_imm(bits);
+    mi.width = w;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     encode_fmov(st, f, mi);
     if (st.buf.bytes.len != 4)                    { ret 1; }
     if (isa_encode.word_read(?st.buf, 0) != want) { ret 1; }
@@ -3349,35 +3350,35 @@ test encode_fp__spilled_operands_route_through_scratch {
     var ops: [3]lang_mir.MirOperand;
     var mi:  lang_mir.MirInstr = lang_mir.instr(lang_mir.MIR_ADD, ?ops[0], 3, 0, 0);
 
-    ops[0]           = tvec(0);
-    ops[1]           = lang_mir.op_mem_slot(lang_mir.vreg_id(100), 0);
-    ops[2]           = tvec(2);
-    mi.opcode        = lang_mir.MIR_FADD;
-    mi.width         = 8;
-    mi.src_width     = 8;
-    st.buf.bytes.len = 0;
+    ops[0]       = tvec(0);
+    ops[1]       = lang_mir.op_mem_slot(lang_mir.vreg_id(100), 0);
+    ops[2]       = tvec(2);
+    mi.opcode    = lang_mir.MIR_FADD;
+    mi.width     = 8;
+    mi.src_width = 8;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     encode_fp_arith(?st, ?f, ?mi);
     if (isa_encode.word_read(?st.buf, 0) != 0xFC5F83BF) { bad = 1; }
     if (isa_encode.word_read(?st.buf, 4) != 0x1E622BE0) { bad = 1; }
 
-    ops[0]           = lang_mir.op_mem_slot(lang_mir.vreg_id(100), 0);
-    ops[1]           = tvec(1);
-    ops[2]           = tvec(2);
-    st.buf.bytes.len = 0;
+    ops[0] = lang_mir.op_mem_slot(lang_mir.vreg_id(100), 0);
+    ops[1] = tvec(1);
+    ops[2] = tvec(2);
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     encode_fp_arith(?st, ?f, ?mi);
     if (isa_encode.word_read(?st.buf, 0) != 0x1E62283F) { bad = 1; }
     if (isa_encode.word_read(?st.buf, 4) != 0xFC1F83BF) { bad = 1; }
 
     var mops: [2]lang_mir.MirOperand;
     var mv:   lang_mir.MirInstr = lang_mir.instr(lang_mir.MIR_MOV, ?mops[0], 2, 8, 0);
-    mops[0]          = tvec(5);
-    mops[1]          = lang_mir.op_mem_slot(lang_mir.vreg_id(100), 0);
-    st.buf.bytes.len = 0;
+    mops[0] = tvec(5);
+    mops[1] = lang_mir.op_mem_slot(lang_mir.vreg_id(100), 0);
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     encode_fmov(?st, ?f, ?mv);
     if (isa_encode.word_read(?st.buf, 0) != 0xFC5F83A5) { bad = 1; }
-    mops[0]          = lang_mir.op_mem_slot(lang_mir.vreg_id(100), 0);
-    mops[1]          = tvec(5);
-    st.buf.bytes.len = 0;
+    mops[0] = lang_mir.op_mem_slot(lang_mir.vreg_id(100), 0);
+    mops[1] = tvec(5);
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     encode_fmov(?st, ?f, ?mv);
     if (isa_encode.word_read(?st.buf, 0) != 0xFC1F83A5) { bad = 1; }
 
@@ -3512,24 +3513,24 @@ test encode_branch__fallthrough_elided {
     var ub: lang_mir.MirInstr = lang_mir.instr(lang_mir.MIR_BR, ?uops[0], 1, 8, 0);
 
     st.has_next_block = false;
-    st.buf.bytes.len  = 0;
-    st.fixup_count    = 0;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
+    st.fixup_count = 0;
     encode_branch(?st, 0, ?ub);
     if (st.buf.bytes.len != 4) { bad = 1; }
     if (st.fixup_count != 1)   { bad = 1; }
 
     st.has_next_block = true;
     st.next_block_id  = 4;
-    st.buf.bytes.len  = 0;
-    st.fixup_count    = 0;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
+    st.fixup_count = 0;
     encode_branch(?st, 0, ?ub);
     if (st.buf.bytes.len != 0) { bad = 1; }
     if (st.fixup_count != 0)   { bad = 1; }
 
     st.has_next_block = true;
     st.next_block_id  = 9;
-    st.buf.bytes.len  = 0;
-    st.fixup_count    = 0;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
+    st.fixup_count = 0;
     encode_branch(?st, 0, ?ub);
     if (st.buf.bytes.len != 4) { bad = 1; }
     if (st.fixup_count != 1)   { bad = 1; }
@@ -3541,15 +3542,15 @@ test encode_branch__fallthrough_elided {
     var cbr: lang_mir.MirInstr = lang_mir.instr(lang_mir.MIR_SEL_CBR, ?cops[0], 3, 8, 0);
 
     st.has_next_block = false;
-    st.buf.bytes.len  = 0;
-    st.fixup_count    = 0;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
+    st.fixup_count = 0;
     encode_cbr(?st, 0, ?cbr);
     val cbr_len: usize = st.buf.bytes.len;
     val cbr_fx:  u32   = st.fixup_count;
     st.has_next_block = true;
     st.next_block_id  = 4;
-    st.buf.bytes.len  = 0;
-    st.fixup_count    = 0;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
+    st.fixup_count = 0;
     encode_cbr(?st, 0, ?cbr);
     if (st.buf.bytes.len != cbr_len - 4) { bad = 1; }
     if (st.fixup_count != cbr_fx - 1)    { bad = 1; }
@@ -3563,15 +3564,15 @@ test encode_branch__fallthrough_elided {
     var mi: lang_mir.MirInstr = lang_mir.instr(lang_mir.MIR_SEL_CBR_EQ, ?ops[0], 4, 8, 0);
 
     st.has_next_block = false;
-    st.buf.bytes.len  = 0;
-    st.fixup_count    = 0;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
+    st.fixup_count = 0;
     encode_fused_cbr(?st, 0, ?mi);
     val fus_len: usize = st.buf.bytes.len;
     val fus_fx:  u32   = st.fixup_count;
     st.has_next_block = true;
     st.next_block_id  = 4;
-    st.buf.bytes.len  = 0;
-    st.fixup_count    = 0;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
+    st.fixup_count = 0;
     encode_fused_cbr(?st, 0, ?mi);
     if (st.buf.bytes.len != fus_len - 4) { bad = 1; }
     if (st.fixup_count != fus_fx - 1)    { bad = 1; }
@@ -3942,90 +3943,90 @@ test encode_neon__op_selection {
     ops[1] = tvec(1);
     ops[2] = tvec(2);
 
-    mi.opcode        = arm64.VEC_ADD::u32;
-    mi.vec_lane      = lang_mir.vec_lane_make(lang_mir.VEC_LANE_FLOAT, 4, 4);
-    st.buf.bytes.len = 0;
+    mi.opcode   = arm64.VEC_ADD::u32;
+    mi.vec_lane = lang_mir.vec_lane_make(lang_mir.VEC_LANE_FLOAT, 4, 4);
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     encode_neon(?st, ?f, ?mi);
     if (isa_encode.word_read(?st.buf, 0) != 0x4E22D420) { bad = 1; }
-    mi.vec_lane      = lang_mir.vec_lane_make(lang_mir.VEC_LANE_INT, 1, 16);
-    st.buf.bytes.len = 0;
+    mi.vec_lane = lang_mir.vec_lane_make(lang_mir.VEC_LANE_INT, 1, 16);
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     encode_neon(?st, ?f, ?mi);
     if (isa_encode.word_read(?st.buf, 0) != 0x4E228420) { bad = 1; }
-    mi.vec_lane      = lang_mir.vec_lane_make(lang_mir.VEC_LANE_INT, 4, 4);
-    st.buf.bytes.len = 0;
+    mi.vec_lane = lang_mir.vec_lane_make(lang_mir.VEC_LANE_INT, 4, 4);
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     encode_neon(?st, ?f, ?mi);
     if (isa_encode.word_read(?st.buf, 0) != 0x4EA28420) { bad = 1; }
 
-    mi.opcode        = arm64.VEC_SUB::u32;
-    mi.vec_lane      = lang_mir.vec_lane_make(lang_mir.VEC_LANE_FLOAT, 8, 2);
-    st.buf.bytes.len = 0;
+    mi.opcode   = arm64.VEC_SUB::u32;
+    mi.vec_lane = lang_mir.vec_lane_make(lang_mir.VEC_LANE_FLOAT, 8, 2);
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     encode_neon(?st, ?f, ?mi);
     if (isa_encode.word_read(?st.buf, 0) != 0x4EE2D420) { bad = 1; }
-    mi.opcode        = arm64.VEC_MUL::u32;
-    mi.vec_lane      = lang_mir.vec_lane_make(lang_mir.VEC_LANE_INT, 2, 8);
-    st.buf.bytes.len = 0;
+    mi.opcode   = arm64.VEC_MUL::u32;
+    mi.vec_lane = lang_mir.vec_lane_make(lang_mir.VEC_LANE_INT, 2, 8);
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     encode_neon(?st, ?f, ?mi);
     if (isa_encode.word_read(?st.buf, 0) != 0x4E629C20) { bad = 1; }
-    mi.vec_lane      = lang_mir.vec_lane_make(lang_mir.VEC_LANE_INT, 1, 16);
-    st.buf.bytes.len = 0;
+    mi.vec_lane = lang_mir.vec_lane_make(lang_mir.VEC_LANE_INT, 1, 16);
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     encode_neon(?st, ?f, ?mi);
     if (isa_encode.word_read(?st.buf, 0) != 0x4E229C20) { bad = 1; }
-    mi.vec_lane      = lang_mir.vec_lane_make(lang_mir.VEC_LANE_INT, 4, 4);
-    st.buf.bytes.len = 0;
+    mi.vec_lane = lang_mir.vec_lane_make(lang_mir.VEC_LANE_INT, 4, 4);
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     encode_neon(?st, ?f, ?mi);
     if (isa_encode.word_read(?st.buf, 0) != 0x4EA29C20) { bad = 1; }
-    mi.opcode        = arm64.VEC_DIV::u32;
-    mi.vec_lane      = lang_mir.vec_lane_make(lang_mir.VEC_LANE_FLOAT, 4, 4);
-    st.buf.bytes.len = 0;
+    mi.opcode   = arm64.VEC_DIV::u32;
+    mi.vec_lane = lang_mir.vec_lane_make(lang_mir.VEC_LANE_FLOAT, 4, 4);
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     encode_neon(?st, ?f, ?mi);
     if (isa_encode.word_read(?st.buf, 0) != 0x6E22FC20) { bad = 1; }
 
-    mi.opcode        = arm64.VEC_AND::u32;
-    mi.vec_lane      = lang_mir.vec_lane_make(lang_mir.VEC_LANE_INT, 4, 4);
-    st.buf.bytes.len = 0;
+    mi.opcode   = arm64.VEC_AND::u32;
+    mi.vec_lane = lang_mir.vec_lane_make(lang_mir.VEC_LANE_INT, 4, 4);
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     encode_neon(?st, ?f, ?mi);
     if (isa_encode.word_read(?st.buf, 0) != 0x4E221C20) { bad = 1; }
-    mi.opcode        = arm64.VEC_ORR::u32;
-    st.buf.bytes.len = 0;
+    mi.opcode = arm64.VEC_ORR::u32;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     encode_neon(?st, ?f, ?mi);
     if (isa_encode.word_read(?st.buf, 0) != 0x4EA21C20) { bad = 1; }
-    mi.opcode        = arm64.VEC_EOR::u32;
-    st.buf.bytes.len = 0;
+    mi.opcode = arm64.VEC_EOR::u32;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     encode_neon(?st, ?f, ?mi);
     if (isa_encode.word_read(?st.buf, 0) != 0x6E221C20) { bad = 1; }
 
-    mi.opcode        = arm64.VEC_CMEQ::u32;
-    mi.vec_lane      = lang_mir.vec_lane_make(lang_mir.VEC_LANE_INT, 4, 4);
-    st.buf.bytes.len = 0;
+    mi.opcode   = arm64.VEC_CMEQ::u32;
+    mi.vec_lane = lang_mir.vec_lane_make(lang_mir.VEC_LANE_INT, 4, 4);
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     encode_neon(?st, ?f, ?mi);
     if (isa_encode.word_read(?st.buf, 0) != 0x6EA28C20) { bad = 1; }
-    mi.vec_lane      = lang_mir.vec_lane_make(lang_mir.VEC_LANE_FLOAT, 4, 4);
-    st.buf.bytes.len = 0;
+    mi.vec_lane = lang_mir.vec_lane_make(lang_mir.VEC_LANE_FLOAT, 4, 4);
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     encode_neon(?st, ?f, ?mi);
     if (isa_encode.word_read(?st.buf, 0) != 0x4E22E420) { bad = 1; }
-    mi.opcode        = arm64.VEC_CMGT::u32;
-    mi.vec_lane      = lang_mir.vec_lane_make(lang_mir.VEC_LANE_INT, 4, 4);
-    st.buf.bytes.len = 0;
+    mi.opcode   = arm64.VEC_CMGT::u32;
+    mi.vec_lane = lang_mir.vec_lane_make(lang_mir.VEC_LANE_INT, 4, 4);
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     encode_neon(?st, ?f, ?mi);
     if (isa_encode.word_read(?st.buf, 0) != 0x4EA23420) { bad = 1; }
-    mi.vec_lane      = lang_mir.vec_lane_make(lang_mir.VEC_LANE_FLOAT, 4, 4);
-    st.buf.bytes.len = 0;
+    mi.vec_lane = lang_mir.vec_lane_make(lang_mir.VEC_LANE_FLOAT, 4, 4);
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     encode_neon(?st, ?f, ?mi);
     if (isa_encode.word_read(?st.buf, 0) != 0x6EA2E420) { bad = 1; }
-    mi.opcode        = arm64.VEC_CMHI::u32;
-    mi.vec_lane      = lang_mir.vec_lane_make(lang_mir.VEC_LANE_INT, 4, 4);
-    st.buf.bytes.len = 0;
+    mi.opcode   = arm64.VEC_CMHI::u32;
+    mi.vec_lane = lang_mir.vec_lane_make(lang_mir.VEC_LANE_INT, 4, 4);
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     encode_neon(?st, ?f, ?mi);
     if (isa_encode.word_read(?st.buf, 0) != 0x6EA23420) { bad = 1; }
-    mi.opcode        = arm64.VEC_CMHS::u32;
-    mi.vec_lane      = lang_mir.vec_lane_make(lang_mir.VEC_LANE_INT, 1, 16);
-    st.buf.bytes.len = 0;
+    mi.opcode   = arm64.VEC_CMHS::u32;
+    mi.vec_lane = lang_mir.vec_lane_make(lang_mir.VEC_LANE_INT, 1, 16);
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     encode_neon(?st, ?f, ?mi);
     if (isa_encode.word_read(?st.buf, 0) != 0x6E223C20) { bad = 1; }
 
-    mi.opcode        = arm64.VEC_CMNE::u32;
-    mi.vec_lane      = lang_mir.vec_lane_make(lang_mir.VEC_LANE_INT, 1, 16);
-    st.buf.bytes.len = 0;
+    mi.opcode   = arm64.VEC_CMNE::u32;
+    mi.vec_lane = lang_mir.vec_lane_make(lang_mir.VEC_LANE_INT, 1, 16);
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     encode_neon(?st, ?f, ?mi);
     if (isa_encode.word_read(?st.buf, 0) != 0x6E228C20) { bad = 1; }
     if (isa_encode.word_read(?st.buf, 4) != 0x6E205800) { bad = 1; }
@@ -4035,7 +4036,7 @@ test encode_neon__op_selection {
     mi.opcode        = arm64.VEC_NOT::u32;
     mi.operand_count = 2;
     mi.vec_lane      = lang_mir.vec_lane_make(lang_mir.VEC_LANE_INT, 1, 16);
-    st.buf.bytes.len = 0;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     encode_neon(?st, ?f, ?mi);
     if (isa_encode.word_read(?st.buf, 0) != 0x6E205820) { bad = 1; }
 
@@ -4055,23 +4056,23 @@ test encode_neon__integer_multiply_refuses_64bit_lanes {
     ops[1] = tvec(1);
     ops[2] = tvec(2);
 
-    mi.opcode        = arm64.VEC_MUL::u32;
-    mi.vec_lane      = lang_mir.vec_lane_make(lang_mir.VEC_LANE_INT, 8, 2);
-    st.buf.bytes.len = 0;
+    mi.opcode   = arm64.VEC_MUL::u32;
+    mi.vec_lane = lang_mir.vec_lane_make(lang_mir.VEC_LANE_INT, 8, 2);
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     val r: err[fail.Fail] = encode_neon(?st, ?f, ?mi);
     if (!sel r.err)            { bad = 1; }
     if (st.buf.bytes.len != 0) { bad = 2; }
 
-    st.buf.bytes.len = 0;
-    mi.vec_lane      = lang_mir.vec_lane_make(lang_mir.VEC_LANE_INT, 4, 4);
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
+    mi.vec_lane = lang_mir.vec_lane_make(lang_mir.VEC_LANE_INT, 4, 4);
     var neon: err[fail.Fail] = encode_neon(?st, ?f, ?mi);
     if (sel neon.err)          { bad = 3; }
     if (st.buf.bytes.len != 4) { bad = 4; }
 
-    st.buf.bytes.len = 0;
-    mi.opcode        = arm64.VEC_ADD::u32;
-    mi.vec_lane      = lang_mir.vec_lane_make(lang_mir.VEC_LANE_INT, 8, 2);
-    neon             = encode_neon(?st, ?f, ?mi);
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
+    mi.opcode   = arm64.VEC_ADD::u32;
+    mi.vec_lane = lang_mir.vec_lane_make(lang_mir.VEC_LANE_INT, 8, 2);
+    neon        = encode_neon(?st, ?f, ?mi);
     if (sel neon.err)                                   { bad = 5; }
     if (isa_encode.word_read(?st.buf, 0) != 0x4EE28420) { bad = 6; }
 
@@ -4087,9 +4088,9 @@ fun t_shift_words(st: *isa_encode.EncodeState, op: arm64.Opcode, lane: u32, coun
     ops[1] = tvec(1);
     ops[2] = count;
     var mi: lang_mir.MirInstr = lang_mir.instr(lang_mir.MIR_ADD, ?ops[0], 3, 0, 0);
-    mi.opcode        = op::u32;
-    mi.vec_lane      = lane;
-    st.buf.bytes.len = 0;
+    mi.opcode   = op::u32;
+    mi.vec_lane = lane;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     val r: err[fail.Fail] = encode_neon_shift(st, ?f, ?mi);
     if (sel r.err || st.buf.bytes.len != (n * 4)::usize) { ret false; }
     var i: u32 = 0;
@@ -4145,34 +4146,34 @@ test vec_lane__index_out_of_range_refused {
 
     var rops: [3]lang_mir.MirOperand;
     var rmi:  lang_mir.MirInstr = lang_mir.instr(lang_mir.MIR_VEC_EXTRACT, ?rops[0], 3, 4, 0);
-    rops[0]          = lang_mir.op_preg(lang_mir.preg_id(isa_inst.regid_make(isa_inst.REG_CLASS_ID_GP, 0)));
-    rops[1]          = tvec(1);
-    rops[2]          = lang_mir.op_imm(3);
-    rmi.vec_lane     = lang_mir.vec_lane_make(lang_mir.VEC_LANE_INT, 4, 4);
-    st.buf.bytes.len = 0;
+    rops[0]      = lang_mir.op_preg(lang_mir.preg_id(isa_inst.regid_make(isa_inst.REG_CLASS_ID_GP, 0)));
+    rops[1]      = tvec(1);
+    rops[2]      = lang_mir.op_imm(3);
+    rmi.vec_lane = lang_mir.vec_lane_make(lang_mir.VEC_LANE_INT, 4, 4);
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     var read: err[fail.Fail] = encode_vec_lane_read(?st, ?f, ?rmi);
     if (sel read.err) { bad = 1; }
 
-    rops[2]          = lang_mir.op_imm(4);
-    st.buf.bytes.len = 0;
-    read             = encode_vec_lane_read(?st, ?f, ?rmi);
+    rops[2] = lang_mir.op_imm(4);
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
+    read = encode_vec_lane_read(?st, ?f, ?rmi);
     if (!sel read.err)         { bad = 2; }
     if (st.buf.bytes.len != 0) { bad = 3; }
 
     var wops: [4]lang_mir.MirOperand;
     var wmi:  lang_mir.MirInstr = lang_mir.instr(lang_mir.MIR_VEC_INSERT, ?wops[0], 4, 4, 4);
-    wops[0]          = tvec(0);
-    wops[1]          = tvec(1);
-    wops[2]          = lang_mir.op_imm(3);
-    wops[3]          = lang_mir.op_preg(lang_mir.preg_id(isa_inst.regid_make(isa_inst.REG_CLASS_ID_GP, 0)));
-    wmi.vec_lane     = lang_mir.vec_lane_make(lang_mir.VEC_LANE_INT, 4, 4);
-    st.buf.bytes.len = 0;
+    wops[0]      = tvec(0);
+    wops[1]      = tvec(1);
+    wops[2]      = lang_mir.op_imm(3);
+    wops[3]      = lang_mir.op_preg(lang_mir.preg_id(isa_inst.regid_make(isa_inst.REG_CLASS_ID_GP, 0)));
+    wmi.vec_lane = lang_mir.vec_lane_make(lang_mir.VEC_LANE_INT, 4, 4);
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     var written: err[fail.Fail] = encode_vec_lane_write(?st, ?f, ?wmi);
     if (sel written.err) { bad = 4; }
 
-    wops[2]          = lang_mir.op_imm(4);
-    st.buf.bytes.len = 0;
-    written          = encode_vec_lane_write(?st, ?f, ?wmi);
+    wops[2] = lang_mir.op_imm(4);
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
+    written = encode_vec_lane_write(?st, ?f, ?wmi);
     if (!sel written.err)      { bad = 5; }
     if (st.buf.bytes.len != 0) { bad = 6; }
 
@@ -4260,7 +4261,7 @@ test encode_select__csel_with_no_branch {
     ops[2] = ops[3];
     ops[3] = ops[4];
     var plain: lang_mir.MirInstr = lang_mir.instr(lang_mir.MIR_SEL_SELECT, ?ops[0], 4, 4, 1);
-    st.buf.bytes.len = 0;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     val rp: err[fail.Fail] = encode_mir_instr(?st, ?f, 0, ?plain);
     if (sel rp.err)                                     { ret 5; }
     if (st.buf.bytes.len != 8)                          { ret 6; }
@@ -4286,7 +4287,7 @@ test encode_mir_instr__refuses_unknown_and_truncated_opcodes {
     val encoded:     err[fail.Fail]    = encode_mir_instr(?st, ?f, 0, ?instruction);
     if (sel encoded.err)       { ret 1; }
     if (st.buf.bytes.len != 4) { ret 2; }
-    st.buf.bytes.len   = 0;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     instruction.opcode = lang_mir.ISA_USE;
     val instr_encoded: err[fail.Fail] = isa_encode.instr_encode(?st, ?f, 0, ?instruction, ?HOOKS);
     if (sel instr_encoded.err) { ret 3; }

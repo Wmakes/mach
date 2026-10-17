@@ -371,8 +371,8 @@ fun decided(s: *Solver, p: u32) bool {
 fun backtrack(s: *Solver, level: u32) {
     var keep: usize = 0;
     for (keep < s.assigns.len && s.assigns.data[keep].level <= level) { keep = keep + 1; }
-    s.assigns.len = keep;
-    s.level       = level;
+    collections_vector.truncate[Assign](?s.assigns, keep);
+    s.level = level;
 }
 
 fun add_incompat(s: *Solver, made: res[Vector[Term], fail.Fail], kind: CauseKind, left: u32, right: u32,
@@ -422,7 +422,7 @@ fun add_incompat(s: *Solver, made: res[Vector[Term], fail.Fail], kind: CauseKind
             }
             r = r + 1;
         }
-        merged.len = w;
+        collections_vector.truncate[Term](?merged, w);
     }
     val inc: Incompat = Incompat{terms: merged, kind: kind, left: left, right: right, owner: owner,
         version: version, target: target, text: text, who: who};
@@ -580,7 +580,7 @@ fun propagate(s: *Solver, first: u32) err[fail.Fail] {
     if (sel seeded.err) { ret err[fail.Fail].err{fail.refused(seeded.err)}; }
     for (changed.len > 0) {
         val p: u32 = changed.data[changed.len - 1];
-        changed.len = changed.len - 1;
+        collections_vector.truncate[u32](?changed, changed.len - 1);
         var n: usize = s.incs.len;
         for (n > 0) {
             n = n - 1;
@@ -592,7 +592,7 @@ fun propagate(s: *Solver, first: u32) err[fail.Fail] {
                 if (sel root_cause.err) { ret err[fail.Fail].err{root_cause.err}; }
                 val again: res[i64, fail.Fail] = propagate_one(s, root_cause.ok);
                 if (sel again.err) { ret err[fail.Fail].err{again.err}; }
-                changed.len = 0;
+                collections_vector.truncate[u32](?changed, 0);
                 if (again.ok >= 0) {
                     val queued: res[usize, A.Error] = collections_vector.push[u32](?changed, again.ok::u32);
                     if (sel queued.err) { ret err[fail.Fail].err{fail.refused(queued.err)}; }
@@ -641,7 +641,7 @@ fun package(s: *Solver, id: str, url: str) res[u32, fail.Fail] {
     if (sel listed.err) {
         p.listed     = false;
         p.list_error = fail.describe(listed.err);
-        p.rels.len   = 0;
+        collections_vector.truncate[package_source.Release](?p.rels, 0);
     }
     sort_releases(?p.rels);
     p.words = (p.rels.len + 64) / 64;

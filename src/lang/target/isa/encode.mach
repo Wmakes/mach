@@ -1822,7 +1822,7 @@ pub fun insert_text(st: *EncodeState, pos: u32, nbytes: u32) err[fail.Fail] {
         st.buf.bytes.data[z] = 0;
         z                    = z + 1;
     }
-    st.buf.bytes.len = need;
+    collections_vector.commit[u8](?st.buf.bytes, need - st.buf.bytes.len);
 
     var bi:          u32  = 0;
     var bases_moved: bool = false;

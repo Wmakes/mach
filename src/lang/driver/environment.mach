@@ -182,7 +182,7 @@ pub fun remove(values: *Environment, index: usize) {
         values.entries.data[i - 1] = values.entries.data[i];
         i                          = i + 1;
     }
-    values.entries.len = values.entries.len - 1;
+    collections_vector.truncate[Entry](?values.entries, values.entries.len - 1);
 }
 
 # the environment `e` describes, in native units: a given UTF-8 array, or this

@@ -98,7 +98,7 @@ fun plan_calls(e: *emitter.Emit, cx: u32, ad: *emitter.Addr) err[fail.Fail] {
             if (sel kr.err) { ret err[fail.Fail].err{kr.err}; }
             # a call the emitter refuses asks for no copy
             if (!kr.ok) {
-                e.keys.len = at::usize;
+                collections_vector.truncate[u32](?e.keys, at::usize);
                 cnt;
             }
             val ar: res[u32, fail.Fail] = add_copy(e, gx, at);
@@ -133,7 +133,7 @@ pub fun param_is_handle(e: *emitter.Emit, fx: u32, k: u32) bool {
 fun add_copy(e: *emitter.Emit, fx: u32, at: u32) res[u32, fail.Fail] {
     val found: u32 = find_copy(e, fx, at);
     if (found != emitter.COPY_NONE) {
-        e.keys.len = at::usize;
+        collections_vector.truncate[u32](?e.keys, at::usize);
         ret res[u32, fail.Fail].ok{found};
     }
     var first: bool = true;
@@ -287,8 +287,8 @@ fun push_key(e: *emitter.Emit, w: u32) err[fail.Fail] {
 # allocation or a parameter's object, through the chains and copies that
 # derive it; false when no single definition names it
 pub fun trace_address(e: *emitter.Emit, cx: u32, mf: *lang_mir.MirFunction, op: *lang_mir.MirOperand, ad: *emitter.Addr) res[bool, fail.Fail] {
-    ad.root      = 0;
-    ad.steps.len = 0;
+    ad.root = 0;
+    collections_vector.truncate[emitter.AddrStep](?ad.steps, 0);
     ret trace_from(e, cx, mf, op, ad);
 }
 

@@ -708,8 +708,8 @@ pub fun result_copy(r: *ResolveResult, alloc: *A.Allocator) res[ResolveResult, f
         out.asm_binds.data[bi] = r.asm_binds.data[bi];
         bi                     = bi + 1;
     }
-    out.asm_binds.len = r.asm_binds.len;
-    done              = true;
+    collections_vector.commit[AsmBind](?out.asm_binds, r.asm_binds.len);
+    done = true;
     ret res[ResolveResult, fail.Fail].ok{out};
 }
 

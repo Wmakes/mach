@@ -1,4 +1,5 @@
 # MIR lowered to x64 instructions, with the frame each function lays out
+use collections_vector: std.collections.vector;
 use mach.lang.fail;
 use std.allocator.page;
 use std.system.panic.panic;
@@ -3682,35 +3683,35 @@ test emit_f16c__conversions_and_word_moves_match_gnu_as {
     emit_f16c(true, x64_emit.t_xmm(1), x64_emit.t_xmm(2), 16, ?got);
     var n: usize = x64_emit.t_unhex("c4e27913ca", ?want[0]);
     if (!x64_emit.t_buf_is(?got, ?want[0], n)) { ret 1; }
-    got.bytes.len = 0;
+    collections_vector.truncate[u8](?got.bytes, 0);
     emit_f16c(true, x64_emit.t_xmm(9), x64_emit.t_xmm(12), 16, ?got);
     n = x64_emit.t_unhex("c4427913cc", ?want[0]);
     if (!x64_emit.t_buf_is(?got, ?want[0], n)) { ret 2; }
-    got.bytes.len = 0;
+    collections_vector.truncate[u8](?got.bytes, 0);
     emit_f16c(false, x64_emit.t_xmm(3), x64_emit.t_xmm(4), 16, ?got);
     n = x64_emit.t_unhex("c4e3791de300", ?want[0]);
     if (!x64_emit.t_buf_is(?got, ?want[0], n)) { ret 3; }
-    got.bytes.len = 0;
+    collections_vector.truncate[u8](?got.bytes, 0);
     emit_f16c(false, x64_emit.t_xmm(12), x64_emit.t_xmm(9), 16, ?got);
     n = x64_emit.t_unhex("c443791dcc00", ?want[0]);
     if (!x64_emit.t_buf_is(?got, ?want[0], n)) { ret 4; }
     val slot: isa_inst.Operand = isa_inst.make_mem(x64.RBP, -24, isa_inst.REG_NONE, 0, 2);
-    got.bytes.len = 0;
+    collections_vector.truncate[u8](?got.bytes, 0);
     val hm1: err[fail.Fail] = x64_emit.half_move(x64_emit.vec_reg(x64_emit.t_xmm(1), 16), slot, ?got);
     if (sel hm1.err) { ret 5; }
     n = x64_emit.t_unhex("660fc44de800", ?want[0]);
     if (!x64_emit.t_buf_is(?got, ?want[0], n)) { ret 6; }
-    got.bytes.len = 0;
+    collections_vector.truncate[u8](?got.bytes, 0);
     val hm2: err[fail.Fail] = x64_emit.half_move(x64_emit.vec_reg(x64_emit.t_xmm(9), 16), slot, ?got);
     if (sel hm2.err) { ret 7; }
     n = x64_emit.t_unhex("66440fc44de800", ?want[0]);
     if (!x64_emit.t_buf_is(?got, ?want[0], n)) { ret 8; }
-    got.bytes.len = 0;
+    collections_vector.truncate[u8](?got.bytes, 0);
     val hm3: err[fail.Fail] = x64_emit.half_move(slot, x64_emit.vec_reg(x64_emit.t_xmm(1), 16), ?got);
     if (sel hm3.err) { ret 9; }
     n = x64_emit.t_unhex("660f3a154de800", ?want[0]);
     if (!x64_emit.t_buf_is(?got, ?want[0], n)) { ret 10; }
-    got.bytes.len = 0;
+    collections_vector.truncate[u8](?got.bytes, 0);
     val hm4: err[fail.Fail] = x64_emit.half_move(slot, x64_emit.vec_reg(x64_emit.t_xmm(9), 16), ?got);
     if (sel hm4.err) { ret 11; }
     n = x64_emit.t_unhex("66440f3a154de800", ?want[0]);
@@ -3767,24 +3768,24 @@ test encode_mir_instr__branch_to_fallthrough_elided {
     var jm: lang_mir.MirInstr = lang_mir.instr(x64.JMP::u32, ?jops[0], 1, 8, 0);
 
     st.has_next_block = false;
-    st.buf.bytes.len  = 0;
-    st.fixup_count    = 0;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
+    st.fixup_count = 0;
     encode_mir_instr(?st, ?f, 0, ?jm);
     if (st.buf.bytes.len != 5) { bad = 1; }
     if (st.fixup_count != 1)   { bad = 1; }
 
     st.has_next_block = true;
     st.next_block_id  = 4;
-    st.buf.bytes.len  = 0;
-    st.fixup_count    = 0;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
+    st.fixup_count = 0;
     encode_mir_instr(?st, ?f, 0, ?jm);
     if (st.buf.bytes.len != 0) { bad = 1; }
     if (st.fixup_count != 0)   { bad = 1; }
 
     st.has_next_block = true;
     st.next_block_id  = 9;
-    st.buf.bytes.len  = 0;
-    st.fixup_count    = 0;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
+    st.fixup_count = 0;
     encode_mir_instr(?st, ?f, 0, ?jm);
     if (st.buf.bytes.len != 5) { bad = 1; }
     if (st.fixup_count != 1)   { bad = 1; }
@@ -3796,15 +3797,15 @@ test encode_mir_instr__branch_to_fallthrough_elided {
     var cbr: lang_mir.MirInstr = lang_mir.instr(lang_mir.MIR_SEL_CBR, ?cops[0], 3, 8, 0);
 
     st.has_next_block = false;
-    st.buf.bytes.len  = 0;
-    st.fixup_count    = 0;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
+    st.fixup_count = 0;
     encode_cbr(?st, ?f, 0, ?cbr);
     val cbr_len: usize = st.buf.bytes.len;
     val cbr_fx:  u32   = st.fixup_count;
     st.has_next_block = true;
     st.next_block_id  = 4;
-    st.buf.bytes.len  = 0;
-    st.fixup_count    = 0;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
+    st.fixup_count = 0;
     encode_cbr(?st, ?f, 0, ?cbr);
     if (st.buf.bytes.len != cbr_len - 5) { bad = 1; }
     if (st.fixup_count != cbr_fx - 1)    { bad = 1; }
@@ -3818,15 +3819,15 @@ test encode_mir_instr__branch_to_fallthrough_elided {
     var mi: lang_mir.MirInstr = lang_mir.instr(lang_mir.MIR_SEL_CBR_EQ, ?ops[0], 4, 8, 0);
 
     st.has_next_block = false;
-    st.buf.bytes.len  = 0;
-    st.fixup_count    = 0;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
+    st.fixup_count = 0;
     encode_fused_cbr(?st, ?f, 0, ?mi);
     val fus_len: usize = st.buf.bytes.len;
     val fus_fx:  u32   = st.fixup_count;
     st.has_next_block = true;
     st.next_block_id  = 4;
-    st.buf.bytes.len  = 0;
-    st.fixup_count    = 0;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
+    st.fixup_count = 0;
     encode_fused_cbr(?st, ?f, 0, ?mi);
     if (st.buf.bytes.len != fus_len - 5) { bad = 1; }
     if (st.fixup_count != fus_fx - 1)    { bad = 1; }
@@ -3862,9 +3863,9 @@ test encode_binary__refuses_a_right_operand_in_the_destination_register {
     if (buf.bytes.len != 3)                                     { ret 4; }
     if (buf.bytes.data[0] != 0x48 || buf.bytes.data[1] != 0x29) { ret 4; }
 
-    buf.bytes.len = 0;
-    ops[1]        = lang_mir.op_preg(lang_mir.preg_id(x64.RDI));
-    ops[2]        = lang_mir.op_preg(lang_mir.preg_id(x64.RCX));
+    collections_vector.truncate[u8](?buf.bytes, 0);
+    ops[1] = lang_mir.op_preg(lang_mir.preg_id(x64.RDI));
+    ops[2] = lang_mir.op_preg(lang_mir.preg_id(x64.RCX));
     if (!t_accepted(encode_binary(?f, ?mi, ?buf), ?buf)) { ret 5; }
     isa_encode.buf_dnit(?buf);
     ret 0;
@@ -3974,34 +3975,34 @@ test encode_mul_pair__byte_exact {
     if (buf.bytes.len != 3)                                                                  { ret 1; }
     if (buf.bytes.data[0] != 0x48 || buf.bytes.data[1] != 0xF7 || buf.bytes.data[2] != 0xE1) { ret 1; }
 
-    buf.bytes.len = 0;
-    mi.opcode     = lang_mir.MIR_SEL_MUL_PAIR_S;
+    collections_vector.truncate[u8](?buf.bytes, 0);
+    mi.opcode = lang_mir.MIR_SEL_MUL_PAIR_S;
     if (!t_accepted(encode_mul_pair(?f, ?mi, ?buf), ?buf))                                   { ret 2; }
     if (buf.bytes.len != 3)                                                                  { ret 2; }
     if (buf.bytes.data[0] != 0x48 || buf.bytes.data[1] != 0xF7 || buf.bytes.data[2] != 0xE9) { ret 2; }
 
     # the 32-bit forms, the high multiply of a 32-bit lane
-    buf.bytes.len = 0;
-    mi.width      = 4;
-    mi.opcode     = lang_mir.MIR_SEL_MUL_PAIR_U;
+    collections_vector.truncate[u8](?buf.bytes, 0);
+    mi.width  = 4;
+    mi.opcode = lang_mir.MIR_SEL_MUL_PAIR_U;
     if (!t_accepted(encode_mul_pair(?f, ?mi, ?buf), ?buf))      { ret 5; }
     if (buf.bytes.len != 2)                                     { ret 5; }
     if (buf.bytes.data[0] != 0xF7 || buf.bytes.data[1] != 0xE1) { ret 5; }
 
-    buf.bytes.len = 0;
-    mi.opcode     = lang_mir.MIR_SEL_MUL_PAIR_S;
+    collections_vector.truncate[u8](?buf.bytes, 0);
+    mi.opcode = lang_mir.MIR_SEL_MUL_PAIR_S;
     if (!t_accepted(encode_mul_pair(?f, ?mi, ?buf), ?buf))      { ret 6; }
     if (buf.bytes.len != 2)                                     { ret 6; }
     if (buf.bytes.data[0] != 0xF7 || buf.bytes.data[1] != 0xE9) { ret 6; }
     mi.width = 8;
 
-    buf.bytes.len = 0;
-    ops[1]        = lang_mir.op_mem_preg(lang_mir.preg_id(x64.RBP), 8);
+    collections_vector.truncate[u8](?buf.bytes, 0);
+    ops[1] = lang_mir.op_mem_preg(lang_mir.preg_id(x64.RBP), 8);
     if (!t_accepted(encode_mul_pair(?f, ?mi, ?buf), ?buf))      { ret 3; }
     if (buf.bytes.data[1] != 0xF7 || buf.bytes.data[2] != 0x6D) { ret 3; }
 
-    buf.bytes.len = 0;
-    ops[1]        = lang_mir.op_imm(3);
+    collections_vector.truncate[u8](?buf.bytes, 0);
+    ops[1] = lang_mir.op_imm(3);
     if (!t_refused(encode_mul_pair(?f, ?mi, ?buf), ?buf)) { ret 4; }
     isa_encode.buf_dnit(?buf);
     ret 0;
@@ -4234,8 +4235,8 @@ test vector_widen_half__every_cell_is_the_gas_sequence {
             val signed: bool = (variant & 1) != 0;
             val high:   bool = (variant & 2) != 0;
             val sse41:  bool = (variant & 4) != 0;
-            got.bytes.len  = 0;
-            want.bytes.len = 0;
+            collections_vector.truncate[u8](?got.bytes, 0);
+            collections_vector.truncate[u8](?want.bytes, 0);
             val r: err[fail.Fail] = emit_vec_widen_half_body(signed, high, from, sse41, 16, src, ?got);
             if (sel r.err) { ret 1; }
             t_widen_bytes(?want, "movaps");
@@ -4282,7 +4283,7 @@ test vector_widen_half__the_model_extensions_choose_the_form {
 
     # baseline: the high dwords unpacked against zero
     x64_grammar.select_extensions(0);
-    st.buf.bytes.len = 0;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     val base: err[fail.Fail] = encode_vector_widen_half(?st, ?f, ?mi);
     if (sel base.err) { ret 1; }
     t_widen_bytes(?want, "movaps");
@@ -4293,8 +4294,8 @@ test vector_widen_half__the_model_extensions_choose_the_form {
 
     # sse41 selected: the high dwords shifted down and zero-extended
     x64_grammar.select_extensions(extension_x64.SSE41);
-    st.buf.bytes.len = 0;
-    want.bytes.len   = 0;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
+    collections_vector.truncate[u8](?want.bytes, 0);
     val ext: err[fail.Fail] = encode_vector_widen_half(?st, ?f, ?mi);
     if (sel ext.err) { ret 3; }
     t_widen_bytes(?want, "movaps");
@@ -4366,8 +4367,8 @@ test vector_arith__i32x4_multiply_is_the_pmuludq_pair_or_pmulld {
 
     # sse41 selected: `pmulld xmm14, xmm3` after the left load
     x64_grammar.select_extensions(extension_x64.SSE41);
-    st.buf.bytes.len = 0;
-    want.bytes.len   = 0;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
+    collections_vector.truncate[u8](?want.bytes, 0);
     val ext: err[fail.Fail] = encode_vector_arith(?st, ?f, ?mi);
     if (sel ext.err) { ret 3; }
     val p0: [6]u8 = [6]u8{0x66, 0x44, 0x0F, 0x38, 0x40, 0xF3};
@@ -4380,8 +4381,8 @@ test vector_arith__i32x4_multiply_is_the_pmuludq_pair_or_pmulld {
     # place (`pshufd xmm15, [rbp-0x20], 0xF5`, `pmuludq xmm14, [rbp-0x30]`)
     # and the destination slot takes the result
     x64_grammar.select_extensions(0);
-    st.buf.bytes.len = 0;
-    want.bytes.len   = 0;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
+    collections_vector.truncate[u8](?want.bytes, 0);
     val rbp: lang_mir.PRegId = lang_mir.preg_id(x64.RBP);
     ops[0] = lang_mir.op_mem_preg(rbp, -16);
     ops[1] = lang_mir.op_mem_preg(rbp, -32);
@@ -4455,14 +4456,14 @@ test vector_arith__i64x2_multiply_is_the_three_pmuludq_sequence {
     if (!t_bytes_equal(?st.buf, ?want)) { ret 2; }
 
     x64_grammar.select_extensions(extension_x64.SSE41);
-    st.buf.bytes.len = 0;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     val ext: err[fail.Fail] = encode_vector_arith(?st, ?f, ?mi);
     if (sel ext.err)                    { ret 3; }
     if (!t_bytes_equal(?st.buf, ?want)) { ret 4; }
 
     # avx512dq without avx512vl has no 128-bit vpmullq
     x64_grammar.select_extensions(extension_x64.AVX512DQ);
-    st.buf.bytes.len = 0;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     val dq: err[fail.Fail] = encode_vector_arith(?st, ?f, ?mi);
     if (sel dq.err)                     { ret 5; }
     if (!t_bytes_equal(?st.buf, ?want)) { ret 6; }
@@ -4493,11 +4494,11 @@ test vector_arith__i64x2_multiply_is_vpmullq_under_avx512dq_and_avx512vl {
     var n: usize = x64_emit.t_unhex("62f2ed0840cb", ?want[0]);
     if (!x64_emit.t_buf_is(?st.buf, ?want[0], n)) { ret 2; }
 
-    ops[0]           = lang_mir.op_mem_preg(lang_mir.preg_id(x64.RBP), -16);
-    ops[1]           = lang_mir.op_mem_preg(lang_mir.preg_id(x64.RBP), -32);
-    mi               = lang_mir.instr(lang_mir.MIR_SEL_MUL, ?ops[0], 3, 16, 16);
-    mi.vec_lane      = lang_mir.vec_lane_make(lang_mir.VEC_LANE_INT, 8, 2);
-    st.buf.bytes.len = 0;
+    ops[0]      = lang_mir.op_mem_preg(lang_mir.preg_id(x64.RBP), -16);
+    ops[1]      = lang_mir.op_mem_preg(lang_mir.preg_id(x64.RBP), -32);
+    mi          = lang_mir.instr(lang_mir.MIR_SEL_MUL, ?ops[0], 3, 16, 16);
+    mi.vec_lane = lang_mir.vec_lane_make(lang_mir.VEC_LANE_INT, 8, 2);
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     val m: err[fail.Fail] = encode_vector_arith(?st, ?f, ?mi);
     if (sel m.err) { ret 3; }
     n = x64_emit.t_unhex("440f2875e062728d0840f3440f2975f0", ?want[0]);
@@ -4544,7 +4545,7 @@ test packed_ops__vex256_forms_at_32_bytes {
     val n:    usize = x64_emit.t_unhex("c5f5fecac535fe4dc0c5e573d320c4c175f2cfc4e27d21d3c5fd5ad3c4410cc2f701c4437d19f701c4430d18f701c463fd00f1d8c57c29f1c4410c57f6c4e27d13cac4e37d1dd100c4e26d47cbc5fe6f4dc0", ?want[0]);
     if (!x64_emit.t_buf_is(?got, ?want[0], n)) { ret 5; }
     # a width with no encoding is refused before its first byte
-    got.bytes.len = 0;
+    collections_vector.truncate[u8](?got.bytes, 0);
     val w: err[fail.Fail] = x64_emit.packed_op(x64.PADDD, 64, x64_emit.t_xmm(1), x64_emit.vec_reg(x64_emit.t_xmm(2), 64), ?got);
     if (!sel w.err || got.bytes.len != 0) { ret 6; }
     ret 0;
@@ -4634,7 +4635,7 @@ fun t_vshift(opcode: lang_mir.MirOpcode, eb: u8, dst: lang_mir.MirOperand, lhs: 
     var st: isa_encode.EncodeState;
     isa_encode.state_blank(?st, ?alloc, x64_grammar.machine());
     val r: err[fail.Fail] = encode_vector_shift(?st, ?f, ?mi);
-    got.bytes.len = 0;
+    collections_vector.truncate[u8](?got.bytes, 0);
     t_bytes(got, st.buf.bytes.data, st.buf.bytes.len);
     isa_encode.buf_dnit(?st.buf);
     ret !sel r.err;
@@ -4668,7 +4669,7 @@ test vector_shift__uniform_count_is_the_sse2_shift {
     val mova:  [3]u8 = [3]u8{0x0F, 0x28, 0xCA};
     val psllw: [5]u8 = [5]u8{0x66, 0x0F, 0x71, 0xF1, 0x05};
     if (!t_vshift(lang_mir.MIR_SEL_SHL, 2, xmm1, xmm2, lang_mir.op_imm(5), ?got)) { ret 1; }
-    want.bytes.len = 0;
+    collections_vector.truncate[u8](?want.bytes, 0);
     t_bytes(?want, ?mova[0], 3);
     t_bytes(?want, ?psllw[0], 5);
     if (!t_bytes_equal(?got, ?want)) { ret 2; }
@@ -4676,7 +4677,7 @@ test vector_shift__uniform_count_is_the_sse2_shift {
     val movd:  [5]u8 = [5]u8{0x66, 0x44, 0x0F, 0x6E, 0xF9};
     val pslld: [5]u8 = [5]u8{0x66, 0x41, 0x0F, 0xF2, 0xCF};
     if (!t_vshift(lang_mir.MIR_SEL_SHL, 4, xmm1, xmm1, rcx, ?got)) { ret 3; }
-    want.bytes.len = 0;
+    collections_vector.truncate[u8](?want.bytes, 0);
     t_bytes(?want, ?movd[0], 5);
     t_bytes(?want, ?pslld[0], 5);
     if (!t_bytes_equal(?got, ?want)) { ret 4; }
@@ -4685,7 +4686,7 @@ test vector_shift__uniform_count_is_the_sse2_shift {
     val movdr: [5]u8 = [5]u8{0x66, 0x45, 0x0F, 0x6E, 0xFB};
     val psraw: [5]u8 = [5]u8{0x66, 0x41, 0x0F, 0xE1, 0xCF};
     if (!t_vshift(lang_mir.MIR_SEL_SHR_S, 2, xmm1, xmm1, rcx, ?got)) { ret 5; }
-    want.bytes.len = 0;
+    collections_vector.truncate[u8](?want.bytes, 0);
     t_bytes(?want, ?zx[0], 4);
     t_bytes(?want, ?movdr[0], 5);
     t_bytes(?want, ?psraw[0], 5);
@@ -4694,7 +4695,7 @@ test vector_shift__uniform_count_is_the_sse2_shift {
     val movq:  [5]u8 = [5]u8{0x66, 0x4C, 0x0F, 0x6E, 0xF9};
     val psrlq: [5]u8 = [5]u8{0x66, 0x41, 0x0F, 0xD3, 0xCF};
     if (!t_vshift(lang_mir.MIR_SEL_SHR_U, 8, xmm1, xmm1, rcx, ?got)) { ret 7; }
-    want.bytes.len = 0;
+    collections_vector.truncate[u8](?want.bytes, 0);
     t_bytes(?want, ?movq[0], 5);
     t_bytes(?want, ?psrlq[0], 5);
     if (!t_bytes_equal(?got, ?want)) { ret 8; }
@@ -4703,7 +4704,7 @@ test vector_shift__uniform_count_is_the_sse2_shift {
     val psrld: [6]u8 = [6]u8{0x66, 0x41, 0x0F, 0x72, 0xD6, 0x03};
     val store: [5]u8 = [5]u8{0x44, 0x0F, 0x29, 0x75, 0xF0};
     if (!t_vshift(lang_mir.MIR_SEL_SHR_U, 4, lang_mir.op_mem_preg(lang_mir.preg_id(x64.RBP), -16), xmm2, lang_mir.op_imm(3), ?got)) { ret 9; }
-    want.bytes.len = 0;
+    collections_vector.truncate[u8](?want.bytes, 0);
     t_bytes(?want, ?load[0], 4);
     t_bytes(?want, ?psrld[0], 6);
     t_bytes(?want, ?store[0], 5);
@@ -4711,7 +4712,7 @@ test vector_shift__uniform_count_is_the_sse2_shift {
 
     val sat: [5]u8 = [5]u8{0x66, 0x0F, 0x71, 0xF1, 0xFF};
     if (!t_vshift(lang_mir.MIR_SEL_SHL, 2, xmm1, xmm1, lang_mir.op_imm(40), ?got)) { ret 11; }
-    want.bytes.len = 0;
+    collections_vector.truncate[u8](?want.bytes, 0);
     t_bytes(?want, ?sat[0], 5);
     if (!t_bytes_equal(?got, ?want)) { ret 12; }
 
@@ -4782,7 +4783,7 @@ test encode_float_arith__two_address_shapes {
     mops[1] = xmm_op(x64.XMM0);
     mops[2] = xmm_op(x64.XMM1);
     var mul: lang_mir.MirInstr = lang_mir.instr(lang_mir.MIR_FMUL, ?mops[0], 3, 4, 0);
-    buf.bytes.len = 0;
+    collections_vector.truncate[u8](?buf.bytes, 0);
     encode_float_arith(?st, ?f, ?mul);
     if (buf.bytes.len != 8)        { bad = 1; }
     or (buf.bytes.data[0] != 0xF3) { bad = 1; }
@@ -4799,7 +4800,7 @@ test encode_float_arith__two_address_shapes {
     aops[1] = xmm_op(x64.XMM3);
     aops[2] = xmm_op(x64.XMM1);
     var add: lang_mir.MirInstr = lang_mir.instr(lang_mir.MIR_FADD, ?aops[0], 3, 4, 0);
-    buf.bytes.len = 0;
+    collections_vector.truncate[u8](?buf.bytes, 0);
     encode_float_arith(?st, ?f, ?add);
     if (buf.bytes.len != 4)        { bad = 1; }
     or (buf.bytes.data[0] != 0xF3) { bad = 1; }
@@ -4812,7 +4813,7 @@ test encode_float_arith__two_address_shapes {
     sops[1] = xmm_op(x64.XMM0);
     sops[2] = xmm_op(x64.XMM1);
     var sub: lang_mir.MirInstr = lang_mir.instr(lang_mir.MIR_FSUB, ?sops[0], 3, 4, 0);
-    buf.bytes.len = 0;
+    collections_vector.truncate[u8](?buf.bytes, 0);
     encode_float_arith(?st, ?f, ?sub);
     if (buf.bytes.len != 14)        { bad = 1; }
     or (buf.bytes.data[0] != 0xF3)  { bad = 1; }
@@ -4835,7 +4836,7 @@ test encode_float_arith__two_address_shapes {
     dops[1] = xmm_op(x64.XMM0);
     dops[2] = lang_mir.op_mem_preg(lang_mir.preg_id(x64.RBP), -8);
     var dv: lang_mir.MirInstr = lang_mir.instr(lang_mir.MIR_FDIV, ?dops[0], 3, 8, 0);
-    buf.bytes.len = 0;
+    collections_vector.truncate[u8](?buf.bytes, 0);
     encode_float_arith(?st, ?f, ?dv);
     if (buf.bytes.len != 9)        { bad = 1; }
     or (buf.bytes.data[0] != 0xF2) { bad = 1; }
@@ -4866,7 +4867,7 @@ test encode_float_cmp__operands_in_place {
     gops[1] = xmm_op(x64.XMM0);
     gops[2] = xmm_op(x64.XMM1);
     var gt: lang_mir.MirInstr = lang_mir.instr(lang_mir.MIR_FCMP, ?gops[0], 3, 4, lang_mir.FCC_GT);
-    buf.bytes.len = 0;
+    collections_vector.truncate[u8](?buf.bytes, 0);
     encode_float_cmp(?st, ?f, ?gt);
     if (buf.bytes.len != 10)       { bad = 1; }
     or (buf.bytes.data[0] != 0x0F) { bad = 1; }
@@ -4878,7 +4879,7 @@ test encode_float_cmp__operands_in_place {
     lops[1] = xmm_op(x64.XMM0);
     lops[2] = xmm_op(x64.XMM1);
     var lt: lang_mir.MirInstr = lang_mir.instr(lang_mir.MIR_FCMP, ?lops[0], 3, 4, lang_mir.FCC_LT);
-    buf.bytes.len = 0;
+    collections_vector.truncate[u8](?buf.bytes, 0);
     encode_float_cmp(?st, ?f, ?lt);
     if (buf.bytes.len != 10)       { bad = 1; }
     or (buf.bytes.data[0] != 0x0F) { bad = 1; }
@@ -4891,7 +4892,7 @@ test encode_float_cmp__operands_in_place {
     eops[1] = xmm_op(x64.XMM0);
     eops[2] = xmm_op(x64.XMM1);
     var eq: lang_mir.MirInstr = lang_mir.instr(lang_mir.MIR_FCMP, ?eops[0], 3, 4, lang_mir.FCC_EQ);
-    buf.bytes.len = 0;
+    collections_vector.truncate[u8](?buf.bytes, 0);
     val er: err[fail.Fail] = encode_float_cmp(?st, ?f, ?eq);
     if (sel er.err)                 { bad = 1; }
     or (buf.bytes.len != 18)        { bad = 1; }
@@ -4945,7 +4946,7 @@ test encode_float_neg__sign_mask_is_pooled {
     ops[0] = xmm_op(x64.XMM0);
     ops[1] = xmm_op(x64.XMM1);
     var ng: lang_mir.MirInstr = lang_mir.instr(lang_mir.MIR_FNEG, ?ops[0], 2, 8, 0);
-    buf.bytes.len = 0;
+    collections_vector.truncate[u8](?buf.bytes, 0);
     var encoded: err[fail.Fail] = encode_float_neg(?st, ?f, ?ng);
     if (sel encoded.err)     { bad = 1; }
     if (buf.bytes.len != 11) { bad = 1; }
@@ -4978,14 +4979,14 @@ test encode_float_neg__sign_mask_is_pooled {
         }
     }
 
-    buf.bytes.len = 0;
-    encoded       = encode_float_neg(?st, ?f, ?ng);
+    collections_vector.truncate[u8](?buf.bytes, 0);
+    encoded = encode_float_neg(?st, ?f, ?ng);
     if (sel encoded.err)     { bad = 1; }
     if (st.const_count != 1) { bad = 1; }
 
-    ng.width      = 4;
-    buf.bytes.len = 0;
-    encoded       = encode_float_neg(?st, ?f, ?ng);
+    ng.width = 4;
+    collections_vector.truncate[u8](?buf.bytes, 0);
+    encoded = encode_float_neg(?st, ?f, ?ng);
     if (sel encoded.err)     { bad = 1; }
     if (st.const_count != 2) { bad = 1; }
     or {
@@ -5008,23 +5009,23 @@ test float_access__width_refusals_emit_nothing {
     val slot: isa_inst.Operand = isa_inst.make_mem(x64.RBX, 16, isa_inst.REG_NONE, 0, 8);
     val xmm0: i32              = x64.XMM0;
 
-    buf.bytes.len = 0;
+    collections_vector.truncate[u8](?buf.bytes, 0);
     if (!t_refused(x64_emit.float_reg_or_slot_load(slot, xmm0, 16, buf), buf)) { bad = 1; }
-    buf.bytes.len = 0;
+    collections_vector.truncate[u8](?buf.bytes, 0);
     if (!t_refused(x64_emit.float_reg_or_slot_load(slot, xmm0, 32, buf), buf)) { bad = 1; }
-    buf.bytes.len = 0;
+    collections_vector.truncate[u8](?buf.bytes, 0);
     if (!t_refused(x64_emit.float_reg_or_slot_load(slot, xmm0, 1, buf), buf)) { bad = 1; }
-    buf.bytes.len = 0;
+    collections_vector.truncate[u8](?buf.bytes, 0);
     if (!t_refused(x64_emit.float_reg_or_slot_load(slot, xmm0, 0, buf), buf)) { bad = 1; }
 
-    buf.bytes.len = 0;
+    collections_vector.truncate[u8](?buf.bytes, 0);
     if (!t_accepted(x64_emit.float_reg_or_slot_load(slot, xmm0, 4, buf), buf)) { bad = 1; }
     if (buf.bytes.len != 5)                                                    { bad = 1; }
     or {
         if (buf.bytes.data[0] != 0xF3 || buf.bytes.data[1] != 0x0F || buf.bytes.data[2] != 0x10) { bad = 1; }
         if (buf.bytes.data[3] != 0x43 || buf.bytes.data[4] != 0x10)                              { bad = 1; }
     }
-    buf.bytes.len = 0;
+    collections_vector.truncate[u8](?buf.bytes, 0);
     if (!t_accepted(x64_emit.float_reg_or_slot_load(slot, xmm0, 8, buf), buf)) { bad = 1; }
     if (buf.bytes.len != 5)                                                    { bad = 1; }
     or {
@@ -5032,32 +5033,32 @@ test float_access__width_refusals_emit_nothing {
         if (buf.bytes.data[3] != 0x43 || buf.bytes.data[4] != 0x10)                              { bad = 1; }
     }
 
-    buf.bytes.len = 0;
+    collections_vector.truncate[u8](?buf.bytes, 0);
     if (!t_refused(x64_emit.float_store(slot, xmm0, 16, buf), buf)) { bad = 1; }
-    buf.bytes.len = 0;
+    collections_vector.truncate[u8](?buf.bytes, 0);
     if (!t_refused(x64_emit.float_store(slot, xmm0, 3, buf), buf)) { bad = 1; }
-    buf.bytes.len = 0;
+    collections_vector.truncate[u8](?buf.bytes, 0);
     if (!t_accepted(x64_emit.float_store(slot, xmm0, 4, buf), buf)) { bad = 1; }
     if (buf.bytes.len != 5)                                         { bad = 1; }
     or {
         if (buf.bytes.data[0] != 0xF3 || buf.bytes.data[1] != 0x0F || buf.bytes.data[2] != 0x11) { bad = 1; }
         if (buf.bytes.data[3] != 0x43 || buf.bytes.data[4] != 0x10)                              { bad = 1; }
     }
-    buf.bytes.len = 0;
+    collections_vector.truncate[u8](?buf.bytes, 0);
     if (!t_accepted(x64_emit.float_store(slot, xmm0, 8, buf), buf)) { bad = 1; }
 
-    buf.bytes.len = 0;
+    collections_vector.truncate[u8](?buf.bytes, 0);
     if (!t_refused(emit_float_load(?st, slot, xmm0, 16), buf)) { bad = 1; }
-    buf.bytes.len = 0;
+    collections_vector.truncate[u8](?buf.bytes, 0);
     if (!t_accepted(emit_float_load(?st, slot, xmm0, 8), buf)) { bad = 1; }
 
-    buf.bytes.len = 0;
+    collections_vector.truncate[u8](?buf.bytes, 0);
     val c16: res[isa_inst.Operand, fail.Fail] = float_const_operand(?st, 0, xmm0, 16);
     if (!sel c16.err || buf.bytes.len != 0) { bad = 1; }
-    buf.bytes.len = 0;
+    collections_vector.truncate[u8](?buf.bytes, 0);
     val c0: res[isa_inst.Operand, fail.Fail] = float_const_operand(?st, 0, xmm0, 3);
     if (!sel c0.err || buf.bytes.len != 0) { bad = 1; }
-    buf.bytes.len = 0;
+    collections_vector.truncate[u8](?buf.bytes, 0);
     val c4: res[isa_inst.Operand, fail.Fail] = float_const_operand(?st, 0, xmm0, 4);
     if (sel c4.err || buf.bytes.len == 0) { bad = 1; }
 
@@ -5076,56 +5077,56 @@ test float_encode__width_refusals_emit_nothing {
     var bad: i32                 = 0;
 
     var mv: isa_inst.Inst = isa_inst.inst_blank();
-    mv.opcode     = x64.MOV;
-    mv.dst        = isa_inst.make_reg(x64.XMM3, 16);
-    mv.src1       = isa_inst.make_reg(x64.XMM5, 16);
-    mv.size       = 12;
-    buf.bytes.len = 0;
+    mv.opcode = x64.MOV;
+    mv.dst    = isa_inst.make_reg(x64.XMM3, 16);
+    mv.src1   = isa_inst.make_reg(x64.XMM5, 16);
+    mv.size   = 12;
+    collections_vector.truncate[u8](?buf.bytes, 0);
     if (!t_refused_n(x64_emit.encode_fp_mov(?mv, buf), buf)) { bad = 1; }
-    mv.size       = 0;
-    buf.bytes.len = 0;
+    mv.size = 0;
+    collections_vector.truncate[u8](?buf.bytes, 0);
     if (!t_refused_n(x64_emit.encode_fp_mov(?mv, buf), buf)) { bad = 1; }
-    mv.size       = 1;
-    buf.bytes.len = 0;
+    mv.size = 1;
+    collections_vector.truncate[u8](?buf.bytes, 0);
     if (!t_refused_n(x64_emit.encode_fp_mov(?mv, buf), buf)) { bad = 1; }
 
-    mv.size       = 4;
-    buf.bytes.len = 0;
+    mv.size = 4;
+    collections_vector.truncate[u8](?buf.bytes, 0);
     if (!t_accepted_n(x64_emit.encode_fp_mov(?mv, buf), buf)) { bad = 1; }
-    mv.size       = 8;
-    buf.bytes.len = 0;
+    mv.size = 8;
+    collections_vector.truncate[u8](?buf.bytes, 0);
     if (!t_accepted_n(x64_emit.encode_fp_mov(?mv, buf), buf)) { bad = 1; }
-    mv.size       = 16;
-    buf.bytes.len = 0;
+    mv.size = 16;
+    collections_vector.truncate[u8](?buf.bytes, 0);
     if (!t_accepted_n(x64_emit.encode_fp_mov(?mv, buf), buf)) { bad = 1; }
-    mv.size       = 32;
-    buf.bytes.len = 0;
+    mv.size = 32;
+    collections_vector.truncate[u8](?buf.bytes, 0);
     if (!t_accepted_n(x64_emit.encode_fp_mov(?mv, buf), buf)) { bad = 1; }
 
     var cops: [2]lang_mir.MirOperand;
     cops[0] = lang_mir.op_preg(lang_mir.preg_id(x64.XMM3));
     cops[1] = lang_mir.op_imm(0);
     var cn: lang_mir.MirInstr = lang_mir.instr(x64.MOV::u32, ?cops[0], 2, 16, 0);
-    buf.bytes.len = 0;
+    collections_vector.truncate[u8](?buf.bytes, 0);
     if (!t_accepted(encode_float_const_mov(?st, ?f, ?cn), buf)) { bad = 1; }
     cn.operands[1].imm = 1;
-    buf.bytes.len      = 0;
+    collections_vector.truncate[u8](?buf.bytes, 0);
     if (!t_refused(encode_float_const_mov(?st, ?f, ?cn), buf)) { bad = 1; }
     cn.operands[1].imm = 0;
     cn.width           = 32;
-    buf.bytes.len      = 0;
+    collections_vector.truncate[u8](?buf.bytes, 0);
     if (!t_accepted(encode_float_const_mov(?st, ?f, ?cn), buf)) { bad = 1; }
-    cn.width      = 12;
-    buf.bytes.len = 0;
+    cn.width = 12;
+    collections_vector.truncate[u8](?buf.bytes, 0);
     if (!t_refused(encode_float_const_mov(?st, ?f, ?cn), buf)) { bad = 1; }
-    cn.width      = 0;
-    buf.bytes.len = 0;
+    cn.width = 0;
+    collections_vector.truncate[u8](?buf.bytes, 0);
     if (!t_refused(encode_float_const_mov(?st, ?f, ?cn), buf)) { bad = 1; }
-    cn.width      = 4;
-    buf.bytes.len = 0;
+    cn.width = 4;
+    collections_vector.truncate[u8](?buf.bytes, 0);
     if (!t_accepted(encode_float_const_mov(?st, ?f, ?cn), buf)) { bad = 1; }
-    cn.width      = 8;
-    buf.bytes.len = 0;
+    cn.width = 8;
+    collections_vector.truncate[u8](?buf.bytes, 0);
     if (!t_accepted(encode_float_const_mov(?st, ?f, ?cn), buf)) { bad = 1; }
 
     var aops: [3]lang_mir.MirOperand;
@@ -5133,20 +5134,20 @@ test float_encode__width_refusals_emit_nothing {
     aops[1] = xmm_op(x64.XMM0);
     aops[2] = xmm_op(x64.XMM1);
     var ar: lang_mir.MirInstr = lang_mir.instr(lang_mir.MIR_FMUL, ?aops[0], 3, 16, 0);
-    buf.bytes.len = 0;
+    collections_vector.truncate[u8](?buf.bytes, 0);
     if (!t_refused(encode_float_arith(?st, ?f, ?ar), buf)) { bad = 1; }
-    ar.width      = 4;
-    buf.bytes.len = 0;
+    ar.width = 4;
+    collections_vector.truncate[u8](?buf.bytes, 0);
     if (!t_accepted(encode_float_arith(?st, ?f, ?ar), buf)) { bad = 1; }
 
     var nops: [2]lang_mir.MirOperand;
     nops[0] = xmm_op(x64.XMM2);
     nops[1] = xmm_op(x64.XMM0);
     var ng: lang_mir.MirInstr = lang_mir.instr(lang_mir.MIR_FNEG, ?nops[0], 2, 16, 0);
-    buf.bytes.len = 0;
+    collections_vector.truncate[u8](?buf.bytes, 0);
     if (!t_refused(encode_float_neg(?st, ?f, ?ng), buf)) { bad = 1; }
-    ng.width      = 8;
-    buf.bytes.len = 0;
+    ng.width = 8;
+    collections_vector.truncate[u8](?buf.bytes, 0);
     if (!t_accepted(encode_float_neg(?st, ?f, ?ng), buf)) { bad = 1; }
 
     var mops: [3]lang_mir.MirOperand;
@@ -5154,26 +5155,26 @@ test float_encode__width_refusals_emit_nothing {
     mops[1] = xmm_op(x64.XMM0);
     mops[2] = xmm_op(x64.XMM1);
     var cm: lang_mir.MirInstr = lang_mir.instr(lang_mir.MIR_FCMP, ?mops[0], 3, 16, lang_mir.FCC_GT);
-    buf.bytes.len = 0;
+    collections_vector.truncate[u8](?buf.bytes, 0);
     if (!t_refused(encode_float_cmp(?st, ?f, ?cm), buf)) { bad = 1; }
-    cm.width      = 4;
-    buf.bytes.len = 0;
+    cm.width = 4;
+    collections_vector.truncate[u8](?buf.bytes, 0);
     if (!t_accepted(encode_float_cmp(?st, ?f, ?cm), buf)) { bad = 1; }
 
     var vops: [2]lang_mir.MirOperand;
     vops[0] = xmm_op(x64.XMM2);
     vops[1] = xmm_op(x64.XMM0);
     var cv: lang_mir.MirInstr = lang_mir.instr(lang_mir.MIR_FP_TRUNC, ?vops[0], 2, 16, 0);
-    cv.src_width  = 8;
-    buf.bytes.len = 0;
+    cv.src_width = 8;
+    collections_vector.truncate[u8](?buf.bytes, 0);
     if (!t_refused(encode_float_conv(?st, ?f, ?cv), buf)) { bad = 1; }
-    cv.width      = 4;
-    cv.src_width  = 16;
-    buf.bytes.len = 0;
+    cv.width     = 4;
+    cv.src_width = 16;
+    collections_vector.truncate[u8](?buf.bytes, 0);
     if (!t_refused(encode_float_conv(?st, ?f, ?cv), buf)) { bad = 1; }
-    cv.width      = 4;
-    cv.src_width  = 8;
-    buf.bytes.len = 0;
+    cv.width     = 4;
+    cv.src_width = 8;
+    collections_vector.truncate[u8](?buf.bytes, 0);
     if (!t_accepted(encode_float_conv(?st, ?f, ?cv), buf)) { bad = 1; }
 
     var iops: [2]lang_mir.MirOperand;
@@ -5181,11 +5182,11 @@ test float_encode__width_refusals_emit_nothing {
     iops[1] = lang_mir.op_preg(lang_mir.preg_id(x64.RCX));
     var i2f: lang_mir.MirInstr = lang_mir.instr(lang_mir.MIR_SI_TO_FP, ?iops[0], 2, 16, 0);
     i2f.src_width = 8;
-    buf.bytes.len = 0;
+    collections_vector.truncate[u8](?buf.bytes, 0);
     if (!t_refused(encode_float_conv(?st, ?f, ?i2f), buf)) { bad = 1; }
     i2f.width     = 8;
     i2f.src_width = 1;
-    buf.bytes.len = 0;
+    collections_vector.truncate[u8](?buf.bytes, 0);
     if (!t_accepted(encode_float_conv(?st, ?f, ?i2f), buf)) { bad = 1; }
 
     var fops: [2]lang_mir.MirOperand;
@@ -5193,11 +5194,11 @@ test float_encode__width_refusals_emit_nothing {
     fops[1] = xmm_op(x64.XMM0);
     var f2i: lang_mir.MirInstr = lang_mir.instr(lang_mir.MIR_FP_TO_SI, ?fops[0], 2, 8, 0);
     f2i.src_width = 16;
-    buf.bytes.len = 0;
+    collections_vector.truncate[u8](?buf.bytes, 0);
     if (!t_refused(encode_float_conv(?st, ?f, ?f2i), buf)) { bad = 1; }
     f2i.width     = 1;
     f2i.src_width = 8;
-    buf.bytes.len = 0;
+    collections_vector.truncate[u8](?buf.bytes, 0);
     if (!t_accepted(encode_float_conv(?st, ?f, ?f2i), buf)) { bad = 1; }
 
     isa_encode.buf_dnit(buf);
@@ -5227,7 +5228,7 @@ fun t_select(st: *isa_encode.EncodeState, f: *lang_mir.MirFunction, fused: bool,
     var src: u8 = 8;
     if (!fused) { src = 1; }
     var mi: lang_mir.MirInstr = lang_mir.instr(op, ?ops[0], k, 8, src);
-    st.buf.bytes.len = 0;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     val r: err[fail.Fail] = encode_mir_instr(st, f, 0, ?mi);
     if (sel r.err) { ret false; }
     ret x64_emit.t_buf_is(?st.buf, want, n);
@@ -5277,7 +5278,7 @@ test encode_mir_instr__unknown_and_truncated_opcodes_refused {
     val encoded:     err[fail.Fail]    = encode_mir_instr(?st, ?f, 0, ?instruction);
     if (sel encoded.err)       { ret 1; }
     if (st.buf.bytes.len != 1) { ret 2; }
-    st.buf.bytes.len   = 0;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     instruction.opcode = lang_mir.ISA_USE;
     val instr_encoded: err[fail.Fail] = isa_encode.instr_encode(?st, ?f, 0, ?instruction, ?HOOKS);
     if (sel instr_encoded.err) { ret 3; }
@@ -6169,8 +6170,8 @@ test vector_convert__an_aliasing_destination_forms_in_scratch_when_the_plan_read
     if (!t_bytes_equal(?got, ?want)) { ret 3; }
 
     # apart: the same plan forms in the destination with no copy out
-    got.bytes.len  = 0;
-    want.bytes.len = 0;
+    collections_vector.truncate[u8](?got.bytes, 0);
+    collections_vector.truncate[u8](?want.bytes, 0);
     val apart: err[fail.Fail] = emit_xconv_to(?p, x64_emit.vec_reg(xmm2, 16), x64_emit.vec_reg(xmm1, 16), 16, ?got);
     if (sel apart.err) { ret 4; }
     x64_emit.movaps_rr(xmm2, xmm1, 16, ?want);
@@ -6210,8 +6211,8 @@ test vector_convert__every_table_plan_forms_in_an_aliasing_destination {
                     var p: convplan.Plan = planned.some;
                     if (!convplan.alias_safe(?p)) { ret 1; }
                     # in place: the operand's own register holds the result and nothing is copied
-                    got.bytes.len  = 0;
-                    want.bytes.len = 0;
+                    collections_vector.truncate[u8](?got.bytes, 0);
+                    collections_vector.truncate[u8](?want.bytes, 0);
                     val emitted: err[fail.Fail] = emit_xconv_to(?p, x64_emit.vec_reg(xmm3, 16), x64_emit.vec_reg(xmm3, 16), 16, ?got);
                     if (sel emitted.err) { ret 2; }
                     val direct: err[fail.Fail] = emit_xconv(?p, x64_emit.vec_reg(xmm3, 16), xmm3, ?want);

@@ -326,7 +326,7 @@ fun each_walk(w: *Walk, ce: *ast_stmt.StmtComptimeEach) {
     w.gated = w.gated + 1;
     stmt_list_walk(w, ce.body_start, ce.body_len);
     w.gated = w.gated - 1;
-    if (bound) { w.each_vars.len = w.each_vars.len - 1; }
+    if (bound) { collections_vector.truncate[intern.StrId](?w.each_vars, w.each_vars.len - 1); }
 }
 
 fun expr_list_walk(w: *Walk, start: u32, len: u32) {

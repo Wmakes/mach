@@ -515,7 +515,7 @@ pub fun type_array(tt: *TypeTable, elem: u32, count: u32, explicit_layout: bool)
     el[0] = elem;
     shape_put(tt, id, ?el[0], 0, explicit_layout, count);
     if (tt.b.err) {
-        if (!explicit_layout) { tt.scalars.len = tt.scalars.len - 1; }
+        if (!explicit_layout) { collections_vector.truncate[ScalarKey](?tt.scalars, tt.scalars.len - 1); }
         ret 0;
     }
     ret id;
