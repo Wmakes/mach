@@ -352,6 +352,14 @@ fwd mach.lang.manifest.target.target_matches_host
 
 forwards [`mach.lang.manifest.target.target_matches_host`](manifest/target.md#fun-target_matches_host)
 
+## fwd mach.lang.manifest.target.find_target_by_name
+
+```mach
+fwd mach.lang.manifest.target.find_target_by_name
+```
+
+forwards [`mach.lang.manifest.target.find_target_by_name`](manifest/target.md#fun-find_target_by_name)
+
 ## fwd mach.lang.manifest.load.project_parse
 
 ```mach

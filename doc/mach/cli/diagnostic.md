@@ -105,7 +105,6 @@ tally: the human tally, counted as the events pass
 out: where a test run renders, stdout
 run: the running test run's results, from its run_start to its run_end
 count: how many results run holds
-runner: the command each test is launched through, or nil
 mod_w: the module column's width
 name_w: the test column's width
 

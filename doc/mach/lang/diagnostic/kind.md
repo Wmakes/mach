@@ -3003,6 +3003,18 @@ pub val SECRET_TARGET_UNENFORCEABLE:      Kind = 508
 pub val TARGET_BASELINE_REQUIRED:         Kind = 509
 ```
 
+## val COMPTIME_CAST_RANGE
+
+```mach
+pub val COMPTIME_CAST_RANGE:              Kind = 510
+```
+
+## val COMPTIME_NAN_UNSPECIFIED
+
+```mach
+pub val COMPTIME_NAN_UNSPECIFIED:         Kind = 511
+```
+
 ## rec Spec
 
 ```mach
@@ -3020,7 +3032,7 @@ retired: nothing raises the kind any more; the row stays so its key is
 ## val COUNT
 
 ```mach
-pub val COUNT: usize       = 509
+pub val COUNT: usize       = 511
 ```
 
 ## fun at

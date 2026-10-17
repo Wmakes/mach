@@ -44,15 +44,21 @@ refused, naming them.
   `mach build` would build the cell, its closure, its `link` entries, its `need` and
   exported dependency entries, and links the dispatcher in place of its entry. Tests
   then run once per (target, profile): the tests every selected artifact reaches
-  there are combined, each qualified name running once. Only a target whose `os` and
-  `isa` are the host's runs; every other (target, profile) is built, reported on a
-  `skip` line, and not run, whatever emulation the host has. `--runner <cmd>` runs a
-  foreign target's tests through a command and needs the selection to resolve to one
-  cell. A run in which nothing was runnable exits `1`, so a green run always ran
+  there are combined, each qualified name running once. A target that declares a
+  [`runner`](manifest.md#targetname) runs through it, and a target whose `os` and
+  `isa` are the host's and that declares none runs directly; every other (target,
+  profile) is built, reported on a `skip` line, and not run, whatever emulation the
+  host has. `--runner <cmd>` replaces the target's runner for one invocation and needs
+  the selection to resolve to one cell. A run in which nothing was runnable exits `1`, so a green run always ran
   something, unless `--allow-unrunnable` accepts it.
 - `mach run <path>` and `mach doc <path>` consume exactly one cell and refuse a
   selection that resolves to several, naming them. `mach run` takes no `--all`, and
-  `mach doc` selects with `-a` and `-t` only.
+  `mach doc` selects with `-a` and `-t` only. `mach run` launches the built program
+  through the target's `runner` when it declares one, the expanded runner followed by
+  the arguments after `--`; `--runner <cmd>` replaces it with `<cmd> <program> <args>`
+  for one invocation. A target that is not the host's and declares no runner is
+  refused, naming the target, and the program's exit status, or the runner's, is
+  `mach run`'s.
 
 ## Enumerated cells are filtered; named ones are not
 

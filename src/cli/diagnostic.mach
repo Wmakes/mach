@@ -880,7 +880,6 @@ fun summary_w(w: *io_writer.Writer, ev: *readout.Summary) {
 # out:    where a test run renders, stdout
 # run:    the running test run's results, from its run_start to its run_end
 # count:  how many results run holds
-# runner: the command each test is launched through, or nil
 # mod_w:  the module column's width
 # name_w: the test column's width
 pub rec Readout {
@@ -892,7 +891,6 @@ pub rec Readout {
     out:    io_writer.Writer;
     run:    *readout.TestResult;
     count:  u32;
-    runner: str;
     mod_w:  usize;
     name_w: usize;
 }
@@ -915,7 +913,6 @@ pub fun readout_init(rd: *Readout, r: *Report, units: usize, quiet: bool, level:
     rd.out           = fs.writer(fs.STDOUT);
     rd.run           = nil;
     rd.count         = 0;
-    rd.runner        = nil;
     rd.mod_w         = 0;
     rd.name_w        = 0;
 }
@@ -1070,7 +1067,6 @@ fun summary_record(r: *Report, ev: *readout.Summary) {
 fun run_begin(rd: *Readout, ev: *readout.RunStart) {
     rd.run    = ev.tests;
     rd.count  = ev.count;
-    rd.runner = ev.runner;
     rd.mod_w  = 0;
     rd.name_w = 0;
     var i: u32 = 0;
@@ -1099,7 +1095,7 @@ fun test_human(rd: *Readout, at: u32) {
     val w: *io_writer.Writer   = ?rd.out;
     val t: *readout.TestResult = ?rd.run[at];
     if (rd.sink.level >= readout.LEVEL_PHASES) {
-        test_line_w(w, t, rd.name_w, rd.runner);
+        test_line_w(w, t, rd.name_w);
         ret;
     }
     val mod_name: str = t.art.module;
@@ -1112,10 +1108,10 @@ fun test_human(rd: *Readout, at: u32) {
         if (!rd.run[j].done) { ret; }
         j = j + 1;
     }
-    module_run_w(w, rd.run, first, last, rd.mod_w, rd.runner);
+    module_run_w(w, rd.run, first, last, rd.mod_w);
 }
 
-fun module_run_w(w: *io_writer.Writer, tests: *readout.TestResult, first: u32, last: u32, mod_w: usize, runner: str) {
+fun module_run_w(w: *io_writer.Writer, tests: *readout.TestResult, first: u32, last: u32, mod_w: usize) {
     var ok:      u32                      = 0;
     var skipped: u32                      = 0;
     var failed:  u32                      = 0;
@@ -1143,13 +1139,13 @@ fun module_run_w(w: *io_writer.Writer, tests: *readout.TestResult, first: u32, l
             reason_w(w, t);
             std_format.write_str(w, "\n");
             captured_w(w, t);
-            pointers_w(w, t, runner);
+            pointers_w(w, t);
         }
         j = j + 1;
     }
 }
 
-fun test_line_w(w: *io_writer.Writer, t: *readout.TestResult, name_w: usize, runner: str) {
+fun test_line_w(w: *io_writer.Writer, t: *readout.TestResult, name_w: usize) {
     if (!failure(?t.result)) {
         if (t.result.kind == testrun.RESULT_SKIP) { std_format.write_str(w, "skip  "); }
         or                                        { std_format.write_str(w, "ok    "); }
@@ -1166,18 +1162,15 @@ fun test_line_w(w: *io_writer.Writer, t: *readout.TestResult, name_w: usize, run
     reason_w(w, t);
     std_format.format(w, "  {}:{}\n", t.art.file, t.art.line::i64);
     captured_w(w, t);
-    pointers_w(w, t, runner);
+    pointers_w(w, t);
 }
 
 # where a failed test's full output is and how to rerun it alone
-fun pointers_w(w: *io_writer.Writer, t: *readout.TestResult, runner: str) {
+fun pointers_w(w: *io_writer.Writer, t: *readout.TestResult) {
     if (t.truncated && t.log != nil) { std_format.format(w, "    full output: {}\n", t.log); }
     std_format.write_str(w, "    rerun: ");
-    if (runner != nil) {
-        std_format.write_str(w, runner);
-        std_format.write_str(w, " ");
-    }
-    std_format.format(w, "{} {}\n", t.art.exe::str, t.art.idx::i64);
+    if (t.launch != nil) { std_format.format(w, "{} {}\n", t.launch, t.art.idx::i64); }
+    or                   { std_format.format(w, "{} {}\n", t.art.exe::str, t.art.idx::i64); }
 }
 
 fun col_w(w: *io_writer.Writer, s: str, width: usize) {
@@ -2072,6 +2065,7 @@ fun t_run_arts(arts: *testrun.TestArtifact, run: *readout.TestResult) {
         run[i].art      = ?arts[i];
         run[i].done     = false;
         run[i].log      = nil;
+        run[i].launch   = nil;
         i               = i + 1;
     }
     arts[0].module = "a";
@@ -2099,7 +2093,7 @@ test readout__a_slow_test_holds_back_only_its_own_module {
     var arts: [3]testrun.TestArtifact;
     var run:  [3]readout.TestResult;
     t_run_arts(?arts[0], ?run[0]);
-    readout.run_start(?rd.sink, ?run[0], 3, nil);
+    readout.run_start(?rd.sink, ?run[0], 3);
 
     t_finish(?run[2], testrun.RESULT_SEMANTIC_MISMATCH, testrun.CAUSE_ORACLE_EXIT, 3);
     readout.test_end(?rd.sink, ?run[0], 2);
@@ -2143,7 +2137,8 @@ test readout__under_v_each_test_prints_as_it_finishes {
     var arts: [3]testrun.TestArtifact;
     var run:  [3]readout.TestResult;
     t_run_arts(?arts[0], ?run[0]);
-    readout.run_start(?rd.sink, ?run[0], 3, "qemu");
+    run[1].launch = "qemu dispatcher";
+    readout.run_start(?rd.sink, ?run[0], 3);
     t_finish(?run[1], testrun.RESULT_SEMANTIC_MISMATCH, testrun.CAUSE_ORACLE_SIGNAL, 9);
     readout.test_end(?rd.sink, ?run[0], 1);
     if (!fixture.sink_contains(?sink, "FAIL  a#fails "))                 { ret 1; }
@@ -2174,7 +2169,7 @@ test readout__a_test_run_is_records_on_the_report {
     var arts: [3]testrun.TestArtifact;
     var run:  [3]readout.TestResult;
     t_run_arts(?arts[0], ?run[0]);
-    readout.run_start(?rd.sink, ?run[0], 3, nil);
+    readout.run_start(?rd.sink, ?run[0], 3);
     t_finish(?run[2], testrun.RESULT_SEMANTIC_MISMATCH, testrun.CAUSE_ORACLE_EXIT, 3);
     run[2].log = "logs/2.log";
     readout.test_end(?rd.sink, ?run[0], 2);

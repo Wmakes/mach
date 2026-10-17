@@ -160,7 +160,9 @@ pub rec TestResult;
 ```
 
 one test's result, filled in place when the test finishes. log is the file its
-captured output is kept in, nil when none could be named
+captured output is kept in, nil when none could be named. launch is the command
+the test was launched through, its runner's words and the program before the
+test's index, nil when the program ran itself
 
 ## rec RunStart
 
@@ -169,9 +171,8 @@ pub rec RunStart;
 ```
 
 a test run starts over count tests in collection order, each with its art set
-and none done, launched through runner when it is not nil. tests stays valid
-and in place until the run's run_end, so a renderer may read every result as
-it finishes
+and none done. tests stays valid and in place until the run's run_end, so a
+renderer may read every result as it finishes
 
 ## rec RunEnd
 
@@ -258,7 +259,7 @@ sink is a no-op
 ## fun run_start
 
 ```mach
-pub fun run_start(sink: *Sink, tests: *TestResult, count: u32, runner: str);
+pub fun run_start(sink: *Sink, tests: *TestResult, count: u32);
 ```
 
 a test run starts; a nil sink is a no-op

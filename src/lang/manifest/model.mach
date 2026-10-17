@@ -70,6 +70,10 @@ pub fun simd_named(name: str) opt[SimdMode] {
 # extensions:      the `extensions` names, each an identifier and listed once; the isa
 #                  refuses a name its vocabulary does not hold when the target resolves
 # extension_count: how many of `extensions` are set
+# runner:          the `runner` argv templates the target's programs are launched
+#                  through; nil when absent. freed by `dnit`
+# runner_count:    length of `runner`
+# runner_at:       where each `runner` entry is written
 # at:              where the table's key is written
 pub rec TargetDef {
     name:            intern.StrId;
@@ -85,6 +89,9 @@ pub rec TargetDef {
     stack_commit:    u64;
     extensions:      [extension.MAX_SELECTED]intern.StrId;
     extension_count: u32;
+    runner:          *intern.StrId;
+    runner_count:    u32;
+    runner_at:       *fail.Place;
     at:              fail.Place;
 }
 
@@ -385,6 +392,12 @@ pub fun dnit(m: *Manifest, alloc: *A.Allocator) {
         m.native_target = nil;
     }
     if (m.targets != nil && m.target_count > 0) {
+        var i: u32 = 0;
+        for (i < m.target_count) {
+            free_strarr(alloc, m.targets[i].runner, m.targets[i].runner_count);
+            free_sites(alloc, m.targets[i].runner_at, m.targets[i].runner_count);
+            i = i + 1;
+        }
         A.deallocate[TargetDef](alloc, m.targets, m.target_count::usize);
         m.targets      = nil;
         m.target_count = 0;

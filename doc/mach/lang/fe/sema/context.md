@@ -138,6 +138,7 @@ type_caps: the whole semantic set, which a module constant is always evaluated w
 collect_insts: whether the walk records the instances it asks for
 subst_fn: substitutes an instance's type arguments into a type
 annotation_check_fn: the per-instance checks over one type annotation, run as each is resolved
+infer_fn: types one expression, as an array length is before it is evaluated
 module: the stable id of the module being typed
 values: the store the module's constant values are built in, which its
                      interface publishes

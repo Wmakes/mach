@@ -48,6 +48,8 @@ pub val CONTEXT_PATH: Context = 2;
 pub val CONTEXT_STEP_VALUE: Context = 3;
 # an `#[embed]` path
 pub val CONTEXT_EMBED: Context = 4;
+# a target's `runner` entries
+pub val CONTEXT_RUNNER: Context = 5;
 
 # how a context reads its templates
 # ---
@@ -64,12 +66,13 @@ rec ContextRow {
     toml:     bool;
 }
 
-val CONTEXTS: [5]ContextRow = [5]ContextRow{
+val CONTEXTS: [6]ContextRow = [6]ContextRow{
     ContextRow{where: "[project].work", lead: "mach.toml: ", verbatim: false, toml: true},
     ContextRow{where: "an artifact's own out", lead: "mach.toml: ", verbatim: false, toml: true},
     ContextRow{where: "a path", lead: "mach.toml: ", verbatim: false, toml: true},
     ContextRow{where: "a build step value", lead: "mach.toml: ", verbatim: true, toml: true},
     ContextRow{where: "an `embed` path", lead: "", verbatim: false, toml: false},
+    ContextRow{where: "a target's runner", lead: "mach.toml: ", verbatim: true, toml: true},
 };
 
 # the value a variable reads
@@ -82,14 +85,16 @@ val FIELD_TARGET_ABI:      Field = 4;
 val FIELD_PROFILE_NAME:    Field = 5;
 val FIELD_ARTIFACT_SUFFIX: Field = 6;
 val FIELD_ARTIFACT_OUT:    Field = 7;
+val FIELD_RUN_OUT:         Field = 8;
 
 val IN_PROJECT_WORK: u8 = 1;
 val IN_ARTIFACT_OUT: u8 = 2;
 val IN_PATH:         u8 = 4;
 val IN_STEP_VALUE:   u8 = 8;
 val IN_EMBED:        u8 = 16;
+val IN_RUNNER:       u8 = 32;
 # every context that knows its target and profile
-val IN_CELL: u8 = IN_PROJECT_WORK | IN_ARTIFACT_OUT | IN_PATH | IN_STEP_VALUE;
+val IN_CELL: u8 = IN_PROJECT_WORK | IN_ARTIFACT_OUT | IN_PATH | IN_STEP_VALUE | IN_RUNNER;
 
 # one template variable
 # ---
@@ -105,9 +110,9 @@ rec Variable {
     note:     str;
 }
 
-val VARIABLE_COUNT: usize       = 8;
-val VARIABLES:      [8]Variable = [8]Variable{
-    Variable{name: "project.work", field: FIELD_PROJECT_WORK, contexts: IN_ARTIFACT_OUT | IN_PATH | IN_STEP_VALUE, note: ""},
+val VARIABLE_COUNT: usize       = 9;
+val VARIABLES:      [9]Variable = [9]Variable{
+    Variable{name: "project.work", field: FIELD_PROJECT_WORK, contexts: IN_ARTIFACT_OUT | IN_PATH | IN_STEP_VALUE | IN_RUNNER, note: ""},
     Variable{name: "target.name", field: FIELD_TARGET_NAME, contexts: IN_CELL, note: ""},
     Variable{name: "target.isa", field: FIELD_TARGET_ISA, contexts: IN_CELL, note: ""},
     Variable{name: "target.os", field: FIELD_TARGET_OS, contexts: IN_CELL, note: ""},
@@ -115,6 +120,7 @@ val VARIABLES:      [8]Variable = [8]Variable{
     Variable{name: "profile.name", field: FIELD_PROFILE_NAME, contexts: IN_CELL, note: ""},
     Variable{name: "artifact.suffix", field: FIELD_ARTIFACT_SUFFIX, contexts: IN_ARTIFACT_OUT, note: "it is available only in an artifact's own out"},
     Variable{name: "artifact.<id>.out", field: FIELD_ARTIFACT_OUT, contexts: IN_PATH | IN_STEP_VALUE | IN_EMBED, note: ""},
+    Variable{name: "artifact.out", field: FIELD_RUN_OUT, contexts: IN_RUNNER, note: "it names the program a runner launches"},
 };
 
 # a variable a previous major named, and the name that replaced it
@@ -168,6 +174,7 @@ pub rec Requirements {
 # profile:         `{profile.name}`
 # format:          the target's explicit `of` override, "" when the format is derived
 # artifact_suffix: `{artifact.suffix}`, set for the artifact whose output is named
+# run_out:         `{artifact.out}`, set for the program a runner launches
 # reqs:            the artifacts `{artifact.<id>.out}` may name; nil when none
 # req_count:       length of `reqs`
 # dependency:      the id of the dependency whose default library requirements
@@ -180,6 +187,7 @@ pub rec Values {
     profile:         str;
     format:          str;
     artifact_suffix: str;
+    run_out:         str;
     reqs:            *Requirement;
     req_count:       u32;
     dependency:      str;
@@ -223,8 +231,9 @@ pub fun embed_values(reqs: *Requirement, req_count: u32, dependency: str) Values
     ret v;
 }
 
-fun values_empty() Values {
-    ret Values{target: "", isa: "", os: "", abi: "", profile: "", format: "", artifact_suffix: nil,
+# values that name nothing, each field set by the caller that has it
+pub fun values_empty() Values {
+    ret Values{target: "", isa: "", os: "", abi: "", profile: "", format: "", artifact_suffix: nil, run_out: nil,
         reqs: nil, req_count: 0, dependency: ""};
 }
 
@@ -496,6 +505,10 @@ fun value_of(alloc: *A.Allocator, tmpl: str, start: usize, end: usize, row: *Con
     if (f == FIELD_ARTIFACT_SUFFIX) {
         if (v.artifact_suffix == nil) { ret res[str, fail.Fail].err{fail.message("internal: an artifact output expanded without its artifact's suffix")}; }
         ret res[str, fail.Fail].ok{v.artifact_suffix};
+    }
+    if (f == FIELD_RUN_OUT) {
+        if (v.run_out == nil) { ret res[str, fail.Fail].err{fail.message("internal: a runner expanded without the program it launches")}; }
+        ret res[str, fail.Fail].ok{v.run_out};
     }
     ret requirement_out(alloc, tmpl, start + str_len(ARTIFACT_PREFIX), end - str_len(ARTIFACT_SUFFIX), row, v);
 }

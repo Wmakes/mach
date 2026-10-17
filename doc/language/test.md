@@ -163,7 +163,7 @@ run are:
 --include-deps           also run tests declared in dependency modules
 --list                   list the collected tests and exit
 --diagnostics <human|json>  write failures and the run's records to stderr as text or NDJSON
---runner <cmd>           launch each test through a host-side command
+--runner <cmd>           launch each test through a host-side command, in place of the target's runner
 --timeout <duration>     terminate a test and its process group after the duration
 --allow-unrunnable       exit 0 when nothing selected can run on this host, after building it
 ```
@@ -278,7 +278,7 @@ as is when the result is in `0..255`, and `255` otherwise (see
 `2`.
 
 `mach test` then keeps up to `--jobs` children in flight, each spawned as
-`<exe> <index>`, captures each child's stdout and stderr to a per-test file
+`<exe> <index>`, or through the target's runner (see [Which tests run](#which-tests-run)), captures each child's stdout and stderr to a per-test file
 under `log/` beside the dispatcher, `test/<artifact>/log/` unless `-o` moves
 the dispatcher, named by the test's position in the run (a passing or skipped
 test's file is removed on the spot, a failing test's file stays), and reads its
@@ -299,11 +299,22 @@ each selected target and profile, so `$bin.name` in a test block, and in every
 module a dispatcher compiles, is the artifact under test.
 
 Tests run once per (target, profile). When several artifacts are selected there,
-the tests they reach are combined and each qualified name runs once. Only a target
-whose `os` and `isa` are the host's runs its tests; any other is built and reported
-on a `skip` line, since an emulator the host happens to have is not the target.
-`--runner <cmd>` launches each test as `<cmd> <exe> <index>` and needs the selection
-to resolve to one (artifact, target, profile), foreign or not. A run that executed
+the tests they reach are combined and each qualified name runs once. A target that
+declares a [`runner`](manifest.md#targetname) runs its tests through it, whether or
+not it is the host: each test launches as the expanded runner followed by its index,
+`{artifact.out}` naming the dispatcher. A target whose `os` and `isa` are the host's
+and that declares none runs each test as `<exe> <index>`. Any other target is built
+and reported on a `skip` line, since an emulator the host happens to have is not the
+target unless the manifest says so. `--runner <cmd>` replaces the target's runner for
+one invocation, launching each test as `<cmd> <exe> <index>`, and needs the selection
+to resolve to one (artifact, target, profile), foreign or not.
+
+A test launched through a runner is judged by the runner's exit status under the
+same rule as a native test: `0` is a pass, `77` a skip, and anything else a failure.
+mach adds nothing for the guest: how a program under an emulator gets its status
+out, through semihosting, a debug-exit port or the emulator's own passthrough, is
+the runner's business, and `wine`, for one, passes the program's status through. The
+`rerun:` line of a failure shows the whole launch command. A run that executed
 nothing exits `1`, naming the host, so a passing run always ran tests. A
 selection with nothing runnable on the host exits `0` under `--allow-unrunnable`,
 after building it and printing each skip line; a build failure still exits non-zero.

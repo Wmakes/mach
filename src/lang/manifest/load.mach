@@ -400,6 +400,13 @@ fun templates_validate(alloc: *A.Allocator, itn: *intern.Interner, m: *Manifest)
         i = i + 1;
     }
     i = 0;
+    for (i < m.target_count) {
+        val t:       *TargetDef     = ?m.targets[i];
+        val checked: err[fail.Fail] = templates_validate_each(alloc, itn, t.runner, t.runner_at, t.runner_count, template.CONTEXT_RUNNER);
+        if (sel checked.err) { ret checked; }
+        i = i + 1;
+    }
+    i = 0;
     for (i < m.step_count) {
         val s:    *StepDef       = ?m.steps[i];
         val argv: err[fail.Fail] = templates_validate_each(alloc, itn, s.argv, s.argv_at, s.argv_count, template.CONTEXT_STEP_VALUE);

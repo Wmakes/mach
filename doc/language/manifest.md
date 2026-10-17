@@ -105,6 +105,7 @@ work    = "out/{target.name}/{profile.name}"  # required: the work directory tem
 isa = "x86_64"
 os  = "linux"
 abi = "sysv64"
+# runner = ["wine", "{artifact.out}"]  # optional: the command run and test launch through
 
 [profile.debug]                        # a build variant; every manifest declares at least one
 optimize = false                       # run the optimization pass set
@@ -276,7 +277,50 @@ to whichever *declared* target matches the host.
 | `stack_commit` | absent: the format's default | Thread stack commit in bytes. See [Image stack size](#image-stack-size). |
 | `default` | removed | Refused as a removed key. A target has no default: with no `-t` a command takes the declared target matching the host. See [`native` target resolution](build.md#native-target-resolution). |
 | `extensions` | absent: none selected | Array of instruction-set extension names the target may assume, such as `["sha", "ssse3"]`. Each name must be in the isa's vocabulary. See [Instruction-set extensions](#instruction-set-extensions). |
+| `runner` | absent: the host runs its own programs, and no other target's | Array of argv templates the target's programs are launched through by `mach run` and `mach test`, whether or not the target is the host. See [Execution command](#execution-command). |
 | `env` | absent: the isa's default | Consumer environment (string). The values are owned by the target's isa: an `env` the isa does not define is a manifest error naming the target and the known values, and an isa that defines none refuses the key outright. Today only `spirv` defines any; see [Finished-module targets](#finished-module-targets). |
+
+### Execution command
+
+A target may declare one execution command, `runner`, which `mach run` and
+`mach test` launch the target's programs through. It is an array of argv
+templates, the first naming the program, resolved on `PATH` as a command name
+would be, and each entry expanded as a [path template](#path-templates) over
+`{target.*}`, `{profile.name}`, `{project.work}` and `{artifact.out}`, the path of
+the program being launched. Both paths are joined to the project root as given on
+the command line, so they hold from the directory mach runs in, as the runner does. The run's
+own arguments are appended: what follows `--` for `mach run`, and the dispatcher's
+test index for `mach test`. A brace group outside the reserved namespaces is text,
+as in a step's `argv`.
+
+```toml
+[target.windows]
+isa    = "x86_64"
+os     = "windows"
+abi    = "win64"
+runner = ["wine", "{artifact.out}"]
+
+[target.pc]
+isa    = "x86_64"
+os     = "freestanding"
+abi    = "sysv64"
+runner = ["qemu-system-x86_64", "-drive", "format=raw,file={project.work}/disk.img",
+          "-device", "isa-debug-exit"]
+```
+
+mach knows no runner by name and adds nothing for one: no emulator list, no
+semihosting and no exit hook. The runner's exit status is the program's: `mach run`
+exits with it, and a test reads it as a native test's (`0` a pass, `77` a skip,
+anything else a failure), so how a guest reports its status is the runner's
+business. A disk image or a bootloader wrapping is an ordinary
+[`[step]`](#stepname--build-steps) the artifact `need`s, never part of the runner.
+
+A target that declares a runner runs through it whether or not it is the host. One
+that declares none runs its programs directly on the host and nowhere else: `mach run`
+refuses it, naming the target, and `mach test` builds it and reports it on a `skip`
+line. `--runner <cmd>` replaces the declared runner for one invocation, launching
+`<cmd> <program> <args>`. An unknown variable or a variable the runner does not admit
+is refused when the manifest loads.
 
 ### Instruction-set extensions
 
@@ -1668,7 +1712,8 @@ How a `version` is resolved to a release, how pins are recorded, and what
 
 ## Path templates
 
-Paths and step `argv` entries expand over a closed, final set of eight variables:
+Paths, step `argv` entries and target `runner` entries expand over a closed, final
+set of nine variables:
 
 - `{project.work}` — the **root** project's expanded `[project].work`, in every
   manifest of the closure. In a dependency's artifact `out` it is that
@@ -1686,6 +1731,8 @@ Paths and step `argv` entries expand over a closed, final set of eight variables
   root project's directory exactly as `{project.work}` is. In a dependency's module
   it names a requirement of that dependency's export library artifact, homed under
   `dep/<id>`. See [Artifact requirements](#artifact-requirements).
+- `{artifact.out}` — the path of the program a target's `runner` launches.
+  Available only in a `runner`. See [Execution command](#execution-command).
 
 The three `{target.*}` tuple keys are also exported to every step process as
 `MACH_TARGET_ISA`/`MACH_TARGET_OS`/`MACH_TARGET_ABI` (see [build steps](#stepname--build-steps)).
@@ -1705,7 +1752,9 @@ refused there, pointing at the template.
 `{project.work}` is not available inside `[project].work` itself (it would be
 self-referential), and `{artifact.<id>.out}` is not available inside an artifact's
 own `out` for the same reason. `{artifact.suffix}` is available nowhere but an
-artifact's own `out`. In a step's `argv` and `env` values a brace group outside
+artifact's own `out`. A target's `runner` admits `{project.work}`, joined to the project root there,
+the `{target.*}` and `{profile.name}` variables, and `{artifact.out}`, and nothing
+else. In a step's `argv` and `env` values, and in a `runner`, a brace group outside
 the `project`, `target`, `profile` and `artifact` namespaces is text, so
 `{"x":1}` passes through as written. Two artifacts selected for one target that resolve to the
 same `out` path collide and fail at build start.
