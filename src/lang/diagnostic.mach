@@ -265,7 +265,7 @@ pub fun expect(store: *DiagnosticStore, list: Vector[Expectation]) err[fail.Fail
         run.placed                                      = run.placed + 1;
         i                                               = i + 1;
     }
-    store.expect_order.len = store.expects.len;
+    collections_vector.commit[usize](?store.expect_order, store.expects.len);
     ret err[fail.Fail].ok{};
 }
 
@@ -402,8 +402,8 @@ fun truncate(store: *DiagnosticStore, m: DiagMark) err[fail.Fail] {
         forget(store, i);
         i = i + 1;
     }
-    store.items.len = m.len;
-    store.epoch     = store.epoch + 1;
+    collections_vector.truncate[Diagnostic](?store.items, m.len);
+    store.epoch = store.epoch + 1;
     ret err[fail.Fail].ok{};
 }
 
@@ -433,8 +433,8 @@ pub fun drop_file(store: *DiagnosticStore, file_id: lang_source.FileId) {
         i = i + 1;
     }
     if (kept != store.items.len) {
-        store.items.len = kept;
-        store.epoch     = store.epoch + 1;
+        collections_vector.truncate[Diagnostic](?store.items, kept);
+        store.epoch = store.epoch + 1;
     }
 }
 

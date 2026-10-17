@@ -1416,7 +1416,7 @@ fun release_roots(es: *EditorSession, all: bool) err[fail.Fail] {
         if (sel released.err) { ret released; }
         str_free(es.alloc, entry.root);
         es.root_retainers.data[i] = es.root_retainers.data[es.root_retainers.len - 1];
-        es.root_retainers.len     = es.root_retainers.len - 1;
+        collections_vector.truncate[RootRetainer](?es.root_retainers, es.root_retainers.len - 1);
     }
     ret retention.retire(?es.s.retention, ?es.s.queries);
 }
@@ -2655,7 +2655,7 @@ test comptime_if__declaration_free_gate_sees_types {
     }
 
     val res_ok: res[lang_source.FileId, fail.Fail] = open(?es, "gateok.mach",
-        "rec H { a: i64; b: i64; }\nval LIMIT: i64 = 16;\n$if ($size_of(H) != 16) { $error(\"size wrong\"); }\n$if ($size_of(H) > LIMIT) { $error(\"too large\"); }\n$if (!$is_record(H)) { $error(\"not a record\"); }\n$if ($type_of(LIMIT) != i64) { $error(\"limit not i64\"); }\n$if ((0xFFF8040000000000::u64:~f64)::f32 == (0xFFF8040000000000::u64:~f64)::f32) { $error(\"narrowed NaN compares equal\"); }\nfun main() i64 { ret 0; }\n");
+        "rec H { a: i64; b: i64; }\nval LIMIT: i64 = 16;\n$if ($size_of(H) != 16) { $error(\"size wrong\"); }\n$if ($size_of(H) > LIMIT) { $error(\"too large\"); }\n$if (!$is_record(H)) { $error(\"not a record\"); }\n$if ($type_of(LIMIT) != i64) { $error(\"limit not i64\"); }\n$if ((0xFFC02000::u32:~f32) == (0xFFC02000::u32:~f32)) { $error(\"NaN compares equal\"); }\nfun main() i64 { ret 0; }\n");
     if (sel res_ok.err) { ret 1; }
     val fid_ok: lang_source.FileId = res_ok.ok;
 

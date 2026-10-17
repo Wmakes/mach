@@ -1,4 +1,5 @@
 # the inline assembly grammar: riscv statements parsed, checked and encoded
+use collections_vector: std.collections.vector;
 use mach.lang.fail;
 use std.allocator.page;
 use std.collections.map;
@@ -1193,39 +1194,39 @@ test inline_asm__rv64_only_forms_refused_on_rv32 {
 
     var i: usize = 0;
     for (i < RV64_ONLY_COUNT) {
-        st32.buf.bytes.len = 0;
+        collections_vector.truncate[u8](?st32.buf.bytes, 0);
         val r32: err[fail.Fail] = asm_text(?st32, ?f, ?lab32, RV64_ONLY_ASM[i]);
         if (!t_refused(r32, ?st32.buf)) { bad = 1; }
         or (sel r32.err) {
             if (!str_contains(fail.describe(r32.err), "is not implemented on riscv32")) { bad = 1; }
         }
 
-        st64.buf.bytes.len = 0;
+        collections_vector.truncate[u8](?st64.buf.bytes, 0);
         if (!t_accepted(asm_text(?st64, ?f, ?lab64, RV64_ONLY_ASM[i]), ?st64.buf)) { bad = 1; }
         i = i + 1;
     }
 
     i = 0;
     for (i < RV_BOTH_COUNT) {
-        st32.buf.bytes.len = 0;
+        collections_vector.truncate[u8](?st32.buf.bytes, 0);
         if (!t_accepted(asm_text(?st32, ?f, ?lab32, RV_BOTH_ASM[i]), ?st32.buf)) { bad = 1; }
-        st64.buf.bytes.len = 0;
+        collections_vector.truncate[u8](?st64.buf.bytes, 0);
         if (!t_accepted(asm_text(?st64, ?f, ?lab64, RV_BOTH_ASM[i]), ?st64.buf)) { bad = 1; }
         i = i + 1;
     }
 
-    st32.buf.bytes.len = 0;
+    collections_vector.truncate[u8](?st32.buf.bytes, 0);
     val ur: err[fail.Fail] = asm_text(?st32, ?f, ?lab32, "frobnicate a0, a1");
     if (!t_refused(ur, ?st32.buf)) { bad = 1; }
     or (sel ur.err) {
         if (!str_contains(fail.describe(ur.err), "unknown riscv inline-asm instruction")) { bad = 1; }
     }
 
-    st32.buf.bytes.len = 0;
+    collections_vector.truncate[u8](?st32.buf.bytes, 0);
     if (!t_refused(asm_text(?st32, ?f, ?lab32, "slli a0, a1, 32"), ?st32.buf)) { bad = 1; }
-    st32.buf.bytes.len = 0;
+    collections_vector.truncate[u8](?st32.buf.bytes, 0);
     if (!t_accepted(asm_text(?st32, ?f, ?lab32, "slli a0, a1, 31"), ?st32.buf)) { bad = 1; }
-    st64.buf.bytes.len = 0;
+    collections_vector.truncate[u8](?st64.buf.bytes, 0);
     if (!t_accepted(asm_text(?st64, ?f, ?lab64, "slli a0, a1, 32"), ?st64.buf)) { bad = 1; }
 
     isa_asm.labels_dnit(?lab32);

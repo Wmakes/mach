@@ -1,4 +1,5 @@
 # riscv instructions packed and appended to the encode buffer, with the relocations they carry
+use collections_vector: std.collections.vector;
 use mach.lang.fail;
 use std.allocator.page;
 use std.collections.map;
@@ -793,11 +794,11 @@ test emit_li__constant_materialization {
         if (isa_encode.word_read(?st.buf, 0) != 0x00500513) { bad = 1; }
     }
 
-    st.buf.bytes.len = 0;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     li(?st, 10, 0 - 1);
     if (isa_encode.word_read(?st.buf, 0) != 0xFFF00513) { bad = 1; }
 
-    st.buf.bytes.len = 0;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     li(?st, 10, 0x12345678);
     if (st.buf.bytes.len != 8) { bad = 1; }
     or {
@@ -805,7 +806,7 @@ test emit_li__constant_materialization {
         if (isa_encode.word_read(?st.buf, 4) != 0x6785051B) { bad = 1; }
     }
 
-    st.buf.bytes.len = 0;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     li(?st, 10, 0x100000000);
     if (st.buf.bytes.len != 8) { bad = 1; }
     or {
@@ -846,14 +847,14 @@ test patch_branch__scatter_and_range {
     patch_branch(?st, ?fx, 0);
     if (isa_encode.word_read(?st.buf, 4) != 0xFFDFF06F) { bad = 1; }
 
-    st.buf.bytes.len = 0;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     raw_word(?st, pack_b(OPC_BRANCH, F3_BNE, 10, 0, 0));
     fx.patch_pos = 0;
     fx.next_ip   = 4;
     val r1: err[fail.Fail] = patch_branch(?st, ?fx, 8192);
     if (!sel r1.err) { bad = 1; }
 
-    st.buf.bytes.len = 0;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     raw_word(?st, pack_j(OPC_JAL, RZERO, 0));
     fx.patch_pos = 0;
     fx.next_ip   = 4;

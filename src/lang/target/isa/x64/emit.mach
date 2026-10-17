@@ -1,4 +1,5 @@
 # x64 instructions encoded to bytes in the encode buffer, and the vector forms built straight into it
+use collections_vector: std.collections.vector;
 use mach.lang.fail;
 use std.allocator.page;
 use std.types.bool.bool;
@@ -1949,7 +1950,7 @@ pub fun encode_inst(mi: *isa_inst.Inst, buf: *isa_encode.ByteBuf) i32 {
     val n: i32 = encode_inst_one(mi, buf);
     if (n <= 0) {
         # an encoder refuses before its first byte, so only the prefix is withdrawn
-        buf.bytes.len = start;
+        collections_vector.truncate[u8](?buf.bytes, start);
         ret n;
     }
     if (isa_encode.sink_unaccounted(buf) > 0) { x64_printer.note_inst(buf, mi, start); }
@@ -3283,19 +3284,19 @@ test emit_vex_rm__c5_where_it_suffices_and_c4_otherwise {
     vex_rm(paddd, 0, t_xmm(1), t_xmm(2), vec_reg(t_xmm(3), 16), ?got);
     var n: usize = t_unhex("c5e9fecb", ?want[0]);
     if (!t_buf_is(?got, ?want[0], n)) { ret 1; }
-    got.bytes.len = 0;
+    collections_vector.truncate[u8](?got.bytes, 0);
     vex_rm(paddd, 0, t_xmm(9), t_xmm(10), vec_reg(t_xmm(3), 16), ?got);
     n = t_unhex("c529fecb", ?want[0]);
     if (!t_buf_is(?got, ?want[0], n)) { ret 2; }
-    got.bytes.len = 0;
+    collections_vector.truncate[u8](?got.bytes, 0);
     vex_rm(paddd, 0, t_xmm(1), t_xmm(2), vec_reg(t_xmm(9), 16), ?got);
     n = t_unhex("c4c169fec9", ?want[0]);
     if (!t_buf_is(?got, ?want[0], n)) { ret 3; }
-    got.bytes.len = 0;
+    collections_vector.truncate[u8](?got.bytes, 0);
     vex_rm(movdq, 1, t_xmm(0), isa_inst.REG_NONE, isa_inst.make_mem(x64.RSI, 0, isa_inst.REG_NONE, 0, 32), ?got);
     n = t_unhex("c5fe6f06", ?want[0]);
     if (!t_buf_is(?got, ?want[0], n)) { ret 4; }
-    got.bytes.len = 0;
+    collections_vector.truncate[u8](?got.bytes, 0);
     vex_rm(movdq, 1, t_xmm(1), isa_inst.REG_NONE, isa_inst.make_mem(x64.R8, 0, isa_inst.REG_NONE, 0, 32), ?got);
     n = t_unhex("c4c17e6f08", ?want[0]);
     if (!t_buf_is(?got, ?want[0], n)) { ret 5; }
@@ -3319,35 +3320,35 @@ test emit_evex_rm__every_field_matches_gnu_as {
     evex_rm(r, plain, t_xmm(17), t_xmm(18), vec_reg(t_xmm(19), 16), ?got);
     var n: usize = t_unhex("62a2ed0040cb", ?want[0]);
     if (!t_buf_is(?got, ?want[0], n)) { ret 2; }
-    got.bytes.len = 0;
+    collections_vector.truncate[u8](?got.bytes, 0);
     evex_rm(r, plain, t_xmm(24), t_xmm(25), vec_reg(t_xmm(31), 16), ?got);
     n = t_unhex("6202b50040c7", ?want[0]);
     if (!t_buf_is(?got, ?want[0], n)) { ret 3; }
-    got.bytes.len = 0;
+    collections_vector.truncate[u8](?got.bytes, 0);
     evex_rm(r, plain, t_xmm(1), t_xmm(20), vec_reg(t_xmm(2), 16), ?got);
     n = t_unhex("62f2dd0040ca", ?want[0]);
     if (!t_buf_is(?got, ?want[0], n)) { ret 4; }
-    got.bytes.len = 0;
+    collections_vector.truncate[u8](?got.bytes, 0);
     evex_rm(r, plain, t_xmm(20), t_xmm(1), isa_inst.make_mem(x64.R9, 16, isa_inst.REG_NONE, 0, 16), ?got);
     n = t_unhex("62c2f508406101", ?want[0]);
     if (!t_buf_is(?got, ?want[0], n)) { ret 5; }
-    got.bytes.len = 0;
+    collections_vector.truncate[u8](?got.bytes, 0);
     evex_rm(r, EvexCtl{ll: 0, mask: 1, zero: false, b: false}, t_xmm(1), t_xmm(2), vec_reg(t_xmm(3), 16), ?got);
     n = t_unhex("62f2ed0940cb", ?want[0]);
     if (!t_buf_is(?got, ?want[0], n)) { ret 6; }
-    got.bytes.len = 0;
+    collections_vector.truncate[u8](?got.bytes, 0);
     evex_rm(r, EvexCtl{ll: 0, mask: 7, zero: true, b: false}, t_xmm(1), t_xmm(2), vec_reg(t_xmm(3), 16), ?got);
     n = t_unhex("62f2ed8f40cb", ?want[0]);
     if (!t_buf_is(?got, ?want[0], n)) { ret 7; }
-    got.bytes.len = 0;
+    collections_vector.truncate[u8](?got.bytes, 0);
     evex_rm(r, EvexCtl{ll: 0, mask: 0, zero: false, b: true}, t_xmm(1), t_xmm(2), isa_inst.make_mem(x64.RAX, 8, isa_inst.REG_NONE, 0, 8), ?got);
     n = t_unhex("62f2ed18404801", ?want[0]);
     if (!t_buf_is(?got, ?want[0], n)) { ret 8; }
-    got.bytes.len = 0;
+    collections_vector.truncate[u8](?got.bytes, 0);
     evex_rm(r, evex_unmasked(1), t_xmm(1), t_xmm(2), isa_inst.make_mem(x64.RAX, 32, isa_inst.REG_NONE, 0, 32), ?got);
     n = t_unhex("62f2ed28404801", ?want[0]);
     if (!t_buf_is(?got, ?want[0], n)) { ret 9; }
-    got.bytes.len = 0;
+    collections_vector.truncate[u8](?got.bytes, 0);
     evex_rm(r, evex_unmasked(2), t_xmm(1), t_xmm(2), vec_reg(t_xmm(3), 16), ?got);
     n = t_unhex("62f2ed4840cb", ?want[0]);
     if (!t_buf_is(?got, ?want[0], n)) { ret 10; }
@@ -3580,7 +3581,7 @@ test encode_push__imm_boundaries {
     if (buf.bytes.data[0] != 0x6A) { bad = 1; }
     if (buf.bytes.data[1] != 0x7F) { bad = 1; }
 
-    buf.bytes.len = 0;
+    collections_vector.truncate[u8](?buf.bytes, 0);
     var m2: isa_inst.Inst = isa_inst.inst_blank();
     m2.opcode = x64.PUSH;
     m2.dst    = isa_inst.make_imm(0x1000, 4);
@@ -3589,7 +3590,7 @@ test encode_push__imm_boundaries {
     if (n2 != 5)                   { bad = 1; }
     if (buf.bytes.data[0] != 0x68) { bad = 1; }
 
-    buf.bytes.len = 0;
+    collections_vector.truncate[u8](?buf.bytes, 0);
     var m3: isa_inst.Inst = isa_inst.inst_blank();
     m3.opcode = x64.PUSH;
     m3.dst    = isa_inst.make_imm(0x80000000, 8);
@@ -3740,27 +3741,27 @@ test encode_mul1__byte_exact {
     if (t_one_operand(x64.MUL, isa_inst.make_reg(x64.RCX, 8), 8, ?buf) != 3)                 { ret 1; }
     if (buf.bytes.data[0] != 0x48 || buf.bytes.data[1] != 0xF7 || buf.bytes.data[2] != 0xE1) { ret 1; }
 
-    buf.bytes.len = 0;
+    collections_vector.truncate[u8](?buf.bytes, 0);
     if (t_one_operand(x64.MUL, isa_inst.make_reg(x64.R9, 8), 8, ?buf) != 3)                  { ret 2; }
     if (buf.bytes.data[0] != 0x49 || buf.bytes.data[1] != 0xF7 || buf.bytes.data[2] != 0xE1) { ret 2; }
 
-    buf.bytes.len = 0;
+    collections_vector.truncate[u8](?buf.bytes, 0);
     if (t_one_operand(x64.IMUL, isa_inst.make_reg(x64.RCX, 8), 8, ?buf) != 3)                { ret 3; }
     if (buf.bytes.data[0] != 0x48 || buf.bytes.data[1] != 0xF7 || buf.bytes.data[2] != 0xE9) { ret 3; }
 
-    buf.bytes.len = 0;
+    collections_vector.truncate[u8](?buf.bytes, 0);
     if (t_one_operand(x64.MUL, isa_inst.make_reg(x64.RCX, 4), 4, ?buf) != 2) { ret 4; }
     if (buf.bytes.data[0] != 0xF7 || buf.bytes.data[1] != 0xE1)              { ret 4; }
 
-    buf.bytes.len = 0;
+    collections_vector.truncate[u8](?buf.bytes, 0);
     if (t_one_operand(x64.MUL, isa_inst.make_mem(x64.RBP, -8, isa_inst.REG_NONE, 0, 8), 8, ?buf) != 4)                    { ret 5; }
     if (buf.bytes.data[0] != 0x48 || buf.bytes.data[1] != 0xF7 || buf.bytes.data[2] != 0x65 || buf.bytes.data[3] != 0xF8) { ret 5; }
 
-    buf.bytes.len = 0;
+    collections_vector.truncate[u8](?buf.bytes, 0);
     if (t_one_operand(x64.MUL, isa_inst.make_reg(x64.RCX, 1), 1, ?buf) != 2) { ret 6; }
     if (buf.bytes.data[0] != 0xF6 || buf.bytes.data[1] != 0xE1)              { ret 6; }
 
-    buf.bytes.len = 0;
+    collections_vector.truncate[u8](?buf.bytes, 0);
     if (t_one_operand(x64.MUL, isa_inst.make_imm(3, 8), 8, ?buf) != 0) { ret 7; }
     isa_encode.buf_dnit(?buf);
     ret 0;
@@ -4070,11 +4071,11 @@ test encode_fp_mov__single_instruction_shapes {
     var bad: i32                = 0;
 
     var rr: isa_inst.Inst = isa_inst.inst_blank();
-    rr.opcode     = x64.MOV;
-    rr.size       = 8;
-    rr.dst        = isa_inst.make_reg(x64.XMM3, 16);
-    rr.src1       = isa_inst.make_reg(x64.XMM5, 16);
-    buf.bytes.len = 0;
+    rr.opcode = x64.MOV;
+    rr.size   = 8;
+    rr.dst    = isa_inst.make_reg(x64.XMM3, 16);
+    rr.src1   = isa_inst.make_reg(x64.XMM5, 16);
+    collections_vector.truncate[u8](?buf.bytes, 0);
     encode_mov(?rr, ?buf);
     if (buf.bytes.len != 4)        { bad = 1; }
     or (buf.bytes.data[0] != 0xF2) { bad = 1; }
@@ -4083,11 +4084,11 @@ test encode_fp_mov__single_instruction_shapes {
     or (buf.bytes.data[3] != 0xDD) { bad = 1; }
 
     var ld: isa_inst.Inst = isa_inst.inst_blank();
-    ld.opcode     = x64.MOV;
-    ld.size       = 4;
-    ld.dst        = isa_inst.make_reg(x64.XMM3, 16);
-    ld.src1       = isa_inst.make_mem(x64.RBP, -16, isa_inst.REG_NONE, 0, 4);
-    buf.bytes.len = 0;
+    ld.opcode = x64.MOV;
+    ld.size   = 4;
+    ld.dst    = isa_inst.make_reg(x64.XMM3, 16);
+    ld.src1   = isa_inst.make_mem(x64.RBP, -16, isa_inst.REG_NONE, 0, 4);
+    collections_vector.truncate[u8](?buf.bytes, 0);
     encode_mov(?ld, ?buf);
     if (buf.bytes.len != 5)        { bad = 1; }
     or (buf.bytes.data[0] != 0xF3) { bad = 1; }
@@ -4097,11 +4098,11 @@ test encode_fp_mov__single_instruction_shapes {
     or (buf.bytes.data[4] != 0xF0) { bad = 1; }
 
     var st: isa_inst.Inst = isa_inst.inst_blank();
-    st.opcode     = x64.MOV;
-    st.size       = 4;
-    st.dst        = isa_inst.make_mem(x64.RBP, -16, isa_inst.REG_NONE, 0, 4);
-    st.src1       = isa_inst.make_reg(x64.XMM3, 16);
-    buf.bytes.len = 0;
+    st.opcode = x64.MOV;
+    st.size   = 4;
+    st.dst    = isa_inst.make_mem(x64.RBP, -16, isa_inst.REG_NONE, 0, 4);
+    st.src1   = isa_inst.make_reg(x64.XMM3, 16);
+    collections_vector.truncate[u8](?buf.bytes, 0);
     encode_mov(?st, ?buf);
     if (buf.bytes.len != 5)        { bad = 1; }
     or (buf.bytes.data[0] != 0xF3) { bad = 1; }
@@ -4179,12 +4180,12 @@ test encode_inst__rowless_and_memoryless_forms_emit_nothing {
     mi.dst = isa_inst.make_reg(x64.RAX, 1);
     if (encode_inst(?mi, ?buf) <= 0 || buf.bytes.len == 0) { bad = 4; }
 
-    buf.bytes.len = 0;
-    mi            = isa_inst.inst_blank();
-    mi.opcode     = x64.MOVQ;
-    mi.dst        = isa_inst.make_reg(x64.XMM0, 16);
-    mi.src1       = isa_inst.make_mem(x64.RBP, -8, isa_inst.REG_NONE, 0, 8);
-    mi.size       = 8;
+    collections_vector.truncate[u8](?buf.bytes, 0);
+    mi        = isa_inst.inst_blank();
+    mi.opcode = x64.MOVQ;
+    mi.dst    = isa_inst.make_reg(x64.XMM0, 16);
+    mi.src1   = isa_inst.make_mem(x64.RBP, -8, isa_inst.REG_NONE, 0, 8);
+    mi.size   = 8;
     if (encode_inst(?mi, ?buf) != 0 || buf.bytes.len != 0) { bad = 5; }
 
     isa_encode.buf_dnit(?buf);

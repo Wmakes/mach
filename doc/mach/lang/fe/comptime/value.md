@@ -114,25 +114,25 @@ pub fun cast_int(bits: wide.Wide, width: u32, signed: bool) res[CTValue, comptim
 ## fun nan_unspecified
 
 ```mach
-pub fun nan_unspecified(itn: *intern.Interner, arch_id: u32) res[CTValue, comptime_failure.EvalFail];
+pub fun nan_unspecified(itn: *intern.Interner, arch_id: u32, nans: resolved.Nans, w: float.FloatWidth) res[CTValue, comptime_failure.EvalFail];
 ```
 
-the refusal of a float operation whose result is a NaN on the instruction set `arch_id`,
-whose NaN results are unspecified: no constant has that value
+the refusal of a float operation whose result is a NaN at width `w` on the instruction
+set `arch_id`, whose rule `nans` gives no defined NaN for it: no constant has that value.
+a rule stated unspecified is the target model's, and one not stated is a gap of mirl's
 
 ## fun cast_scalar
 
 ```mach
-pub fun cast_scalar(types: *type.TypeInterner, itn: *intern.Interner, pointer_width: u32, nan_rule: float.NanRule, arch_id: u32,
+pub fun cast_scalar(types: *type.TypeInterner, itn: *intern.Interner, pointer_width: u32, nans: resolved.Nans, arch_id: u32,
 value: CTValue, from_ty: type.TypeId, to_ty: type.TypeId, reinterpret: bool) res[CTValue, comptime_failure.EvalFail];
 ```
 
 a numeric conversion folds through mirl's conversion rows. a float to int cast
 whose value is NaN or truncates outside the integer's range is refused, so the
 saturation mirl's row gives such a value is never folded. a NaN converted to
-another float width on a target whose rule gives the canonical NaN keeps mach's
-conversion, since mirl's row quiets the NaN it is given whatever the target, and
-on a target whose rule leaves the NaN unspecified it is refused, naming the
+another float width is made by the target's rule `nans` for the format it is
+converted to, and where the rule leaves it unknown it is refused, naming the
 target's instruction set `arch_id`
 
 ## fun is_descriptor
@@ -205,8 +205,11 @@ pub fun apply_compare(op: ast_expr.BinOp, lhs: CTValue, rhs: CTValue) res[CTValu
 ## fun apply_arith
 
 ```mach
-pub fun apply_arith(op: ast_expr.BinOp, lhs: CTValue, rhs: CTValue) res[CTValue, comptime_failure.EvalFail];
+pub fun apply_arith(op: ast_expr.BinOp, lhs: CTValue, rhs: CTValue, nans: resolved.Nans) res[CTValue, comptime_failure.EvalFail];
 ```
+
+`nans` is the target's rule for the nan a float operation returns, and a nan result it
+leaves unknown is refused as comptime.nan_unspecified
 
 ## fun non_integer
 

@@ -87,6 +87,17 @@ integers: one per INTEGER_WIDTHS row
 floats: one per FLOAT_WIDTHS row
 pointer: a pointer of the default address space, none where the owner holds
           pointers logically, with no representation in memory
+vectors: the vector registers the owner fits a vector's alignment to under
+          the build's selection, none where it states no register fit
+
+## rec Registers
+
+```mach
+pub rec Registers;
+```
+
+the vector registers a vector aligns to: `narrow` the narrowest and `widest`
+the widest the build meets
 
 ## fun scalars_none
 
@@ -116,7 +127,8 @@ pub fun machine(ptr_width: u32, vector_bits: u32, register_bits: u32) Machine;
 pub fun with_scalars(m: Machine, s: Scalars) Machine;
 ```
 
-`m` laying its primitives out at the owner's extents `s`
+`m` laying its primitives out at the owner's extents `s`, and its vectors at
+the owner's registers where it states them
 
 ## rec Node
 

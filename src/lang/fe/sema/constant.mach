@@ -527,7 +527,7 @@ fun leaf_value(sc: *sema_context.SemaContext, eid: ast_id.ExprId, ty: type.TypeI
     if (sel evaluated.err) { ret evaluated; }
     val v: comptime.CTValue = evaluated.ok;
     if ((v.kind != comptime.CT_KIND_INT && v.kind != comptime.CT_KIND_FLOAT) || (class != type.PRIM_CLASS_INT && class != type.PRIM_CLASS_FLOAT)) { ret evaluated; }
-    ret comptime.cast_scalar(?sc.s.types, ?sc.s.interner, sc.view.ctx.env.target.pointer_width, sc.view.ctx.env.target.nan_rule, sc.view.ctx.env.target.arch_id, v, ty, ty, false);
+    ret comptime.cast_scalar(?sc.s.types, ?sc.s.interner, sc.view.ctx.env.target.pointer_width, sc.view.ctx.env.target.nans, sc.view.ctx.env.target.arch_id, v, ty, ty, false);
 }
 
 # a leaf with no compile-time value keeps the refusal reading it gives, at the leaf; an internal

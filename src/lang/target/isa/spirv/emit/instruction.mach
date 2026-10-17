@@ -235,15 +235,15 @@ fun call_emit(e: *emitter.Emit, mf: *lang_mir.MirFunction, vm: *emitter.VMaps, m
     val at: u32                  = e.keys.len::u32;
     val kr: res[bool, fail.Fail] = emit_copy.call_key(e, e.cur_copy, mf, mi, fx, ?ad, vm.prov, vm.n);
     if (sel kr.err) {
-        e.keys.len = at::usize;
+        collections_vector.truncate[u32](?e.keys, at::usize);
         ret err[fail.Fail].err{kr.err};
     }
     if (!kr.ok) {
-        e.keys.len = at::usize;
+        collections_vector.truncate[u32](?e.keys, at::usize);
         ret emitter.unsupported(e, "a SPIR-V Logical Shader reference argument must address memory the module names along one path: a local, a shader interface variable, or an element or member of one. logical addressing passes a pointer only as the object it points into and the path from there, and this address is chosen at run time or produced by an instruction");
     }
     val cx: u32 = emit_copy.find_copy(e, fx, at);
-    e.keys.len = at::usize;
+    collections_vector.truncate[u32](?e.keys, at::usize);
     if (cx == emitter.COPY_NONE) { ret emitter.defect(e, "spirv.emit: a call selects a copy of its callee the plan did not make"); }
     val key: u32 = e.copies.data[cx].key_at;
 

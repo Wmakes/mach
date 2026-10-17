@@ -609,13 +609,13 @@ pub fun module_reload(l: *Loader, mid: session.ModuleId) res[bool, fail.Fail] {
     comptime.dnit(?m.ctx);
     frames_drop(l, m);
     walked_drop(l.alloc, m);
-    m.ctx          = ctx_r.ok;
-    m.frame        = FRAME_BUILD;
-    m.deps         = collections_vector.init[session.StableModuleId](l.alloc);
-    m.consts       = collections_vector.init[Const](l.alloc);
-    m.bindings.len = 0;
-    m.status       = fail.accepted();
-    m.outcome      = comptime_gate.GATE_ACTIVE;
+    m.ctx    = ctx_r.ok;
+    m.frame  = FRAME_BUILD;
+    m.deps   = collections_vector.init[session.StableModuleId](l.alloc);
+    m.consts = collections_vector.init[Const](l.alloc);
+    collections_vector.truncate[Binding](?m.bindings, 0);
+    m.status  = fail.accepted();
+    m.outcome = comptime_gate.GATE_ACTIVE;
     state_set(l, mid, STATE_LOADING);
 
     val parse_r: err[fail.Fail] = module_parse(l, mid, fqn, false);
@@ -1161,7 +1161,7 @@ fun demand_push(l: *Loader, mid: session.ModuleId, did: ast_id.DeclId, cond: ast
 }
 
 fun demand_pop(l: *Loader) {
-    if (l.demands.len > 0) { l.demands.len = l.demands.len - 1; }
+    if (l.demands.len > 0) { collections_vector.truncate[Demand](?l.demands, l.demands.len - 1); }
 }
 
 fun demand_find(l: *Loader, mid: session.ModuleId, frame: u32, did: ast_id.DeclId, cond: ast_id.ExprId) opt[u32] {

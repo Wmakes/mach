@@ -14,9 +14,11 @@ use mach.lang.float;
 use mach.lang.intern;
 use lang_source:  mach.lang.source;
 use catalog_arch: mach.lang.target.catalog.arch;
+use mach.lang.target.resolved;
 use mach.lang.type;
 use mach.lang.wide;
-use A: std.allocator;
+use mirl_capability: mirl.target.capability;
+use A:               std.allocator;
 use std.allocator.page;
 use std.text.string.str_free;
 use std.types.bool.bool;
@@ -147,7 +149,7 @@ fun cast_desc(types: *type.TypeInterner, tid: type.TypeId, pointer_width: u32) r
 
 # the value mirl's conversion row `op` gives `x`, read as `from`, at `to`
 fun converted(op: opcodes.Opcode, from: comptime_fold.Kind, x: wide.Wide, to: comptime_fold.Kind) res[wide.Wide, comptime_failure.EvalFail] {
-    val got: comptime_fold.Answer = comptime_fold.convert(op, from, x, to);
+    val got: comptime_fold.Answer = comptime_fold.convert(op, from, x, to, resolved.nans_none());
     if (sel got.folded) { ret res[wide.Wide, comptime_failure.EvalFail].ok{got.folded[0]}; }
     ret res[wide.Wide, comptime_failure.EvalFail].err{comptime_failure.eval_internal("the constant folder refused a comptime conversion")};
 }
@@ -197,12 +199,24 @@ fun float_to_int_refused(types: *type.TypeInterner, itn: *intern.Interner, v: f6
     ret reject(diagnostic_kind.COMPTIME_CAST_RANGE, intern.text(itn, id.ok));
 }
 
-# the refusal of a float operation whose result is a NaN on the instruction set `arch_id`,
-# whose NaN results are unspecified: no constant has that value
-pub fun nan_unspecified(itn: *intern.Interner, arch_id: u32) res[CTValue, comptime_failure.EvalFail] {
-    val text: res[str, fail.Fail] = diagnostic.format(itn.a,
-        "comptime NaN has no value on `{}`: Vulkan leaves a NaN result unspecified without a float-controls execution mode",
-        catalog_arch.name_for(arch_id));
+# the refusal of a float operation whose result is a NaN at width `w` on the instruction
+# set `arch_id`, whose rule `nans` gives no defined NaN for it: no constant has that value.
+# a rule stated unspecified is the target model's, and one not stated is a gap of mirl's
+pub fun nan_unspecified(itn: *intern.Interner, arch_id: u32, nans: resolved.Nans, w: float.FloatWidth) res[CTValue, comptime_failure.EvalFail] {
+    val target: str              = catalog_arch.name_for(arch_id);
+    var at:     float.FloatWidth = w;
+    if (at == float.FLOAT_W_NONE) { at = float.FLOAT_W_64; }
+    var rules: resolved.Nans        = nans;
+    val rule:  mirl_capability.Nans = resolved.nans_at(?rules, at);
+    var text:  res[str, fail.Fail];
+    if (sel rule.unspecified) {
+        text = diagnostic.format(itn.a, "comptime NaN has no value on `{}`: mirl's target model states its NaN result as unspecified", target);
+    }
+    or {
+        val format: str = float.width_name(at);
+        text = diagnostic.format(itn.a, "comptime NaN has no value on `{}` at `{}`: mirl states no NaN rule for `{}` on `{}` yet, which is a toolchain gap, not a property of the target",
+            target, format, format, target);
+    }
     if (sel text.err) { ret internal_failure(fail.describe(text.err)); }
     fin { str_free(itn.a, text.ok); }
     val id: res[intern.StrId, A.Error] = intern.add(itn, text.ok);
@@ -213,11 +227,10 @@ pub fun nan_unspecified(itn: *intern.Interner, arch_id: u32) res[CTValue, compti
 # a numeric conversion folds through mirl's conversion rows. a float to int cast
 # whose value is NaN or truncates outside the integer's range is refused, so the
 # saturation mirl's row gives such a value is never folded. a NaN converted to
-# another float width on a target whose rule gives the canonical NaN keeps mach's
-# conversion, since mirl's row quiets the NaN it is given whatever the target, and
-# on a target whose rule leaves the NaN unspecified it is refused, naming the
+# another float width is made by the target's rule `nans` for the format it is
+# converted to, and where the rule leaves it unknown it is refused, naming the
 # target's instruction set `arch_id`
-pub fun cast_scalar(types: *type.TypeInterner, itn: *intern.Interner, pointer_width: u32, nan_rule: float.NanRule, arch_id: u32,
+pub fun cast_scalar(types: *type.TypeInterner, itn: *intern.Interner, pointer_width: u32, nans: resolved.Nans, arch_id: u32,
     value: CTValue, from_ty: type.TypeId, to_ty: type.TypeId, reinterpret: bool) res[CTValue, comptime_failure.EvalFail] {
     val from_r: res[type.PrimDesc, comptime_failure.EvalFail] = cast_desc(types, from_ty, pointer_width);
     if (sel from_r.err) { ret res[CTValue, comptime_failure.EvalFail].err{from_r.err}; }
@@ -243,18 +256,18 @@ pub fun cast_scalar(types: *type.TypeInterner, itn: *intern.Interner, pointer_wi
         val source_value: f64       = source_r.ok.data.f;
         val source_bits:  wide.Wide = wide.from_u64(float.bits_at(source_value, source_fw));
         if (to_float) {
-            val nan: bool = source_value != source_value;
-            if (nan && fw != source_fw && !float.nan_rule_valid(nan_rule)) {
-                ret reject(diagnostic_kind.COMPTIME_CAST, "a NaN converted to another float width folds only for a selected target");
-            }
-            if (fw == source_fw)                          { ret float_value(source_value, fw); }
-            if (nan && nan_rule == float.NAN_UNSPECIFIED) { ret nan_unspecified(itn, arch_id); }
-            if (nan && nan_rule != float.NAN_PRESERVE)    { ret float_value(float.convert(source_value, source_fw, fw, nan_rule), fw); }
+            if (fw == source_fw) { ret float_value(source_value, fw); }
             var op: opcodes.Opcode = opcodes.FDEMOTE;
             if (to.bits > from.bits) { op = opcodes.FPROMOTE; }
-            val wider: res[wide.Wide, comptime_failure.EvalFail] = converted(op, comptime_fold.Kind.float{source_fw}, source_bits, comptime_fold.Kind.float{fw});
-            if (sel wider.err) { ret res[CTValue, comptime_failure.EvalFail].err{wider.err}; }
-            ret float_value(float.value_of_bits(wider.ok.lo, fw), fw);
+            val got: comptime_fold.Answer = comptime_fold.convert(op, comptime_fold.Kind.float{source_fw}, source_bits, comptime_fold.Kind.float{fw}, nans);
+            if (sel got.nan) {
+                if (!resolved.nans_held(?nans)) {
+                    ret reject(diagnostic_kind.COMPTIME_CAST, "a NaN converted to another float width folds only for a selected target");
+                }
+                ret nan_unspecified(itn, arch_id, nans, fw);
+            }
+            if (!(sel got.folded)) { ret res[CTValue, comptime_failure.EvalFail].err{comptime_failure.eval_internal("the constant folder refused a comptime conversion")}; }
+            ret float_value(float.value_of_bits(got.folded[0].lo, fw), fw);
         }
         if (representation)                                    { ret cast_int(source_bits, to.bits, to.signed); }
         if (!float_fits_int(source_value, to.bits, to.signed)) { ret float_to_int_refused(types, itn, source_value, source_fw, to_ty); }
@@ -368,7 +381,7 @@ pub fun apply_equality(op: ast_expr.BinOp, lhs: CTValue, rhs: CTValue) res[CTVal
     if (lhs.kind == CT_KIND_INT) { eq = ct_int_eq(lhs, rhs); }
     or (lhs.kind == CT_KIND_FLOAT) {
         val w: float.FloatWidth = float.unify_width(lhs.float_width, rhs.float_width);
-        eq = comptime_fold.holds(comptime_fold.flt(opcodes.FEQ_O, w, float.round_at(lhs.data.f, w), float.round_at(rhs.data.f, w), 2), 0);
+        eq = comptime_fold.holds(comptime_fold.flt(opcodes.FEQ_O, w, float.round_at(lhs.data.f, w), float.round_at(rhs.data.f, w), 2, resolved.nans_none()), 0);
     }
     or (lhs.kind == CT_KIND_STR)  { eq = intern.str_same(lhs.data.s, rhs.data.s); }
     or (lhs.kind == CT_KIND_TYPE) { eq = lhs.data.t == rhs.data.t; }
@@ -399,21 +412,23 @@ pub fun apply_compare(op: ast_expr.BinOp, lhs: CTValue, rhs: CTValue) res[CTValu
         if (op == ast_expr.BIN_LT)  { row = opcodes.FLT_O; }
         or (op == ast_expr.BIN_LEQ) { row = opcodes.FLE_O; }
         or (op == ast_expr.BIN_GT)  { row = opcodes.FGT_O; }
-        ret u8_value(if_u8(comptime_fold.holds(comptime_fold.flt(row, w, l, r, 2), 0)));
+        ret u8_value(if_u8(comptime_fold.holds(comptime_fold.flt(row, w, l, r, 2, resolved.nans_none()), 0)));
     }
     ret reject(diagnostic_kind.COMPTIME_OPERAND_TYPE, "ordered comparison requires numeric operands");
 }
 
-pub fun apply_arith(op: ast_expr.BinOp, lhs: CTValue, rhs: CTValue) res[CTValue, comptime_failure.EvalFail] {
+# `nans` is the target's rule for the nan a float operation returns, and a nan result it
+# leaves unknown is refused as comptime.nan_unspecified
+pub fun apply_arith(op: ast_expr.BinOp, lhs: CTValue, rhs: CTValue, nans: resolved.Nans) res[CTValue, comptime_failure.EvalFail] {
     if (lhs.kind != rhs.kind) {
         ret reject(diagnostic_kind.COMPTIME_OPERAND_TYPE, "arithmetic requires operands of the same kind");
     }
     if (lhs.kind == CT_KIND_INT)   { ret apply_int_arith(op, lhs, rhs); }
-    if (lhs.kind == CT_KIND_FLOAT) { ret apply_float_arith(op, lhs, rhs); }
+    if (lhs.kind == CT_KIND_FLOAT) { ret apply_float_arith(op, lhs, rhs, nans); }
     ret reject(diagnostic_kind.COMPTIME_OPERAND_TYPE, "arithmetic requires numeric operands");
 }
 
-fun apply_float_arith(op: ast_expr.BinOp, lhs: CTValue, rhs: CTValue) res[CTValue, comptime_failure.EvalFail] {
+fun apply_float_arith(op: ast_expr.BinOp, lhs: CTValue, rhs: CTValue, nans: resolved.Nans) res[CTValue, comptime_failure.EvalFail] {
     if (!float.widths_agree(lhs.float_width, rhs.float_width)) {
         ret reject(diagnostic_kind.COMPTIME_FLOAT_WIDTH_MISMATCH, FLOAT_WIDTH_MISMATCH_MSG);
     }
@@ -433,7 +448,9 @@ fun apply_float_arith(op: ast_expr.BinOp, lhs: CTValue, rhs: CTValue) res[CTValu
         row = opcodes.FREM;
     }
     or (op != ast_expr.BIN_ADD) { ret reject(diagnostic_kind.COMPTIME_NOT_EVALUABLE, "unsupported float operator"); }
-    ret float_value(comptime_fold.float_of(comptime_fold.flt(row, w, l, r, 2), w), w);
+    val got: comptime_fold.Answer = comptime_fold.flt(row, w, l, r, 2, nans);
+    if (sel got.nan) { ret reject(diagnostic_kind.COMPTIME_NAN_UNSPECIFIED, "comptime NaN has no value on this target"); }
+    ret float_value(comptime_fold.float_of(got, w), w);
 }
 
 fun bitwise_value(bits: wide.Wide, lhs: CTValue, rhs: CTValue) res[CTValue, comptime_failure.EvalFail] {
@@ -579,7 +596,7 @@ fun negated(x: wide.Wide) wide.Wide {
 
 # the negation of a float at width `w`, folded
 pub fun float_negated(x: f64, w: float.FloatWidth) f64 {
-    ret comptime_fold.float_of(comptime_fold.flt(opcodes.FNEG, w, x, 0.0, 1), w);
+    ret comptime_fold.float_of(comptime_fold.flt(opcodes.FNEG, w, x, 0.0, 1, resolved.nans_none()), w);
 }
 
 # the bitwise complement of an integer, folded at comptime's width
@@ -718,6 +735,12 @@ pub fun ct_zero_int(unsigned: bool, width: u8) CTValue {
     ret v;
 }
 
+# the rule of a target whose float operations return the first nan operand, quieted
+#[testing]
+pub fun t_nans() resolved.Nans {
+    ret resolved.nans_of_rule(float.NAN_PRESERVE);
+}
+
 #[testing]
 pub fun t_ct_wide(lo: u64, hi: u64, unsigned: bool) CTValue {
     var v: CTValue;
@@ -764,14 +787,14 @@ test apply_arith__float_mod_truncated {
     val float_value_r2: res[CTValue, comptime_failure.EvalFail] = float_value(3.0, float.FLOAT_W_NONE);
     if (sel float_value_r2.err) { ret 99; }
     val b: CTValue                                 = float_value_r2.ok;
-    val r: res[CTValue, comptime_failure.EvalFail] = apply_arith(ast_expr.BIN_MOD, a, b);
+    val r: res[CTValue, comptime_failure.EvalFail] = apply_arith(ast_expr.BIN_MOD, a, b, t_nans());
     if (sel r.err)          { ret 1; }
     if (r.ok.data.f != 2.5) { ret 1; }
 
     val float_value_r3: res[CTValue, comptime_failure.EvalFail] = float_value(0.0 - 5.5, float.FLOAT_W_NONE);
     if (sel float_value_r3.err) { ret 99; }
     val na: CTValue                                 = float_value_r3.ok;
-    val rn: res[CTValue, comptime_failure.EvalFail] = apply_arith(ast_expr.BIN_MOD, na, b);
+    val rn: res[CTValue, comptime_failure.EvalFail] = apply_arith(ast_expr.BIN_MOD, na, b, t_nans());
     if (sel rn.err)                  { ret 1; }
     if (rn.ok.data.f != (0.0 - 2.5)) { ret 1; }
 
@@ -781,14 +804,14 @@ test apply_arith__float_mod_truncated {
     val float_value_r5: res[CTValue, comptime_failure.EvalFail] = float_value(1.0, float.FLOAT_W_NONE);
     if (sel float_value_r5.err) { ret 99; }
     val one: CTValue                                 = float_value_r5.ok;
-    val rs:  res[CTValue, comptime_failure.EvalFail] = apply_arith(ast_expr.BIN_MOD, s, one);
+    val rs:  res[CTValue, comptime_failure.EvalFail] = apply_arith(ast_expr.BIN_MOD, s, one, t_nans());
     if (sel rs.err)           { ret 1; }
     if (rs.ok.data.f != 0.45) { ret 1; }
 
     val float_value_r6: res[CTValue, comptime_failure.EvalFail] = float_value(0.0, float.FLOAT_W_NONE);
     if (sel float_value_r6.err) { ret 99; }
     val z:             CTValue                                 = float_value_r6.ok;
-    val apply_arith_r: res[CTValue, comptime_failure.EvalFail] = apply_arith(ast_expr.BIN_MOD, a, z);
+    val apply_arith_r: res[CTValue, comptime_failure.EvalFail] = apply_arith(ast_expr.BIN_MOD, a, z, t_nans());
     if (sel apply_arith_r.ok) { ret 1; }
     ret 0;
 }
@@ -827,30 +850,30 @@ test cast_scalar__width_signedness_and_reinterpretation {
     val make_int_value_r: res[CTValue, comptime_failure.EvalFail] = make_int_value(255, true);
     if (sel make_int_value_r.err) { ret 99; }
     val raw:      CTValue                                 = make_int_value_r.ok;
-    val signed_r: res[CTValue, comptime_failure.EvalFail] = cast_scalar(?types, ?itn, 8, float.NAN_PRESERVE, 0, raw, u8t, i8t, true);
+    val signed_r: res[CTValue, comptime_failure.EvalFail] = cast_scalar(?types, ?itn, 8, t_nans(), 0, raw, u8t, i8t, true);
     if (sel signed_r.err) { ret 2; }
     val signed: CTValue = signed_r.ok;
     if (signed.data.i != -1 || signed.int_unsigned || signed.int_width != 8) { ret 3; }
-    val wide_r: res[CTValue, comptime_failure.EvalFail] = cast_scalar(?types, ?itn, 8, float.NAN_PRESERVE, 0, signed, i8t, u64t, false);
+    val wide_r: res[CTValue, comptime_failure.EvalFail] = cast_scalar(?types, ?itn, 8, t_nans(), 0, signed, i8t, u64t, false);
     if (sel wide_r.err) { ret 4; }
     val wide: CTValue = wide_r.ok;
     if (wide.data.i != -1 || !wide.int_unsigned || wide.int_width != 64) { ret 5; }
     val int_value_r: res[CTValue, comptime_failure.EvalFail] = int_value(300);
     if (sel int_value_r.err) { ret 99; }
-    val narrow_r: res[CTValue, comptime_failure.EvalFail] = cast_scalar(?types, ?itn, 8, float.NAN_PRESERVE, 0,
+    val narrow_r: res[CTValue, comptime_failure.EvalFail] = cast_scalar(?types, ?itn, 8, t_nans(), 0,
         int_value_r.ok, i64t, u8t, false);
     if (sel narrow_r.err) { ret 6; }
     val narrow: CTValue = narrow_r.ok;
     if (narrow.data.i != 44 || !narrow.int_unsigned || narrow.int_width != 8) { ret 7; }
     val negative_zero: CTValue                                 = ct_float(float.f64_neg(0.0), float.FLOAT_W_64);
-    val bits_r:        res[CTValue, comptime_failure.EvalFail] = cast_scalar(?types, ?itn, 8, float.NAN_PRESERVE, 0, negative_zero, f64t, u64t, true);
+    val bits_r:        res[CTValue, comptime_failure.EvalFail] = cast_scalar(?types, ?itn, 8, t_nans(), 0, negative_zero, f64t, u64t, true);
     if (sel bits_r.err) { ret 8; }
     val bits: CTValue = bits_r.ok;
     if (bits.data.i:~u64 != 0x8000000000000000 || !bits.int_unsigned) { ret 9; }
-    val back_r: res[CTValue, comptime_failure.EvalFail] = cast_scalar(?types, ?itn, 8, float.NAN_PRESERVE, 0, bits, u64t, f64t, true);
+    val back_r: res[CTValue, comptime_failure.EvalFail] = cast_scalar(?types, ?itn, 8, t_nans(), 0, bits, u64t, f64t, true);
     if (sel back_r.err)                              { ret 10; }
     if (back_r.ok.data.f:~u64 != 0x8000000000000000) { ret 11; }
-    val cast_scalar_r: res[CTValue, comptime_failure.EvalFail] = cast_scalar(?types, ?itn, 8, float.NAN_PRESERVE, 0, raw, u8t, u64t, true);
+    val cast_scalar_r: res[CTValue, comptime_failure.EvalFail] = cast_scalar(?types, ?itn, 8, t_nans(), 0, raw, u8t, u64t, true);
     if (sel cast_scalar_r.ok) { ret 12; }
     val prim_typed_8: opt[type.TypeId] = type.prim(?types, type.TYPE_PTR);
     if (sel prim_typed_8.none) { ret 1; }
@@ -858,31 +881,31 @@ test cast_scalar__width_signedness_and_reinterpretation {
     val make_int_value_r2: res[CTValue, comptime_failure.EvalFail] = make_int_value(0x3FF0000000000000, true);
     if (sel make_int_value_r2.err) { ret 99; }
     val pointer: CTValue                                 = make_int_value_r2.ok;
-    val float_r: res[CTValue, comptime_failure.EvalFail] = cast_scalar(?types, ?itn, 8, float.NAN_PRESERVE, 0, pointer, ptrt, f64t, false);
+    val float_r: res[CTValue, comptime_failure.EvalFail] = cast_scalar(?types, ?itn, 8, t_nans(), 0, pointer, ptrt, f64t, false);
     if (sel float_r.err)          { ret 13; }
     if (float_r.ok.data.f != 1.0) { ret 13; }
-    val pointer_r: res[CTValue, comptime_failure.EvalFail] = cast_scalar(?types, ?itn, 8, float.NAN_PRESERVE, 0, ct_float(1.0, float.FLOAT_W_64), f64t, ptrt, false);
+    val pointer_r: res[CTValue, comptime_failure.EvalFail] = cast_scalar(?types, ?itn, 8, t_nans(), 0, ct_float(1.0, float.FLOAT_W_64), f64t, ptrt, false);
     if (sel pointer_r.err)                     { ret 14; }
     if (pointer_r.ok.data.i != pointer.data.i) { ret 14; }
     # float to int refuses a value past the integer's range and a NaN
-    val big: res[CTValue, comptime_failure.EvalFail] = cast_scalar(?types, ?itn, 8, float.NAN_PRESERVE, 0, ct_float(300.5, float.FLOAT_W_64), f64t, u8t, false);
+    val big: res[CTValue, comptime_failure.EvalFail] = cast_scalar(?types, ?itn, 8, t_nans(), 0, ct_float(300.5, float.FLOAT_W_64), f64t, u8t, false);
     if (!sel big.err)                                        { ret 15; }
     if (big.err.diag != diagnostic_kind.COMPTIME_CAST_RANGE) { ret 15; }
-    val down: res[CTValue, comptime_failure.EvalFail] = cast_scalar(?types, ?itn, 8, float.NAN_PRESERVE, 0, ct_float(-1.75, float.FLOAT_W_64), f64t, i8t, false);
+    val down: res[CTValue, comptime_failure.EvalFail] = cast_scalar(?types, ?itn, 8, t_nans(), 0, ct_float(-1.75, float.FLOAT_W_64), f64t, i8t, false);
     if (sel down.err)         { ret 16; }
     if (down.ok.data.i != -1) { ret 16; }
-    val nan: res[CTValue, comptime_failure.EvalFail] = cast_scalar(?types, ?itn, 8, float.NAN_PRESERVE, 0, ct_float(float.bits_f64(0x7FF8000000000000), float.FLOAT_W_64), f64t, i64t, false);
+    val nan: res[CTValue, comptime_failure.EvalFail] = cast_scalar(?types, ?itn, 8, t_nans(), 0, ct_float(float.bits_f64(0x7FF8000000000000), float.FLOAT_W_64), f64t, i64t, false);
     if (!sel nan.err)                                        { ret 17; }
     if (nan.err.diag != diagnostic_kind.COMPTIME_CAST_RANGE) { ret 17; }
     val prim_typed_9: opt[type.TypeId] = type.prim(?types, type.TYPE_F32);
     if (sel prim_typed_9.none) { ret 1; }
     val f32t:  type.TypeId                             = prim_typed_9.some;
-    val tenth: res[CTValue, comptime_failure.EvalFail] = cast_scalar(?types, ?itn, 8, float.NAN_PRESERVE, 0, ct_float(0.1, float.FLOAT_W_64), f64t, f32t, false);
+    val tenth: res[CTValue, comptime_failure.EvalFail] = cast_scalar(?types, ?itn, 8, t_nans(), 0, ct_float(0.1, float.FLOAT_W_64), f64t, f32t, false);
     if (sel tenth.err)                                                  { ret 18; }
     if (float.bits_at(tenth.ok.data.f, float.FLOAT_W_32) != 0x3DCCCCCD) { ret 18; }
     val all_r: res[CTValue, comptime_failure.EvalFail] = make_int_value(-1, true);
     if (sel all_r.err) { ret 99; }
-    val top: res[CTValue, comptime_failure.EvalFail] = cast_scalar(?types, ?itn, 8, float.NAN_PRESERVE, 0, all_r.ok, u64t, f64t, false);
+    val top: res[CTValue, comptime_failure.EvalFail] = cast_scalar(?types, ?itn, 8, t_nans(), 0, all_r.ok, u64t, f64t, false);
     if (sel top.err)                              { ret 19; }
     if (top.ok.data.f:~u64 != 0x43F0000000000000) { ret 19; }
     ret 0;
@@ -979,7 +1002,7 @@ rec TOp {
 # the row gives one in range, and a refusal where the row traps or overflows
 #[testing]
 fun t_agrees(o: TOp, x: wide.Wide, y: wide.Wide, unsigned: bool) bool {
-    val got: res[CTValue, comptime_failure.EvalFail] = apply_arith(o.op, make_int_wide_t(x, unsigned), make_int_wide_t(y, unsigned));
+    val got: res[CTValue, comptime_failure.EvalFail] = apply_arith(o.op, make_int_wide_t(x, unsigned), make_int_wide_t(y, unsigned), t_nans());
     var row: opcodes.Opcode                          = o.signed;
     var ov:  opcodes.Opcode                          = o.over_s;
     if (unsigned) {
@@ -1034,7 +1057,7 @@ test apply_arith__agrees_with_the_folder_over_edge_values {
     }
 
     # a division or remainder by zero is refused, as the folder's row traps
-    val by_zero: res[CTValue, comptime_failure.EvalFail] = apply_arith(ast_expr.BIN_MOD, make_int_wide_t(T_EDGES[1], false), make_int_wide_t(T_EDGES[0], false));
+    val by_zero: res[CTValue, comptime_failure.EvalFail] = apply_arith(ast_expr.BIN_MOD, make_int_wide_t(T_EDGES[1], false), make_int_wide_t(T_EDGES[0], false), t_nans());
     if (sel by_zero.ok) { ret 21; }
     if (sel by_zero.err) {
         if (by_zero.err.diag != diagnostic_kind.COMPTIME_DIVISION_BY_ZERO) { ret 21; }
@@ -1047,12 +1070,12 @@ test apply_arith__agrees_with_the_folder_over_edge_values {
         var c: u32 = 0;
         for (c < 5) {
             val n:   wide.Wide                               = wide.from_u64(counts[c]);
-            val shr: res[CTValue, comptime_failure.EvalFail] = apply_arith(ast_expr.BIN_SHR, make_int_wide_t(T_EDGES[i], true), make_int_wide_t(n, true));
+            val shr: res[CTValue, comptime_failure.EvalFail] = apply_arith(ast_expr.BIN_SHR, make_int_wide_t(T_EDGES[i], true), make_int_wide_t(n, true), t_nans());
             if (sel shr.err) { ret 22; }
             if (sel shr.ok) {
                 if (!wide.eq(shr.ok.data.w, comptime_fold.first(comptime_fold.int(opcodes.SHR_U, T_EDGES[i], n, 2)))) { ret 22; }
             }
-            val shl: res[CTValue, comptime_failure.EvalFail] = apply_arith(ast_expr.BIN_SHL, make_int_wide_t(T_EDGES[i], true), make_int_wide_t(n, true));
+            val shl: res[CTValue, comptime_failure.EvalFail] = apply_arith(ast_expr.BIN_SHL, make_int_wide_t(T_EDGES[i], true), make_int_wide_t(n, true), t_nans());
             if (sel shl.ok) {
                 if (!wide.eq(shl.ok.data.w, comptime_fold.first(comptime_fold.int(opcodes.SHL, T_EDGES[i], n, 2)))) { ret 23; }
             }
@@ -1079,7 +1102,7 @@ test apply_arith__agrees_with_the_folder_over_edge_values {
             val y:      wide.Wide                               = T_EDGES[(i + 4) % 9];
             val at:     comptime_fold.Kind                      = comptime_fold.Kind.integer{widths[w]};
             val whole:  wide.Wide                               = comptime_fold.first(comptime_fold.int(opcodes.ADD, x, y, 2));
-            val narrow: comptime_fold.Answer                    = comptime_fold.fold_op(opcodes.ADD, at, [3]wide.Wide{comptime_fold.at_width(x, widths[w], false), comptime_fold.at_width(y, widths[w], false), wide.zero()}, 2, opt[comptime_fold.Kind].none{});
+            val narrow: comptime_fold.Answer                    = comptime_fold.fold_op(opcodes.ADD, at, [3]wide.Wide{comptime_fold.at_width(x, widths[w], false), comptime_fold.at_width(y, widths[w], false), wide.zero()}, 2, opt[comptime_fold.Kind].none{}, resolved.nans_none());
             val cut:    res[CTValue, comptime_failure.EvalFail] = cast_int(whole, widths[w], false);
             if (sel cut.err) { ret 25; }
             if (sel cut.ok) {
@@ -1107,9 +1130,9 @@ test apply_arith__agrees_with_the_folder_over_edge_values {
                 for (j < 7) {
                     val l:   f64                                     = float.round_at(values[i], fws[f]);
                     val r:   f64                                     = float.round_at(values[j], fws[f]);
-                    val got: res[CTValue, comptime_failure.EvalFail] = apply_arith(fops[k], ct_float(l, fws[f]), ct_float(r, fws[f]));
+                    val got: res[CTValue, comptime_failure.EvalFail] = apply_arith(fops[k], ct_float(l, fws[f]), ct_float(r, fws[f]), t_nans());
                     if (sel got.ok) {
-                        val want: u64 = comptime_fold.first(comptime_fold.flt(frows[k], fws[f], l, r, 2)).lo;
+                        val want: u64 = comptime_fold.first(comptime_fold.flt(frows[k], fws[f], l, r, 2, t_nans())).lo;
                         if (float.bits_at(got.ok.data.f, fws[f]) != want) { ret 26; }
                     }
                     or (r != 0.0) { ret 27; }
@@ -1146,24 +1169,24 @@ test apply_int_shift__limb_crossing_and_bounds {
     val sh64:  CTValue                                 = t_ct_wide(64, 0, false);
     val sh100: CTValue                                 = t_ct_wide(100, 0, false);
     val sh128: CTValue                                 = t_ct_wide(128, 0, false);
-    val shl64: res[CTValue, comptime_failure.EvalFail] = apply_arith(ast_expr.BIN_SHL, one, sh64);
+    val shl64: res[CTValue, comptime_failure.EvalFail] = apply_arith(ast_expr.BIN_SHL, one, sh64, t_nans());
     if (!t_ok_is(shl64, 0, 1, false)) { ret 1; }
-    val shl100: res[CTValue, comptime_failure.EvalFail] = apply_arith(ast_expr.BIN_SHL, one, sh100);
+    val shl100: res[CTValue, comptime_failure.EvalFail] = apply_arith(ast_expr.BIN_SHL, one, sh100, t_nans());
     if (!t_ok_is(shl100, 0, 1::u64 << 36, false)) { ret 2; }
-    val back: res[CTValue, comptime_failure.EvalFail] = apply_arith(ast_expr.BIN_SHR, t_val(shl100), sh100);
+    val back: res[CTValue, comptime_failure.EvalFail] = apply_arith(ast_expr.BIN_SHR, t_val(shl100), sh100, t_nans());
     if (!t_ok_is(back, 1, 0, false)) { ret 3; }
-    val too_far: res[CTValue, comptime_failure.EvalFail] = apply_arith(ast_expr.BIN_SHL, one, sh128);
+    val too_far: res[CTValue, comptime_failure.EvalFail] = apply_arith(ast_expr.BIN_SHL, one, sh128, t_nans());
     if (sel too_far.ok)                                                                  { ret 4; }
     if (!str_equals(too_far.err.message, "comptime shift amount must be less than 128")) { ret 5; }
-    val huge_amt: res[CTValue, comptime_failure.EvalFail] = apply_arith(ast_expr.BIN_SHR, one, t_ct_wide(0, 1, false));
+    val huge_amt: res[CTValue, comptime_failure.EvalFail] = apply_arith(ast_expr.BIN_SHR, one, t_ct_wide(0, 1, false), t_nans());
     if (sel huge_amt.ok) { ret 6; }
     val neg: CTValue                                 = t_ct_wide(0, 0x8000000000000000, false);
-    val sar: res[CTValue, comptime_failure.EvalFail] = apply_arith(ast_expr.BIN_SHR, neg, sh100);
+    val sar: res[CTValue, comptime_failure.EvalFail] = apply_arith(ast_expr.BIN_SHR, neg, sh100, t_nans());
     if (!t_ok_is(sar, 0xFFFFFFFFF8000000, 0xFFFFFFFFFFFFFFFF, false)) { ret 7; }
     val umax: CTValue                                 = t_ct_wide(0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF, true);
-    val lsr:  res[CTValue, comptime_failure.EvalFail] = apply_arith(ast_expr.BIN_SHR, umax, sh64);
+    val lsr:  res[CTValue, comptime_failure.EvalFail] = apply_arith(ast_expr.BIN_SHR, umax, sh64, t_nans());
     if (!t_ok_is(lsr, 0xFFFFFFFFFFFFFFFF, 0, true)) { ret 8; }
-    val drop: res[CTValue, comptime_failure.EvalFail] = apply_arith(ast_expr.BIN_SHL, t_ct_wide(0, 2, false), t_ct_wide(63, 0, false));
+    val drop: res[CTValue, comptime_failure.EvalFail] = apply_arith(ast_expr.BIN_SHL, t_ct_wide(0, 2, false), t_ct_wide(63, 0, false), t_nans());
     if (sel drop.ok) { ret 9; }
     ret 0;
 }
@@ -1199,28 +1222,28 @@ test cast_scalar__between_64_and_128_bits {
     val neg1_r: res[CTValue, comptime_failure.EvalFail] = int_value(0 - 1);
     if (sel neg1_r.err) { ret 99; }
     val neg1:   CTValue                                 = neg1_r.ok;
-    val sext_r: res[CTValue, comptime_failure.EvalFail] = cast_scalar(?types, ?itn, 8, float.NAN_PRESERVE, 0, neg1, i64t, i128t, false);
+    val sext_r: res[CTValue, comptime_failure.EvalFail] = cast_scalar(?types, ?itn, 8, t_nans(), 0, neg1, i64t, i128t, false);
     if (sel sext_r.err)                                                                                { ret 2; }
     if (!t_is(sext_r.ok, 0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF, false) || sext_r.ok.int_width != 128) { ret 3; }
-    val to_u128: res[CTValue, comptime_failure.EvalFail] = cast_scalar(?types, ?itn, 8, float.NAN_PRESERVE, 0, neg1, i64t, u128t, false);
+    val to_u128: res[CTValue, comptime_failure.EvalFail] = cast_scalar(?types, ?itn, 8, t_nans(), 0, neg1, i64t, u128t, false);
     if (!t_ok_is(to_u128, 0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF, true)) { ret 4; }
     val u64_max: CTValue                                 = t_ct_wide(0xFFFFFFFFFFFFFFFF, 0, true);
-    val zext_r:  res[CTValue, comptime_failure.EvalFail] = cast_scalar(?types, ?itn, 8, float.NAN_PRESERVE, 0, u64_max, u64t, i128t, false);
+    val zext_r:  res[CTValue, comptime_failure.EvalFail] = cast_scalar(?types, ?itn, 8, t_nans(), 0, u64_max, u64t, i128t, false);
     if (!t_ok_is(zext_r, 0xFFFFFFFFFFFFFFFF, 0, false)) { ret 5; }
     val wide_v:  CTValue                                 = t_ct_wide(0x0FEDCBA987654321, 0x123456789ABCDEF0, true);
-    val trunc_r: res[CTValue, comptime_failure.EvalFail] = cast_scalar(?types, ?itn, 8, float.NAN_PRESERVE, 0, wide_v, u128t, u64t, false);
+    val trunc_r: res[CTValue, comptime_failure.EvalFail] = cast_scalar(?types, ?itn, 8, t_nans(), 0, wide_v, u128t, u64t, false);
     if (!t_ok_is(trunc_r, 0x0FEDCBA987654321, 0, true) || t_width(trunc_r) != 64) { ret 6; }
-    val to_i64: res[CTValue, comptime_failure.EvalFail] = cast_scalar(?types, ?itn, 8, float.NAN_PRESERVE, 0, t_ct_wide(0x8000000000000000, 7, true), u128t, i64t, false);
+    val to_i64: res[CTValue, comptime_failure.EvalFail] = cast_scalar(?types, ?itn, 8, t_nans(), 0, t_ct_wide(0x8000000000000000, 7, true), u128t, i64t, false);
     if (!t_ok_is(to_i64, 0x8000000000000000, 0xFFFFFFFFFFFFFFFF, false)) { ret 7; }
-    val reinterp: res[CTValue, comptime_failure.EvalFail] = cast_scalar(?types, ?itn, 8, float.NAN_PRESERVE, 0, t_ct_wide(5, 0x8000000000000000, true), u128t, i128t, true);
+    val reinterp: res[CTValue, comptime_failure.EvalFail] = cast_scalar(?types, ?itn, 8, t_nans(), 0, t_ct_wide(5, 0x8000000000000000, true), u128t, i128t, true);
     if (!t_ok_is(reinterp, 5, 0x8000000000000000, false) || !ct_is_negative(t_val(reinterp))) { ret 8; }
-    val narrow_reinterp: res[CTValue, comptime_failure.EvalFail] = cast_scalar(?types, ?itn, 8, float.NAN_PRESERVE, 0, wide_v, u128t, u64t, true);
+    val narrow_reinterp: res[CTValue, comptime_failure.EvalFail] = cast_scalar(?types, ?itn, 8, t_nans(), 0, wide_v, u128t, u64t, true);
     if (sel narrow_reinterp.ok) { ret 9; }
-    val to_f: res[CTValue, comptime_failure.EvalFail] = cast_scalar(?types, ?itn, 8, float.NAN_PRESERVE, 0, t_ct_wide(0, 1, true), u128t, f64t, false);
+    val to_f: res[CTValue, comptime_failure.EvalFail] = cast_scalar(?types, ?itn, 8, t_nans(), 0, t_ct_wide(0, 1, true), u128t, f64t, false);
     if (t_float_of(to_f) != 18446744073709551616.0) { ret 10; }
-    val neg_f: res[CTValue, comptime_failure.EvalFail] = cast_scalar(?types, ?itn, 8, float.NAN_PRESERVE, 0, t_ct_wide(0, 0xFFFFFFFFFFFFFFFF, false), i128t, f64t, false);
+    val neg_f: res[CTValue, comptime_failure.EvalFail] = cast_scalar(?types, ?itn, 8, t_nans(), 0, t_ct_wide(0, 0xFFFFFFFFFFFFFFFF, false), i128t, f64t, false);
     if (t_float_of(neg_f) != -18446744073709551616.0) { ret 11; }
-    val from_f: res[CTValue, comptime_failure.EvalFail] = cast_scalar(?types, ?itn, 8, float.NAN_PRESERVE, 0, ct_float(18446744073709551616.0, float.FLOAT_W_64), f64t, u128t, false);
+    val from_f: res[CTValue, comptime_failure.EvalFail] = cast_scalar(?types, ?itn, 8, t_nans(), 0, ct_float(18446744073709551616.0, float.FLOAT_W_64), f64t, u128t, false);
     if (!t_ok_is(from_f, 0, 1, true)) { ret 12; }
     ret 0;
 }

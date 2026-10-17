@@ -558,7 +558,7 @@ pub fun typed_surface_decode(itn: *intern.Interner, a: *A.Allocator, bytes: *u8,
                     deprecation: notice.ok};
                 j = j + 1;
             }
-            node.entries.len = field_count::usize;
+            collections_vector.commit[type.FieldEntry](?node.entries, field_count::usize);
         }
         val added: res[usize, A.Error] = collections_vector.push[fe_sema.fields.Node](?surface.graph.nodes, node);
         if (sel added.err) { ret res[fe_sema.ModuleSema, fail.Fail].err{fail.refused(added.err)}; }

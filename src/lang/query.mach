@@ -380,7 +380,7 @@ pub fun begin(db: *QueryDb) res[Operation, fail.Fail] {
     if (db.operation_sequence == ~(0::u64))       { ret res[Operation, fail.Fail].err{fail.message("query operation sequence exhausted")}; }
     map.clear[Slot, Revision](?db.validated);
     map.clear[Slot, usize](?db.metadata_index);
-    db.metadata.len       = 0;
+    collections_vector.truncate[MetadataSample](?db.metadata, 0);
     db.operation_sequence = db.operation_sequence + 1;
     db.operation_active   = true;
     db.operation_failure  = opt[fail.Fail].none{};
@@ -467,7 +467,7 @@ fun attempt_prepare(db: *QueryDb, key: Slot) res[usize, fail.Fail] {
     if (sel added.err) { ret res[usize, fail.Fail].err{fail.refused(added.err)}; }
     val indexed: res[bool, A.Error] = map.insert[Slot, usize](?db.attempt_index, key, index);
     if (sel indexed.err) {
-        db.attempts.len = index;
+        collections_vector.truncate[Attempt](?db.attempts, index);
         ret res[usize, fail.Fail].err{fail.refused(indexed.err)};
     }
     ret res[usize, fail.Fail].ok{index};
@@ -498,7 +498,7 @@ fun attempts_clear(db: *QueryDb) {
         entry_free(db, db.storage[attempt.key.kind::u32], ?attempt.evidence);
         i = i + 1;
     }
-    db.attempts.len   = 0;
+    collections_vector.truncate[Attempt](?db.attempts, 0);
     db.prepared_count = 0;
     map.clear[Slot, usize](?db.attempt_index);
 }
@@ -669,7 +669,7 @@ fun sample_metadata(db: *QueryDb, kind: KindIndex, key: u64) res[MetadataRevisio
     if (sel pushed.err) { ret res[MetadataRevision, fail.Fail].err{fail.refused(pushed.err)}; }
     val indexed: res[bool, A.Error] = map.insert[Slot, usize](?db.metadata_index, pair, index);
     if (sel indexed.err) {
-        db.metadata.len = index;
+        collections_vector.truncate[MetadataSample](?db.metadata, index);
         ret res[MetadataRevision, fail.Fail].err{fail.refused(indexed.err)};
     }
     ret res[MetadataRevision, fail.Fail].ok{value};
@@ -887,8 +887,8 @@ fun prepare_slot_retirement(db: *QueryDb, roots: *Slot, count: usize) res[Prepar
         i = i + 1;
     }
     val selected: usize = pending.len;
-    pending.len = 0;
-    i           = 0;
+    collections_vector.truncate[usize](?pending, 0);
+    i = 0;
     for (i < nodes.len) {
         if (nodes.data[i].selected) {
             var edge: usize = nodes.data[i].first;
@@ -1042,8 +1042,8 @@ pub fun commit_retirement(prepared: *PreparedRetirement) err[fail.Fail] {
                 }
                 i = i + 1;
             }
-            sh.index.len = write;
-            kind         = kind + 1;
+            collections_vector.truncate[QueryIndexEntry](?sh.index, write);
+            kind = kind + 1;
         }
     }
     discard_retirement(prepared);
@@ -1925,7 +1925,7 @@ fun entry_append(db: *QueryDb, sh: *QueryShard, key: u64) res[*QueryEntry, fail.
 
     val map_r: res[bool, A.Error] = map.insert[u64, handle.HandleId[QueryEntryDomain]](?sh.by_key, key, id);
     if (sel map_r.err) {
-        sh.index.len = sh.index.len - 1;
+        collections_vector.truncate[QueryIndexEntry](?sh.index, sh.index.len - 1);
         val ed3_r: res[handle.HandleEditor[QueryEntry, QueryEntryDomain], handle.Error] = handle.edit[QueryEntry, QueryEntryDomain](?sh.entries);
         if (sel ed3_r.ok) {
             var ed3: handle.HandleEditor[QueryEntry, QueryEntryDomain] =
@@ -1961,7 +1961,7 @@ fun entry_remove(db: *QueryDb, sh: *QueryShard, key: u64) {
 
             val last: usize = sh.index.len - 1;
             if (i != last) { sh.index.data[i] = sh.index.data[last]; }
-            sh.index.len = last;
+            collections_vector.truncate[QueryIndexEntry](?sh.index, last);
 
             var rk: u64 = key;
             map.remove[u64, handle.HandleId[QueryEntryDomain]](?sh.by_key, ?rk);

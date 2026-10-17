@@ -22,8 +22,8 @@ finite dividend over an infinite divisor gives the dividend unchanged, its sign
 and a zero dividend's sign included, as C `fmod` does. Where the result is NaN,
 only the NaN is defined, not its sign or payload. In a constant expression a
 zero divisor is refused as division by zero, and the other cases fold to the
-same results as at run time, except a NaN on spirv
-([A NaN in a constant on spirv](#a-nan-in-a-constant-on-spirv)).
+same results as at run time, except a NaN on a target that leaves it unspecified
+([A NaN in a constant on a target that leaves it unspecified](#a-nan-in-a-constant-on-a-target-that-leaves-it-unspecified)).
 
 ```mach
 use std.print;
@@ -428,23 +428,31 @@ depends on when the cast is evaluated:
   the minimum, one above its maximum gives the maximum, and a NaN gives 0, the
   same on every target.
 
-### A NaN in a constant on spirv
+### A NaN in a constant on a target that leaves it unspecified
 
-Vulkan leaves the NaN a float operation returns unspecified unless the module
-states a float-controls execution mode, and mach never states one. On spirv a
+A compile-time float operation whose result is a NaN gives the NaN the target's
+own operation returns, by the rule mirl's target model states for the result's
+format: the canonical NaN on riscv with hardware floats, and the first NaN
+operand, quieted, on x86-64. Where the model gives no defined NaN result, a
 float operation whose result would be a NaN, arithmetic or a conversion between
-float widths, is therefore not folded at compile time:
+float widths, is not folded at compile time, so it is never miscompiled. SPIR-V
+is the case the target itself leaves unspecified: Vulkan defines no NaN result
+unless the module states a float-controls execution mode, and mach never states
+one. Every other refusal is a toolchain gap, a rule mirl does not state yet
+(aarch64's, binary16 on x86-64, and riscv without hardware floats), and it
+closes as mirl states the rule.
 
 - **Where a constant is required**, a module `val`, an array length, a `$if`
   condition or a comptime argument, it has no value and is refused
-  (`comptime.nan_unspecified`). The error names the target and the reason. This
-  holds for a NaN anywhere in the expression, so `$if` over a comparison of such
-  a NaN is refused too.
-- **In a function body** the operation runs on the device, as it would with
-  operands known only at run time.
+  (`comptime.nan_unspecified`). The error names the target, and says whether
+  the target model states the NaN as unspecified or states no rule for the
+  format yet. This holds for a NaN anywhere in the expression, so `$if` over a
+  comparison of such a NaN is refused too.
+- **In a function body** on spirv the operation runs on the device, as it
+  would with operands known only at run time.
 
 `:~` is not an operation on the value, so a NaN read from its bits is a constant
-on spirv as on every target.
+on every target.
 
 ### `f16` conversions
 
@@ -511,9 +519,10 @@ because it is what the target's own conversion instruction does:
 | spirv | unspecified: a device may return any NaN |
 
 A conversion folded at compile time follows the build target's rule, so a folded
-`::` gives the bits the same `::` gives at run time on that target. On spirv the
+`::` gives the bits the same `::` gives at run time on that target. Where the
+toolchain's target model gives no defined NaN for the format converted to, the
 NaN has no rule to follow, so a constant that converts one is refused
-([A NaN in a constant on spirv](#a-nan-in-a-constant-on-spirv)). An `f16`
+([A NaN in a constant on a target that leaves it unspecified](#a-nan-in-a-constant-on-a-target-that-leaves-it-unspecified)). An `f16`
 conversion the target has no instruction for follows the same rule. `:~` never
 converts, so it reads and writes a NaN's bits exactly on every target.
 

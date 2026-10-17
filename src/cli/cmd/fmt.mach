@@ -176,7 +176,7 @@ fun read_text(a: *A.Allocator, fd: usize, name: str) res[str, fail.Fail] {
         var i: usize = 0;
         for (i < count::usize) {
             bytes.data[bytes.len] = chunk[i];
-            bytes.len             = bytes.len + 1;
+            collections_vector.commit[u8](?bytes, 1);
             if (chunk[i] == 0) { ret res[str, fail.Fail].err{nul_byte(a, name, ?bytes)}; }
             i = i + 1;
         }

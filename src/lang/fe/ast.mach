@@ -180,7 +180,7 @@ fun table_copy[T](dst: *Vector[T], src: *Vector[T]) err[fail.Fail] {
         dst.data[i] = src.data[i];
         i           = i + 1;
     }
-    dst.len = src.len;
+    collections_vector.commit[T](dst, src.len);
     ret err[fail.Fail].ok{};
 }
 
@@ -326,7 +326,7 @@ pub fun literal_bytes_reserve(a: *Ast, n: usize) res[*u8, fail.Fail] {
 # claims the first `n` reserved bytes as one literal's value
 pub fun literal_bytes_take(a: *Ast, n: usize) ast_expr.ByteRange {
     val range: ast_expr.ByteRange = ast_expr.ByteRange{start: a.literal_bytes.len::u32, len: n::u32};
-    a.literal_bytes.len = a.literal_bytes.len + n;
+    collections_vector.commit[u8](?a.literal_bytes, n);
     ret range;
 }
 
@@ -401,22 +401,22 @@ pub fun rollback(a: *Ast, m: AstMark) bool {
     if (m.type_id_len > a.type_ids.len)                  { ret false; }
     if (m.literal_byte_len > a.literal_bytes.len)        { ret false; }
 
-    a.modules.len           = m.module_len;
-    a.exprs.len             = m.expr_len;
-    a.stmts.len             = m.stmt_len;
-    a.decls.len             = m.decl_len;
-    a.types.len             = m.type_len;
-    a.typed_names.len       = m.typed_name_len;
-    a.tag_cases.len         = m.tag_case_len;
-    a.field_inits.len       = m.field_init_len;
-    a.generic_names.len     = m.generic_name_len;
-    a.comptime_branches.len = m.comptime_branch_len;
-    a.decorators.len        = m.decorator_len;
-    a.decl_ids.len          = m.decl_id_len;
-    a.stmt_ids.len          = m.stmt_id_len;
-    a.expr_ids.len          = m.expr_id_len;
-    a.type_ids.len          = m.type_id_len;
-    a.literal_bytes.len     = m.literal_byte_len;
+    collections_vector.truncate[ast_module.Module](?a.modules, m.module_len);
+    collections_vector.truncate[ast_expr.Expr](?a.exprs, m.expr_len);
+    collections_vector.truncate[ast_stmt.Stmt](?a.stmts, m.stmt_len);
+    collections_vector.truncate[ast_decl.Decl](?a.decls, m.decl_len);
+    collections_vector.truncate[ast_type.Type](?a.types, m.type_len);
+    collections_vector.truncate[ast_decl.TypedName](?a.typed_names, m.typed_name_len);
+    collections_vector.truncate[ast_decl.TagCase](?a.tag_cases, m.tag_case_len);
+    collections_vector.truncate[ast_expr.FieldInit](?a.field_inits, m.field_init_len);
+    collections_vector.truncate[lang_source.Span](?a.generic_names, m.generic_name_len);
+    collections_vector.truncate[ast_decl.ComptimeBranch](?a.comptime_branches, m.comptime_branch_len);
+    collections_vector.truncate[ast_decl.Decorator](?a.decorators, m.decorator_len);
+    collections_vector.truncate[ast_id.DeclId](?a.decl_ids, m.decl_id_len);
+    collections_vector.truncate[ast_id.StmtId](?a.stmt_ids, m.stmt_id_len);
+    collections_vector.truncate[ast_id.ExprId](?a.expr_ids, m.expr_id_len);
+    collections_vector.truncate[ast_id.TypeId](?a.type_ids, m.type_id_len);
+    collections_vector.truncate[u8](?a.literal_bytes, m.literal_byte_len);
     ret true;
 }
 
@@ -643,7 +643,7 @@ test add__refuses_an_id_past_its_domain {
     a.exprs.cap = 0x100000000;
     val expr_over: res[ast_id.ExprId, fail.Fail] = add_expr(?a, expr_make(0, 1));
     if (sel expr_over.ok || a.exprs.len != 0xFFFFFFFF) { rc = 1; }
-    a.exprs.len = 0;
+    collections_vector.truncate[ast_expr.Expr](?a.exprs, 0);
     a.exprs.cap = 0;
 
     a.modules.len = 0xFFFFFFFF;
@@ -651,7 +651,7 @@ test add__refuses_an_id_past_its_domain {
     var mo:          ast_module.Module;
     val module_over: res[ast_id.ModuleNodeId, fail.Fail] = add_module(?a, mo);
     if (sel module_over.ok) { rc = 2; }
-    a.modules.len = 0;
+    collections_vector.truncate[ast_module.Module](?a.modules, 0);
     a.modules.cap = 0;
 
     a.stmts.len = 0xFFFFFFFF;
@@ -659,7 +659,7 @@ test add__refuses_an_id_past_its_domain {
     var s:         ast_stmt.Stmt;
     val stmt_over: res[ast_id.StmtId, fail.Fail] = add_stmt(?a, s);
     if (sel stmt_over.ok) { rc = 3; }
-    a.stmts.len = 0;
+    collections_vector.truncate[ast_stmt.Stmt](?a.stmts, 0);
     a.stmts.cap = 0;
 
     a.decls.len = 0xFFFFFFFF;
@@ -667,7 +667,7 @@ test add__refuses_an_id_past_its_domain {
     var d:         ast_decl.Decl;
     val decl_over: res[ast_id.DeclId, fail.Fail] = add_decl(?a, d);
     if (sel decl_over.ok) { rc = 4; }
-    a.decls.len = 0;
+    collections_vector.truncate[ast_decl.Decl](?a.decls, 0);
     a.decls.cap = 0;
 
     a.types.len = 0xFFFFFFFF;
@@ -675,7 +675,7 @@ test add__refuses_an_id_past_its_domain {
     var t:         ast_type.Type;
     val type_over: res[ast_id.TypeId, fail.Fail] = add_type(?a, t);
     if (sel type_over.ok) { rc = 5; }
-    a.types.len = 0;
+    collections_vector.truncate[ast_type.Type](?a.types, 0);
     a.types.cap = 0;
 
     a.typed_names.len = 0x100000000;
@@ -683,7 +683,7 @@ test add__refuses_an_id_past_its_domain {
     var tn:        ast_decl.TypedName;
     val name_over: res[u32, fail.Fail] = add_typed_name(?a, tn);
     if (sel name_over.ok || a.typed_names.len != 0x100000000) { rc = 6; }
-    a.typed_names.len = 0;
+    collections_vector.truncate[ast_decl.TypedName](?a.typed_names, 0);
     a.typed_names.cap = 0;
 
     val expr_ok: res[ast_id.ExprId, fail.Fail] = add_expr(?a, expr_make(0, 1));

@@ -1768,8 +1768,8 @@ fun record_abi_inputs(ctx: *mir_context.LowerCtx, slots: *abi.SigLayout) err[fai
     ctx.f.abi_input_count = inputs.len;
     ctx.f.abi_input_cap   = inputs.cap;
     inputs.data           = nil;
-    inputs.len            = 0;
-    inputs.cap            = 0;
+    collections_vector.truncate[lang_mir.MirAbiInput](?inputs, 0);
+    inputs.cap = 0;
     ret err[fail.Fail].ok{};
 }
 

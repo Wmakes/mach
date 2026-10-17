@@ -1,5 +1,6 @@
 use std.allocator.arena;
 use std.allocator.page;
+use std.collections.slice.Slice;
 use collections_vector: std.collections.vector;
 use std.collections.vector.Vector;
 use fs:       std.filesystem;
@@ -2055,12 +2056,14 @@ test link__reuse_and_fingerprint {
     loaded.options.resources = ?ri;
     loaded.resource          = ?ri;
     loaded.icon_bytes        = collections_vector.init[u8](?alloc);
-    loaded.icon_bytes.data   = ?icon_bytes[0];
-    loaded.icon_bytes.len    = 4;
-    loaded.icon_bytes.cap    = 4;
-    loaded.manifest_bytes    = collections_vector.init[u8](?alloc);
-    loaded.icon_path         = "assets/app.ico";
-    loaded.manifest_path     = nil;
+    fin { collections_vector.dnit[u8](?loaded.icon_bytes); }
+    val icon_held: res[usize, A.Error] = collections_vector.extend[u8](?loaded.icon_bytes, Slice[u8]{data: ?icon_bytes[0], size: 4});
+    if (sel icon_held.err) { ret 1; }
+    # the resource reads the icon through the vector's own bytes, so one write below changes both
+    ri.icon               = loaded.icon_bytes.data;
+    loaded.manifest_bytes = collections_vector.init[u8](?alloc);
+    loaded.icon_path      = "assets/app.ico";
+    loaded.manifest_path  = nil;
 
     val p5r: res[project.Project, fail.Fail] = lowered(?sA, root);
     if (sel p5r.err) {
@@ -2099,7 +2102,7 @@ test link__reuse_and_fingerprint {
     if (!(sel r6.ok && (!(r6.ok) && link_lc(?sA) == lk5))) { bad = 1; }
     project.dnit_project(?p6);
 
-    icon_bytes[3] = 5;
+    loaded.icon_bytes.data[3] = 5;
     val p7r: res[project.Project, fail.Fail] = lowered(?sA, root);
     if (sel p7r.err) {
         fs.remove_all(?alloc, root);
@@ -5295,8 +5298,8 @@ $if ($mach.build.os == $mach.os.linux && $mach.build.arch == $mach.arch.x86_64) 
         if (status_of(?labels, ?statuses, "lessons.common#names_its_artifact") != 11) { ret 22; }
 
         # the other artifact, which a default run never compiles
-        labels.len   = 0;
-        statuses.len = 0;
+        collections_vector.truncate[str](?labels, 0);
+        collections_vector.truncate[i32](?statuses, 0);
         val sr2: i32 = artifact_test_statuses(?alloc, ?s, root, "shaded", ?labels, ?statuses);
         if (sr2 != 0)                                                                 { ret 30 + sr2; }
         if (labels.len != 2)                                                          { ret 40; }

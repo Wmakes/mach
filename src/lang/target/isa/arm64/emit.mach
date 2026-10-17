@@ -1,4 +1,5 @@
 # arm64 instructions built and appended to the encode buffer, with the relocations they carry
+use collections_vector: std.collections.vector;
 use mach.lang.fail;
 use std.allocator.page;
 use io_writer: std.io.writer;
@@ -1176,7 +1177,7 @@ test patch_branch__imm26_and_imm19 {
     patch_branch(?st, ?fx, 12);
     if (isa_encode.word_read(?st.buf, 12) != 0xB5000001) { bad = 1; }
 
-    st.buf.bytes.len = 0;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     var k: u32 = 0;
     for (k < 8) {
         raw_word(?st, arm64_inst.form(arm64_inst.B).base);
@@ -1209,14 +1210,14 @@ test patch_branch__out_of_range_refused {
     val r1: err[fail.Fail] = patch_branch(?st, ?fx, 2000000);
     if (!sel r1.err) { bad = 1; }
 
-    st.buf.bytes.len = 0;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     raw_word(?st, arm64_inst.form(arm64_inst.B).base);
     fx.patch_pos = 0;
     fx.next_ip   = 4;
     val r2: err[fail.Fail] = patch_branch(?st, ?fx, 200000000);
     if (!sel r2.err) { bad = 1; }
 
-    st.buf.bytes.len = 0;
+    collections_vector.truncate[u8](?st.buf.bytes, 0);
     raw_word(?st, arm64_inst.form(arm64_inst.BCOND).base | CC_EQ);
     fx.patch_pos = 0;
     fx.next_ip   = 4;

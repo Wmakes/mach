@@ -160,15 +160,6 @@ pub fun value_of_bits(bits: u64, w: FloatWidth) f64;
 
 the value an encoding at `w` holds, carried exactly in an f64: the value `:~` makes
 
-## fun convert
-
-```mach
-pub fun convert(f: f64, from: FloatWidth, to: FloatWidth, rule: NanRule) f64;
-```
-
-`f`, a value at `from`, converted to `to` as the target's conversion instruction
-does, carried exactly in an f64: rounded once, a NaN made by `rule`
-
 ## fun widths_agree
 
 ```mach
@@ -229,21 +220,24 @@ pub rec Rounded;
 a decimal rounded to one format: the value, carried exactly in an f64, and how it fit.
 an overflow carries +inf and an underflow of a nonzero decimal carries +0
 
-## fun round_decimal
+## fun parse_decimal
 
 ```mach
-pub fun round_decimal(mant: *bignum.Big, exp10: i64, trunc: bool, w: FloatWidth) Rounded;
+pub fun parse_decimal(s: str, len: usize, w: FloatWidth) opt[f64];
 ```
 
-round mant * 10^exp10 straight to the format of `w`, to nearest with ties to even, in
-exact arithmetic. `trunc` says digits past mant were dropped and at least one was nonzero,
-so the true value lies just above mant * 10^exp10
+the decimal `s`, its first `len` bytes, rounded once to nearest with ties to even at `w` by
+std's parse and carried exactly in an f64, none when the parse refuses the text
 
-mant: the significant digits as an integer
-exp10: the decimal exponent of mant's last digit
-trunc: a nonzero digit was dropped past mant
-w: the width to round to
-ret: the rounded value and whether it was exact, inexact, or left the format's range
+## fun fit_of
+
+```mach
+pub fun fit_of(value: f64, mant: *bignum.Big, exp10: i64, trunc: bool) Rounded;
+```
+
+how the decimal mant * 10^exp10 fit `value`, the value it was rounded to: exact when the two are
+equal, an overflow when it rounded to infinity and an underflow when a nonzero decimal rounded to
+zero. `trunc` says a nonzero digit past mant was dropped, so the decimal is never exact
 
 ## rec Shortest
 

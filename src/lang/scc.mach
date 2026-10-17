@@ -101,14 +101,14 @@ pub fun components(alloc: *A.Allocator, n: u32, arcs: *Arc, e: u32, comp: *u32) 
                 }
                 cnt;
             }
-            calls.len = calls.len - 1;
+            collections_vector.truncate[u32](?calls, calls.len - 1);
             if (calls.len > 0) {
                 val p: u32 = calls.data[calls.len - 1];
                 if (low.data[v] < low.data[p]) { low.data[p] = low.data[v]; }
             }
             if (low.data[v] == order.data[v]) {
                 for (true) {
-                    stack.len = stack.len - 1;
+                    collections_vector.truncate[u32](?stack, stack.len - 1);
                     val m: u32 = stack.data[stack.len];
                     on.data[m] = false;
                     comp[m]    = comps;

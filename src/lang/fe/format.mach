@@ -380,7 +380,7 @@ fun pair_delimiters(a: *A.Allocator, atoms: *Vector[Atom]) err[fail.Fail] {
         }
         or (closer(kind)) {
             if (stack.len == 0) { ret err[fail.Fail].err{fail.message("formatter parsed delimiters are unbalanced")}; }
-            stack.len = stack.len - 1;
+            collections_vector.truncate[usize](?stack, stack.len - 1);
             val open: usize = stack.data[stack.len];
             atoms.data[open].pair = i;
             atoms.data[i].pair    = open;
@@ -802,7 +802,7 @@ fun emission_order(a: *A.Allocator, atoms: *Vector[Atom], items: *Vector[UseItem
         order.data[i] = i;
         i             = i + 1;
     }
-    order.len = atoms.len;
+    collections_vector.commit[usize](order, atoms.len);
     var sorted: Vector[UseItem] = collections_vector.init[UseItem](a);
     fin { collections_vector.dnit[UseItem](?sorted); }
     var start: usize = 0;
@@ -810,8 +810,8 @@ fun emission_order(a: *A.Allocator, atoms: *Vector[Atom], items: *Vector[UseItem
         var end: usize = start + 1;
         for (end < items.len && items.data[end].block == items.data[start].block) { end = end + 1; }
         if (end - start > 1) {
-            sorted.len = 0;
-            i          = start;
+            collections_vector.truncate[UseItem](?sorted, 0);
+            i = start;
             for (i < end) {
                 val pushed: res[usize, A.Error] = collections_vector.push[UseItem](?sorted, items.data[i]);
                 if (sel pushed.err) { ret err[fail.Fail].err{fail.refused(pushed.err)}; }
@@ -845,7 +845,7 @@ fun emission_order(a: *A.Allocator, atoms: *Vector[Atom], items: *Vector[UseItem
         }
         i = i + 1;
     }
-    order.len = kept;
+    collections_vector.truncate[usize](order, kept);
     ret err[fail.Fail].ok{};
 }
 
@@ -891,7 +891,7 @@ fun append_bytes(out: *Vector[u8], text: str, offset: usize, len: usize) err[fai
         out.data[out.len + i] = text[offset + i];
         i                     = i + 1;
     }
-    out.len = out.len + len;
+    collections_vector.commit[u8](out, len);
     ret err[fail.Fail].ok{};
 }
 
@@ -903,7 +903,7 @@ fun fill(out: *Vector[u8], byte: u8, count: usize) err[fail.Fail] {
         out.data[out.len + i] = byte;
         i                     = i + 1;
     }
-    out.len = out.len + count;
+    collections_vector.commit[u8](out, count);
     ret err[fail.Fail].ok{};
 }
 
@@ -1193,7 +1193,7 @@ fun emit_atom(r: *Render, k: usize, gap: Gap) err[fail.Fail] {
     }
     or (closer(current.kind)) {
         if (r.stack.len == 0) { ret err[fail.Fail].err{fail.message("formatter parsed delimiters are unbalanced")}; }
-        r.stack.len = r.stack.len - 1;
+        collections_vector.truncate[usize](?r.stack, r.stack.len - 1);
     }
     ret err[fail.Fail].ok{};
 }
@@ -1451,7 +1451,7 @@ fun same_block(a: *A.Allocator, left: *Side, right: *Side, lb: usize, le: usize,
     fin { collections_vector.dnit[bool](?used); }
     val room: res[usize, A.Error] = collections_vector.reserve[bool](?used, le - lb);
     if (sel room.err) { ret res[bool, fail.Fail].err{fail.refused(room.err)}; }
-    used.len = le - lb;
+    collections_vector.commit[bool](?used, le - lb);
     var i: usize = 0;
     for (i < used.len) {
         used.data[i] = false;

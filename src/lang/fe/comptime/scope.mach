@@ -607,18 +607,18 @@ test apply_int_shift__typed_operand_refuses_count_at_width {
     val x32_r: res[comptime_value.CTValue, comptime_failure.EvalFail] = comptime_value.cast_int(wide.from_u64(1), 32, false);
     if (sel x32_r.err) { ret 99; }
     val x32: comptime_value.CTValue                                 = x32_r.ok;
-    val at:  res[comptime_value.CTValue, comptime_failure.EvalFail] = comptime_value.apply_arith(ast_expr.BIN_SHL, x32, comptime_value.ct_u8(32));
+    val at:  res[comptime_value.CTValue, comptime_failure.EvalFail] = comptime_value.apply_arith(ast_expr.BIN_SHL, x32, comptime_value.ct_u8(32), comptime_value.t_nans());
     if (sel at.ok)                                                                                         { ret 1; }
     if (!str_equals(at.err.message, "comptime shift amount is at least the width of the shifted operand")) { ret 2; }
-    val over: res[comptime_value.CTValue, comptime_failure.EvalFail] = comptime_value.apply_arith(ast_expr.BIN_SHR, x32, comptime_value.ct_u8(40));
+    val over: res[comptime_value.CTValue, comptime_failure.EvalFail] = comptime_value.apply_arith(ast_expr.BIN_SHR, x32, comptime_value.ct_u8(40), comptime_value.t_nans());
     if (sel over.ok) { ret 3; }
-    val below: res[comptime_value.CTValue, comptime_failure.EvalFail] = comptime_value.apply_arith(ast_expr.BIN_SHL, x32, comptime_value.ct_u8(31));
+    val below: res[comptime_value.CTValue, comptime_failure.EvalFail] = comptime_value.apply_arith(ast_expr.BIN_SHL, x32, comptime_value.ct_u8(31), comptime_value.t_nans());
     if (!comptime_value.t_ok_is(below, 1::u64 << 31, 0, false)) { ret 4; }
     val x8_r: res[comptime_value.CTValue, comptime_failure.EvalFail] = comptime_value.cast_int(wide.from_u64(0x80), 8, true);
     if (sel x8_r.err) { ret 99; }
-    val at8: res[comptime_value.CTValue, comptime_failure.EvalFail] = comptime_value.apply_arith(ast_expr.BIN_SHR, x8_r.ok, comptime_value.ct_u8(8));
+    val at8: res[comptime_value.CTValue, comptime_failure.EvalFail] = comptime_value.apply_arith(ast_expr.BIN_SHR, x8_r.ok, comptime_value.ct_u8(8), comptime_value.t_nans());
     if (sel at8.ok) { ret 5; }
-    val untyped: res[comptime_value.CTValue, comptime_failure.EvalFail] = comptime_value.apply_arith(ast_expr.BIN_SHL, comptime_value.t_ct_wide(1, 0, false), comptime_value.t_ct_wide(100, 0, false));
+    val untyped: res[comptime_value.CTValue, comptime_failure.EvalFail] = comptime_value.apply_arith(ast_expr.BIN_SHL, comptime_value.t_ct_wide(1, 0, false), comptime_value.t_ct_wide(100, 0, false), comptime_value.t_nans());
     if (!comptime_value.t_ok_is(untyped, 0, 1::u64 << 36, false)) { ret 6; }
     ret 0;
 }

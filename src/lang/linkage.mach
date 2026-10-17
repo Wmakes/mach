@@ -138,7 +138,7 @@ pub fun register_provider(l: *Linkage, name: intern.StrId, is_static: bool) err[
     if (sel pushed.err) { ret err[fail.Fail].err{fail.refused(pushed.err)}; }
     val indexed: res[bool, A.Error] = map.insert[intern.StrId, usize](?l.provider_at, name, at);
     if (sel indexed.err) {
-        l.providers.len = at;
+        collections_vector.truncate[Provider](?l.providers, at);
         ret err[fail.Fail].err{fail.refused(indexed.err)};
     }
     ret err[fail.Fail].ok{};
@@ -153,7 +153,7 @@ pub fun provider(l: *Linkage, name: intern.StrId) opt[Provider] {
 
 # forget every library offered, as each link names its own
 pub fun providers_clear(l: *Linkage) {
-    l.providers.len = 0;
+    collections_vector.truncate[Provider](?l.providers, 0);
     map.clear[intern.StrId, usize](?l.provider_at);
 }
 

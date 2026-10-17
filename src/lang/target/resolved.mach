@@ -24,17 +24,17 @@ use catalog_os:        mach.lang.target.catalog.os;
 use target_definition: mach.lang.target.definition;
 use mach.lang.target.extension;
 #[testing]
-use extension_x64: mach.lang.target.extension.x64;
-use target_model:  mach.lang.target.model;
+use extension_x64:   mach.lang.target.extension.x64;
+use target_model:    mach.lang.target.model;
 #[testing]
-use model_arm64:   mach.lang.target.model.arm64;
+use model_arm64:     mach.lang.target.model.arm64;
 #[testing]
-use model_riscv:   mach.lang.target.model.riscv;
+use model_riscv:     mach.lang.target.model.riscv;
 #[testing]
-use model_spirv:   mach.lang.target.model.spirv;
+use model_spirv:     mach.lang.target.model.spirv;
 #[testing]
-use model_x64:     mach.lang.target.model.x64;
-#[testing]
+use model_x64:       mach.lang.target.model.x64;
+use mirl_capability: mirl.target.capability;
 use std.types.size.usize;
 
 # whether an asm body returns from the function that holds it
@@ -86,6 +86,58 @@ pub rec Target {
     # the extents the target's owner row lays each primitive out at, none held for a
     # cell no owner has a row for yet
     scalars: layout.Scalars;
+    # the nan each float format's operations return: the owner's, else mach's own
+    # rule for a cell no owner assembles yet
+    nans: Nans;
+}
+
+# the nan a target's float operations return in each format, binary16, binary32
+# and binary64 at the index of mirl's format, which mirl's folder reads
+pub rec Nans {
+    formats: [3]mirl_capability.Nans;
+}
+
+# no format's rule stated, as where no target is selected
+pub fun nans_none() Nans {
+    var n: Nans;
+    var i: usize = 0;
+    for (i < 3) {
+        n.formats[i] = mirl_capability.Nans.unstated{};
+        i            = i + 1;
+    }
+    ret n;
+}
+
+# the rule of a target cell no owner assembles yet, read from mach's own (#4779)
+pub fun nans_of_rule(r: float.NanRule) Nans {
+    var rule: mirl_capability.Nans = mirl_capability.Nans.unstated{};
+    if (r == float.NAN_PRESERVE)    { rule = mirl_capability.Nans.propagate{}; }
+    if (r == float.NAN_CANONICAL)   { rule = mirl_capability.Nans.canonical{}; }
+    if (r == float.NAN_UNSPECIFIED) { rule = mirl_capability.Nans.unspecified{}; }
+    var n: Nans  = nans_none();
+    var i: usize = 0;
+    for (i < 3) {
+        n.formats[i] = rule;
+        i            = i + 1;
+    }
+    ret n;
+}
+
+# the rule of the format of width `w`, binary64 for any other width
+pub fun nans_at(n: *Nans, w: float.FloatWidth) mirl_capability.Nans {
+    if (w == float.FLOAT_W_16) { ret n.formats[0]; }
+    if (w == float.FLOAT_W_32) { ret n.formats[1]; }
+    ret n.formats[2];
+}
+
+# whether any format's rule is stated, as it is wherever a target is selected
+pub fun nans_held(n: *Nans) bool {
+    var i: usize = 0;
+    for (i < 3) {
+        if (!(sel n.formats[i].unstated)) { ret true; }
+        i = i + 1;
+    }
+    ret false;
 }
 
 # the layout machine of a resolved target. total over what resolve produces,
@@ -135,6 +187,8 @@ pub rec Facts {
     flat_addressing: bool;
     # the extents the target's owner row lays each primitive out at
     scalars: layout.Scalars;
+    # the nan each float format's operations return, which comptime folds by
+    nans: Nans;
 }
 
 pub fun facts(tgt: *Target) Facts {
@@ -144,7 +198,7 @@ pub fun facts(tgt: *Target) Facts {
         has_float:   tgt.model.has_float, va_list_size: tgt.va_list_size, va_list_align: tgt.va_list_align,
         defs:        tgt.defs, ct_mul: ct_mul_admitted(tgt), extensions: target_model.extension_view(?tgt.model),
         vocabulary:  tgt.vocabulary, nan_rule: tgt.model.nan_rule, has_assembly: tgt.has_assembly, flat_addressing: tgt.model.flat_addressing,
-        scalars:     tgt.scalars
+        scalars:     tgt.scalars, nans: tgt.nans
     };
 }
 
@@ -156,7 +210,7 @@ pub fun facts_none() Facts {
         va_list_size: 0, va_list_align: 0, defs: nil, ct_mul: ct.mul_mask_none(),
         extensions:   target_model.ExtensionView{selected: 0, table: nil},
         vocabulary:   extension.vocabulary_empty(), nan_rule: float.NAN_RULE_NONE, has_assembly: true, flat_addressing: true,
-        scalars:      layout.scalars_none()
+        scalars:      layout.scalars_none(), nans: nans_none()
     };
 }
 
