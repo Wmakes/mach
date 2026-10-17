@@ -12,9 +12,11 @@ use std.types.string.str;
 
 use A: std.allocator;
 
+use mach.lang.diagnostic;
 use mach.lang.fail;
 use mach.lang.fe.ast;
 use ast_decl: mach.lang.fe.ast.decl;
+use ast_expr: mach.lang.fe.ast.expr;
 use ast_id:   mach.lang.fe.ast.id;
 use ast_type: mach.lang.fe.ast.type;
 use mach.lang.fe.comptime;
@@ -43,6 +45,42 @@ pub fun interface_of(sc: *sema_context.SemaContext) res[interface.Interface, fai
     iface.values      = @sc.typing.values;
     @sc.typing.values = comptime_deep.init(sc.s.alloc);
     ret res[interface.Interface, fail.Fail].ok{iface};
+}
+
+# reports the refusal each module `val` the interface publishes holds, as lowering the global
+# reports it: a refused member of an aggregate or address value under any kind, a refused
+# scalar only as the evaluator's rejection, which lowering's own fold meets again. a `nil`
+# initializer lowers as null and folds nothing
+pub fun refusals_report(sc: *sema_context.SemaContext, iface: *interface.Interface) {
+    var i: usize = 0;
+    for (i < iface.declarations.len) {
+        val decl: *interface.Declaration = ?iface.declarations.data[i];
+        i = i + 1;
+        if (decl.kind != resolve.SYM_VAL || decl.value == interface.NONE) { cnt; }
+        val d_opt: opt[*ast_decl.Decl] = ast.get_decl(sc.view.a, decl.decl);
+        if (sel d_opt.none)                              { cnt; }
+        if (is_null_init(sc, d_opt.some.data.bind.init)) { cnt; }
+        val n:       *comptime_deep.Node = comptime_deep.node_at(?iface.values, decl.value);
+        val refused: opt[u32]            = comptime_deep.refused_within(?iface.values, decl.value);
+        if (sel refused.none) { cnt; }
+        val r: comptime_deep.Refusal = comptime_deep.node_at(?iface.values, refused.some).refusal;
+        if (n.kind == comptime_deep.NODE_REFUSED && r.kind != comptime.EVAL_FAIL_REJECTED) { cnt; }
+        fail.reject(?sc.status);
+        val reported: err[fail.Fail] = diagnostic.report(sc.diags, r.diag, r.at.file, r.at.span, intern.text(?sc.s.interner, r.message));
+        if (sel reported.err) { fail.internal(?sc.status, fail.describe(reported.err)); }
+    }
+}
+
+fun is_null_init(sc: *sema_context.SemaContext, eid: ast_id.ExprId) bool {
+    var cur: ast_id.ExprId = eid;
+    for (true) {
+        val e_opt: opt[*ast_expr.Expr] = ast.get_expr(sc.view.a, cur);
+        if (sel e_opt.none)                                { ret false; }
+        if (e_opt.some.kind == ast_expr.EXPR_KIND_LIT_NIL) { ret true; }
+        if (e_opt.some.kind != ast_expr.EXPR_KIND_CAST)    { ret false; }
+        cur = e_opt.some.data.cast.value;
+    }
+    ret false;
 }
 
 fun interface_fill(sc: *sema_context.SemaContext, iface: *interface.Interface) err[fail.Fail] {

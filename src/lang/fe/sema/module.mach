@@ -1058,6 +1058,7 @@ fun build_result(sc: *sema_context.SemaContext) res[sema_product.SemaResult, fai
         val built: res[interface.Interface, fail.Fail] = publish.interface_of(sc);
         if (sel built.err) { ret res[sema_product.SemaResult, fail.Fail].err{built.err}; }
         published = built.ok;
+        publish.refusals_report(sc, ?published);
     }
     var graph: fields.Graph = fields.init(sc.s.alloc);
     if (sel sc.status.kind.accepted) {
