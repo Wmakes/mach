@@ -76,8 +76,8 @@ pub fun f64_signbit(f: f64) bool;
 pub def NanRule: u8
 ```
 
-what a conversion between two float formats makes of a NaN, a fact of the target's
-conversion instructions that comptime folds by (see doc/language/operators.md)
+what the target makes of a NaN it computes, a conversion between two float formats
+among them, which comptime folds by (see doc/language/operators.md)
 
 ## val NAN_RULE_NONE
 
@@ -103,11 +103,53 @@ pub val NAN_CANONICAL: NanRule = 2
 
 the canonical NaN, positive and quiet with an empty payload: RISC-V
 
+## val NAN_UNSPECIFIED
+
+```mach
+pub val NAN_UNSPECIFIED: NanRule = 4
+```
+
+no NaN the target computes is specified, so comptime folds none: SPIR-V under
+Vulkan with no float-controls execution mode
+
 ## fun nan_rule_valid
 
 ```mach
 pub fun nan_rule_valid(r: NanRule) bool;
 ```
+
+## rec Nans
+
+```mach
+pub rec Nans;
+```
+
+the nan a target's float operations return in each format, binary16, binary32
+and binary64 at the index of mirl's format, which mirl's folder reads
+
+## fun nans_none
+
+```mach
+pub fun nans_none() Nans;
+```
+
+no format's rule stated, as where no target is selected
+
+## fun nans_of_rule
+
+```mach
+pub fun nans_of_rule(r: NanRule) Nans;
+```
+
+the rule of a target cell no owner assembles yet, read from mach's own (#4779)
+
+## fun nans_held
+
+```mach
+pub fun nans_held(n: *Nans) bool;
+```
+
+whether any format's rule is stated, as it is wherever a target is selected
 
 ## fun f64_to_f32_bits
 
@@ -150,15 +192,6 @@ pub fun value_of_bits(bits: u64, w: FloatWidth) f64;
 ```
 
 the value an encoding at `w` holds, carried exactly in an f64: the value `:~` makes
-
-## fun convert
-
-```mach
-pub fun convert(f: f64, from: FloatWidth, to: FloatWidth, rule: NanRule) f64;
-```
-
-`f`, a value at `from`, converted to `to` as the target's conversion instruction
-does, carried exactly in an f64: rounded once, a NaN made by `rule`
 
 ## fun widths_agree
 
@@ -220,21 +253,24 @@ pub rec Rounded;
 a decimal rounded to one format: the value, carried exactly in an f64, and how it fit.
 an overflow carries +inf and an underflow of a nonzero decimal carries +0
 
-## fun round_decimal
+## fun parse_decimal
 
 ```mach
-pub fun round_decimal(mant: *bignum.Big, exp10: i64, trunc: bool, w: FloatWidth) Rounded;
+pub fun parse_decimal(s: str, len: usize, w: FloatWidth) opt[f64];
 ```
 
-round mant * 10^exp10 straight to the format of `w`, to nearest with ties to even, in
-exact arithmetic. `trunc` says digits past mant were dropped and at least one was nonzero,
-so the true value lies just above mant * 10^exp10
+the decimal `s`, its first `len` bytes, rounded once to nearest with ties to even at `w` by
+std's parse and carried exactly in an f64, none when the parse refuses the text
 
-mant: the significant digits as an integer
-exp10: the decimal exponent of mant's last digit
-trunc: a nonzero digit was dropped past mant
-w: the width to round to
-ret: the rounded value and whether it was exact, inexact, or left the format's range
+## fun fit_of
+
+```mach
+pub fun fit_of(value: f64, mant: *bignum.Big, exp10: i64, trunc: bool) Rounded;
+```
+
+how the decimal mant * 10^exp10 fit `value`, the value it was rounded to: exact when the two are
+equal, an overflow when it rounded to infinity and an underflow when a nonzero decimal rounded to
+zero. `trunc` says a nonzero digit past mant was dropped, so the decimal is never exact
 
 ## rec Shortest
 

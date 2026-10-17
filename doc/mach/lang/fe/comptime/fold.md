@@ -35,6 +35,7 @@ pub tag Answer: u8 {
     folded: [2]wide.Wide;
     zero;
     overflow;
+    nan;
     refused;
 }
 ```
@@ -45,12 +46,14 @@ folded: its results, at most two, each as the low 128 bits of its value: a float
           are its own encoding at its width
 zero: the folder refused it by a division or remainder by zero
 overflow: the folder refused it by a quotient that does not fit
+nan: the folder refused it by a nan result whose bits the target's rule for
+          its format leaves unknown
 refused: the folder refused it otherwise, which no request comptime makes can do
 
 ## fun fold_op
 
 ```mach
-pub fun fold_op(op: Opcode, k: Kind, x: [3]wide.Wide, n: u32, to: opt[Kind]) Answer;
+pub fun fold_op(op: Opcode, k: Kind, x: [3]wide.Wide, n: u32, to: opt[Kind], nans: float.Nans) Answer;
 ```
 
 fold `op` over `n` operands of kind `k`, the results read at `out`, with the
@@ -61,6 +64,7 @@ k: the kind of every operand
 x: the operands' bits
 n: how many, at most three
 to: the kind the row's type immediate states, none for a row with no immediate
+nans: the nan the target's float operations return in each format
 
 ## fun int
 
@@ -73,19 +77,20 @@ an integer operation at comptime's width over one or two operands
 ## fun flt
 
 ```mach
-pub fun flt(op: Opcode, w: float.FloatWidth, x: f64, y: f64, n: u32) Answer;
+pub fun flt(op: Opcode, w: float.FloatWidth, x: f64, y: f64, n: u32, nans: float.Nans) Answer;
 ```
 
 a float operation at width `w` over one or two operands, each the f64 that holds
-its value at that width
+its value at that width, a nan result made by the target's rule `nans`
 
 ## fun convert
 
 ```mach
-pub fun convert(op: Opcode, from: Kind, x: wide.Wide, to: Kind) Answer;
+pub fun convert(op: Opcode, from: Kind, x: wide.Wide, to: Kind, nans: float.Nans) Answer;
 ```
 
-a conversion of `x`, read as `from`, to `to` by mirl's conversion row `op`
+a conversion of `x`, read as `from`, to `to` by mirl's conversion row `op`, a nan
+result made by the target's rule `nans`
 
 ## fun first
 

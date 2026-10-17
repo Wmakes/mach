@@ -18,6 +18,17 @@ pub fun spells(arch: *mink_arch.Arch) bool;
 whether masc's catalog for mink's architecture `arch` spells a selection, as
 riscv's isa strings do, so a target of it takes a `baseline`
 
+## fun takes_baseline
+
+```mach
+pub fun takes_baseline(arch: *mink_arch.Arch, t: *extension.Table) bool;
+```
+
+whether a target of mink's architecture `arch` takes a `baseline`: masc's catalog
+for it spells a selection, and `t`, the table mach's code generator emits against,
+is that catalog's. aarch64's masc spells, but mach's vocabulary for it is its own
+until #4779
+
 ## fun entered_by
 
 ```mach

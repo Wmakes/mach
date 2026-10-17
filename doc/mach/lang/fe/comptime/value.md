@@ -111,18 +111,28 @@ pub fun awaiting(kind: comptime_failure.EvalFailKind, diag: diagnostic_kind.Kind
 pub fun cast_int(bits: wide.Wide, width: u32, signed: bool) res[CTValue, comptime_failure.EvalFail];
 ```
 
+## fun nan_unspecified
+
+```mach
+pub fun nan_unspecified(itn: *intern.Interner, arch_id: u32) res[CTValue, comptime_failure.EvalFail];
+```
+
+the refusal of a float operation whose result is a NaN on the instruction set `arch_id`,
+whose NaN results are unspecified: no constant has that value
+
 ## fun cast_scalar
 
 ```mach
-pub fun cast_scalar(types: *type.TypeInterner, pointer_width: u32, nan_rule: float.NanRule, value: CTValue,
-from_ty: type.TypeId, to_ty: type.TypeId, reinterpret: bool) res[CTValue, comptime_failure.EvalFail];
+pub fun cast_scalar(types: *type.TypeInterner, itn: *intern.Interner, pointer_width: u32, nans: float.Nans, arch_id: u32,
+value: CTValue, from_ty: type.TypeId, to_ty: type.TypeId, reinterpret: bool) res[CTValue, comptime_failure.EvalFail];
 ```
 
-a numeric conversion folds through mirl's conversion rows, but for float to
-int, which keeps mach's own conversion until its out-of-range answer is ruled
-on. a NaN converted to
-another float width on a target whose rule gives the canonical NaN keeps mach's
-conversion, since mirl's row quiets the NaN it is given whatever the target
+a numeric conversion folds through mirl's conversion rows. a float to int cast
+whose value is NaN or truncates outside the integer's range is refused, so the
+saturation mirl's row gives such a value is never folded. a NaN converted to
+another float width is made by the target's rule `nans` for the format it is
+converted to, and where the rule leaves it unknown it is refused, naming the
+target's instruction set `arch_id`
 
 ## fun is_descriptor
 
@@ -194,8 +204,11 @@ pub fun apply_compare(op: ast_expr.BinOp, lhs: CTValue, rhs: CTValue) res[CTValu
 ## fun apply_arith
 
 ```mach
-pub fun apply_arith(op: ast_expr.BinOp, lhs: CTValue, rhs: CTValue) res[CTValue, comptime_failure.EvalFail];
+pub fun apply_arith(op: ast_expr.BinOp, lhs: CTValue, rhs: CTValue, nans: float.Nans) res[CTValue, comptime_failure.EvalFail];
 ```
+
+`nans` is the target's rule for the nan a float operation returns, and a nan result it
+leaves unknown is refused as comptime.nan_unspecified
 
 ## fun non_integer
 
