@@ -6,6 +6,13 @@
 pub rec RunArtifact;
 ```
 
+the program `mach run` launches
+
+path: the built executable, or `-o`
+host_runnable: the target's os and isa are the host's
+target_name: the target's declared name
+runner: the runner the target declares, none when it declares none
+
 ## fun resolve_run_artifact
 
 ```mach

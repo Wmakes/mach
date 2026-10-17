@@ -56,6 +56,14 @@ pub val CONTEXT_EMBED: Context = 4
 
 an `#[embed]` path
 
+## val CONTEXT_RUNNER
+
+```mach
+pub val CONTEXT_RUNNER: Context = 5
+```
+
+a target's `runner` entries
+
 ## rec Requirement
 
 ```mach
@@ -97,6 +105,7 @@ abi: `{target.abi}`
 profile: `{profile.name}`
 format: the target's explicit `of` override, "" when the format is derived
 artifact_suffix: `{artifact.suffix}`, set for the artifact whose output is named
+run_out: `{artifact.out}`, set for the program a runner launches
 reqs: the artifacts `{artifact.<id>.out}` may name; nil when none
 req_count: length of `reqs`
 dependency: the id of the dependency whose default library requirements
@@ -134,6 +143,14 @@ reqs: the requirements
 req_count: length of `reqs`
 dependency: the dependency whose default library requirements they are, "" for
             the artifact being built
+
+## fun values_empty
+
+```mach
+pub fun values_empty() Values;
+```
+
+values that name nothing, each field set by the caller that has it
 
 ## fun expand
 

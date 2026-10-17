@@ -275,7 +275,7 @@ val HELPS: [HELPS_N]*FlagSpec = [HELPS_N]*FlagSpec{?HELP, ?HELP_SHORT};
 val HELP_TABLE: TableRef = TableRef{rows: ?HELPS[0], n: HELPS_N, accepted: nil, docs: nil};
 
 # `--runner <cmd>`
-pub val RUNNER: FlagSpec = FlagSpec{name: "--runner", value: "cmd", arity: ARITY_VALUE, doc: "execute through a command name or path resolved on PATH", default: "direct execution", repeatable: false, alias_of: nil};
+pub val RUNNER: FlagSpec = FlagSpec{name: "--runner", value: "cmd", arity: ARITY_VALUE, doc: "execute through a command name or path resolved on PATH, in place of the target's runner", default: "the target's runner, else direct execution", repeatable: false, alias_of: nil};
 
 # row count of RUNNERS
 pub val RUNNERS_N: usize = 1;
