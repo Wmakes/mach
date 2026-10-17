@@ -86,6 +86,9 @@ pub rec Target {
     # the extents the target's owner row lays each primitive out at, none held for a
     # cell no owner has a row for yet
     scalars: layout.Scalars;
+    # the nan each float format's operations return: the owner's, else mach's own
+    # rule for a cell no owner assembles yet
+    nans: float.Nans;
 }
 
 # the layout machine of a resolved target. total over what resolve produces,
@@ -135,6 +138,8 @@ pub rec Facts {
     flat_addressing: bool;
     # the extents the target's owner row lays each primitive out at
     scalars: layout.Scalars;
+    # the nan each float format's operations return, which comptime folds by
+    nans: float.Nans;
 }
 
 pub fun facts(tgt: *Target) Facts {
@@ -144,7 +149,7 @@ pub fun facts(tgt: *Target) Facts {
         has_float:   tgt.model.has_float, va_list_size: tgt.va_list_size, va_list_align: tgt.va_list_align,
         defs:        tgt.defs, ct_mul: ct_mul_admitted(tgt), extensions: target_model.extension_view(?tgt.model),
         vocabulary:  tgt.vocabulary, nan_rule: tgt.model.nan_rule, has_assembly: tgt.has_assembly, flat_addressing: tgt.model.flat_addressing,
-        scalars:     tgt.scalars
+        scalars:     tgt.scalars, nans: tgt.nans
     };
 }
 
@@ -156,7 +161,7 @@ pub fun facts_none() Facts {
         va_list_size: 0, va_list_align: 0, defs: nil, ct_mul: ct.mul_mask_none(),
         extensions:   target_model.ExtensionView{selected: 0, table: nil},
         vocabulary:   extension.vocabulary_empty(), nan_rule: float.NAN_RULE_NONE, has_assembly: true, flat_addressing: true,
-        scalars:      layout.scalars_none()
+        scalars:      layout.scalars_none(), nans: float.nans_none()
     };
 }
 

@@ -50,6 +50,15 @@ pub fun spells(arch: *mink_arch.Arch) bool {
     ret s.extensions.syntax != ?masc_extension.LIST;
 }
 
+# whether a target of mink's architecture `arch` takes a `baseline`: masc's catalog
+# for it spells a selection, and `t`, the table mach's code generator emits against,
+# is that catalog's. aarch64's masc spells, but mach's vocabulary for it is its own
+# until #4779
+pub fun takes_baseline(arch: *mink_arch.Arch, t: *extension.Table) bool {
+    if (!spells(arch) || t == nil) { ret false; }
+    ret t.catalog == set_of(arch).extensions;
+}
+
 # the catalog arch id of the first instruction set whose masc catalog reads
 # `spelling` as a selection its architecture enters, catalog_arch.UNKNOWN when none
 # does, as an isa written as the selection it meant names its architecture
@@ -214,8 +223,9 @@ test select__reads_masc_s_spelling_for_the_entering_architecture {
     ret 0;
 }
 
-# every instruction set whose catalog spells a selection names a default baseline
-# its architecture enters, and no other does
+# every instruction set whose default baseline is named has a catalog that spells it,
+# and its architecture enters it. aarch64's catalog spells, but its default waits on
+# mach's vocabulary for it (#4779)
 test default_baseline__named_exactly_where_masc_spells_a_selection {
     var a:    A.Allocator;
     val made: err[A.Error] = page.make(?a);
@@ -224,8 +234,8 @@ test default_baseline__named_exactly_where_masc_spells_a_selection {
     for (i < catalog_arch.count()) {
         val id:      u32 = catalog_arch.id_for(catalog_arch.name_at(i));
         val default: str = catalog_arch.default_baseline(id);
-        if (spells(catalog_arch.owner_of(id)) != (default != nil)) { ret 2; }
-        if (default != nil && entered_by(?a, default) != id)       { ret 3; }
+        if (default != nil && !spells(catalog_arch.owner_of(id))) { ret 2; }
+        if (default != nil && entered_by(?a, default) != id)      { ret 3; }
         i = i + 1;
     }
     ret 0;

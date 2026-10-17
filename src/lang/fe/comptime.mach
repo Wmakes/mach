@@ -494,12 +494,11 @@ fun eval_binary[T](ev: *Evaluation[T], eid: ast_id.ExprId, bin: *ast_expr.ExprBi
         || bin.op == ast_expr.BIN_GT || bin.op == ast_expr.BIN_GEQ) {
         ret comptime_value.apply_compare(bin.op, lhs, rhs);
     }
-    val result: res[comptime_value.CTValue, comptime_failure.EvalFail] = comptime_value.apply_arith(bin.op, lhs, rhs);
-    if (sel result.err) { ret result; }
-    # a NaN result folds only where the target states the NaN it computes
-    if (result.ok.kind == comptime_value.CT_KIND_FLOAT && result.ok.data.f != result.ok.data.f
-        && ev.c.env.target.nan_rule == float.NAN_UNSPECIFIED) {
-        ret comptime_value.nan_unspecified(ev.interner, ev.c.env.target.arch_id);
+    val result: res[comptime_value.CTValue, comptime_failure.EvalFail] = comptime_value.apply_arith(bin.op, lhs, rhs, ev.c.env.target.nans);
+    if (sel result.err) {
+        # a NaN result folds only where the target states the NaN it computes
+        if (result.err.diag == diagnostic_kind.COMPTIME_NAN_UNSPECIFIED) { ret comptime_value.nan_unspecified(ev.interner, ev.c.env.target.arch_id); }
+        ret result;
     }
     if ((bin.op == ast_expr.BIN_BIT_AND || bin.op == ast_expr.BIN_BIT_OR || bin.op == ast_expr.BIN_BIT_XOR)
         && comptime_capability.capabilities_have_types[T](ev.cap_ctx, ev.caps)) {
@@ -1469,16 +1468,16 @@ test apply_arith__u128_boundary_overflow {
     val int_value_r2: res[comptime_value.CTValue, comptime_failure.EvalFail] = comptime_value.int_value(0);
     if (sel int_value_r2.err) { ret 99; }
     val zero:          comptime_value.CTValue                                 = int_value_r2.ok;
-    val apply_arith_r: res[comptime_value.CTValue, comptime_failure.EvalFail] = comptime_value.apply_arith(ast_expr.BIN_SUB, big, one);
+    val apply_arith_r: res[comptime_value.CTValue, comptime_failure.EvalFail] = comptime_value.apply_arith(ast_expr.BIN_SUB, big, one, comptime_value.t_nans());
     if (sel apply_arith_r.err) { ret 99; }
     val dec: comptime_value.CTValue = apply_arith_r.ok;
     if (!comptime_value.t_bool(comptime_value.apply_compare(ast_expr.BIN_GT, dec, zero))) { ret 1; }
     if (!comptime_value.t_is(dec, 0xFFFFFFFFFFFFFFFE, 0xFFFFFFFFFFFFFFFF, true))          { ret 1; }
-    val apply_arith_r2: res[comptime_value.CTValue, comptime_failure.EvalFail] = comptime_value.apply_arith(ast_expr.BIN_ADD, big, one);
+    val apply_arith_r2: res[comptime_value.CTValue, comptime_failure.EvalFail] = comptime_value.apply_arith(ast_expr.BIN_ADD, big, one, comptime_value.t_nans());
     if (sel apply_arith_r2.ok) { ret 1; }
     val u64_max: res[comptime_value.CTValue, comptime_failure.EvalFail] = t_eval_int("0xFFFFFFFFFFFFFFFF");
     if (sel u64_max.err) { ret 99; }
-    val carried: res[comptime_value.CTValue, comptime_failure.EvalFail] = comptime_value.apply_arith(ast_expr.BIN_ADD, u64_max.ok, one);
+    val carried: res[comptime_value.CTValue, comptime_failure.EvalFail] = comptime_value.apply_arith(ast_expr.BIN_ADD, u64_max.ok, one, comptime_value.t_nans());
     if (!comptime_value.t_ok_is(carried, 0, 1, true)) { ret 2; }
     ret 0;
 }
@@ -1488,7 +1487,7 @@ test apply_arith__signed_overflow_traps {
     val int_value_r2: res[comptime_value.CTValue, comptime_failure.EvalFail] = comptime_value.int_value(1);
     if (sel int_value_r2.err) { ret 99; }
     val one:           comptime_value.CTValue                                 = int_value_r2.ok;
-    val apply_arith_r: res[comptime_value.CTValue, comptime_failure.EvalFail] = comptime_value.apply_arith(ast_expr.BIN_ADD, imax, one);
+    val apply_arith_r: res[comptime_value.CTValue, comptime_failure.EvalFail] = comptime_value.apply_arith(ast_expr.BIN_ADD, imax, one, comptime_value.t_nans());
     if (sel apply_arith_r.ok) { ret 1; }
     val int_value_r3: res[comptime_value.CTValue, comptime_failure.EvalFail] = comptime_value.int_value(5);
     if (sel int_value_r3.err) { ret 99; }
@@ -1496,7 +1495,7 @@ test apply_arith__signed_overflow_traps {
     val int_value_r4: res[comptime_value.CTValue, comptime_failure.EvalFail] = comptime_value.int_value(10);
     if (sel int_value_r4.err) { ret 99; }
     val ten:            comptime_value.CTValue                                 = int_value_r4.ok;
-    val apply_arith_r2: res[comptime_value.CTValue, comptime_failure.EvalFail] = comptime_value.apply_arith(ast_expr.BIN_SUB, five, ten);
+    val apply_arith_r2: res[comptime_value.CTValue, comptime_failure.EvalFail] = comptime_value.apply_arith(ast_expr.BIN_SUB, five, ten, comptime_value.t_nans());
     if (sel apply_arith_r2.err) { ret 99; }
     val d: comptime_value.CTValue = apply_arith_r2.ok;
     if (d.data.i != (0 - 5))                                                   { ret 1; }
@@ -1504,7 +1503,7 @@ test apply_arith__signed_overflow_traps {
     if (!comptime_value.t_is(d, (0 - 5)::i64:~u64, 0xFFFFFFFFFFFFFFFF, false)) { ret 2; }
     val i64_max: res[comptime_value.CTValue, comptime_failure.EvalFail] = comptime_value.int_value(t_i64_max());
     if (sel i64_max.err) { ret 99; }
-    val past: res[comptime_value.CTValue, comptime_failure.EvalFail] = comptime_value.apply_arith(ast_expr.BIN_ADD, i64_max.ok, one);
+    val past: res[comptime_value.CTValue, comptime_failure.EvalFail] = comptime_value.apply_arith(ast_expr.BIN_ADD, i64_max.ok, one, comptime_value.t_nans());
     if (!comptime_value.t_ok_is(past, 0x8000000000000000, 0, false)) { ret 3; }
     ret 0;
 }
@@ -1516,7 +1515,7 @@ test apply_int_shift__left_shift_high_bit_matches_the_equivalent_literal {
     val int_value_r2: res[comptime_value.CTValue, comptime_failure.EvalFail] = comptime_value.int_value(127);
     if (sel int_value_r2.err) { ret 99; }
     val sh127:         comptime_value.CTValue                                 = int_value_r2.ok;
-    val apply_arith_r: res[comptime_value.CTValue, comptime_failure.EvalFail] = comptime_value.apply_arith(ast_expr.BIN_SHL, one, sh127);
+    val apply_arith_r: res[comptime_value.CTValue, comptime_failure.EvalFail] = comptime_value.apply_arith(ast_expr.BIN_SHL, one, sh127, comptime_value.t_nans());
     if (sel apply_arith_r.err) { ret 99; }
     val shifted:      comptime_value.CTValue                                 = apply_arith_r.ok;
     val t_eval_int_r: res[comptime_value.CTValue, comptime_failure.EvalFail] = t_eval_int("0x80000000000000000000000000000000");
@@ -1530,7 +1529,7 @@ test apply_int_shift__left_shift_high_bit_matches_the_equivalent_literal {
     val int_value_r3: res[comptime_value.CTValue, comptime_failure.EvalFail] = comptime_value.int_value(2);
     if (sel int_value_r3.err) { ret 99; }
     val two:            comptime_value.CTValue                                 = int_value_r3.ok;
-    val apply_arith_r2: res[comptime_value.CTValue, comptime_failure.EvalFail] = comptime_value.apply_arith(ast_expr.BIN_SHL, two, sh127);
+    val apply_arith_r2: res[comptime_value.CTValue, comptime_failure.EvalFail] = comptime_value.apply_arith(ast_expr.BIN_SHL, two, sh127, comptime_value.t_nans());
     if (sel apply_arith_r2.ok) { ret 4; }
 
     ret 0;

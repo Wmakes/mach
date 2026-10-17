@@ -623,9 +623,8 @@ fun t_refused_with(r: err[fail.Fail], want: str) bool {
     ret str_contains(fail.describe(r.err), want);
 }
 
-# the constant-time decision is masc's per set: x86_64 and the risc-v sets classify
-# their rows, spir-v classifies none, and aarch64, which masc registers no set for
-# yet, keeps mach's own walk
+# the constant-time decision is masc's per set: x86_64, aarch64 and the risc-v sets
+# classify their rows, and spir-v classifies none
 test timing_of__reads_masc_s_set_for_the_architecture {
     val x: opt[masc_ct.Timing] = timing_of(catalog_arch.X86_64);
     if (sel x.none)         { ret 1; }
@@ -637,7 +636,8 @@ test timing_of__reads_masc_s_set_for_the_architecture {
     if (sel v.none)         { ret 3; }
     if (!(sel v.some.none)) { ret 3; }
     val a: opt[masc_ct.Timing] = timing_of(catalog_arch.AARCH64);
-    if (sel a.some) { ret 4; }
+    if (sel a.none)         { ret 4; }
+    if (!(sel a.some.rows)) { ret 4; }
     val u: opt[masc_ct.Timing] = timing_of(catalog_arch.UNKNOWN);
     if (sel u.some) { ret 5; }
     ret 0;

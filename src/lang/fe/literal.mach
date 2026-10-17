@@ -140,6 +140,7 @@ rec Decimal {
     exp10:  i64;
     trunc:  bool;
     suffix: type.TypeKind;
+    end:    usize;
 }
 
 fun decimal_scan(source: str, span: lang_source.Span, out: *Decimal) err[Refusal] {
@@ -237,7 +238,16 @@ fun decimal_scan(source: str, span: lang_source.Span, out: *Decimal) err[Refusal
     out.exp10  = dexp + exp;
     out.trunc  = trunc;
     out.suffix = sfx_r.ok;
+    out.end    = i;
     ret err[Refusal].ok{};
+}
+
+# the scanned literal `d` rounded at `w` by std's parse of its digits, and how it fit
+fun rounded_at(source: str, span: lang_source.Span, d: *Decimal, w: float.FloatWidth) res[float.Rounded, Refusal] {
+    val text:  View     = lang_source.span_view(source, span);
+    val value: opt[f64] = float.parse_decimal(text.data, d.end, w);
+    if (sel value.none) { ret res[float.Rounded, Refusal].err{refused(diagnostic_kind.LITERAL_MALFORMED, "malformed float literal")}; }
+    ret res[float.Rounded, Refusal].ok{float.fit_of(value.some, ?d.mant, d.exp10, d.trunc)};
 }
 
 # a literal's value at the width its suffix names, binary64 when it has none
@@ -245,8 +255,10 @@ pub fun float_scan(source: str, span: lang_source.Span) res[Float, Refusal] {
     var d:       Decimal;
     val scanned: err[Refusal] = decimal_scan(source, span, ?d);
     if (sel scanned.err) { ret res[Float, Refusal].err{scanned.err}; }
+    val rounded: res[float.Rounded, Refusal] = rounded_at(source, span, ?d, type.float_width_of(d.suffix));
+    if (sel rounded.err) { ret res[Float, Refusal].err{rounded.err}; }
     var lit: Float;
-    lit.value  = float.round_decimal(?d.mant, d.exp10, d.trunc, type.float_width_of(d.suffix)).value;
+    lit.value  = rounded.ok.value;
     lit.suffix = d.suffix;
     ret res[Float, Refusal].ok{lit};
 }
@@ -265,7 +277,9 @@ pub fun float_at(source: str, span: lang_source.Span, w: float.FloatWidth) res[f
     if (sel scanned.err) { ret res[float.Rounded, fail.Fail].err{fail.message(scanned.err.message)}; }
     var at: float.FloatWidth = w;
     if (d.suffix != ast_expr.LIT_SUFFIX_NONE) { at = type.float_width_of(d.suffix); }
-    ret res[float.Rounded, fail.Fail].ok{float.round_decimal(?d.mant, d.exp10, d.trunc, at)};
+    val rounded: res[float.Rounded, Refusal] = rounded_at(source, span, ?d, at);
+    if (sel rounded.err) { ret res[float.Rounded, fail.Fail].err{fail.message(rounded.err.message)}; }
+    ret res[float.Rounded, fail.Fail].ok{rounded.ok};
 }
 
 # true when the literal's significant digits, leading and trailing zeros and exponent

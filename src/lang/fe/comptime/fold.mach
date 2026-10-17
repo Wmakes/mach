@@ -20,6 +20,7 @@ use opcodes: mirl.ir.opcode;
 use mirl.ir.opcode.Immediate;
 use mirl.ir.opcode.Opcode;
 use types: mirl.ir.type;
+use mirl.target.capability;
 
 use mach.lang.float;
 use mach.lang.wide;
@@ -45,11 +46,14 @@ pub tag Kind: u8 {
 #           are its own encoding at its width
 # zero:     the folder refused it by a division or remainder by zero
 # overflow: the folder refused it by a quotient that does not fit
+# nan:      the folder refused it by a nan result whose bits the target's rule for
+#           its format leaves unknown
 # refused:  the folder refused it otherwise, which no request comptime makes can do
 pub tag Answer: u8 {
     folded: [2]wide.Wide;
     zero;
     overflow;
+    nan;
     refused;
 }
 
@@ -75,12 +79,13 @@ fun words_of(k: Kind) usize {
 # fold `op` over `n` operands of kind `k`, the results read at `out`, with the
 # immediate type `to` where the row takes one
 # ---
-# op: the operation
-# k:  the kind of every operand
-# x:  the operands' bits
-# n:  how many, at most three
-# to: the kind the row's type immediate states, none for a row with no immediate
-pub fun fold_op(op: Opcode, k: Kind, x: [3]wide.Wide, n: u32, to: opt[Kind]) Answer {
+# op:   the operation
+# k:    the kind of every operand
+# x:    the operands' bits
+# n:    how many, at most three
+# to:   the kind the row's type immediate states, none for a row with no immediate
+# nans: the nan the target's float operations return in each format
+pub fun fold_op(op: Opcode, k: Kind, x: [3]wide.Wide, n: u32, to: opt[Kind], nans: float.Nans) Answer {
     var buf:   [ARENA]u8;
     var state: fixed.FixedState;
     var a:     A.Allocator;
@@ -114,13 +119,15 @@ pub fun fold_op(op: Opcode, k: Kind, x: [3]wide.Wide, n: u32, to: opt[Kind]) Ans
         i           = i + 1;
     }
 
-    val out: fold.Outcome = fold.fold(?a, ?t, req);
+    var rules: float.Nans   = nans;
+    val out:   fold.Outcome = fold.fold(?a, ?t, Slice[capability.Nans]{data: ?rules.formats[0], size: 3}, req);
     if (sel out.refused) {
         val why: fold.Refusal = out.refused;
         if (sel why.trap) {
             if (sel why.trap.zero)     { ret Answer.zero{}; }
             if (sel why.trap.overflow) { ret Answer.overflow{}; }
         }
+        if (sel why.nan) { ret Answer.nan{}; }
         ret Answer.refused{};
     }
     var got:     [2]wide.Wide      = [2]wide.Wide{wide.zero(), wide.zero()};
@@ -140,20 +147,21 @@ pub fun fold_op(op: Opcode, k: Kind, x: [3]wide.Wide, n: u32, to: opt[Kind]) Ans
 
 # an integer operation at comptime's width over one or two operands
 pub fun int(op: Opcode, x: wide.Wide, y: wide.Wide, n: u32) Answer {
-    ret fold_op(op, Kind.integer{WIDTH}, [3]wide.Wide{x, y, wide.zero()}, n, opt[Kind].none{});
+    ret fold_op(op, Kind.integer{WIDTH}, [3]wide.Wide{x, y, wide.zero()}, n, opt[Kind].none{}, float.nans_none());
 }
 
 # a float operation at width `w` over one or two operands, each the f64 that holds
-# its value at that width
-pub fun flt(op: Opcode, w: float.FloatWidth, x: f64, y: f64, n: u32) Answer {
+# its value at that width, a nan result made by the target's rule `nans`
+pub fun flt(op: Opcode, w: float.FloatWidth, x: f64, y: f64, n: u32, nans: float.Nans) Answer {
     val xb: wide.Wide = wide.from_u64(float.bits_at(x, w));
     val yb: wide.Wide = wide.from_u64(float.bits_at(y, w));
-    ret fold_op(op, Kind.float{w}, [3]wide.Wide{xb, yb, wide.zero()}, n, opt[Kind].none{});
+    ret fold_op(op, Kind.float{w}, [3]wide.Wide{xb, yb, wide.zero()}, n, opt[Kind].none{}, nans);
 }
 
-# a conversion of `x`, read as `from`, to `to` by mirl's conversion row `op`
-pub fun convert(op: Opcode, from: Kind, x: wide.Wide, to: Kind) Answer {
-    ret fold_op(op, from, [3]wide.Wide{x, wide.zero(), wide.zero()}, 1, opt[Kind].some{to});
+# a conversion of `x`, read as `from`, to `to` by mirl's conversion row `op`, a nan
+# result made by the target's rule `nans`
+pub fun convert(op: Opcode, from: Kind, x: wide.Wide, to: Kind, nans: float.Nans) Answer {
+    ret fold_op(op, from, [3]wide.Wide{x, wide.zero(), wide.zero()}, 1, opt[Kind].some{to}, nans);
 }
 
 # the first result of a fold the caller knows cannot trap
@@ -177,8 +185,8 @@ pub fun float_of(a: Answer, w: float.FloatWidth) f64 {
 # extended for a signed width, zero extended otherwise
 pub fun at_width(x: wide.Wide, width: u32, signed: bool) wide.Wide {
     if (width >= WIDTH) { ret x; }
-    val cut:  Answer = fold_op(opcodes.TRUNC, Kind.integer{WIDTH}, [3]wide.Wide{x, wide.zero(), wide.zero()}, 1, opt[Kind].some{Kind.integer{width}});
+    val cut:  Answer = fold_op(opcodes.TRUNC, Kind.integer{WIDTH}, [3]wide.Wide{x, wide.zero(), wide.zero()}, 1, opt[Kind].some{Kind.integer{width}}, float.nans_none());
     var back: Opcode = opcodes.EXT_U;
     if (signed) { back = opcodes.EXT_S; }
-    ret first(fold_op(back, Kind.integer{width}, [3]wide.Wide{first(cut), wide.zero(), wide.zero()}, 1, opt[Kind].some{Kind.integer{WIDTH}}));
+    ret first(fold_op(back, Kind.integer{width}, [3]wide.Wide{first(cut), wide.zero(), wide.zero()}, 1, opt[Kind].some{Kind.integer{WIDTH}}, float.nans_none()));
 }

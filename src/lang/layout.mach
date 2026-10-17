@@ -35,17 +35,28 @@ pub val FLOAT_WIDTHS:   [3]u32 = [3]u32{16, 32, 64};
 # floats:   one per FLOAT_WIDTHS row
 # pointer:  a pointer of the default address space, none where the owner holds
 #           pointers logically, with no representation in memory
+# vectors:  the vector registers the owner fits a vector's alignment to under
+#           the build's selection, none where it states no register fit
 pub rec Scalars {
     held:     bool;
     integers: [5]Extent;
     floats:   [3]Extent;
     pointer:  opt[Extent];
+    vectors:  opt[Registers];
+}
+
+# the vector registers a vector aligns to: `narrow` the narrowest and `widest`
+# the widest the build meets
+pub rec Registers {
+    narrow: u32;
+    widest: u32;
 }
 
 pub fun scalars_none() Scalars {
     var s: Scalars;
     s.held    = false;
     s.pointer = opt[Extent].none{};
+    s.vectors = opt[Registers].none{};
     ret s;
 }
 
@@ -68,10 +79,17 @@ pub fun machine(ptr_width: u32, vector_bits: u32, register_bits: u32) Machine {
     ret m;
 }
 
-# `m` laying its primitives out at the owner's extents `s`
+# `m` laying its primitives out at the owner's extents `s`, and its vectors at
+# the owner's registers where it states them
 pub fun with_scalars(m: Machine, s: Scalars) Machine {
     var out: Machine = m;
     out.scalars = s;
+    if (s.held) {
+        if (sel s.vectors.some) {
+            out.vector_bits   = s.vectors.some.narrow;
+            out.register_bits = s.vectors.some.widest;
+        }
+    }
     ret out;
 }
 

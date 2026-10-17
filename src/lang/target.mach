@@ -70,8 +70,6 @@ use mach.lang.target.tuple;
 use mach.lang.textbuild;
 use mach.lang.wire;
 
-use mirl_target: mirl.target;
-
 fwd target_model.ENDIAN_LITTLE;
 fwd target_model.ENDIAN_BIG;
 
@@ -493,13 +491,14 @@ pub fun resolve(reg: *TargetRegistry, req: *TargetRequest) res[binding.Binding, 
     }
 
     t.scalars = layout.scalars_none();
-    val row_r: res[opt[*mirl_target.Target], fail.Fail] = target_owner.row_for(?reg.alloc, os_vt.id, arch_vt.id, abi_vt.id);
-    if (sel row_r.err) { ret res[binding.Binding, fail.Fail].err{row_r.err}; }
-    if (sel row_r.ok.some) {
-        val held: res[layout.Scalars, fail.Fail] = target_owner.scalars_of(?reg.alloc, row_r.ok.some);
-        if (sel held.err) { ret res[binding.Binding, fail.Fail].err{held.err}; }
-        t.scalars = held.ok;
-        if (sel held.ok.pointer.some) { t.pointer_width = held.ok.pointer.some.size; }
+    t.nans    = float.nans_of_rule(selected_model.nan_rule);
+    val owned_r: res[opt[target_owner.Owned], fail.Fail] = target_owner.owned_for(?reg.alloc, os_vt.id, arch_vt.id, abi_vt.id, selected_model.extension_table, selected_model.extensions);
+    if (sel owned_r.err) { ret res[binding.Binding, fail.Fail].err{owned_r.err}; }
+    if (sel owned_r.ok.some) {
+        val held: layout.Scalars = owned_r.ok.some.scalars;
+        t.scalars = held;
+        t.nans    = owned_r.ok.some.nans;
+        if (sel held.pointer.some) { t.pointer_width = held.pointer.some.size; }
     }
 
     t.model              = selected_model;
@@ -517,7 +516,7 @@ pub fun resolve(reg: *TargetRegistry, req: *TargetRequest) res[binding.Binding, 
 # model's own extensions. `os_vt` is nil for a matrix cell, which no target names
 fun baseline_bits(a: *A.Allocator, os_vt: *lang_target_os.OsVTable, arch_vt: *isa.IsaVTable, named: str) res[u64, fail.Fail] {
     val owner: *mink_arch.Arch = catalog_arch.owner_of(arch_vt.id);
-    if (!target_baseline.spells(owner)) {
+    if (!target_baseline.takes_baseline(owner, arch_vt.model.extension_table)) {
         if (!str_empty(named)) {
             ret res[u64, fail.Fail].err{fail.formatted(a,
                 "target: isa '{}' takes no `baseline`: masc's extension catalog for it spells no selection; name what it adds with `extensions`", arch_vt.name)};
@@ -626,7 +625,7 @@ pub fun selection_spelling(isa_vt: *isa.IsaVTable, model: *target_model.Machine,
     var text: str = isa_vt.name;
     var a:    A.Allocator;
     page.make(?a);
-    if (target_baseline.spells(catalog_arch.owner_of(isa_vt.id))) {
+    if (target_baseline.takes_baseline(catalog_arch.owner_of(isa_vt.id), model.extension_table)) {
         val spelled: res[str, fail.Fail] = target_baseline.spell(?a, catalog_arch.owner_of(isa_vt.id), model.extension_table, model.extensions, false);
         if (sel spelled.ok) {
             var off: usize = buf_put(buf, cap, 0, spelled.ok);
