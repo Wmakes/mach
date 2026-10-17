@@ -39,11 +39,13 @@ use std.types.string.str;
 
 use A: std.allocator;
 
-# pending: not bound yet, and tried again on the next read; none: no constant, for good
+# pending: not bound yet, and tried again on the next read; none: no constant, for good;
+# refused: no constant, for good, since the evaluator rejected its initializer
 pub val CONSTANT_PENDING: u8 = 0;
 val     CONSTANT_ACTIVE:  u8 = 1;
 val     CONSTANT_BOUND:   u8 = 2;
 val     CONSTANT_NONE:    u8 = 3;
+val     CONSTANT_REFUSED: u8 = 4;
 
 # the value of the module constant the bare name `eid` names: one of this module's, bound on
 # first read, or one an imported module published
@@ -164,22 +166,41 @@ fun reads_published(sc: *sema_context.SemaContext, sym: *resolve.Symbol) bool {
     ret d_opt.some.kind == ast_decl.DECL_KIND_VAL && !ast_id.expr_is_nil(init) && is_aggregate(sc, init);
 }
 
-# binds the module `val` `did` declares when its initializer is a compile-time constant
+# binds the module `val` `did` declares when its initializer is a compile-time constant. this
+# is the last try, so an initializer the evaluator rejects is marked refused, which its
+# published value reports
 pub fun bind(sc: *sema_context.SemaContext, did: ast_id.DeclId) err[fail.Fail] {
-    val made: res[opt[comptime.CTValue], comptime.EvalFail] = bound_of(sc, did);
+    val made: res[opt[comptime.CTValue], comptime.EvalFail] = bound_or_refused(sc, did);
     if (sel made.ok) { ret err[fail.Fail].ok{}; }
     val failure: comptime.EvalFail = made.err;
     if (failure.kind == comptime.EVAL_FAIL_INTERNAL) { ret err[fail.Fail].err{fail.message(failure.message)}; }
+    if (failure.kind == comptime.EVAL_FAIL_REJECTED) { sc.view.constant_state[ast_id.decl_index(did)] = CONSTANT_REFUSED; }
     ret err[fail.Fail].ok{};
 }
 
+# whether the evaluator rejected the initializer of the module `val` `did` when it was bound
+pub fun rejected(sc: *sema_context.SemaContext, did: ast_id.DeclId) bool {
+    if (sc.view.constant_state == nil || !sema_context.decl_in_view(sc, did)) { ret false; }
+    ret sc.view.constant_state[ast_id.decl_index(did)] == CONSTANT_REFUSED;
+}
+
+# the constant `did` binds, none while it reads as no constant: a reader reports that it read
+# none, so only an internal failure is returned
 fun bound_of(sc: *sema_context.SemaContext, did: ast_id.DeclId) res[opt[comptime.CTValue], comptime.EvalFail] {
+    val made: res[opt[comptime.CTValue], comptime.EvalFail] = bound_or_refused(sc, did);
+    if (sel made.err) {
+        if (made.err.kind != comptime.EVAL_FAIL_INTERNAL) { ret res[opt[comptime.CTValue], comptime.EvalFail].ok{opt[comptime.CTValue].none{}}; }
+    }
+    ret made;
+}
+
+fun bound_or_refused(sc: *sema_context.SemaContext, did: ast_id.DeclId) res[opt[comptime.CTValue], comptime.EvalFail] {
     val none: res[opt[comptime.CTValue], comptime.EvalFail] = res[opt[comptime.CTValue], comptime.EvalFail].ok{opt[comptime.CTValue].none{}};
     # a module read only through an instance of it is bound by its own typing
     if (sc.view.constant_state == nil || !sema_context.decl_in_view(sc, did)) { ret none; }
     val ix: u32 = ast_id.decl_index(did);
     val st: u8  = sc.view.constant_state[ix];
-    if (st == CONSTANT_ACTIVE || st == CONSTANT_NONE) { ret none; }
+    if (st == CONSTANT_ACTIVE || st == CONSTANT_NONE || st == CONSTANT_REFUSED) { ret none; }
 
     val d_opt: opt[*ast_decl.Decl] = ast.get_decl(sc.view.a, did);
     if (!sel d_opt.some) { ret none; }
@@ -212,8 +233,7 @@ fun bound_of(sc: *sema_context.SemaContext, did: ast_id.DeclId) res[opt[comptime
     sema_context.walk_close(sc, outer);
     if (sel evaluated.err) {
         sc.view.constant_state[ix] = CONSTANT_PENDING;
-        if (evaluated.err.kind == comptime.EVAL_FAIL_INTERNAL) { ret res[opt[comptime.CTValue], comptime.EvalFail].err{evaluated.err}; }
-        ret none;
+        ret res[opt[comptime.CTValue], comptime.EvalFail].err{evaluated.err};
     }
     # an aggregate is a value of the store, built from its initializer, and binds no scalar
     if (evaluated.ok.kind == comptime.CT_KIND_NODE) {
