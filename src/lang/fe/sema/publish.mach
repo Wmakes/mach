@@ -48,9 +48,9 @@ pub fun interface_of(sc: *sema_context.SemaContext) res[interface.Interface, fai
 }
 
 # reports the refusal each module `val` the interface publishes holds, as lowering the global
-# reports it: a refused member of an aggregate or address value under any kind, a refused
-# scalar only as the evaluator's rejection, which lowering's own fold meets again. a `nil`
-# initializer lowers as null and folds nothing
+# reports it: a refused member of an aggregate or address value under any kind, and a refused
+# value of its own only when binding it met the evaluator's rejection, which lowering's own
+# fold meets again. a `nil` initializer lowers as null and folds nothing
 pub fun refusals_report(sc: *sema_context.SemaContext, iface: *interface.Interface) {
     var i: usize = 0;
     for (i < iface.declarations.len) {
@@ -64,7 +64,7 @@ pub fun refusals_report(sc: *sema_context.SemaContext, iface: *interface.Interfa
         val refused: opt[u32]            = comptime_deep.refused_within(?iface.values, decl.value);
         if (sel refused.none) { cnt; }
         val r: comptime_deep.Refusal = comptime_deep.node_at(?iface.values, refused.some).refusal;
-        if (n.kind == comptime_deep.NODE_REFUSED && r.kind != comptime.EVAL_FAIL_REJECTED) { cnt; }
+        if (n.kind == comptime_deep.NODE_REFUSED && !sema_constant.rejected(sc, decl.decl)) { cnt; }
         fail.reject(?sc.status);
         val reported: err[fail.Fail] = diagnostic.report(sc.diags, r.diag, r.at.file, r.at.span, intern.text(?sc.s.interner, r.message));
         if (sel reported.err) { fail.internal(?sc.status, fail.describe(reported.err)); }
