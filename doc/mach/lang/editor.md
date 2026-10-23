@@ -161,6 +161,7 @@ pub rec ProjectSelection;
 
 the build selection a project snapshot is analyzed under, over mach's own for the root; an
 empty field takes mach's choice for its axis, as the command line does when it names none
+reached only by mach-lsp
 
 artifact: the declared artifact name, or ""
 target: the declared target name, or ""
@@ -173,6 +174,7 @@ pub rec ProjectBuffer;
 ```
 
 an open buffer's text, which a snapshot reads in place of the file at `path`
+reached only by mach-lsp
 
 ## rec ProjectRequest
 
@@ -182,6 +184,7 @@ pub rec ProjectRequest;
 
 what one project_open call asks for; every string and the buffer array are borrowed only
 during the call
+reached only by mach-lsp
 
 root: the project's directory, the one holding its mach.toml
 phase: how far the frontend runs, PHASE_PARSE, PHASE_RESOLVE or PHASE_SEMA
@@ -199,6 +202,7 @@ the whole project at a root analyzed for a tool, every artifact's closure with t
 buffers' modules beside it. the envelope fields are owned as AnalysisResult's are; the module
 products borrow the Session the snapshot was opened in and expire with its next query
 operation. release exactly once with project_dnit, never copy it as a second owner
+reached only by mach-lsp
 
 alloc: the Session's allocator, which owns every field below
 session: the Session the snapshot was opened in and whose overlays it holds
@@ -217,6 +221,7 @@ pub fun project_request(root: str, phase: AnalysisPhase) ProjectRequest;
 ```
 
 a request for the project at `root` to `phase`, on mach's own selection and with no buffers
+reached only by mach-lsp
 
 ## fun project_open
 
@@ -231,6 +236,7 @@ Session is any the caller owns, not one an EditorSession serves, so a snapshot c
 off the thread that serves open buffers; it holds one snapshot at a time. ok means the owned
 envelope was produced: read status for the standing and failure for a project that could not
 load. the buffers' overlays stay set on the Session until project_dnit
+reached only by mach-lsp
 
 s: the Session; it must outlive the snapshot
 req: the request
@@ -245,6 +251,7 @@ pub fun project_dnit(snap: *ProjectSnapshot) err[fail.Fail];
 
 release a snapshot: its project, the overlays it set on its Session and everything it owns. a
 zero snapshot is a no-op. check the result: a failure leaves the snapshot intact for a retry
+reached only by mach-lsp
 
 snap: the snapshot; zeroed on success so a second call is a no-op
 
@@ -255,6 +262,7 @@ pub fun project_module_count(snap: *ProjectSnapshot) u32;
 ```
 
 how many modules the snapshot loaded; module indices run from 0 below it
+reached only by mach-lsp
 
 ## fun project_module_by_path
 
@@ -263,6 +271,7 @@ pub fun project_module_by_path(snap: *ProjectSnapshot, path: str) opt[u32];
 ```
 
 the module the snapshot loaded from the file at `path`, none when it loaded none
+reached only by mach-lsp
 
 ## fun project_module_by_fqn
 
@@ -271,6 +280,7 @@ pub fun project_module_by_fqn(snap: *ProjectSnapshot, fqn: str) opt[u32];
 ```
 
 the module the snapshot loaded under the fully qualified name `fqn`, none when it loaded none
+reached only by mach-lsp
 
 ## fun project_module_fqn
 
@@ -279,6 +289,7 @@ pub fun project_module_fqn(snap: *ProjectSnapshot, index: u32) res[str, fail.Fai
 ```
 
 a module's fully qualified name, borrowed from the snapshot's Session
+reached only by mach-lsp
 
 ## fun project_module_file
 
@@ -287,6 +298,7 @@ pub fun project_module_file(snap: *ProjectSnapshot, index: u32) res[lang_source.
 ```
 
 the source file a module was read from, whose version the snapshot analyzed
+reached only by mach-lsp
 
 ## fun project_ast_of
 
@@ -295,6 +307,7 @@ pub fun project_ast_of(snap: *ProjectSnapshot, index: u32) res[*ast.Ast, fail.Fa
 ```
 
 a module's AST, under ast_of's rules over the snapshot's Session; nil when the module has none
+reached only by mach-lsp
 
 ## fun project_resolve_of
 
@@ -303,6 +316,7 @@ pub fun project_resolve_of(snap: *ProjectSnapshot, index: u32) res[*resolve.Reso
 ```
 
 a module's resolve product, under resolve_of's rules; nil when the module did not reach resolution
+reached only by mach-lsp
 
 ## fun project_sema_of
 
@@ -311,6 +325,7 @@ pub fun project_sema_of(snap: *ProjectSnapshot, index: u32) res[*fe_sema.SemaRes
 ```
 
 a module's sema product, under sema_of's rules; nil when the module was not type checked
+reached only by mach-lsp
 
 ## fun init
 
