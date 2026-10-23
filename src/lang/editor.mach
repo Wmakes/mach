@@ -66,7 +66,6 @@ use mach.lang.manifest;
 use mach.lang.manifest.target.host_isa_name;
 use mach.lang.manifest.target.host_os_name;
 use mach.lang.manifest.target.host_target_table;
-use me_pass: mach.lang.me.pass;
 use mach.lang.me.pipeline;
 use mach.lang.module;
 use mach.lang.query;
@@ -74,8 +73,7 @@ use mach.lang.retention;
 use mach.lang.session;
 use lang_source: mach.lang.source;
 use mach.lang.stack;
-use lang_target:       mach.lang.target;
-use catalog_subsystem: mach.lang.target.catalog.subsystem;
+use lang_target: mach.lang.target;
 use mach.lang.type;
 
 # one reusable slot for a currently open file
@@ -94,26 +92,14 @@ rec Buffer {
     view: comptime.ComptimeCtx;
 }
 
-# the request fields a loaded project's frontend depends on. the strings are owned
-# copies: an AnalysisRequest's strings are borrowed only for the duration of one call.
-# the omitted fields name outputs and link inputs, which no frontend phase reads
+# the selection a loaded project's request was composed from. the strings are owned copies,
+# which the loaded project's request borrows: an AnalysisRequest's strings are borrowed only
+# for the duration of one call
 rec ProjKey {
-    valid:          bool;
-    target:         str;
-    profile:        str;
-    artifact:       str;
-    owner:          str;
-    goal:           request.BuildGoal;
-    opt:            u8;
-    debug:          bool;
-    pie:            bool;
-    subsystem_flag: request.SubsystemFlag;
-    subsystem:      catalog_subsystem.Subsystem;
-    simd:           manifest.SimdMode;
-    passes:         pipeline.PassSet;
-    skips:          pipeline.PassSet;
-    relax:          me_pass.Relax;
-    include_deps:   bool;
+    valid:    bool;
+    target:   str;
+    profile:  str;
+    artifact: str;
 }
 
 # the retainer a project root's modules are held under while an open buffer belongs to the root
@@ -162,16 +148,19 @@ pub val PHASE_SEMA: AnalysisPhase = driver.FRONTEND_SEMA;
 # ---
 # file:              an open buffer's FileId, the root of the analysis
 # phase:             how far the frontend runs, PHASE_PARSE, PHASE_RESOLVE or PHASE_SEMA
-# build:             the selection and effective options a file under a project's src is analyzed
-#                    with; the same boundary the driver uses, its profile options already composed
+# selection:         the overrides of mach's selection for a file under a project's src, empty for
+#                    none; its request is composed from the manifest as a project snapshot's is
 # standalone_target: for a file under no manifest, a borrowed resolved target whose
 #                    registry-owned definitions outlive the Session; nil selects the registered host target.
 #                    a project's target selection is never replaced by it
+# standalone_build:  for a file under no manifest, the options it is analyzed with, since no profile
+#                    composes them; a project's are never taken from it
 pub rec AnalysisRequest {
     file:              lang_source.FileId;
     phase:             AnalysisPhase;
-    build:             request.BuildRequest;
+    selection:         ProjectSelection;
     standalone_target: *lang_target.Binding;
+    standalone_build:  request.BuildRequest;
 }
 
 rec AnalysisTarget {
@@ -233,9 +222,10 @@ pub rec AnalysisResult {
     tree:               *ast.Ast;
 }
 
-# a request for one buffer at one phase with the default build selection
+# a request for one buffer at one phase on mach's own selection
 pub fun analysis_request(file: lang_source.FileId, phase: AnalysisPhase) AnalysisRequest {
-    ret AnalysisRequest{file: file, phase: phase, build: request.defaults()};
+    ret AnalysisRequest{file: file, phase: phase, selection: ProjectSelection{artifact: "", target: "", profile: ""},
+        standalone_build: request.defaults()};
 }
 
 # release an analysis result and everything it owns; a zero result is a no-op. this
@@ -476,7 +466,7 @@ fun snapshot_analysis(es: *EditorSession, req: *AnalysisRequest, status: fail.Ph
             mid = mid + 1;
         }
     }
-    var profile_name: str = req.build.profile;
+    var profile_name: str = "";
     if (es.proj_loaded) {
         val name: opt[str] = intern.get(?es.s.interner, es.proj.config.profile);
         if (sel name.none) { ret res[AnalysisResult, fail.Fail].err{fail.message("analysis profile has no stable spelling")}; }
@@ -525,7 +515,6 @@ pub fun analyze(es: *EditorSession, req: *AnalysisRequest) res[AnalysisResult, f
     fin {
         es.active_request    = nil;
         es.operation_failure = opt[fail.Fail].none{};
-        if (es.proj_loaded) { es.proj.req = request.defaults(); }
     }
     var work: err[fail.Fail] = err[fail.Fail].ok{};
     if (req.phase == PHASE_PARSE) {
@@ -766,17 +755,10 @@ fun snapshot_load(snap: *ProjectSnapshot, req: *ProjectRequest) err[fail.Fail] {
     val manifest_alloc: *A.Allocator      = s.build_alloc;
     fin { manifest.dnit(?m, manifest_alloc); }
 
-    var overrides: request.Overrides                    = request.overrides_init(s.alloc);
-    val composed:  res[request.BuildRequest, fail.Fail] = request.compose(s.alloc, ?s.interner, ?m, ?overrides, req.root,
-        request.GOAL_CHECK, req.selection.profile);
+    val composed: res[request.BuildRequest, fail.Fail] = project_build(s, ?m, req.root, ?req.selection);
     if (sel composed.err) { ret err[fail.Fail].err{composed.err}; }
     var build: request.BuildRequest = composed.ok;
-    fin {
-        collections_vector.dnit[request.LinkToken](?build.link_tokens);
-        collections_vector.dnit[str](?build.lib_dirs);
-    }
-    build.artifact = req.selection.artifact;
-    build.target   = req.selection.target;
+    fin { project_build_dnit(?build); }
 
     val id_text:  opt[str] = intern.get(?s.interner, m.id);
     val src_text: opt[str] = intern.get(?s.interner, m.src);
@@ -809,6 +791,25 @@ fun snapshot_load(snap: *ProjectSnapshot, req: *ProjectRequest) err[fail.Fail] {
     snap.project = analyzed.ok;
     snap.loaded  = true;
     ret err[fail.Fail].ok{};
+}
+
+# the request a project is analyzed under in the editor, composed from its manifest and a selection
+# as `mach check` composes it; the one composition an open buffer and a snapshot share. the
+# selection's strings are borrowed by the request. release it with project_build_dnit
+fun project_build(s: *session.Session, m: *manifest.Manifest, root: str, chosen: *ProjectSelection) res[request.BuildRequest, fail.Fail] {
+    var overrides: request.Overrides                    = request.overrides_init(s.alloc);
+    val composed:  res[request.BuildRequest, fail.Fail] = request.compose(s.alloc, ?s.interner, m, ?overrides, root,
+        request.GOAL_CHECK, chosen.profile);
+    if (sel composed.err) { ret composed; }
+    var build: request.BuildRequest = composed.ok;
+    build.artifact = chosen.artifact;
+    build.target   = chosen.target;
+    ret res[request.BuildRequest, fail.Fail].ok{build};
+}
+
+fun project_build_dnit(build: *request.BuildRequest) {
+    collections_vector.dnit[request.LinkToken](?build.link_tokens);
+    collections_vector.dnit[str](?build.lib_dirs);
 }
 
 # release a snapshot: its project, the overlays it set on its Session and everything it owns. a
@@ -998,7 +999,6 @@ pub fun init(s: *session.Session) EditorSession {
     es.proj_key.target   = nil;
     es.proj_key.profile  = nil;
     es.proj_key.artifact = nil;
-    es.proj_key.owner    = nil;
     es.proj_roots        = nil;
     es.proj_root_count   = 0;
     es.proj_root_cap     = 0;
@@ -1772,70 +1772,41 @@ fun proj_key_free(es: *EditorSession, k: *ProjKey) {
     if (k.target != nil)   { str_free(es.alloc, k.target); }
     if (k.profile != nil)  { str_free(es.alloc, k.profile); }
     if (k.artifact != nil) { str_free(es.alloc, k.artifact); }
-    if (k.owner != nil)    { str_free(es.alloc, k.owner); }
     k.valid    = false;
     k.target   = nil;
     k.profile  = nil;
     k.artifact = nil;
-    k.owner    = nil;
 }
 
-fun proj_key_capture(es: *EditorSession, req: *request.BuildRequest, out: *ProjKey) err[fail.Fail] {
+fun proj_key_capture(es: *EditorSession, chosen: *ProjectSelection, out: *ProjKey) err[fail.Fail] {
     var k: ProjKey;
     k.valid    = true;
     k.target   = nil;
     k.profile  = nil;
     k.artifact = nil;
-    k.owner    = nil;
     var complete: bool = false;
     fin {
         if (!complete) { proj_key_free(es, ?k); }
     }
-    val target: res[str, types_string.StrError] = str_copy(es.alloc, req.target);
+    val target: res[str, types_string.StrError] = str_copy(es.alloc, chosen.target);
     if (sel target.err) { ret err[fail.Fail].err{fail.str_refused(target.err)}; }
     k.target = target.ok;
-    val profile: res[str, types_string.StrError] = str_copy(es.alloc, req.profile);
+    val profile: res[str, types_string.StrError] = str_copy(es.alloc, chosen.profile);
     if (sel profile.err) { ret err[fail.Fail].err{fail.str_refused(profile.err)}; }
     k.profile = profile.ok;
-    val artifact: res[str, types_string.StrError] = str_copy(es.alloc, req.artifact);
+    val artifact: res[str, types_string.StrError] = str_copy(es.alloc, chosen.artifact);
     if (sel artifact.err) { ret err[fail.Fail].err{fail.str_refused(artifact.err)}; }
     k.artifact = artifact.ok;
-    val owner: res[str, types_string.StrError] = str_copy(es.alloc, req.owner);
-    if (sel owner.err) { ret err[fail.Fail].err{fail.str_refused(owner.err)}; }
-    k.owner          = owner.ok;
-    k.goal           = req.goal;
-    k.opt            = req.opt;
-    k.debug          = req.debug;
-    k.pie            = req.pie;
-    k.subsystem_flag = req.subsystem_flag;
-    k.subsystem      = req.subsystem;
-    k.simd           = req.simd;
-    k.passes         = req.passes;
-    k.skips          = req.skips;
-    k.relax          = req.relax;
-    k.include_deps   = req.include_deps;
-    complete         = true;
-    @out             = k;
+    complete   = true;
+    @out       = k;
     ret err[fail.Fail].ok{};
 }
 
-fun proj_key_matches(k: *ProjKey, req: *request.BuildRequest) bool {
-    if (!k.valid)                               { ret false; }
-    if (!str_equals(k.target, req.target))      { ret false; }
-    if (!str_equals(k.profile, req.profile))    { ret false; }
-    if (!str_equals(k.artifact, req.artifact))  { ret false; }
-    if (!str_equals(k.owner, req.owner))        { ret false; }
-    if (k.goal != req.goal)                     { ret false; }
-    if (k.opt != req.opt)                       { ret false; }
-    if (k.debug != req.debug)                   { ret false; }
-    if (k.pie != req.pie)                       { ret false; }
-    if (k.subsystem_flag != req.subsystem_flag) { ret false; }
-    if (k.subsystem != req.subsystem)           { ret false; }
-    if (k.simd != req.simd)                     { ret false; }
-    if (k.passes.bits != req.passes.bits)       { ret false; }
-    if (k.skips.bits != req.skips.bits)         { ret false; }
-    if (k.relax != req.relax)                   { ret false; }
-    if (k.include_deps != req.include_deps)     { ret false; }
+fun proj_key_matches(k: *ProjKey, chosen: *ProjectSelection) bool {
+    if (!k.valid)                                 { ret false; }
+    if (!str_equals(k.target, chosen.target))     { ret false; }
+    if (!str_equals(k.profile, chosen.profile))   { ret false; }
+    if (!str_equals(k.artifact, chosen.artifact)) { ret false; }
     ret true;
 }
 
@@ -2053,27 +2024,18 @@ fun proj_ensure(es: *EditorSession, fid: lang_source.FileId) res[opt[*project.Mo
     }
     val fqn: intern.StrId = fqn_r.ok;
 
-    var want_req:   request.BuildRequest = request.defaults();
-    var want_phase: driver.FrontendPhase = driver.FRONTEND_SEMA;
+    var want_selection: ProjectSelection     = ProjectSelection{artifact: "", target: "", profile: ""};
+    var want_phase:     driver.FrontendPhase = driver.FRONTEND_SEMA;
     if (es.active_request != nil) {
-        want_req   = es.active_request.build;
-        want_phase = es.active_request.phase;
+        want_selection = es.active_request.selection;
+        want_phase     = es.active_request.phase;
     }
 
-    # a loaded project answers only for the phase it was loaded to and the request it was
-    # loaded under: a deeper phase has no products and a different request has other ones
+    # a loaded project answers only for the phase it was loaded to and the selection its request
+    # was composed from: a deeper phase has no products and a different request has other ones
     val has_root:    bool = proj_roots_has(es, fqn);
     var need_reload: bool = root_changed || es.proj_dirty || !es.proj_loaded || !has_root
-        || want_phase > es.proj_phase || !proj_key_matches(?es.proj_key, ?want_req);
-
-    # a loaded project answers under the request it was loaded with, which the key matched, so
-    # what it computes reads that request and not the defaults its last analysis left behind
-    if (!need_reload) {
-        var loaded: request.BuildRequest = want_req;
-        loaded.project_root = es.proj_root;
-        val reconfigured: err[fail.Fail] = driver.reconfigure(?es.proj, loaded);
-        if (sel reconfigured.err) { ret res[opt[*project.ModuleEntry], fail.Fail].err{reconfigured.err}; }
-    }
+        || want_phase > es.proj_phase || !proj_key_matches(?es.proj_key, ?want_selection);
 
     if (!need_reload && es.proj_edited.len > 0) {
         val refreshed: res[bool, fail.Fail] = proj_refresh_edited(es);
@@ -2087,8 +2049,8 @@ fun proj_ensure(es: *EditorSession, fid: lang_source.FileId) res[opt[*project.Mo
         ret res[opt[*project.ModuleEntry], fail.Fail].ok{project.module_by_fqn(?es.proj, fqn)};
     }
 
-    var key:      ProjKey        = ProjKey{valid: false, target: nil, profile: nil, artifact: nil, owner: nil};
-    val captured: err[fail.Fail] = proj_key_capture(es, ?want_req, ?key);
+    var key:      ProjKey        = ProjKey{valid: false, target: nil, profile: nil, artifact: nil};
+    val captured: err[fail.Fail] = proj_key_capture(es, ?want_selection, ?key);
     if (sel captured.err) {
         ret res[opt[*project.ModuleEntry], fail.Fail].err{captured.err};
     }
@@ -2111,6 +2073,16 @@ fun proj_ensure(es: *EditorSession, fid: lang_source.FileId) res[opt[*project.Mo
         m             = m_r.ok;
         have_manifest = true;
     }
+
+    # the request borrows the key's strings, which the editor owns for as long as the project
+    var owned:    ProjectSelection                     = ProjectSelection{artifact: key.artifact, target: key.target, profile: key.profile};
+    val composed: res[request.BuildRequest, fail.Fail] = project_build(es.s, ?m, root, ?owned);
+    if (sel composed.err) {
+        root_handed = true;
+        ret proj_unavailable(es, root, composed.err);
+    }
+    var want_req: request.BuildRequest = composed.ok;
+    fin { project_build_dnit(?want_req); }
 
     val holder: res[retention.RetainerId, fail.Fail] = root_retainer(es, root);
     if (sel holder.err) {
@@ -2383,7 +2355,7 @@ fun ctx_seed(es: *EditorSession, b: *Buffer) err[fail.Fail] {
     var defaults: AnalysisRequest  = analysis_request(b.file_id, PHASE_SEMA);
     var req:      *AnalysisRequest = es.active_request;
     if (req == nil) { req = ?defaults; }
-    if (str_len(req.build.target) != 0) {
+    if (str_len(req.selection.target) != 0) {
         # a refused project load already recorded the cause, and this buffer is standalone only because of it
         val caused: bool = sel es.operation_failure.some;
         if (!caused) { es.operation_failure = opt[fail.Fail].some{fail.user(diagnostic_kind.EDITOR_TARGET_SELECTION, "a standalone buffer requires a resolved target, not a project target name")}; }
@@ -2402,7 +2374,7 @@ fun ctx_seed(es: *EditorSession, b: *Buffer) err[fail.Fail] {
     }
     if (selected.isa == nil) { ret err[fail.Fail].err{fail.message("standalone analysis requires a resolved target with an instruction set")}; }
     comptime.dnit(?b.ctx);
-    b.ctx           = driver_load.target_context(es.alloc, selected, ?req.build, intern.STR_NIL, intern.STR_NIL);
+    b.ctx           = driver_load.target_context(es.alloc, selected, ?req.standalone_build, intern.STR_NIL, intern.STR_NIL);
     b.context_ready = true;
     ret err[fail.Fail].ok{};
 }
@@ -3355,7 +3327,7 @@ test analyze__an_open_buffer_of_another_artifact_resolves_its_own_requirements {
 
     # the template names the shader `shaded` needs; the only complaint is the unbuilt output
     var req: AnalysisRequest = analysis_request(fid, PHASE_SEMA);
-    req.build.target = LESSONS_TARGET;
+    req.selection.target = LESSONS_TARGET;
     val analyze_r: res[AnalysisResult, fail.Fail] = analyze(?es, ?req);
     if (sel analyze_r.err) { ret 1; }
     var result: AnalysisResult = analyze_r.ok;
@@ -3369,7 +3341,7 @@ test analyze__an_open_buffer_of_another_artifact_resolves_its_own_requirements {
     val updated:      res[bool, fail.Fail] = update(?es, fid, refused_text);
     if (sel updated.err) { ret 99; }
     var again: AnalysisRequest = analysis_request(fid, PHASE_SEMA);
-    again.build.target = LESSONS_TARGET;
+    again.selection.target = LESSONS_TARGET;
     val refused_r: res[AnalysisResult, fail.Fail] = analyze(?es, ?again);
     if (sel refused_r.err) { ret 5; }
     var refused: AnalysisResult = refused_r.ok;
@@ -3410,7 +3382,7 @@ test analyze__an_open_buffer_of_another_artifact_reads_its_own_bin_name {
     val fid: lang_source.FileId = open_r.ok;
 
     var req: AnalysisRequest = analysis_request(fid, PHASE_SEMA);
-    req.build.target = LESSONS_TARGET;
+    req.selection.target = LESSONS_TARGET;
     val analyze_r: res[AnalysisResult, fail.Fail] = analyze(?es, ?req);
     if (sel analyze_r.err) { ret 1; }
     var result: AnalysisResult = analyze_r.ok;
@@ -3426,7 +3398,7 @@ test analyze__an_open_buffer_of_another_artifact_reads_its_own_bin_name {
     val updated: res[bool, fail.Fail] = update(?es, fid, edited);
     if (sel updated.err) { ret 99; }
     var again: AnalysisRequest = analysis_request(fid, PHASE_SEMA);
-    again.build.target = LESSONS_TARGET;
+    again.selection.target = LESSONS_TARGET;
     val again_r: res[AnalysisResult, fail.Fail] = analyze(?es, ?again);
     if (sel again_r.err) { ret 5; }
     var refreshed: AnalysisResult = again_r.ok;
@@ -3440,7 +3412,7 @@ test analyze__an_open_buffer_of_another_artifact_reads_its_own_bin_name {
     val hello_r: res[lang_source.FileId, fail.Fail] = open(?es, hp_r.ok, texts[0]);
     if (sel hello_r.err) { ret 99; }
     var hello_req: AnalysisRequest = analysis_request(hello_r.ok, PHASE_SEMA);
-    hello_req.build.target = LESSONS_TARGET;
+    hello_req.selection.target = LESSONS_TARGET;
     val hello_a: res[AnalysisResult, fail.Fail] = analyze(?es, ?hello_req);
     if (sel hello_a.err) { ret 8; }
     var hello: AnalysisResult = hello_a.ok;
@@ -3639,7 +3611,7 @@ fun t_unlocated_analysis(range: str, targets: str, selector: str, phase: Analysi
     if (sel open_r.err) { ret 99; }
 
     var req: AnalysisRequest = analysis_request(open_r.ok, phase);
-    req.build.target = selector;
+    req.selection.target = selector;
     val analyze_r: res[AnalysisResult, fail.Fail] = analyze(?es, ?req);
     if (sel analyze_r.err) { ret 1; }
     var result: AnalysisResult = analyze_r.ok;
@@ -4702,8 +4674,8 @@ test analyze__explicit_target_changes_context_and_expires_previous_view {
     if (first.target.pointer_width != 4) { ret 1; }
     val resolve_of_r: res[*resolve.ResolveResult, fail.Fail] = resolve_of(?first);
     if (sel resolve_of_r.err) { ret 2; }
-    req.standalone_target = ?t64;
-    req.build.opt         = pipeline.OPT_RELEASE;
+    req.standalone_target    = ?t64;
+    req.standalone_build.opt = pipeline.OPT_RELEASE;
     val analyze_r2: res[AnalysisResult, fail.Fail] = analyze(?es, ?req);
     if (sel analyze_r2.err) { ret 99; }
     var second: AnalysisResult = analyze_r2.ok;
@@ -4846,7 +4818,7 @@ test close__removes_extra_roots_and_reloads_closed_dependencies_from_disk {
     if (sel open_r3.err) { ret 99; }
     val orphan: lang_source.FileId = open_r3.ok;
     var req:    AnalysisRequest    = analysis_request(main, PHASE_SEMA);
-    req.build.target = "host";
+    req.selection.target = "host";
     val analyze_r: res[AnalysisResult, fail.Fail] = analyze(?es, ?req);
     if (sel analyze_r.err) { ret 99; }
     var bad: AnalysisResult = analyze_r.ok;
@@ -4931,8 +4903,8 @@ test analyze__project_phase_does_not_run_later_frontend_work {
     analysis_dnit(?parsed);
     val update_r: res[bool, fail.Fail] = update(?es, fid, "fun main() i32 { ret \"wrong\"; }");
     if (sel update_r.err) { ret 99; }
-    req.build.target = "host";
-    req.phase        = PHASE_RESOLVE;
+    req.selection.target = "host";
+    req.phase            = PHASE_RESOLVE;
     val analyze_r2: res[AnalysisResult, fail.Fail] = analyze(?es, ?req);
     if (sel analyze_r2.err) { ret 99; }
     var resolved: AnalysisResult = analyze_r2.ok;

@@ -48,11 +48,13 @@ what one analyze call asks for
 
 file: an open buffer's FileId, the root of the analysis
 phase: how far the frontend runs, PHASE_PARSE, PHASE_RESOLVE or PHASE_SEMA
-build: the selection and effective options a file under a project's src is analyzed
-                   with; the same boundary the driver uses, its profile options already composed
+selection: the overrides of mach's selection for a file under a project's src, empty for
+                   none; its request is composed from the manifest as a project snapshot's is
 standalone_target: for a file under no manifest, a borrowed resolved target whose
                    registry-owned definitions outlive the Session; nil selects the registered host target.
                    a project's target selection is never replaced by it
+standalone_build: for a file under no manifest, the options it is analyzed with, since no profile
+                   composes them; a project's are never taken from it
 
 ## rec AnalysisResult
 
@@ -83,7 +85,7 @@ tree: the owned tree of a parse_text result; nil for an analysis of a buffer
 pub fun analysis_request(file: lang_source.FileId, phase: AnalysisPhase) AnalysisRequest;
 ```
 
-a request for one buffer at one phase with the default build selection
+a request for one buffer at one phase on mach's own selection
 
 ## fun analysis_dnit
 
