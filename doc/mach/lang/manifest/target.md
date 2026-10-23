@@ -50,6 +50,21 @@ pub fun find_target_by_name(itn: *intern.Interner, m: *Manifest, name: str) *Tar
 
 the target `m` declares under `name`, nil when none is
 
+## fun resolve_declared
+
+```mach
+pub fun resolve_declared(alloc: *A.Allocator, itn: *intern.Interner, reg: *lang_target.TargetRegistry, d: *TargetDef) res[lang_target.Binding, fail.Fail];
+```
+
+resolve a declared target with every key it states: the one place a
+`[target.<name>]` table becomes a target request
+
+alloc: owns the `env` origin a refusal names
+itn: resolves the target's strings and holds that origin
+reg: the registry the target resolves against
+d: the target
+ret: the binding; err the registry's refusal of the request
+
 ## fun target_matches_host
 
 ```mach

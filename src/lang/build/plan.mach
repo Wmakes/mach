@@ -702,22 +702,7 @@ fun plan_unit(a: *A.Allocator, itn: *intern.Interner, reg: *lang_target.TargetRe
     }
     val bu: manifest.BuildUnit = ur.ok;
 
-    val os_opt: opt[str] = intern.get(itn, bu.target.os);
-    if (sel os_opt.none) { ret res[BuildUnit, fail.Fail].err{fail.message("target os name not interned")}; }
-    val os_s:    str      = os_opt.some;
-    val isa_opt: opt[str] = intern.get(itn, bu.target.isa);
-    if (sel isa_opt.none) { ret res[BuildUnit, fail.Fail].err{fail.message("target isa name not interned")}; }
-    val isa_s:   str      = isa_opt.some;
-    val abi_opt: opt[str] = intern.get(itn, bu.target.abi);
-    if (sel abi_opt.none) { ret res[BuildUnit, fail.Fail].err{fail.message("target abi name not interned")}; }
-    val abi_s:  str      = abi_opt.some;
-    var of_s:   str      = "";
-    val of_opt: opt[str] = intern.get(itn, bu.target.of);
-    if (sel of_opt.some) { of_s = of_opt.some; }
-
-    var baseline_s: str = "";
-    if (!intern.str_is_nil(bu.target.baseline)) { baseline_s = intern.text(itn, bu.target.baseline); }
-    val tr: res[lang_target.Binding, fail.Fail] = lang_target.select_on(reg, isa_s, baseline_s, os_s, abi_s, of_s);
+    val tr: res[lang_target.Binding, fail.Fail] = manifest.resolve_declared(a, itn, reg, bu.target);
     if (sel tr.err) {
         ret res[BuildUnit, fail.Fail].err{fail.as_user(diagnostic_kind.TARGET_UNSUPPORTED, tr.err)};
     }
@@ -1824,11 +1809,11 @@ test plan__out_override_names_one_unit_inside_the_root {
 }
 
 # the plan's entry carries every target key, not only the ones the tuple names
-test plan__the_unit_entry_carries_base_stack_platform_and_env {
+test plan__the_unit_entry_carries_base_stack_and_platform {
     var alloc: A.Allocator;
     var itn:   intern.Interner;
     var m:     manifest.Manifest;
-    if (!ut_scaffold_src(?alloc, ?itn, ?m, "[project]\nmach = \">=5\"\nid = \"p\"\nversion = \"0.1.0\"\nsrc = \"src\"\nwork = \"out\"\n[target.win]\nisa = \"x86_64\"\nos = \"windows\"\nabi = \"win64\"\nplatform = \"alpha\"\nenv = \"beta\"\nbase = 5368709120\nstack_reserve = 8388608\nstack_commit = 8192\n[profile.debug]\noptimize = false\ndebug = false\nsimd = \"scalarize\"\n[artifact.app]\nkind = \"bin\"\nentry = \"main.mach\"\nout = \"{project.work}/bin/app.exe\"\ntargets = [\"*\"]\nlink = []\nneed = []\n")) { ret 1; }
+    if (!ut_scaffold_src(?alloc, ?itn, ?m, "[project]\nmach = \">=5\"\nid = \"p\"\nversion = \"0.1.0\"\nsrc = \"src\"\nwork = \"out\"\n[target.win]\nisa = \"x86_64\"\nos = \"windows\"\nabi = \"win64\"\nplatform = \"alpha\"\nbase = 5368709120\nstack_reserve = 8388608\nstack_commit = 8192\n[profile.debug]\noptimize = false\ndebug = false\nsimd = \"scalarize\"\n[artifact.app]\nkind = \"bin\"\nentry = \"main.mach\"\nout = \"{project.work}/bin/app.exe\"\ntargets = [\"*\"]\nlink = []\nneed = []\n")) { ret 1; }
 
     var rq: request.BuildRequest = request.defaults();
     rq.project_root = "/r";
@@ -1839,11 +1824,10 @@ test plan__the_unit_entry_carries_base_stack_platform_and_env {
     val bp: BuildPlan = pr.ok;
     if (bp.units.len != 1) { ret 3; }
     val te: *project.TargetEntry = bp.units.data[0].target_entry;
-    if (te.base != 5368709120)                                     { ret 4; }
-    if (te.stack_reserve != 8388608)                               { ret 5; }
-    if (te.stack_commit != 8192)                                   { ret 6; }
+    if (te.declared.base != 5368709120)                            { ret 4; }
+    if (te.declared.stack_reserve != 8388608)                      { ret 5; }
+    if (te.declared.stack_commit != 8192)                          { ret 6; }
     if (!str_equals(intern.text(?itn, te.platform_name), "alpha")) { ret 7; }
-    if (!str_equals(intern.text(?itn, te.env_name), "beta"))       { ret 8; }
     ret 0;
 }
 

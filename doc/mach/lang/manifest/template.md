@@ -102,6 +102,7 @@ target: `{target.name}`
 isa: `{target.isa}`
 os: `{target.os}`
 abi: `{target.abi}`
+declared: the declared target the values name, nil when none
 profile: `{profile.name}`
 format: the target's explicit `of` override, "" when the format is derived
 artifact_suffix: `{artifact.suffix}`, set for the artifact whose output is named

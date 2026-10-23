@@ -298,6 +298,39 @@ pub fun find_target_by_name(itn: *intern.Interner, m: *Manifest, name: str) *Tar
     ret nil;
 }
 
+# resolve a declared target with every key it states: the one place a
+# `[target.<name>]` table becomes a target request
+# ---
+# alloc: owns the `env` origin a refusal names
+# itn:   resolves the target's strings and holds that origin
+# reg:   the registry the target resolves against
+# d:     the target
+# ret:   the binding; err the registry's refusal of the request
+pub fun resolve_declared(alloc: *A.Allocator, itn: *intern.Interner, reg: *lang_target.TargetRegistry, d: *TargetDef) res[lang_target.Binding, fail.Fail] {
+    val isa_name: str                       = intern.text(itn, d.isa);
+    var req:      lang_target.TargetRequest = lang_target.target_request(isa_name, intern.text(itn, d.os), intern.text(itn, d.abi));
+    if (!intern.str_is_nil(d.of)) { lang_target.with_of(?req, intern.text(itn, d.of)); }
+    lang_target.with_image(?req, d.base, d.stack_reserve, d.stack_commit);
+    if (!intern.str_is_nil(d.baseline)) { lang_target.with_baseline(?req, intern.text(itn, d.baseline)); }
+    if (!intern.str_is_nil(d.env) && str_len(intern.text(itn, d.env)) != 0) {
+        val env_name: str = intern.text(itn, d.env);
+        # a target the manifest does not name is labelled by its isa
+        var label: str = isa_name;
+        if (!intern.str_is_nil(d.name) && str_len(intern.text(itn, d.name)) != 0) { label = intern.text(itn, d.name); }
+        val origin: res[str, fail.Fail] = fail.format_intern(itn, alloc, "mach.toml: [target.{}] env = \"{}\"", label, env_name);
+        if (sel origin.err) { ret res[lang_target.Binding, fail.Fail].err{origin.err}; }
+        lang_target.with_env(?req, env_name, origin.ok);
+    }
+    var ext_names: [extension.MAX_SELECTED]str;
+    var ei:        u32 = 0;
+    for (ei < d.extension_count) {
+        ext_names[ei] = intern.text(itn, d.extensions[ei]);
+        ei            = ei + 1;
+    }
+    lang_target.with_extensions(?req, ?ext_names[0], d.extension_count);
+    ret lang_target.resolve(reg, ?req);
+}
+
 # whether a target's `os` and `isa` name the given host ids. the abi is not compared
 # ---
 # itn:       resolves the target's strings

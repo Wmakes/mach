@@ -59,6 +59,7 @@ use mach.lang.manifest.refusal.t_fmt;
 use mach.lang.manifest.target.find_target_by_name;
 use mach.lang.manifest.target.host_target_table;
 use mach.lang.manifest.target.host_tuple;
+use mach.lang.manifest.target.resolve_declared;
 use mach.lang.manifest.target.target_is_hosted;
 use mach.lang.manifest.target.target_matches_host;
 use mach.lang.manifest.target.tuple_of;
@@ -1340,12 +1341,7 @@ pub fun check_stack_keys(alloc: *A.Allocator, itn: *intern.Interner, reg: *lang_
         val td: *TargetDef = ?m.targets[i];
         i = i + 1;
         if (td.stack_reserve == 0 && td.stack_commit == 0) { cnt; }
-        var of_name: str = "";
-        if (!intern.str_is_nil(td.of)) { of_name = intern.text(itn, td.of); }
-        var baseline: str = "";
-        if (!intern.str_is_nil(td.baseline)) { baseline = intern.text(itn, td.baseline); }
-        val tr: res[lang_target.Binding, fail.Fail] = lang_target.select_on(reg,
-            intern.text(itn, td.isa), baseline, intern.text(itn, td.os), intern.text(itn, td.abi), of_name);
+        val tr: res[lang_target.Binding, fail.Fail] = resolve_declared(alloc, itn, reg, td);
         if (sel tr.err) { cnt; }
         val t: lang_target.Binding = tr.ok;
         if (t.of.carries_stack_size) { cnt; }

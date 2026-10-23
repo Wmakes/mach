@@ -626,38 +626,8 @@ fun validate_local_links(p: *project.Project, project_root: str, m: *manifest.Ma
 pub fun select_target(p: *project.Project, t: *project.TargetEntry) err[fail.Fail] {
     val toolchain_r: res[*lang_target.TargetRegistry, fail.Fail] = toolchain.registry();
     if (sel toolchain_r.err) { ret err[fail.Fail].err{toolchain_r.err}; }
-    val toolchain: *lang_target.TargetRegistry = toolchain_r.ok;
-    val os_name:   str                         = intern.text(?p.s.interner, t.os_name);
-    val isa_name:  str                         = intern.text(?p.s.interner, t.isa_name);
-    val abi_name:  str                         = intern.text(?p.s.interner, t.abi_name);
-
-    var of_name: str = "";
-    if (!intern.str_is_nil(t.of_name)) { of_name = intern.text(?p.s.interner, t.of_name); }
-
-    var req: lang_target.TargetRequest = lang_target.target_request(isa_name, os_name, abi_name);
-    lang_target.with_of(?req, of_name);
-    lang_target.with_image(?req, t.base, t.stack_reserve, t.stack_commit);
-    if (!intern.str_is_nil(t.baseline_name)) { lang_target.with_baseline(?req, intern.text(?p.s.interner, t.baseline_name)); }
-    var env_name: str = "";
-    if (!intern.str_is_nil(t.env_name)) { env_name = intern.text(?p.s.interner, t.env_name); }
-    # a target the manifest does not name is labelled by its isa
-    var label: str = isa_name;
-    if (!intern.str_is_nil(t.name) && !str_empty(intern.text(?p.s.interner, t.name))) { label = intern.text(?p.s.interner, t.name); }
-    var origin: str = "";
-    if (!str_empty(env_name)) {
-        val written: res[str, fail.Fail] = fail.format_intern(?p.s.interner, p.s.alloc, "mach.toml: [target.{}] env = \"{}\"", label, env_name);
-        if (sel written.err) { ret err[fail.Fail].err{written.err}; }
-        origin = written.ok;
-    }
-    lang_target.with_env(?req, env_name, origin);
-    var ext_names: [64]str;
-    var ei:        u32 = 0;
-    for (ei < t.extension_count) {
-        ext_names[ei] = intern.text(?p.s.interner, t.extensions[ei]);
-        ei            = ei + 1;
-    }
-    lang_target.with_extensions(?req, ?ext_names[0], t.extension_count);
-    val tr: res[lang_target.Binding, fail.Fail] = lang_target.resolve(toolchain, ?req);
+    val toolchain: *lang_target.TargetRegistry         = toolchain_r.ok;
+    val tr:        res[lang_target.Binding, fail.Fail] = manifest.resolve_declared(p.s.alloc, ?p.s.interner, toolchain, ?t.declared);
     if (sel tr.err) { ret err[fail.Fail].err{fail.as_user(diagnostic_kind.TARGET_INVALID, tr.err)}; }
     p.target = tr.ok;
 
