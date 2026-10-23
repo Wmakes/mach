@@ -317,11 +317,15 @@ fun write_image(img: *Image, path: str) err[fail.Fail] {
 
 # the image of `kind` mink links in memory from the `count` objects at `objects`, in link order,
 # and the `ext_count` external inputs at `ext`, written to `destination`. a link against a
-# library by name, a position independent image and an executable carrying resources are refused
+# library by name, a flat image, a position independent image and an executable carrying
+# resources are refused
 pub fun link_image(p: *project.Project, kind: *mink_output.Kind, flat: bool, objects: **Object, count: u32,
     ext: *target_of.ObjectInput, ext_count: u32, dynlib_len: u32, destination: str, image: *LoadedImageOptions) err[fail.Fail] {
     if (dynlib_len != 0) {
         ret err[fail.Fail].err{fail.user(diagnostic_kind.LINK_NO_LOADER, "linking against a library by name waits for mink to search libraries (mink#537)")};
+    }
+    if (flat) {
+        ret err[fail.Fail].err{fail.user(diagnostic_kind.LINK_NO_LOADER, "a flat image waits for the mink that writes flat images (#4848, mink#493)")};
     }
     if (p.req.pie || p.target.target.pie_default) {
         ret err[fail.Fail].err{fail.user(diagnostic_kind.LINK_NO_LOADER, "a position independent executable is not yet linked through mink")};
