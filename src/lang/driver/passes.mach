@@ -671,7 +671,7 @@ fun codegen_compute(raw: ptr, kind: *query.Kind, key: u64, alloc: *A.Allocator, 
 pub fun compile_object(p: *project.Project, u: *me_lower.Unit) res[Object, fail.Fail] {
     if (u.compiled) { ret res[Object, fail.Fail].err{fail.message("codegen: a lowered unit was compiled twice")}; }
     u.compiled = true;
-    ret backend.compile(?p.back, p.s.backing, u, p.req.opt, p.req.opt != request.OPT_RELEASE, intern.text(?p.s.interner, u.name));
+    ret backend.compile(?p.back, p.s.backing, u, p.req.opt, p.req.opt != request.OPT_RELEASE, p.req.relax, intern.text(?p.s.interner, u.name));
 }
 
 # the unit `u` compiled into an object boxed in `a`

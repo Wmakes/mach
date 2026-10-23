@@ -190,9 +190,11 @@ pub rec BuildRequest {
     opt: u8;
     # the command line changed a lever of the selected profile, so a build that
     # publishes artifacts must say where: presentation only, no part of any hash
-    overrides:      bool;
-    debug:          bool;
-    pie:            bool;
+    overrides: bool;
+    debug:     bool;
+    pie:       bool;
+    # whether the linker may relax the code, which mirl's build option states
+    relax:          bool;
     subsystem_flag: SubsystemFlag;
     subsystem:      catalog_subsystem.Subsystem;
     simd:           manifest.SimdMode;
@@ -229,6 +231,7 @@ pub fun defaults() BuildRequest {
     r.opt            = OPT_DEBUG;
     r.debug          = false;
     r.pie            = false;
+    r.relax          = true;
     r.subsystem_flag = SUBSYSTEM_FLAG_NONE;
     r.subsystem      = catalog_subsystem.CONSOLE;
     r.simd           = manifest.SIMD_SCALARIZE;
@@ -370,6 +373,7 @@ fun levers_compose(a: *A.Allocator, itn: *intern.Interner, pf: *manifest.Resolve
     if (pf.optimize) { r.opt = OPT_RELEASE; }
     r.debug = pf.debug;
     r.simd  = pf.simd;
+    r.relax = pf.relax;
 
     val profiled: BuildRequest = @r;
     if (o.optimize == LEVER_ON)  { r.opt = OPT_RELEASE; }
@@ -389,7 +393,7 @@ val SIMD_REQUIRE_REFUSED: str = "simd = \"require\" is not accepted: mirl legali
 
 # every profile's keys name what a build can hold, so a profile is refused where
 # it is written whichever profile is selected: mirl schedules its passes by level,
-# so no profile names passes or relaxations, and none requires packed vector forms
+# so no profile names passes, and none requires packed vector forms
 fun profiles_check(a: *A.Allocator, itn: *intern.Interner, m: *manifest.Manifest) err[fail.Fail] {
     var i: u32 = 0;
     for (i < m.profile_count) {
@@ -399,8 +403,6 @@ fun profiles_check(a: *A.Allocator, itn: *intern.Interner, m: *manifest.Manifest
         if (sel passes.err) { ret passes; }
         val skips: err[fail.Fail] = no_names(a, itn, pf.name, ?pf.skip, "skip");
         if (sel skips.err) { ret skips; }
-        val relax: err[fail.Fail] = no_names(a, itn, pf.name, ?pf.relax, "relax");
-        if (sel relax.err) { ret relax; }
     }
     ret err[fail.Fail].ok{};
 }
@@ -462,6 +464,7 @@ fun write_semantic_fields(s: *wire.Sink, r: *BuildRequest) {
     wire.put_u8(s, r.opt);
     put_flag(s, r.debug);
     put_flag(s, r.pie);
+    put_flag(s, r.relax);
     wire.put_u8(s, r.simd);
     put_flag(s, r.include_deps);
 }
@@ -801,7 +804,7 @@ test levers_compose__the_command_line_wins_over_the_profile {
     pf.simd     = manifest.SIMD_SCALARIZE;
     pf.pass     = manifest.NameList{items: nil, sites: nil, count: 0};
     pf.skip     = manifest.NameList{items: nil, sites: nil, count: 0};
-    pf.relax    = manifest.NameList{items: nil, sites: nil, count: 0};
+    pf.relax    = true;
 
     var o:           Overrides      = overrides_init(?a);
     var r:           BuildRequest   = defaults();
