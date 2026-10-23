@@ -62,10 +62,12 @@ use mirl.ir.function.FunctionData;
 use mirl.ir.global.GlobalData;
 use mirl.ir.global.Section;
 use mirl_global: mirl.ir.global;
+use mirl_function: mirl.ir.function;
+use mirl_slice: mirl.base.slice;
 use mirl_constant: mirl.ir.constant;
 use mirl.ir.id;
 use mirl.ir.linkage.Linkage;
-use mirl.ir.module;
+use mirl_module: mirl.ir.module;
 use types: mirl.ir.type;
 use mirl.ir.type.Type;
 use mirl_point: mirl.ir.point;
@@ -80,9 +82,11 @@ pub rec LoopFrame {
     fin_depth: u32;
 }
 
-# the target lowering builds for, as mirl assembled it, and the context the build's
-# selection opened, none for a target with no baseline
+# the target lowering builds for: the tuple its modules are named for, the target mirl
+# assembled from it, and the context the build's selection opened, none for a target with
+# no baseline
 pub rec Machine {
+    tuple:  mirl_module.Tuple;
     target: *mirl_target.Target;
     ctx:    opt[*core_state.Context];
 }
@@ -103,17 +107,35 @@ pub rec FnInfo {
 
 # a lowered module: the mirl module, the facts mach keeps of its functions, and the
 # allocator both live in
+# ---
+# exports: the linkage names a root-project `fwd` puts on a shared library's surface,
+#          which another module of the image defines
 pub rec Unit {
     name:         intern.StrId;
-    m:            module.Module;
+    m:            mirl_module.Module;
     fns:          collections_vector.Vector[FnInfo];
+    exports:      collections_vector.Vector[intern.StrId];
     root_project: bool;
+}
+
+# an empty unit named `name`, its module built for the machine's target
+pub fun unit_init(a: *A.Allocator, machine: *Machine, name: intern.StrId, root_project: bool) res[Unit, fail.Fail] {
+    val made: res[mirl_module.Module, mirl_module.Error] = mirl_module.init(a, machine.tuple);
+    if (sel made.err) { ret res[Unit, fail.Fail].err{fail.message("lower: mirl refused the target tuple")}; }
+    var u: Unit;
+    u.name         = name;
+    u.m            = made.ok;
+    u.fns          = collections_vector.init[FnInfo](a);
+    u.exports      = collections_vector.init[intern.StrId](a);
+    u.root_project = root_project;
+    ret res[Unit, fail.Fail].ok{u};
 }
 
 # release a unit's module and facts
 pub fun unit_dnit(u: *Unit) {
-    module.dnit(?u.m);
+    mirl_module.dnit(?u.m);
     collections_vector.dnit[FnInfo](?u.fns);
+    collections_vector.dnit[intern.StrId](?u.exports);
 }
 
 # the facts of function `f` of a unit, none past its functions
@@ -221,7 +243,7 @@ pub rec LowerContext {
     # debug-profile runtime checks: the release pipeline emits none
     checks:  bool;
     unit:    *Unit;
-    m:       *module.Module;
+    m:       *mirl_module.Module;
     builder: builder.Builder;
     locals:  map.Map[resolve.SymbolId, value.Value];
 
@@ -1054,6 +1076,23 @@ pub fun pop_fins_to(lc: *LowerContext, mark: u32) {
 pub val TAG_DISCRIMINANT: u32 = 0;
 pub val TAG_PAYLOAD:      u32 = 1;
 
+# the pointer type, which every address is held in
+pub fun ptr_or_none(lc: *LowerContext) Type {
+    ret builder.ptr_type(?lc.builder);
+}
+
+# the byte type, which a global another module defines is declared as when only its
+# address is taken
+pub fun byte_type(lc: *LowerContext) Type {
+    ret builder.int_type(?lc.builder, 8);
+}
+
+# the first refusal the builder met, which every builder call after it skips
+pub fun builder_state(lc: *LowerContext) err[fail.Fail] {
+    if (!builder.failed(?lc.builder)) { ret err[fail.Fail].ok{}; }
+    ret builder.done(?lc.builder);
+}
+
 pub fun int_type(lc: *LowerContext, bits: u32) res[Type, fail.Fail] {
     ret irt.int(?lc.m.types, bits);
 }
@@ -1869,7 +1908,7 @@ pub fun add_function(lc: *LowerContext, data: FunctionData, info: FnInfo) res[u3
 
 # the function of the module named `name`, none when no function is
 pub fun function_named(lc: *LowerContext, name: intern.StrId) opt[u32] {
-    val found: opt[id.Symbol] = module.find(lc.m, view_text(lc, name));
+    val found: opt[id.Symbol] = mirl_module.find(lc.m, view_text(lc, name));
     if (sel found.some) {
         if (sel found.some.function) { ret opt[u32].some{found.some.function.index}; }
     }
@@ -1878,11 +1917,58 @@ pub fun function_named(lc: *LowerContext, name: intern.StrId) opt[u32] {
 
 # the global of the module named `name`, none when no global is
 pub fun global_named(lc: *LowerContext, name: intern.StrId) opt[u32] {
-    val found: opt[id.Symbol] = module.find(lc.m, view_text(lc, name));
+    val found: opt[id.Symbol] = mirl_module.find(lc.m, view_text(lc, name));
     if (sel found.some) {
         if (sel found.some.global) { ret opt[u32].some{found.some.global.index}; }
     }
     ret opt[u32].none{};
+}
+
+# put `name` on the shared library's export surface
+pub fun export_add(lc: *LowerContext, name: intern.StrId) err[fail.Fail] {
+    val pushed: res[usize, A.Error] = collections_vector.push[intern.StrId](?lc.unit.exports, name);
+    if (sel pushed.err) { ret err[fail.Fail].err{fail.refused(pushed.err)}; }
+    ret err[fail.Fail].ok{};
+}
+
+# the module's definition of a function: a reference earlier in the module declared it,
+# and the definition takes the declaration's place
+pub fun define_function(lc: *LowerContext, data: FunctionData, info: FnInfo) res[u32, fail.Fail] {
+    val existing: opt[u32] = function_named(lc, info.name);
+    if (sel existing.none) { ret add_function(lc, data, info); }
+    val f: u32 = existing.some;
+    if (lc.unit.fns.data[f].defined) { ret res[u32, fail.Fail].err{fail.message("lower: a function is defined twice in one module")}; }
+    val node: *mirl_function.Node = ?lc.m.functions.data[f];
+    node.data.signature     = data.signature;
+    node.data.linkage       = data.linkage;
+    node.data.constant_time = data.constant_time;
+    lc.unit.fns.data[f]     = info;
+    ret res[u32, fail.Fail].ok{f};
+}
+
+# the module's definition of a global, in place of a declaration a reference made
+pub fun define_global(lc: *LowerContext, g: GlobalData) res[u32, fail.Fail] {
+    val found: opt[id.Symbol] = mirl_module.find(lc.m, g.name);
+    if (sel found.none) { ret add_global(lc, g); }
+    if (!sel found.some.global) { ret res[u32, fail.Fail].err{fail.message("lower: a global shares its symbol with a function of the module")}; }
+    val at:   u32               = found.some.global.index;
+    val node: *mirl_global.Node = ?lc.m.globals.data[at];
+    if (sel node.data.initial.some) { ret res[u32, fail.Fail].err{fail.message("lower: a global is defined twice in one module")}; }
+    node.data.type      = g.type;
+    node.data.alignment = g.alignment;
+    node.data.tls       = g.tls;
+    node.data.linkage   = g.linkage;
+    node.data.constant  = g.constant;
+    if (sel g.section.some) {
+        val named: res[View, A.Error] = mirl_slice.copy_view(lc.m.a, g.section.some.name);
+        if (sel named.err) { ret res[u32, fail.Fail].err{fail.refused(named.err)}; }
+        node.data.section = opt[Section].some{Section{name: named.ok, kind: g.section.some.kind}};
+    }
+    if (sel g.initial.some) {
+        val given: err[mirl_module.Error] = mirl_module.initialize(lc.m, id.Global{index: at}, g.initial.some);
+        if (sel given.err) { ret res[u32, fail.Fail].err{fail.message("lower: mirl refused a global's initial value")}; }
+    }
+    ret res[u32, fail.Fail].ok{at};
 }
 
 # the module's function `name`, declared here when another module defines it
@@ -1921,41 +2007,17 @@ pub fun add_global(lc: *LowerContext, g: GlobalData) res[u32, fail.Fail] {
     ret res[u32, fail.Fail].ok{made.index};
 }
 
-# the constant of byte `b`, one per value in the module
-pub fun byte_constant(lc: *LowerContext, b: u8) id.Constant {
-    var word: [1]u64 = [1]u64{b::u64};
-    val i8t: Type = builder.int_type(?lc.builder, 8);
-    ret mbuild.constant(?lc.builder.mb, ConstantData.integer{Bits{type: i8t, words: Slice[u64]{data: ?word[0], size: 1}}});
-}
-
-# read-only bytes of the module's own, whose address is the value
-pub fun add_rodata_bytes(lc: *LowerContext, bytes: *u8, len: u32) res[value.Value, fail.Fail] {
-    val i8t: Type = builder.int_type(?lc.builder, 8);
-    val arr: res[Type, fail.Fail] = irt.array(?lc.m.types, i8t, len::u64);
-    if (sel arr.err) { ret res[value.Value, fail.Fail].err{arr.err}; }
-    var elems: collections_vector.Vector[id.Constant] = collections_vector.init[id.Constant](lc.s.alloc);
-    fin { collections_vector.dnit[id.Constant](?elems); }
-    var cache: [256]u32;
-    var c: u32 = 0;
-    for (c < 256) {
-        cache[c] = 0xFFFFFFFF;
-        c        = c + 1;
-    }
-    var i: u32 = 0;
-    for (i < len) {
-        val b: u8 = bytes[i];
-        if (cache[b::u32] == 0xFFFFFFFF) { cache[b::u32] = byte_constant(lc, b).index; }
-        val pushed: res[usize, A.Error] = collections_vector.push[id.Constant](?elems, id.Constant{index: cache[b::u32]});
-        if (sel pushed.err) { ret res[value.Value, fail.Fail].err{fail.refused(pushed.err)}; }
-        i = i + 1;
-    }
-    val init: id.Constant = mbuild.constant(?lc.builder.mb, ConstantData.aggregate{mirl_constant.Aggregate{type: arr.ok, elements: Slice[id.Constant]{data: elems.data, size: elems.len}}});
+# a read-only global of the module's own holding the constant `v`, whose address is the value
+pub fun constant_global(lc: *LowerContext, v: value.Value) res[value.Value, fail.Fail] {
     val res_name: res[intern.StrId, fail.Fail] = anon_global_name(lc, lc.m.globals.len::u32);
     if (sel res_name.err) { ret res[value.Value, fail.Fail].err{res_name.err}; }
+    val c: id.Constant = builder.constant_of(?lc.builder, v);
+    val built: err[fail.Fail] = builder_state(lc);
+    if (sel built.err) { ret res[value.Value, fail.Fail].err{built.err}; }
     var g: GlobalData;
     g.name      = view_text(lc, res_name.ok);
-    g.type      = arr.ok;
-    g.initial   = opt[id.Constant].some{init};
+    g.type      = v.ty;
+    g.initial   = opt[id.Constant].some{c};
     g.alignment = opt[u64].none{};
     g.section   = opt[Section].none{};
     g.tls       = opt[mirl_global.Tls].none{};

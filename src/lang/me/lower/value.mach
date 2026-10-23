@@ -21,6 +21,7 @@ pub def ValueKind: u8;
 # null:  every bit zero
 # fn:    function `index` of the module, called by name or taken as an address
 # global: the address of global `index` of the module
+# const:  constant `index` of the module, a scalar or an aggregate laid out as its type
 pub val VAL_NONE:   ValueKind = 0;
 pub val VAL_SSA:    ValueKind = 1;
 pub val VAL_INT:    ValueKind = 2;
@@ -28,6 +29,7 @@ pub val VAL_FLOAT:  ValueKind = 3;
 pub val VAL_NULL:   ValueKind = 4;
 pub val VAL_FN:     ValueKind = 5;
 pub val VAL_GLOBAL: ValueKind = 6;
+pub val VAL_CONST:  ValueKind = 7;
 
 pub rec Value {
     kind:   ValueKind;
@@ -36,6 +38,8 @@ pub rec Value {
     id:     id.Value;
     bits:   wide.Wide;
     index:  u32;
+    # the signature a function is called through
+    sig: Type;
 }
 
 pub fun none() Value {
@@ -46,6 +50,7 @@ pub fun none() Value {
     v.id     = id.Value{index: 0xFFFFFFFF};
     v.bits   = wide.zero();
     v.index  = 0;
+    v.sig    = irt.NONE;
     ret v;
 }
 
@@ -86,11 +91,13 @@ pub fun const_null(ty: Type) Value {
     ret v;
 }
 
-pub fun fn(index: u32, ty: Type) Value {
+# function `index`, an address of `ptr` called through `sig`
+pub fun fn(index: u32, ptr: Type, sig: Type) Value {
     var v: Value = none();
     v.kind  = VAL_FN;
-    v.ty    = ty;
+    v.ty    = ptr;
     v.index = index;
+    v.sig   = sig;
     ret v;
 }
 
@@ -99,6 +106,14 @@ pub fun global(index: u32, ty: Type) Value {
     v.kind  = VAL_GLOBAL;
     v.ty    = ty;
     v.index = index;
+    ret v;
+}
+
+pub fun constant(c: id.Constant, ty: Type) Value {
+    var v: Value = none();
+    v.kind  = VAL_CONST;
+    v.ty    = ty;
+    v.index = c.index;
     ret v;
 }
 
@@ -122,7 +137,7 @@ pub fun is_int_const(v: Value) bool {
 }
 
 pub fun is_constant(v: Value) bool {
-    ret v.kind == VAL_INT || v.kind == VAL_FLOAT || v.kind == VAL_NULL;
+    ret v.kind == VAL_INT || v.kind == VAL_FLOAT || v.kind == VAL_NULL || v.kind == VAL_CONST;
 }
 
 # a float constant's value
