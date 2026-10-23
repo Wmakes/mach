@@ -59,6 +59,7 @@ use fe_parser: mach.lang.fe.parser;
 use mach.lang.fe.parser.state;
 use mach.lang.fe.resolve;
 use fe_sema: mach.lang.fe.sema;
+use mach.lang.fe.token;
 use mach.lang.growth;
 use mach.lang.intern;
 use mach.lang.manifest;
@@ -1304,6 +1305,28 @@ pub fun same_shape(x: *AnalysisResult, y: *AnalysisResult) res[bool, fail.Fail] 
     val b: *ast.Ast = yr.ok;
     if (a == nil || b == nil) { ret res[bool, fail.Fail].err{fail.message("analysis has no tree")}; }
     ret res[bool, fail.Fail].ok{ast.same_shape(a, b)};
+}
+
+# whether a text is exactly one identifier token, as the lexer reads it standalone
+# reached only by mach-lsp
+# ---
+# alloc: scratch for the lex, freed before return
+# text:  the candidate, borrowed only during the call
+# ret:   whether it is one identifier token, or the failure that stopped the lex
+pub fun is_identifier(alloc: *A.Allocator, text: str) res[bool, fail.Fail] {
+    if (text == nil) { ret res[bool, fail.Fail].ok{false}; }
+    val n: usize = str_len(text);
+    if (n == 0) { ret res[bool, fail.Fail].ok{false}; }
+    var diags: diagnostic.DiagnosticStore = diagnostic.store_init(alloc);
+    fin { diagnostic.store_dnit(?diags); }
+    val lexed: res[fe_lexer.TokenStream, fail.Fail] = lex_text(text, alloc, lang_source.FILE_NIL, ?diags);
+    if (sel lexed.err) { ret res[bool, fail.Fail].err{lexed.err}; }
+    var stream: fe_lexer.TokenStream = lexed.ok;
+    fin { fe_lexer.dnit(?stream, alloc); }
+    if (stream.error_len != 0 || stream.len == 0) { ret res[bool, fail.Fail].ok{false}; }
+    val first: token.Token = stream.tokens[0];
+    if (first.kind != token.KIND_IDENT || first.span.offset != 0 || first.span.len != n) { ret res[bool, fail.Fail].ok{false}; }
+    ret res[bool, fail.Fail].ok{stream.len == 1 || stream.tokens[1].kind == token.KIND_EOF};
 }
 
 # a project module without the requested product: the tolerant load kept the
