@@ -155,20 +155,25 @@ pub fun load_status(p: *project.Project) fail.PhaseStatus {
     ret status;
 }
 
-# the standing of the front end over every module: the load's, and that of each product this
-# project's operations published
+# the standing of one module: its load's and that of each product this project's operations
+# published for it
+pub fun module_status(p: *project.Project, m: *project.ModuleEntry) fail.PhaseStatus {
+    var status: fail.PhaseStatus  = m.load.status;
+    val shown:  opt[ParsedModule] = parsed(p, m);
+    if (sel shown.some) { fail.merge(?status, shown.some.status); }
+    val rr: *resolve.ResolveResult = resolved(p, m);
+    val sr: *fe_sema.SemaResult    = typed(p, m);
+    if (rr != nil) { fail.merge(?status, rr.status); }
+    if (sr != nil) { fail.merge(?status, sr.status); }
+    ret status;
+}
+
+# the standing of the front end over every module
 pub fun frontend_status(p: *project.Project) fail.PhaseStatus {
     var status: fail.PhaseStatus = fail.accepted();
     var i:      u32              = 0;
     for (i < project.module_count(p)) {
-        val m: *project.ModuleEntry = project.module_at(p, i);
-        fail.merge(?status, m.load.status);
-        val shown: opt[ParsedModule] = parsed(p, m);
-        if (sel shown.some) { fail.merge(?status, shown.some.status); }
-        val rr: *resolve.ResolveResult = resolved(p, m);
-        val sr: *fe_sema.SemaResult    = typed(p, m);
-        if (rr != nil) { fail.merge(?status, rr.status); }
-        if (sr != nil) { fail.merge(?status, sr.status); }
+        fail.merge(?status, module_status(p, project.module_at(p, i)));
         i = i + 1;
     }
     ret status;

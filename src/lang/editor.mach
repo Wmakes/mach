@@ -956,6 +956,22 @@ pub fun project_sema_of(snap: *ProjectSnapshot, index: u32) res[*fe_sema.SemaRes
     ret res[*fe_sema.SemaResult, fail.Fail].ok{frontend.typed(?snap.project, m.ok)};
 }
 
+# a module's own phase standing, as the snapshot's analysis left it
+# reached only by mach-lsp
+pub fun project_module_status(snap: *ProjectSnapshot, index: u32) res[fail.PhaseStatus, fail.Fail] {
+    val m: res[*project.ModuleEntry, fail.Fail] = snapshot_view(snap, index);
+    if (sel m.err) { ret res[fail.PhaseStatus, fail.Fail].err{m.err}; }
+    ret res[fail.PhaseStatus, fail.Fail].ok{frontend.module_status(?snap.project, m.ok)};
+}
+
+# whether a module belongs to the project the snapshot was opened for, not to one of its dependencies
+# reached only by mach-lsp
+pub fun project_module_is_root(snap: *ProjectSnapshot, index: u32) res[bool, fail.Fail] {
+    val m: res[*project.ModuleEntry, fail.Fail] = snapshot_module(snap, index);
+    if (sel m.err) { ret res[bool, fail.Fail].err{m.err}; }
+    ret res[bool, fail.Fail].ok{m.ok.load.home.root};
+}
+
 # an editor facade over a caller-owned Session, borrowed for serial use; neither may move
 # while the other holds its address, and there is no concurrent request support. tear
 # down with dnit before the Session

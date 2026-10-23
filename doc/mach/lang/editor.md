@@ -329,6 +329,24 @@ pub fun project_sema_of(snap: *ProjectSnapshot, index: u32) res[*fe_sema.SemaRes
 a module's sema product, under sema_of's rules; nil when the module was not type checked
 reached only by mach-lsp
 
+## fun project_module_status
+
+```mach
+pub fun project_module_status(snap: *ProjectSnapshot, index: u32) res[fail.PhaseStatus, fail.Fail];
+```
+
+a module's own phase standing, as the snapshot's analysis left it
+reached only by mach-lsp
+
+## fun project_module_is_root
+
+```mach
+pub fun project_module_is_root(snap: *ProjectSnapshot, index: u32) res[bool, fail.Fail];
+```
+
+whether a module belongs to the project the snapshot was opened for, not to one of its dependencies
+reached only by mach-lsp
+
 ## fun init
 
 ```mach
