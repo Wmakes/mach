@@ -420,6 +420,40 @@ pub fun rollback(a: *Ast, m: AstMark) bool {
     ret true;
 }
 
+# whether two trees have the same shape: the same number of every node, and the same
+# expression, statement, declaration and type kinds, and declaration flags, in the same
+# order. spans, names and literal values are not compared
+pub fun same_shape(x: *Ast, y: *Ast) bool {
+    if (x.modules.len != y.modules.len || x.exprs.len != y.exprs.len || x.stmts.len != y.stmts.len
+        || x.decls.len != y.decls.len || x.types.len != y.types.len || x.typed_names.len != y.typed_names.len
+        || x.tag_cases.len != y.tag_cases.len || x.field_inits.len != y.field_inits.len
+        || x.generic_names.len != y.generic_names.len || x.comptime_branches.len != y.comptime_branches.len
+        || x.decorators.len != y.decorators.len) {
+        ret false;
+    }
+    var i: usize = 0;
+    for (i < x.exprs.len) {
+        if (x.exprs.data[i].kind != y.exprs.data[i].kind) { ret false; }
+        i = i + 1;
+    }
+    i = 0;
+    for (i < x.stmts.len) {
+        if (x.stmts.data[i].kind != y.stmts.data[i].kind) { ret false; }
+        i = i + 1;
+    }
+    i = 0;
+    for (i < x.decls.len) {
+        if (x.decls.data[i].kind != y.decls.data[i].kind || x.decls.data[i].flags != y.decls.data[i].flags) { ret false; }
+        i = i + 1;
+    }
+    i = 0;
+    for (i < x.types.len) {
+        if (x.types.data[i].kind != y.types.data[i].kind) { ret false; }
+        i = i + 1;
+    }
+    ret true;
+}
+
 # reached only by mach-lsp
 pub fun span_contains(span: lang_source.Span, offset: usize) bool {
     if (span.len == 0)        { ret false; }
