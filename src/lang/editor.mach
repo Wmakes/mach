@@ -242,16 +242,7 @@ pub fun analysis_request(file: lang_source.FileId, phase: AnalysisPhase) Analysi
 # result: the envelope; zeroed on return so a second call is a no-op
 pub fun analysis_dnit(result: *AnalysisResult) {
     if (result.alloc == nil) { ret; }
-    if (result.diagnostics != nil) {
-        diagnostic.store_dnit(result.diagnostics);
-        A.deallocate[diagnostic.DiagnosticStore](result.alloc, result.diagnostics, 1);
-    }
-    var i: usize = 0;
-    for (i < result.sources.len) {
-        lang_source.dnit_file(?result.sources.data[i].file, result.alloc);
-        i = i + 1;
-    }
-    collections_vector.dnit[AnalysisSource](?result.sources);
+    envelope_dnit(result.alloc, result.diagnostics, ?result.sources);
     if (result.configuration.bytes != nil) { A.deallocate[u8](result.alloc, result.configuration.bytes, result.configuration.len::usize); }
     str_free(result.alloc, result.project_root);
     str_free(result.alloc, result.profile);
@@ -268,12 +259,30 @@ pub fun analysis_dnit(result: *AnalysisResult) {
 # ret:    the owned SourceFile, valid until analysis_dnit; none when the result carries no
 #         version of that file
 fun analysis_source(result: *AnalysisResult, file: lang_source.FileId) opt[*lang_source.SourceFile] {
+    ret sources_find(?result.sources, file);
+}
+
+fun sources_find(sources: *Vector[AnalysisSource], file: lang_source.FileId) opt[*lang_source.SourceFile] {
     var i: usize = 0;
-    for (i < result.sources.len) {
-        if (lang_source.file_same(result.sources.data[i].id, file)) { ret opt[*lang_source.SourceFile].some{?result.sources.data[i].file}; }
+    for (i < sources.len) {
+        if (lang_source.file_same(sources.data[i].id, file)) { ret opt[*lang_source.SourceFile].some{?sources.data[i].file}; }
         i = i + 1;
     }
     ret opt[*lang_source.SourceFile].none{};
+}
+
+# release what an envelope owns: its diagnostic store and the source versions it refers to
+fun envelope_dnit(alloc: *A.Allocator, diagnostics: *diagnostic.DiagnosticStore, sources: *Vector[AnalysisSource]) {
+    if (diagnostics != nil) {
+        diagnostic.store_dnit(diagnostics);
+        A.deallocate[diagnostic.DiagnosticStore](alloc, diagnostics, 1);
+    }
+    var i: usize = 0;
+    for (i < sources.len) {
+        lang_source.dnit_file(?sources.data[i].file, alloc);
+        i = i + 1;
+    }
+    collections_vector.dnit[AnalysisSource](sources);
 }
 
 fun result_buffer(result: *AnalysisResult) res[*Buffer, fail.Fail] {
@@ -330,8 +339,8 @@ pub fun sema_of(result: *AnalysisResult) res[*fe_sema.SemaResult, fail.Fail] {
     ret res[*fe_sema.SemaResult, fail.Fail].ok{buffer.ok.sr};
 }
 
-fun snapshot_source(result: *AnalysisResult, s: *session.Session, file: lang_source.FileId) err[fail.Fail] {
-    val analysis_source_r: opt[*lang_source.SourceFile] = analysis_source(result, file);
+fun snapshot_source(alloc: *A.Allocator, sources: *Vector[AnalysisSource], s: *session.Session, file: lang_source.FileId) err[fail.Fail] {
+    val analysis_source_r: opt[*lang_source.SourceFile] = sources_find(sources, file);
     if (lang_source.file_is_nil(file)) { ret err[fail.Fail].ok{}; }
     if (sel analysis_source_r.some)    { ret err[fail.Fail].ok{}; }
     val current: opt[*lang_source.SourceFile] = lang_source.get(?s.sources, file);
@@ -341,13 +350,72 @@ fun snapshot_source(result: *AnalysisResult, s: *session.Session, file: lang_sou
     if (!current.some.present) {
         ret err[fail.Fail].err{fail.message("analysis diagnostic refers to an unavailable source version")};
     }
-    val copied: res[lang_source.SourceFile, lang_source.Error] = lang_source.copy_file(current.some, result.alloc);
+    val copied: res[lang_source.SourceFile, lang_source.Error] = lang_source.copy_file(current.some, alloc);
     if (sel copied.err) { ret err[fail.Fail].err{fail.source_refused(copied.err)}; }
     var entry: AnalysisSource      = AnalysisSource{id: file, file: copied.ok};
-    val added: res[usize, A.Error] = collections_vector.push[AnalysisSource](?result.sources, entry);
+    val added: res[usize, A.Error] = collections_vector.push[AnalysisSource](sources, entry);
     if (sel added.err) {
-        lang_source.dnit_file(?entry.file, result.alloc);
+        lang_source.dnit_file(?entry.file, alloc);
         ret err[fail.Fail].err{fail.refused(added.err)};
+    }
+    ret err[fail.Fail].ok{};
+}
+
+# the session's diagnostics copied into an owned store at `out`, and every source version a
+# location, related location or fix edit of theirs refers to copied into `sources`. `out` is set
+# before any source is copied, so a failure leaves both for envelope_dnit
+fun snapshot_diagnostics(alloc: *A.Allocator, s: *session.Session, out: **diagnostic.DiagnosticStore,
+    sources: *Vector[AnalysisSource]) err[fail.Fail] {
+    val diagnostics: res[*diagnostic.DiagnosticStore, fail.Fail] = diagnostic.snapshot_from(?s.diags, 0, alloc);
+    if (sel diagnostics.err) { ret err[fail.Fail].err{diagnostics.err}; }
+    @out = diagnostics.ok;
+    var i: usize = 0;
+    for (i < diagnostic.len(diagnostics.ok)) {
+        val d:    *diagnostic.Diagnostic = ?diagnostics.ok.items.data[i];
+        val main: err[fail.Fail]         = snapshot_source(alloc, sources, s, d.loc.file);
+        if (sel main.err) { ret main; }
+        var j: usize = 0;
+        for (j < d.related.len) {
+            val related: err[fail.Fail] = snapshot_source(alloc, sources, s, d.related.data[j].loc.file);
+            if (sel related.err) { ret related; }
+            j = j + 1;
+        }
+        j = 0;
+        for (j < d.fixes.len) {
+            var k: usize = 0;
+            for (k < d.fixes.data[j].edits.len) {
+                val edit: err[fail.Fail] = snapshot_source(alloc, sources, s, d.fixes.data[j].edits.data[k].loc.file);
+                if (sel edit.err) { ret edit; }
+                k = k + 1;
+            }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    ret err[fail.Fail].ok{};
+}
+
+# an envelope's owned message and failure: the failure's text, else the internal standing's, is
+# copied into `message`, an internal standing then reads that copy, and the failure's places are
+# copied beside it. envelope_dnit's caller releases `message` with str_free and `kept` with
+# fail.places_dnit
+fun snapshot_failure(alloc: *A.Allocator, status: *fail.PhaseStatus, failure: opt[fail.Fail], message: *str,
+    kept: *opt[fail.Fail]) err[fail.Fail] {
+    var text:        str      = "";
+    val status_text: opt[str] = fail.internal_text(@status);
+    if (sel status_text.some) { text = status_text.some; }
+    if (sel failure.some) {
+        val failure_text: opt[str] = fail.text(failure.some);
+        if (sel failure_text.some) { text = failure_text.some; }
+    }
+    val owned_message: res[str, types_string.StrError] = str_copy(alloc, text);
+    if (sel owned_message.err) { ret err[fail.Fail].err{fail.str_refused(owned_message.err)}; }
+    @message = owned_message.ok;
+    if (sel status_text.some) { status.kind = fail.PhaseKind.internal{@message}; }
+    if (sel failure.some) {
+        val owned: res[fail.Fail, A.Error] = fail.places_retain(alloc, fail.with_text(failure.some, @message));
+        if (sel owned.err) { ret err[fail.Fail].err{fail.refused(owned.err)}; }
+        @kept = opt[fail.Fail].some{owned.ok};
     }
     ret err[fail.Fail].ok{};
 }
@@ -371,34 +439,10 @@ fun snapshot_analysis(es: *EditorSession, req: *AnalysisRequest, status: fail.Ph
     fin {
         if (!complete) { analysis_dnit(?result); }
     }
-    val diagnostics: res[*diagnostic.DiagnosticStore, fail.Fail] = diagnostic.snapshot_from(?es.s.diags, 0, es.alloc);
-    if (sel diagnostics.err) { ret res[AnalysisResult, fail.Fail].err{diagnostics.err}; }
-    result.diagnostics = diagnostics.ok;
-    val copied: err[fail.Fail] = snapshot_source(?result, es.s, req.file);
+    val copied: err[fail.Fail] = snapshot_source(es.alloc, ?result.sources, es.s, req.file);
     if (sel copied.err) { ret res[AnalysisResult, fail.Fail].err{copied.err}; }
-    var i: usize = 0;
-    for (i < diagnostic.len(result.diagnostics)) {
-        val d:    *diagnostic.Diagnostic = ?result.diagnostics.items.data[i];
-        val main: err[fail.Fail]         = snapshot_source(?result, es.s, d.loc.file);
-        if (sel main.err) { ret res[AnalysisResult, fail.Fail].err{main.err}; }
-        var j: usize = 0;
-        for (j < d.related.len) {
-            val related: err[fail.Fail] = snapshot_source(?result, es.s, d.related.data[j].loc.file);
-            if (sel related.err) { ret res[AnalysisResult, fail.Fail].err{related.err}; }
-            j = j + 1;
-        }
-        j = 0;
-        for (j < d.fixes.len) {
-            var k: usize = 0;
-            for (k < d.fixes.data[j].edits.len) {
-                val edit: err[fail.Fail] = snapshot_source(?result, es.s, d.fixes.data[j].edits.data[k].loc.file);
-                if (sel edit.err) { ret res[AnalysisResult, fail.Fail].err{edit.err}; }
-                k = k + 1;
-            }
-            j = j + 1;
-        }
-        i = i + 1;
-    }
+    val diagnosed: err[fail.Fail] = snapshot_diagnostics(es.alloc, es.s, ?result.diagnostics, ?result.sources);
+    if (sel diagnosed.err) { ret res[AnalysisResult, fail.Fail].err{diagnosed.err}; }
     val b: *Buffer = slot_live(es, req.file);
     if (b.context_ready) {
         result.target           = target_snapshot(?b.ctx.env);
@@ -430,23 +474,8 @@ fun snapshot_analysis(es: *EditorSession, req: *AnalysisRequest, status: fail.Ph
     val profile: res[str, types_string.StrError] = str_copy(es.alloc, profile_name);
     if (sel profile.err) { ret res[AnalysisResult, fail.Fail].err{fail.str_refused(profile.err)}; }
     result.profile = profile.ok;
-    var message:     str      = "";
-    val status_text: opt[str] = fail.internal_text(status);
-    if (sel status_text.some) { message = status_text.some; }
-    if (sel failure.some) {
-        val failure_text: opt[str] = fail.text(failure.some);
-        if (sel failure_text.some) { message = failure_text.some; }
-    }
-    val owned_message: res[str, types_string.StrError] = str_copy(es.alloc, message);
-    if (sel owned_message.err) { ret res[AnalysisResult, fail.Fail].err{fail.str_refused(owned_message.err)}; }
-    result.message = owned_message.ok;
-    if (sel status_text.some) { result.status.kind = fail.PhaseKind.internal{result.message}; }
-    if (sel failure.some) {
-        # the places a failure points at are copied beside its message; analysis_dnit releases both
-        val owned: res[fail.Fail, A.Error] = fail.places_retain(es.alloc, fail.with_text(failure.some, result.message));
-        if (sel owned.err) { ret res[AnalysisResult, fail.Fail].err{fail.refused(owned.err)}; }
-        result.failure = opt[fail.Fail].some{owned.ok};
-    }
+    val failed: err[fail.Fail] = snapshot_failure(es.alloc, ?result.status, failure, ?result.message, ?result.failure);
+    if (sel failed.err) { ret res[AnalysisResult, fail.Fail].err{failed.err}; }
     val analysis_source_r: opt[*lang_source.SourceFile] = analysis_source(?result, req.file);
     if (sel analysis_source_r.none) { ret res[AnalysisResult, fail.Fail].err{fail.message("an element is absent where the snapshot analysis expected it")}; }
     result.source_revision    = analysis_source_r.some.revision;
@@ -557,6 +586,348 @@ pub fun resolved_type_of(result: *AnalysisResult, tid: ast_id.TypeId) res[type.T
     val checked: res[*fe_sema.SemaResult, fail.Fail] = sema_of(result);
     if (sel checked.err) { ret res[type.TypeId, fail.Fail].err{checked.err}; }
     ret res[type.TypeId, fail.Fail].ok{buffer_resolved_type(result.editor, result.file, tid)};
+}
+
+# the build selection a project snapshot is analyzed under, over mach's own for the root; an
+# empty field takes mach's choice for its axis, as the command line does when it names none
+# ---
+# artifact: the declared artifact name, or ""
+# target:   the declared target name, or ""
+# profile:  the declared profile name, or ""
+pub rec ProjectSelection {
+    artifact: str;
+    target:   str;
+    profile:  str;
+}
+
+# an open buffer's text, which a snapshot reads in place of the file at `path`
+pub rec ProjectBuffer {
+    path: str;
+    text: str;
+}
+
+# what one project_open call asks for; every string and the buffer array are borrowed only
+# during the call
+# ---
+# root:         the project's directory, the one holding its mach.toml
+# phase:        how far the frontend runs, PHASE_PARSE, PHASE_RESOLVE or PHASE_SEMA
+# selection:    the overrides of mach's selection, empty for none
+# buffers:      the open buffers, nil with buffer_count 0
+# buffer_count: how many buffers
+pub rec ProjectRequest {
+    root:         str;
+    phase:        AnalysisPhase;
+    selection:    ProjectSelection;
+    buffers:      *ProjectBuffer;
+    buffer_count: u32;
+}
+
+# the whole project at a root analyzed for a tool, every artifact's closure with the open
+# buffers' modules beside it. the envelope fields are owned as AnalysisResult's are; the module
+# products borrow the Session the snapshot was opened in and expire with its next query
+# operation. release exactly once with project_dnit, never copy it as a second owner
+# ---
+# alloc:       the Session's allocator, which owns every field below
+# session:     the Session the snapshot was opened in and whose overlays it holds
+# phase:       the phase it was opened to
+# loaded:      whether `project` holds a project; false when the project could not be loaded
+# status:      the frontend's standing over every module, accepted, rejected or internal
+# failure:     the operational failure that kept the project from loading, absent when it loaded
+# message:     the failure's text, or the internal standing's, "" for neither
+# diagnostics: the owned store, with related locations, fix edits and lost-diagnostic evidence
+# sources:     the owned source versions every diagnostic location refers to
+pub rec ProjectSnapshot {
+    alloc:           *A.Allocator;
+    session:         *session.Session;
+    phase:           AnalysisPhase;
+    loaded:          bool;
+    project:         project.Project;
+    overlays:        Vector[str];
+    query_operation: u64;
+    query_revision:  query.Revision;
+    status:          fail.PhaseStatus;
+    failure:         opt[fail.Fail];
+    message:         str;
+    diagnostics:     *diagnostic.DiagnosticStore;
+    sources:         Vector[AnalysisSource];
+}
+
+# a request for the project at `root` to `phase`, on mach's own selection and with no buffers
+pub fun project_request(root: str, phase: AnalysisPhase) ProjectRequest {
+    ret ProjectRequest{root: root, phase: phase, selection: ProjectSelection{artifact: "", target: "", profile: ""}};
+}
+
+# analyze the project at a root on the cell mach selects for it, over the union of its artifacts,
+# with each open buffer's text read in place of its file. the request is composed from the
+# manifest and the selection as `mach check` composes it, so a tool never restates a build. the
+# Session is any the caller owns, not one an EditorSession serves, so a snapshot can be opened
+# off the thread that serves open buffers; it holds one snapshot at a time. ok means the owned
+# envelope was produced: read status for the standing and failure for a project that could not
+# load. the buffers' overlays stay set on the Session until project_dnit
+# ---
+# s:   the Session; it must outlive the snapshot
+# req: the request
+# ret: the snapshot, released with project_dnit, or the operational failure, owned through the
+#      Session's allocator and released with fail.dnit
+pub fun project_open(s: *session.Session, req: *ProjectRequest) res[ProjectSnapshot, fail.Fail] {
+    if (req == nil || req.phase > PHASE_SEMA || str_len(req.root) == 0 || (req.buffer_count > 0 && req.buffers == nil)) {
+        ret res[ProjectSnapshot, fail.Fail].err{fail.message("project analysis requires a root, a valid phase and its buffers")};
+    }
+    if (s.queries.operation_active || s.queries.presentation_pending) {
+        ret res[ProjectSnapshot, fail.Fail].err{fail.message("project analysis cannot nest active query use")};
+    }
+    var snap: ProjectSnapshot = ProjectSnapshot{
+        alloc:    s.alloc, session: s, phase: req.phase, status: fail.accepted(),
+        overlays: collections_vector.init[str](s.alloc), sources: collections_vector.init[AnalysisSource](s.alloc)
+    };
+    var complete: bool = false;
+    fin {
+        # a release refused on top of a refused open leaves the overlays to the Session's teardown
+        if (!complete) { project_dnit(?snap); }
+    }
+    var i: u32 = 0;
+    for (i < req.buffer_count) {
+        val held: err[fail.Fail] = snapshot_overlay(?snap, req.buffers[i].path, req.buffers[i].text);
+        if (sel held.err) { ret res[ProjectSnapshot, fail.Fail].err{snapshot_fail(s, held.err)}; }
+        i = i + 1;
+    }
+    diagnostic.store_dnit(?s.diags);
+    s.diags = diagnostic.store_init(s.alloc);
+
+    var failure: opt[fail.Fail] = opt[fail.Fail].none{};
+    val work:    err[fail.Fail] = snapshot_load(?snap, req);
+    if (sel work.err) {
+        val f: fail.Fail = work.err;
+        failure = opt[fail.Fail].some{f};
+        if (sel f.reported || sel f.user) { fail.reject(?snap.status); }
+        or                                { fail.internal(?snap.status, fail.describe(f)); }
+    }
+    if (snap.loaded) { fail.merge(?snap.status, frontend.frontend_status(?snap.project)); }
+    val diagnosed: err[fail.Fail] = snapshot_diagnostics(s.alloc, s, ?snap.diagnostics, ?snap.sources);
+    if (sel diagnosed.err) { ret res[ProjectSnapshot, fail.Fail].err{snapshot_fail(s, diagnosed.err)}; }
+    val failed: err[fail.Fail] = snapshot_failure(s.alloc, ?snap.status, failure, ?snap.message, ?snap.failure);
+    if (sel failed.err) { ret res[ProjectSnapshot, fail.Fail].err{snapshot_fail(s, failed.err)}; }
+    snap.query_operation = s.queries.operation_sequence;
+    snap.query_revision  = s.queries.revision;
+    complete             = true;
+    ret res[ProjectSnapshot, fail.Fail].ok{snap};
+}
+
+fun snapshot_fail(s: *session.Session, f: fail.Fail) fail.Fail {
+    val kept: res[fail.Fail, A.Error] = fail.retain(s.alloc, f);
+    if (sel kept.err) { ret fail.message(OOM_FAIL_MESSAGE); }
+    ret kept.ok;
+}
+
+# set a buffer's overlay and record its path for project_dnit; a path given twice keeps the later text
+fun snapshot_overlay(snap: *ProjectSnapshot, path: str, text: str) err[fail.Fail] {
+    val cleaned: res[str, A.Error] = types_path.clean(snap.alloc, path);
+    if (sel cleaned.err) { ret err[fail.Fail].err{fail.refused(cleaned.err)}; }
+    var recorded: bool  = false;
+    var i:        usize = 0;
+    for (i < snap.overlays.len && !recorded) {
+        recorded = str_equals(snap.overlays.data[i], cleaned.ok);
+        i        = i + 1;
+    }
+    if (recorded) { str_free(snap.alloc, cleaned.ok); }
+    or {
+        val added: res[usize, A.Error] = collections_vector.push[str](?snap.overlays, cleaned.ok);
+        if (sel added.err) {
+            str_free(snap.alloc, cleaned.ok);
+            ret err[fail.Fail].err{fail.refused(added.err)};
+        }
+    }
+    ret session.set_overlay(snap.session, path, text);
+}
+
+# load the manifest, compose the request as `mach check` does and analyze the root's union
+fun snapshot_load(snap: *ProjectSnapshot, req: *ProjectRequest) err[fail.Fail] {
+    val s:    *session.Session                  = snap.session;
+    val read: res[manifest.Manifest, fail.Fail] = driver.load_manifest(s, req.root);
+    if (sel read.err) { ret err[fail.Fail].err{read.err}; }
+    var m:              manifest.Manifest = read.ok;
+    val manifest_alloc: *A.Allocator      = s.build_alloc;
+    fin { manifest.dnit(?m, manifest_alloc); }
+
+    var overrides: request.Overrides                    = request.overrides_init(s.alloc);
+    val composed:  res[request.BuildRequest, fail.Fail] = request.compose(s.alloc, ?s.interner, ?m, ?overrides, req.root,
+        request.GOAL_CHECK, req.selection.profile);
+    if (sel composed.err) { ret err[fail.Fail].err{composed.err}; }
+    var build: request.BuildRequest = composed.ok;
+    fin {
+        collections_vector.dnit[request.LinkToken](?build.link_tokens);
+        collections_vector.dnit[str](?build.lib_dirs);
+    }
+    build.artifact = req.selection.artifact;
+    build.target   = req.selection.target;
+
+    val id_text:  opt[str] = intern.get(?s.interner, m.id);
+    val src_text: opt[str] = intern.get(?s.interner, m.src);
+    if (sel id_text.none)  { ret err[fail.Fail].err{fail.message("editor: manifest project id or src dir not interned")}; }
+    if (sel src_text.none) { ret err[fail.Fail].err{fail.message("editor: manifest project id or src dir not interned")}; }
+    var roots: *intern.StrId = nil;
+    if (req.buffer_count > 0) {
+        val allocated: res[*intern.StrId, A.Error] = A.allocate[intern.StrId](s.alloc, req.buffer_count::usize);
+        if (sel allocated.err) { ret err[fail.Fail].err{fail.refused(allocated.err)}; }
+        roots = allocated.ok;
+    }
+    fin {
+        if (roots != nil) { A.deallocate[intern.StrId](s.alloc, roots, req.buffer_count::usize); }
+    }
+    var count: u32 = 0;
+    var i:     u32 = 0;
+    for (i < req.buffer_count) {
+        val name: res[opt[intern.StrId], fail.Fail] = buffer_root_fqn(s.alloc, ?s.interner, req.buffers[i].path, req.root,
+            id_text.some, src_text.some);
+        if (sel name.err) { ret err[fail.Fail].err{name.err}; }
+        if (sel name.ok.some) {
+            roots[count] = name.ok.some;
+            count        = count + 1;
+        }
+        i = i + 1;
+    }
+
+    val analyzed: res[project.Project, fail.Fail] = root_analyze(s, ?m, req.root, ?build, roots, count, snap.phase);
+    if (sel analyzed.err) { ret err[fail.Fail].err{analyzed.err}; }
+    snap.project = analyzed.ok;
+    snap.loaded  = true;
+    ret err[fail.Fail].ok{};
+}
+
+# release a snapshot: its project, the overlays it set on its Session and everything it owns. a
+# zero snapshot is a no-op. check the result: a failure leaves the snapshot intact for a retry
+# ---
+# snap: the snapshot; zeroed on success so a second call is a no-op
+pub fun project_dnit(snap: *ProjectSnapshot) err[fail.Fail] {
+    if (snap.alloc == nil) { ret err[fail.Fail].ok{}; }
+    var removals: Vector[session.PreparedOverlay] = collections_vector.init[session.PreparedOverlay](snap.alloc);
+    fin {
+        var j: usize = 0;
+        for (j < removals.len) {
+            session.discard_overlay(?removals.data[j]);
+            j = j + 1;
+        }
+        collections_vector.dnit[session.PreparedOverlay](?removals);
+    }
+    var i: usize = 0;
+    for (i < snap.overlays.len) {
+        val prepared: res[session.PreparedOverlay, fail.Fail] = session.prepare_overlay(snap.session, snap.overlays.data[i], nil, true);
+        if (sel prepared.err) { ret err[fail.Fail].err{prepared.err}; }
+        var overlay: session.PreparedOverlay = prepared.ok;
+        val added:   res[usize, A.Error]     = collections_vector.push[session.PreparedOverlay](?removals, overlay);
+        if (sel added.err) {
+            session.discard_overlay(?overlay);
+            ret err[fail.Fail].err{fail.refused(added.err)};
+        }
+        i = i + 1;
+    }
+    if (snap.loaded) { project.dnit_project(?snap.project); }
+    # a removal moves the last overlay into its place, so the highest index goes first
+    sort.sort_by[session.PreparedOverlay](removals.data, removals.len, removal_order);
+    i = 0;
+    for (i < removals.len) {
+        session.commit_overlay(?removals.data[i]);
+        i = i + 1;
+    }
+    i = 0;
+    for (i < snap.overlays.len) {
+        str_free(snap.alloc, snap.overlays.data[i]);
+        i = i + 1;
+    }
+    collections_vector.dnit[str](?snap.overlays);
+    envelope_dnit(snap.alloc, snap.diagnostics, ?snap.sources);
+    str_free(snap.alloc, snap.message);
+    if (sel snap.failure.some) { fail.places_dnit(snap.alloc, snap.failure.some); }
+    @snap = ProjectSnapshot{};
+    ret err[fail.Fail].ok{};
+}
+
+# how many modules the snapshot loaded; module indices run from 0 below it
+pub fun project_module_count(snap: *ProjectSnapshot) u32 {
+    if (snap.alloc == nil || !snap.loaded) { ret 0; }
+    ret project.module_count(?snap.project);
+}
+
+# the module the snapshot loaded from the file at `path`, none when it loaded none
+pub fun project_module_by_path(snap: *ProjectSnapshot, path: str) opt[u32] {
+    if (snap.alloc == nil || !snap.loaded) { ret opt[u32].none{}; }
+    val cleaned: res[str, A.Error] = types_path.clean(snap.alloc, path);
+    if (sel cleaned.err) { ret opt[u32].none{}; }
+    fin { str_free(snap.alloc, cleaned.ok); }
+    var i: u32 = 0;
+    for (i < project.module_count(?snap.project)) {
+        val file: opt[*lang_source.SourceFile] = lang_source.get(?snap.session.sources, project.module_at(?snap.project, i).file_id);
+        if (sel file.some) {
+            if (str_equals(file.some.path, cleaned.ok)) { ret opt[u32].some{i}; }
+        }
+        i = i + 1;
+    }
+    ret opt[u32].none{};
+}
+
+# the module the snapshot loaded under the fully qualified name `fqn`, none when it loaded none
+pub fun project_module_by_fqn(snap: *ProjectSnapshot, fqn: str) opt[u32] {
+    if (snap.alloc == nil || !snap.loaded) { ret opt[u32].none{}; }
+    val mid: session.ModuleId = project.module_named(?snap.project, fqn);
+    if (module.is_nil(mid)) { ret opt[u32].none{}; }
+    ret opt[u32].some{mid::u32};
+}
+
+fun snapshot_module(snap: *ProjectSnapshot, index: u32) res[*project.ModuleEntry, fail.Fail] {
+    if (snap.alloc == nil || !snap.loaded) { ret res[*project.ModuleEntry, fail.Fail].err{fail.message("project snapshot holds no project")}; }
+    if (index >= project.module_count(?snap.project)) {
+        ret res[*project.ModuleEntry, fail.Fail].err{fail.message("project snapshot has no module at that index")};
+    }
+    ret res[*project.ModuleEntry, fail.Fail].ok{project.module_at(?snap.project, index)};
+}
+
+# a module's fully qualified name, borrowed from the snapshot's Session
+pub fun project_module_fqn(snap: *ProjectSnapshot, index: u32) res[str, fail.Fail] {
+    val m: res[*project.ModuleEntry, fail.Fail] = snapshot_module(snap, index);
+    if (sel m.err) { ret res[str, fail.Fail].err{m.err}; }
+    ret res[str, fail.Fail].ok{intern.text(?snap.session.interner, m.ok.fqn)};
+}
+
+# the source file a module was read from, whose version the snapshot analyzed
+pub fun project_module_file(snap: *ProjectSnapshot, index: u32) res[lang_source.FileId, fail.Fail] {
+    val m: res[*project.ModuleEntry, fail.Fail] = snapshot_module(snap, index);
+    if (sel m.err) { ret res[lang_source.FileId, fail.Fail].err{m.err}; }
+    ret res[lang_source.FileId, fail.Fail].ok{m.ok.file_id};
+}
+
+# a module whose products are still the ones the snapshot's analysis published
+fun snapshot_view(snap: *ProjectSnapshot, index: u32) res[*project.ModuleEntry, fail.Fail] {
+    val m: res[*project.ModuleEntry, fail.Fail] = snapshot_module(snap, index);
+    if (sel m.err) { ret m; }
+    if (snap.query_operation != snap.session.queries.operation_sequence || snap.query_revision != snap.session.queries.revision) {
+        ret res[*project.ModuleEntry, fail.Fail].err{fail.message("project snapshot view has expired")};
+    }
+    ret m;
+}
+
+# a module's AST, under ast_of's rules over the snapshot's Session; nil when the module has none
+pub fun project_ast_of(snap: *ProjectSnapshot, index: u32) res[*ast.Ast, fail.Fail] {
+    val m: res[*project.ModuleEntry, fail.Fail] = snapshot_view(snap, index);
+    if (sel m.err) { ret res[*ast.Ast, fail.Fail].err{m.err}; }
+    val shown: opt[frontend.ParsedModule] = frontend.parsed(?snap.project, m.ok);
+    if (sel shown.none) { ret res[*ast.Ast, fail.Fail].ok{nil}; }
+    ret res[*ast.Ast, fail.Fail].ok{shown.some.a};
+}
+
+# a module's resolve product, under resolve_of's rules; nil when the module did not reach resolution
+pub fun project_resolve_of(snap: *ProjectSnapshot, index: u32) res[*resolve.ResolveResult, fail.Fail] {
+    val m: res[*project.ModuleEntry, fail.Fail] = snapshot_view(snap, index);
+    if (sel m.err)                  { ret res[*resolve.ResolveResult, fail.Fail].err{m.err}; }
+    if (snap.phase < PHASE_RESOLVE) { ret res[*resolve.ResolveResult, fail.Fail].err{fail.message("analysis did not request resolution")}; }
+    ret res[*resolve.ResolveResult, fail.Fail].ok{frontend.resolved(?snap.project, m.ok)};
+}
+
+# a module's sema product, under sema_of's rules; nil when the module was not type checked
+pub fun project_sema_of(snap: *ProjectSnapshot, index: u32) res[*fe_sema.SemaResult, fail.Fail] {
+    val m: res[*project.ModuleEntry, fail.Fail] = snapshot_view(snap, index);
+    if (sel m.err)                { ret res[*fe_sema.SemaResult, fail.Fail].err{m.err}; }
+    if (snap.phase != PHASE_SEMA) { ret res[*fe_sema.SemaResult, fail.Fail].err{fail.message("analysis did not request type checking")}; }
+    ret res[*fe_sema.SemaResult, fail.Fail].ok{frontend.typed(?snap.project, m.ok)};
 }
 
 # an editor facade over a caller-owned Session, borrowed for serial use; neither may move
@@ -1168,6 +1539,42 @@ fun proj_roots_has(es: *EditorSession, fqn: intern.StrId) bool {
     ret false;
 }
 
+# the module an open buffer at `path` is loaded as beside the project at `root`: none when the
+# buffer belongs to another project or lies outside the source directory
+# ---
+# id_text:  the project id, the module path's first segment
+# src_text: the manifest's source directory, relative to `root`
+fun buffer_root_fqn(alloc: *A.Allocator, itn: *intern.Interner, path: str, root: str, id_text: str,
+    src_text: str) res[opt[intern.StrId], fail.Fail] {
+    val owner_r: res[opt[str], fail.Fail] = discover_project_root(alloc, path);
+    if (sel owner_r.err) { ret res[opt[intern.StrId], fail.Fail].err{owner_r.err}; }
+    val owner: opt[str] = owner_r.ok;
+    if (sel owner.none) { ret res[opt[intern.StrId], fail.Fail].ok{opt[intern.StrId].none{}}; }
+    val same: bool = str_equals(owner.some, root);
+    str_free(alloc, owner.some);
+    if (!same) { ret res[opt[intern.StrId], fail.Fail].ok{opt[intern.StrId].none{}}; }
+    val relative: res[opt[str], fail.Fail] = relative_under(alloc, path, root, src_text);
+    if (sel relative.err)     { ret res[opt[intern.StrId], fail.Fail].err{relative.err}; }
+    if (sel relative.ok.none) { ret res[opt[intern.StrId], fail.Fail].ok{opt[intern.StrId].none{}}; }
+    val rel:  str                          = relative.ok.some;
+    val name: res[intern.StrId, fail.Fail] = module.compose_fqn(alloc, itn, id_text, rel);
+    str_free(alloc, rel);
+    if (sel name.err) { ret res[opt[intern.StrId], fail.Fail].err{name.err}; }
+    ret res[opt[intern.StrId], fail.Fail].ok{opt[intern.StrId].some{name.ok}};
+}
+
+# the project at `root` as an editor holds it: the union of every artifact, since an open buffer
+# belongs to whichever artifact reaches it, so every entry loads and each module's
+# `{artifact.<id>.out}` resolves in the requirements of the artifact that needs it. the extra
+# roots are the open buffers' modules, loaded beside the entries; the project comes back
+# whatever its phases decided
+fun root_analyze(s: *session.Session, m: *manifest.Manifest, root: str, req: *request.BuildRequest,
+    extra_roots: *intern.StrId, extra_root_count: u32, phase: driver.FrontendPhase) res[project.Project, fail.Fail] {
+    var rooted: request.BuildRequest = @req;
+    rooted.project_root = root;
+    ret driver.analyze_project_tolerant(s, m, ?rooted, project.ROOT_UNION, extra_roots, extra_root_count, phase);
+}
+
 fun proj_roots_rebuild(es: *EditorSession, root: str, id_text: str, src_text: str) err[fail.Fail] {
     val allocated: res[*intern.StrId, A.Error] = A.allocate[intern.StrId](es.alloc, es.buf_len::usize);
     if (sel allocated.err) { ret err[fail.Fail].err{fail.refused(allocated.err)}; }
@@ -1182,28 +1589,10 @@ fun proj_roots_rebuild(es: *EditorSession, root: str, id_text: str, src_text: st
         if (es.buffers[i].in_use) {
             val file: opt[*lang_source.SourceFile] = lang_source.get(?es.s.sources, es.buffers[i].file_id);
             if (sel file.none) { ret err[fail.Fail].err{fail.message("open editor buffer has no source identity")}; }
-            val owner_r: res[opt[str], fail.Fail] = discover_project_root(es.alloc, file.some.path);
-            if (sel owner_r.err) { ret err[fail.Fail].err{owner_r.err}; }
-            val owner: opt[str] = owner_r.ok;
-            if (sel owner.none) {
-                i = i + 1;
-                cnt;
-            }
-            val same: bool = str_equals(owner.some, root);
-            str_free(es.alloc, owner.some);
-            if (!same) {
-                i = i + 1;
-                cnt;
-            }
-            val relative: res[opt[str], fail.Fail] = relative_under(es.alloc,
-                file.some.path, root, src_text);
-            if (sel relative.err) { ret err[fail.Fail].err{relative.err}; }
-            if (sel relative.ok.some) {
-                val rel:  str                          = relative.ok.some;
-                val name: res[intern.StrId, fail.Fail] = module.compose_fqn(es.alloc, ?es.s.interner, id_text, rel);
-                str_free(es.alloc, rel);
-                if (sel name.err) { ret err[fail.Fail].err{name.err}; }
-                roots[count] = name.ok;
+            val name: res[opt[intern.StrId], fail.Fail] = buffer_root_fqn(es.alloc, ?es.s.interner, file.some.path, root, id_text, src_text);
+            if (sel name.err) { ret err[fail.Fail].err{name.err}; }
+            if (sel name.ok.some) {
+                roots[count] = name.ok.some;
                 count        = count + 1;
             }
         }
@@ -1603,16 +1992,9 @@ fun proj_ensure(es: *EditorSession, fid: lang_source.FileId) res[opt[*project.Mo
     val prior_build: *A.Allocator = es.s.build_alloc;
     es.s.build_alloc = ?es.proj_alloc;
 
-    var req: request.BuildRequest = want_req;
-    req.project_root = root;
-
     val prior_retainer: retention.RetainerId = es.s.retention.active;
     es.s.retention.active = holder.ok;
-    # an editor session is the union of every artifact: an open buffer belongs to
-    # whichever artifact reaches it, so every entry loads and each module's
-    # `{artifact.<id>.out}` resolves in the requirements of the artifact that needs it
-    val ap_r: res[project.Project, fail.Fail] = driver.analyze_project_tolerant(es.s, ?m, ?req, project.ROOT_UNION,
-        es.proj_roots, es.proj_root_count, want_phase);
+    val ap_r: res[project.Project, fail.Fail] = root_analyze(es.s, ?m, root, ?want_req, es.proj_roots, es.proj_root_count, want_phase);
     es.s.build_alloc      = prior_build;
     es.s.retention.active = prior_retainer;
 
