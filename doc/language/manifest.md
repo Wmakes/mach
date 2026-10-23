@@ -340,7 +340,7 @@ comptime member, `$mach.build.extensions.<name>` (see [`$mach`](comptime-mach.md
 | `isa` | Baseline | Extensions |
 |-------|----------|------------|
 | `x86_64` | SSE2 | `ssse3`, `sse41`, `sse42`, `sha`, `fsgsbase`, `popcnt`, `lzcnt`, `bmi1`, `bmi2`, `cx16`, `avx`, `avx2`, `fma`, `movbe`, `f16c`, `avx512f`, `avx512bw`, `avx512cd`, `avx512dq`, `avx512vl`, `aes`, `pclmul` |
-| `aarch64` | AdvSIMD | `sha2`, `sb`, `aes`, `pmull`, `fp16` |
+| `aarch64` | the target's `baseline` | `FEAT_SHA1`, `FEAT_SB`, `FEAT_AES`, `FEAT_PMULL`, `FEAT_FP16` |
 | `riscv64`, `riscv32` | the target's `baseline` | `i`, `m`, `a`, `f`, `d`, `c`, `zicond`, `zicsr`, `zifencei`, `zfhmin`, `zfh`, `zkt` |
 | `spirv` | | `float16`, `int8`, `int16`, `int64`, `float64`, `zero_init_workgroup`, `storage_read_without_format`, `storage_write_without_format`, `vulkan_memory_model`, `vulkan_memory_model_device_scope`, `buffer_device_address`, `subgroup_arithmetic`, `subgroup_clustered`, `subgroup_vote`, `subgroup_ballot`, `subgroup_shuffle`, `subgroup_shuffle_relative`, `subgroup_quad`, `subgroup_graphics_stages`, `buffer_int64_atomics`, `shared_int64_atomics`, `buffer_float32_atomics`, `buffer_float32_atomic_add`, `buffer_float32_atomic_min_max`, `buffer_float64_atomics`, `buffer_float64_atomic_add`, `buffer_float64_atomic_min_max`, `shared_float32_atomics`, `shared_float32_atomic_add`, `shared_float32_atomic_min_max`, `shared_float64_atomics`, `shared_float64_atomic_add`, `shared_float64_atomic_min_max`, `buffer_float16_atomics`, `buffer_float16_atomic_add`, `buffer_float16_atomic_min_max`, `shared_float16_atomics`, `shared_float16_atomic_add`, `shared_float16_atomic_min_max`, `image_int64_atomics`, `image_float32_atomics`, `image_float32_atomic_add`, `image_float32_atomic_min_max`, `storage_image_multisample`, `resource_min_lod`, `image_gather_extended`, `maintenance8`, `storage_buffer_16bit_access`, `uniform_and_storage_buffer_16bit_access`, `storage_push_constant16`, `storage_input_output16`, `storage_buffer_8bit_access`, `uniform_and_storage_buffer_8bit_access`, `storage_push_constant8` |
 
@@ -364,15 +364,20 @@ x86-64-v2, x86-64-v3, x86-64-v4
 The array must hold strings, each an identifier (`sse41`, not `sse4.1`) or a level
 spelling (`x86-64-v2`), listed once.
 
-The x86_64 and riscv names, what each implies and the x86-64 levels are read from
+The x86_64, aarch64 and riscv names, what each implies and the x86-64 levels are read from
 masc's extension catalog for the instruction set, and mach adds only which of its
-rows the compiler emits against. The aarch64 and spirv names are mach's own until a
-catalog names them one to one. A level is a bundle, never an axis of its own: each
+rows the compiler emits against. The spirv names are mach's own until a catalog
+names them. A name may cover several rows, as llvm's aarch64 `aes` covers
+`FEAT_AES` and `FEAT_PMULL` and `sha2` covers `FEAT_SHA1` and `FEAT_SHA256`: in
+`extensions` and `#[extensions(...)]` it selects every row it covers, and
+`$mach.build.extensions.<name>` answers for the one row it stands for, the one that
+implies the rest (`FEAT_PMULL` for `aes`). The table names each aarch64 row by masc's
+name for it. A level is a bundle, never an axis of its own: each
 name may imply others, and the selection is closed over that once, when the target
 resolves. `sse41` brings `ssse3` (the chain stops there; SSE3 is not a name),
 `sse42` brings `sse41`, `avx` brings `sse42`, `avx2`, `fma` and `f16c` bring `avx`,
 and every `avx512*` set brings `avx512f`, which brings `avx2`, `fma` and `f16c`. On
-aarch64 `pmull` brings `aes`. On riscv `d` brings
+aarch64 `FEAT_PMULL` brings `FEAT_AES`. On riscv `d` brings
 `f`, `zfh` brings `zfhmin`, `zfhmin` brings `f`, and `f` brings `zicsr`, as masc's
 riscv catalog has it, so `extensions = ["d"]` on `baseline = "rv64i"` selects
 `rv64ifd` with Zicsr. The baseline and the list feed one set: `baseline = "rv64i"`
@@ -580,9 +585,10 @@ emits a finished GPU module rather than machine code (see
 ### RISC-V baselines
 
 `isa` names the architecture, and `baseline` the selection the target stands on,
-spelled as masc's riscv catalog spells one. A target with an operating system that
-names no baseline stands on that system's **floor** for the isa: `riscv64` is
-`rv64gc`. A `freestanding` target must name its baseline, since the chip decides
+spelled as masc's catalog for the isa spells one. A target with an operating system that
+names no baseline stands on the **floor** mink states for that system and isa:
+`riscv64` on `linux` is `rv64gc`, and `aarch64` on `linux` is `armv8-a+fp+simd`. A
+`freestanding` target must name its baseline, since the chip decides
 it and a default would fault on hardware that lacks an extension; leaving it out is
 refused (`target.baseline_required`). A baseline such as `rv32imc` or `rv64imafd`
 selects a smaller machine, and `extensions` adds names on top of it:
@@ -599,7 +605,7 @@ masc reads the baseline, closes it over the catalog's implications (`g` is IMAFD
 plus Zicsr and Zifencei, D brings F and F brings Zicsr) and says whether the
 architecture enters it. A baseline masc's catalog refuses, or one of the other
 width (`rv64gc` on `riscv32`) or the E base, is refused naming the baseline and the
-isa. An isa whose catalog spells no selection (`x86_64`, `aarch64`, `spirv`) refuses
+isa. An isa whose catalog spells no selection (`x86_64`, `spirv`) refuses
 `baseline` outright, naming the isa: name what it adds with `extensions`.
 
 mach emits against I, M, A, F, D, C, Zicond, Zicsr, Zifencei, Zfhmin, Zfh and Zkt.

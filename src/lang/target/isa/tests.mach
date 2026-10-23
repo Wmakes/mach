@@ -1303,7 +1303,7 @@ test ct_mul_query__agrees_with_the_lowering_gate {
     if (sel make_r.err) { ret 1; }
     var tuples: [5]CtTuple = [5]CtTuple{
         CtTuple{isa_name: "aarch64", os_name: "linux", abi_name: "aapcs64", of_name: "elf"},
-        CtTuple{isa_name: "aarch64", os_name: "freestanding", abi_name: "aapcs64", of_name: "elf"},
+        CtTuple{isa_name: "aarch64", baseline: "armv8-a+fp+simd", os_name: "freestanding", abi_name: "aapcs64", of_name: "elf"},
         CtTuple{isa_name: "riscv64", baseline: "rv64gc_zkt", os_name: "linux", abi_name: "lp64d", of_name: "elf"},
         CtTuple{isa_name: "riscv64", baseline: "rv64gc", os_name: "linux", abi_name: "lp64d", of_name: "elf"},
         CtTuple{isa_name: "spirv", os_name: "vulkan", abi_name: "spirv", of_name: "spirv"}
@@ -1692,7 +1692,7 @@ test ct_mul__refuses_every_undeclared_isa_os_and_condition {
     if (ct_mul_refused(?alloc, "riscv64", "rv64gc", "linux", "lp64d", "elf") != 0)                   { bad = bad | 4; }
     if (ct_mul_refused(?alloc, "riscv64", "rv64imafd_zicsr_zifencei", "linux", "lp64d", "elf") != 0) { bad = bad | 8; }
     if (ct_mul_refused(?alloc, "riscv64", "rv64i_zkt", "linux", "lp64", "elf") != 0)                 { bad = bad | 16; }
-    if (ct_mul_refused(?alloc, "aarch64", "", "freestanding", "aapcs64", "elf") != 0)                { bad = bad | 128; }
+    if (ct_mul_refused(?alloc, "aarch64", "armv8-a+fp+simd", "freestanding", "aapcs64", "elf") != 0) { bad = bad | 128; }
     var control: CtTuple = CtTuple{isa_name: "riscv64", baseline: "rv64gc_zkt", os_name: "linux", abi_name: "lp64d", of_name: "elf"};
     var buf:     [16384]u8;
     var len:     usize   = 0;
@@ -1848,10 +1848,10 @@ test extensions__aes_and_carry_less_rows_need_their_extension {
     val c:       str = "aapcs64";
     val arm_aes: str = "fun f() {\n    asm aarch64 { aese v0.16b, v1.16b\n aesmc v0.16b, v0.16b }\n}\n";
     val arm_clm: str = "fun f() {\n    asm aarch64 { pmull v0.1q, v1.1d, v2.1d\n pmull2 v3.1q, v1.2d, v2.2d }\n}\n";
-    if (ext_codegen_at(a, "", l, c, "", arm_aes, "inline-asm instruction 'aese' needs the `aes` extension", 2, 5) != 0)                                      { ret 6; }
+    if (ext_codegen_at(a, "", l, c, "", arm_aes, "inline-asm instruction 'aese' needs the `FEAT_AES` extension", 2, 5) != 0)                                 { ret 6; }
     if (ext_codegen(a, "", l, c, "[\"aes\"]", arm_aes, "") != 0)                                                                                             { ret 7; }
     if (ext_codegen(a, "", l, c, "[\"pmull\"]", arm_aes, "") != 0)                                                                                           { ret 8; }
-    if (ext_codegen_at(a, "", l, c, "[\"aes\"]", arm_clm, "inline-asm instruction 'pmull' needs the `pmull` extension", 2, 5) != 0)                          { ret 9; }
+    if (ext_codegen_at(a, "", l, c, "[\"FEAT_AES\"]", arm_clm, "inline-asm instruction 'pmull' needs the `FEAT_PMULL` extension", 2, 5) != 0)                { ret 9; }
     if (ext_codegen(a, "", l, c, "[\"pmull\"]", arm_clm, "") != 0)                                                                                           { ret 10; }
     if (ext_codegen(a, "", l, c, "", "#[extensions(aes, pmull)]\nfun f() { asm aarch64 { aesimc v0.16b, v1.16b\n pmull v0.1q, v1.1d, v2.1d } }\n", "") != 0) { ret 11; }
     if (ext_answer(a, "", l, c, "[\"pmull\"]", "aes") != 1)                                                                                                  { ret 12; }
@@ -1891,7 +1891,7 @@ test build_extensions__answers_the_selected_isa_only {
     if (ext_probe("x86_64", "", "linux", "sysv64", "", unknown,
         "`$mach.build.extensions.avx9`: `avx9` is not an extension of isa 'x86_64'; its extensions are: ssse3, sse41, sha, fsgsbase, popcnt, lzcnt, bmi1, sse42, cx16, avx, avx2, bmi2, fma, movbe, f16c, avx512f, avx512bw, avx512cd, avx512dq, avx512vl, aes, pclmul") != 0) { ret 9; }
     if (ext_probe("aarch64", "", "linux", "aapcs64", "", "$if ($mach.build.extensions.sha == 1) { val X: u8 = 1; }\n",
-        "`$mach.build.extensions.sha`: `sha` is not an extension of isa 'aarch64'; its extensions are: sha2, sb, aes, pmull") != 0) { ret 16; }
+        "`$mach.build.extensions.sha`: `sha` is not an extension of isa 'aarch64'; its extensions are: FEAT_SHA1, FEAT_SB, FEAT_AES, FEAT_PMULL") != 0) { ret 16; }
     if (ext_probe("x86_64", "", "linux", "sysv64", "", "val X: u8 = $mach.build.extensions;\n", "names one extension") != 0) { ret 10; }
     # `&&` does not guard the right-hand side: the path is checked on its own,
     # so another isa's name needs the nested form under an arch guard
@@ -1982,7 +1982,7 @@ test extensions_decorator__checked_against_every_vocabulary {
     if (ext_probe(x, "", l, a, "", unknown,
         "`extensions` decorator: no extension catalog names `avx9` (read from masc's x86 catalog, ") != 0) { ret 8; }
     if (ext_probe(x, "", l, a, "", unknown, "ssse3, sse41, sha, fsgsbase, popcnt, lzcnt, bmi1") != 0)                          { ret 9; }
-    if (ext_probe(x, "", l, a, "", unknown, "sha2") != 0)                                                                      { ret 10; }
+    if (ext_probe(x, "", l, a, "", unknown, "FEAT_SHA1") != 0)                                                                 { ret 10; }
     if (ext_probe("riscv64", "rv64i", "freestanding", "lp64", "", "#[extensions(m, sha)]\nfun f() i32 { ret 0; }\n", "") != 0) { ret 11; }
     # a row only a target selects is never a function's, on its own isa or another's
     if (ext_probe("riscv64", "rv64i", "freestanding", "lp64", "", "#[extensions(f)]\nfun f() i32 { ret 0; }\n",
@@ -2040,7 +2040,7 @@ test manifest_extensions__checked_against_the_isa_vocabulary {
     if (ext_probe("x86_64", "", "linux", "sysv64", "[\"sha2\"]", ok,
         "`sha2` is not an extension or level of isa 'x86_64'; its extensions are: ssse3, sse41, sha, fsgsbase, popcnt, lzcnt, bmi1, sse42, cx16, avx, avx2, bmi2, fma, movbe, f16c, avx512f, avx512bw, avx512cd, avx512dq, avx512vl, aes, pclmul; its levels are: x86-64-v2, x86-64-v3, x86-64-v4") != 0) { ret 2; }
     if (ext_probe("aarch64", "", "linux", "aapcs64", "[\"sha\"]", ok,
-        "`sha` is not an extension of isa 'aarch64'; its extensions are: sha2, sb, aes, pmull") != 0) { ret 3; }
+        "`sha` is not an extension or level of isa 'aarch64'; its extensions are: FEAT_SHA1, FEAT_SB, FEAT_AES, FEAT_PMULL, FEAT_FP16") != 0) { ret 3; }
     if (ext_probe("x86_64", "", "linux", "sysv64", "[\"sse4.1\"]", ok, "is not an extension name or level") != 0) { ret 4; }
     # a level is a manifest spelling that expands to its members, beside names
     # or alone, and an unknown level names the known ones
@@ -2048,7 +2048,7 @@ test manifest_extensions__checked_against_the_isa_vocabulary {
     if (ext_probe("x86_64", "", "linux", "sysv64", "[\"x86-64-v5\"]", ok,
         "`x86-64-v5` is not an extension or level of isa 'x86_64'; its extensions are: ssse3, sse41, sha, fsgsbase, popcnt, lzcnt, bmi1, sse42, cx16, avx, avx2, bmi2, fma, movbe, f16c, avx512f, avx512bw, avx512cd, avx512dq, avx512vl, aes, pclmul; its levels are: x86-64-v2, x86-64-v3, x86-64-v4") != 0) { ret 9; }
     if (ext_probe("aarch64", "", "linux", "aapcs64", "[\"x86-64-v2\"]", ok,
-        "`x86-64-v2` is not an extension of isa 'aarch64'; its extensions are: sha2, sb, aes, pmull") != 0) { ret 10; }
+        "`x86-64-v2` is not an extension or level of isa 'aarch64'; its extensions are: FEAT_SHA1, FEAT_SB, FEAT_AES, FEAT_PMULL, FEAT_FP16") != 0) { ret 10; }
     if (ext_answer("x86_64", "", "linux", "sysv64", "[\"x86-64-v3\"]", "avx2") != 1)                              { ret 11; }
     if (ext_answer("x86_64", "", "linux", "sysv64", "[\"x86-64-v3\"]", "sse41") != 1)                             { ret 12; }
     if (ext_answer("x86_64", "", "linux", "sysv64", "[\"x86-64-v2\"]", "avx") != 0)                               { ret 13; }

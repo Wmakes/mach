@@ -35,6 +35,7 @@ use catalog_abi:  mach.lang.target.catalog.abi;
 use catalog_arch: mach.lang.target.catalog.arch;
 use catalog_os:   mach.lang.target.catalog.os;
 use mach.lang.target.extension;
+use target_host: mach.lang.target.host;
 use mach.lang.target.resolved;
 
 # one mach target cell and the tuple its owners spell it by
@@ -44,8 +45,9 @@ use mach.lang.target.resolved;
 # architecture: mink's architecture row
 # env:          the system's environment, `none` for a host under none
 # convention:   the member of the architecture's convention axis
-# baseline:     masc's spelling of the selection the cell stands on, to which
-#               a build adds the extensions mach selects
+# baseline:     masc's spelling of the selection a cell whose host states no
+#               floor stands on, nil where the host's floor is it. a build adds
+#               the extensions mach selects to it
 rec Named {
     os:           u32;
     arch:         u32;
@@ -60,19 +62,22 @@ rec Named {
 # x86-64's baseline as masc spells it
 val X86_64_BASE: str = "cmov,cx8,x87,fxsr,mmx,osfxsr,sce,sse,sse2";
 
-# every cell an owner assembles. riscv32 freestanding is rv32imac under ilp32,
-# as mach's riscv32 freestanding has always selected imac. darwin on aarch64 is
+# every cell an owner assembles. a hosted cell stands on its host's floor.
+# riscv32 freestanding is rv32imac under ilp32, as mach's riscv32 freestanding
+# has always selected imac, and aarch64 freestanding holds the fp and simd its
+# convention passes in. vulkan states its own, since mink's vulkan floor names no
+# SPIR-V version and mirl assembles no target from it. darwin on aarch64 is
 # darwinpcs, the convention it is called under
 val NAMED_COUNT: usize              = 10;
 val NAMED:       [NAMED_COUNT]Named = [NAMED_COUNT]Named{
-    Named{os: catalog_os.LINUX, arch: catalog_arch.X86_64, abi: catalog_abi.SYSV, system: "linux", architecture: "x86_64", env: "gnu", convention: "sysv64", baseline: X86_64_BASE},
-    Named{os: catalog_os.DARWIN, arch: catalog_arch.X86_64, abi: catalog_abi.SYSV, system: "darwin", architecture: "x86_64", env: "macos", convention: "sysv64", baseline: X86_64_BASE},
-    Named{os: catalog_os.WINDOWS, arch: catalog_arch.X86_64, abi: catalog_abi.WIN64, system: "windows", architecture: "x86_64", env: "msvc", convention: "win64", baseline: X86_64_BASE},
+    Named{os: catalog_os.LINUX, arch: catalog_arch.X86_64, abi: catalog_abi.SYSV, system: "linux", architecture: "x86_64", env: "gnu", convention: "sysv64", baseline: nil},
+    Named{os: catalog_os.DARWIN, arch: catalog_arch.X86_64, abi: catalog_abi.SYSV, system: "darwin", architecture: "x86_64", env: "macos", convention: "sysv64", baseline: nil},
+    Named{os: catalog_os.WINDOWS, arch: catalog_arch.X86_64, abi: catalog_abi.WIN64, system: "windows", architecture: "x86_64", env: "msvc", convention: "win64", baseline: nil},
     Named{os: catalog_os.FREESTANDING, arch: catalog_arch.X86_64, abi: catalog_abi.SYSV, system: "freestanding", architecture: "x86_64", env: "none", convention: "sysv64", baseline: X86_64_BASE},
-    Named{os: catalog_os.LINUX, arch: catalog_arch.AARCH64, abi: catalog_abi.AAPCS64, system: "linux", architecture: "aarch64", env: "gnu", convention: "aapcs64", baseline: "armv8-a"},
-    Named{os: catalog_os.DARWIN, arch: catalog_arch.AARCH64, abi: catalog_abi.AAPCS64, system: "darwin", architecture: "aarch64", env: "macos", convention: "darwinpcs", baseline: "armv8-a"},
-    Named{os: catalog_os.FREESTANDING, arch: catalog_arch.AARCH64, abi: catalog_abi.AAPCS64, system: "freestanding", architecture: "aarch64", env: "none", convention: "aapcs64", baseline: "armv8-a"},
-    Named{os: catalog_os.LINUX, arch: catalog_arch.RISCV64, abi: catalog_abi.LP64D, system: "linux", architecture: "riscv64", env: "gnu", convention: "lp64d", baseline: "rv64gc"},
+    Named{os: catalog_os.LINUX, arch: catalog_arch.AARCH64, abi: catalog_abi.AAPCS64, system: "linux", architecture: "aarch64", env: "gnu", convention: "aapcs64", baseline: nil},
+    Named{os: catalog_os.DARWIN, arch: catalog_arch.AARCH64, abi: catalog_abi.AAPCS64, system: "darwin", architecture: "aarch64", env: "macos", convention: "darwinpcs", baseline: nil},
+    Named{os: catalog_os.FREESTANDING, arch: catalog_arch.AARCH64, abi: catalog_abi.AAPCS64, system: "freestanding", architecture: "aarch64", env: "none", convention: "aapcs64", baseline: "armv8-a+fp+simd"},
+    Named{os: catalog_os.LINUX, arch: catalog_arch.RISCV64, abi: catalog_abi.LP64D, system: "linux", architecture: "riscv64", env: "gnu", convention: "lp64d", baseline: nil},
     Named{os: catalog_os.FREESTANDING, arch: catalog_arch.RISCV32, abi: catalog_abi.ILP32, system: "freestanding", architecture: "riscv32", env: "none", convention: "ilp32", baseline: "rv32imac"},
     Named{os: catalog_os.VULKAN, arch: catalog_arch.SPIRV, abi: catalog_abi.SPIRV, system: "vulkan", architecture: "spirv", env: "none", convention: "shader", baseline: "spv1.0,Shader"},
 };
@@ -91,14 +96,31 @@ fun named_of(os_id: u32, arch_id: u32, abi_id: u32) opt[*Named] {
     ret opt[*Named].none{};
 }
 
-# the target a named cell means, refused when mirl assembles none from its
-# tuple: the table here and the owners disagree. given back by mirl_target.release
-fun assembled(a: *A.Allocator, n: *Named) res[mirl_target.Target, fail.Fail] {
-    val tuple: Tuple                                        = Tuple{arch: view_of(n.architecture), system: view_of(n.system), env: view_of(n.env), convention: view_of(n.convention), baseline: view_of(n.baseline)};
+# the selection a named cell stands on: its own, else its host's floor
+fun baseline_of(a: *A.Allocator, n: *Named) res[str, fail.Fail] {
+    if (n.baseline != nil) { ret res[str, fail.Fail].ok{n.baseline}; }
+    val floor: res[opt[str], fail.Fail] = target_host.floor(a, n.os, n.arch, n.abi);
+    if (sel floor.err) { ret res[str, fail.Fail].err{floor.err}; }
+    if (sel floor.ok.none) {
+        ret res[str, fail.Fail].err{fail.formatted(a, "target: the host of {} {} states no floor for the cell to stand on", n.architecture, n.system)};
+    }
+    ret res[str, fail.Fail].ok{floor.ok.some};
+}
+
+# the target a named cell means over `baseline`, refused when mirl assembles none
+# from its tuple: a baseline that does not hold what the convention requires, or
+# the table here and the owners disagree. given back by mirl_target.release
+fun assembled(a: *A.Allocator, n: *Named, baseline: str) res[mirl_target.Target, fail.Fail] {
+    val tuple: Tuple                                        = Tuple{arch: view_of(n.architecture), system: view_of(n.system), env: view_of(n.env), convention: view_of(n.convention), baseline: view_of(baseline)};
     val made:  res[mirl_target.Target, mirl_target.Refusal] = mirl_target.assemble(a, tuple);
     if (sel made.err) {
+        if (sel made.err.requires) {
+            ret res[mirl_target.Target, fail.Fail].err{fail.formatted(a,
+                "target: baseline `{}` does not hold what calling convention `{}` requires on {}, so mirl assembles no target from it; state a baseline that holds it",
+                baseline, n.convention, n.architecture)};
+        }
         ret res[mirl_target.Target, fail.Fail].err{fail.formatted(a, "target: mirl assembles no target from {} {} {} {} {}: {}",
-            n.architecture, n.system, n.env, n.convention, n.baseline, mirl_target.rule(made.err))};
+            n.architecture, n.system, n.env, n.convention, baseline, mirl_target.rule(made.err))};
     }
     ret res[mirl_target.Target, fail.Fail].ok{made.ok};
 }
@@ -133,13 +155,21 @@ pub rec Owned {
 # the most extensions a build adds over a cell's baseline
 val ADDED_CAP: usize = 64;
 
-# what the owners state of the cell of `os_id`, `arch_id` and `abi_id` under the
+# what the owners state of the cell of `os_id`, `arch_id` and `abi_id` standing on
+# the selection the target spells, `spelled`, else the cell's own, under the
 # selection `bits` of mach's extension table `t`, none for a cell no owner
 # assembles yet
-pub fun owned_for(a: *A.Allocator, os_id: u32, arch_id: u32, abi_id: u32, t: *extension.Table, bits: u64) res[opt[Owned], fail.Fail] {
+pub fun owned_for(a: *A.Allocator, os_id: u32, arch_id: u32, abi_id: u32, spelled: opt[str], t: *extension.Table, bits: u64) res[opt[Owned], fail.Fail] {
     val n: opt[*Named] = named_of(os_id, arch_id, abi_id);
     if (sel n.none) { ret res[opt[Owned], fail.Fail].ok{opt[Owned].none{}}; }
-    val made: res[mirl_target.Target, fail.Fail] = assembled(a, n.some);
+    var baseline: str = nil;
+    if (sel spelled.some) { baseline = spelled.some; }
+    or {
+        val stands: res[str, fail.Fail] = baseline_of(a, n.some);
+        if (sel stands.err) { ret res[opt[Owned], fail.Fail].err{stands.err}; }
+        baseline = stands.ok;
+    }
+    val made: res[mirl_target.Target, fail.Fail] = assembled(a, n.some, baseline);
     if (sel made.err) { ret res[opt[Owned], fail.Fail].err{made.err}; }
     var target: mirl_target.Target = made.ok;
     fin { mirl_target.release(a, ?target); }
@@ -151,7 +181,7 @@ pub fun owned_for(a: *A.Allocator, os_id: u32, arch_id: u32, abi_id: u32, t: *ex
     if (sel target.baseline.required) {
         val chosen: err[mirl_basis.Error] = mirl_target.choose(?b, a, ?target, Slice[str]{data: ?names[0], size: count});
         if (sel chosen.err) {
-            ret res[opt[Owned], fail.Fail].err{fail.formatted(a, "target: mirl opens no build of {} {} over {}", n.some.architecture, n.some.system, n.some.baseline)};
+            ret res[opt[Owned], fail.Fail].err{fail.formatted(a, "target: mirl opens no build of {} {} over {}", n.some.architecture, n.some.system, baseline)};
         }
         basis = opt[*mirl_target.Basis].some{?b};
     }
@@ -206,7 +236,7 @@ fun registers_of(row: *mirl_target.Target, basis: opt[*mirl_target.Basis]) opt[l
 
 # the extents mirl's data layout of `row` gives every primitive under the build
 # `basis` opened, and the vector registers it fits vectors to. a pointer mirl
-# holds logically, with no representation in memory, has none
+# holds logically, or under an addressing model that holds no address of it, has none
 fun scalars_of(a: *A.Allocator, row: *mirl_target.Target, basis: opt[*mirl_target.Basis]) res[layout.Scalars, fail.Fail] {
     var t: types.Table = types.init(a);
     fin { types.dnit(?t); }
@@ -229,7 +259,7 @@ fun scalars_of(a: *A.Allocator, row: *mirl_target.Target, basis: opt[*mirl_targe
     val p: res[layout.Extent, mirl_target.Error] = extent_of(?l, ?t, types.Shape.pointer{types.Pointer{space: types.DEFAULT_SPACE}});
     if (sel p.ok) { s.pointer = opt[layout.Extent].some{p.ok}; }
     or (sel p.err) {
-        if (!(sel p.err.unsized)) { ret res[layout.Scalars, fail.Fail].err{fail.message("target: mirl lays out no pointer on this target")}; }
+        if (!(sel p.err.unsized) && !(sel p.err.unmodelled)) { ret res[layout.Scalars, fail.Fail].err{fail.message("target: mirl lays out no pointer on this target")}; }
     }
     s.vectors = registers_of(row, basis);
     s.held    = true;
@@ -295,7 +325,9 @@ test scalars_of__every_primitive_and_aggregate_agrees_with_mirl_on_every_target 
     page.make(?a);
     var i: usize = 0;
     for (i < NAMED_COUNT) {
-        val made: res[mirl_target.Target, fail.Fail] = assembled(?a, ?NAMED[i]);
+        val stands: res[str, fail.Fail] = baseline_of(?a, ?NAMED[i]);
+        if (sel stands.err) { ret 1; }
+        val made: res[mirl_target.Target, fail.Fail] = assembled(?a, ?NAMED[i], stands.ok);
         if (sel made.err) { ret 1; }
         var row: mirl_target.Target = made.ok;
         fin { mirl_target.release(?a, ?row); }

@@ -148,8 +148,9 @@ pub fun known(t: *Table, name: str, len: usize) bool {
     ret false;
 }
 
-# the bits `t` gives the extension `name[0..len]` names, 0 when it names none the code
-# generator emits against or names a level
+# the bits `t` gives every extension `name[0..len]` names, as an edit of a selection
+# by that name enables them, 0 when it names none the code generator emits against
+# or names a level
 pub fun bit_of(t: *Table, name: str, len: usize) u64 {
     if (t.catalog == nil) {
         var i: u32 = 0;
@@ -161,14 +162,9 @@ pub fun bit_of(t: *Table, name: str, len: usize) u64 {
     }
     val e: opt[*masc_extension.NameEntry] = entry_of(t, name, len);
     if (sel e.none) { ret 0; }
-    var out: u64 = 0;
-    var i:   u32 = 0;
-    for (i < e.some.rows.len) {
-        val id: requirement.Id = e.some.rows.at[i];
-        if (id < t.catalog.count) { out = out | bit_of_handle(t, id); }
-        i = i + 1;
-    }
-    ret out;
+    val rows: opt[requirement.Ids] = masc_extension.extensions_of(t.catalog, e.some);
+    if (sel rows.none) { ret 0; }
+    ret bits_of_ids(t, rows.some);
 }
 
 # the bits of the members of the level the catalog names `name[0..len]`, 0 when it

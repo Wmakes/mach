@@ -1,6 +1,7 @@
 use mach.lang.fail;
 use mach.lang.float;
 use mink_arch: mink.catalog.arch;
+use mink_os:   mink.catalog.os;
 use std.allocator.page;
 use collections_vector: std.collections.vector;
 use std.collections.vector.Vector;
@@ -49,6 +50,7 @@ use catalog_subsystem: mach.lang.target.catalog.subsystem;
 use mach.lang.target.extension;
 use extension_arm64: mach.lang.target.extension.arm64;
 use extension_x64:   mach.lang.target.extension.x64;
+use target_host:     mach.lang.target.host;
 use mach.lang.target.isa;
 use arm64_register:  mach.lang.target.isa.arm64.register;
 use isa_environment: mach.lang.target.isa.environment;
@@ -291,8 +293,14 @@ pub fun with_image(req: *TargetRequest, base: u64, stack_reserve: u64, stack_com
 }
 
 pub fun select_of(reg: *TargetRegistry, isa_name: str, os_name: str, abi_name: str, of_name: str) res[binding.Binding, fail.Fail] {
+    ret select_on(reg, isa_name, "", os_name, abi_name, of_name);
+}
+
+# select_of on the baseline a target names, "" for none
+pub fun select_on(reg: *TargetRegistry, isa_name: str, baseline_name: str, os_name: str, abi_name: str, of_name: str) res[binding.Binding, fail.Fail] {
     var req: TargetRequest = target_request(isa_name, os_name, abi_name);
     with_of(?req, of_name);
+    with_baseline(?req, baseline_name);
     ret resolve(reg, ?req);
 }
 
@@ -369,7 +377,14 @@ pub fun resolve(reg: *TargetRegistry, req: *TargetRequest) res[binding.Binding, 
 
     val of_vt: *target_of.OfVTable = opt_of_vt.some;
 
-    val base_r: res[u64, fail.Fail] = baseline_bits(?reg.alloc, os_vt, arch_vt, req.baseline_name);
+    # a baseline is the floor of a host that runs the isa, so an os that does not
+    # run it is refused before one is read
+    if (!lang_target_os.supports_isa(os_vt, arch_vt.id)) {
+        ret res[binding.Binding, fail.Fail].err{tuple.refusal(?reg.alloc, tuple.OS_NO_ISA, os_vt, arch_vt, abi_vt, of_vt)};
+    }
+    val spelled_r: res[opt[str], fail.Fail] = baseline_spelling(?reg.alloc, os_vt, arch_vt, abi_vt, req.baseline_name);
+    if (sel spelled_r.err) { ret res[binding.Binding, fail.Fail].err{spelled_r.err}; }
+    val base_r: res[u64, fail.Fail] = baseline_bits(?reg.alloc, arch_vt, spelled_r.ok);
     if (sel base_r.err) { ret res[binding.Binding, fail.Fail].err{base_r.err}; }
     val added_r: res[u64, fail.Fail] = requested_extensions(?reg.alloc, arch_vt, req);
     if (sel added_r.err) { ret res[binding.Binding, fail.Fail].err{added_r.err}; }
@@ -449,7 +464,10 @@ pub fun resolve(reg: *TargetRegistry, req: *TargetRequest) res[binding.Binding, 
     t.abi_id  = abi_vt.id;
     t.of_id   = of_vt.id;
 
-    t.dit_guaranteed = lang_target_os.dit_guaranteed_for(os_vt, arch_vt.id);
+    val caps_r: res[mink_os.Caps, fail.Fail] = target_host.caps(?reg.alloc, os_vt.id, arch_vt.id, abi_vt.id);
+    if (sel caps_r.err) { ret res[binding.Binding, fail.Fail].err{caps_r.err}; }
+    t.dit_guaranteed = (caps_r.ok & mink_os.DIT_GUARANTEED) != 0;
+    t.pie_default    = (caps_r.ok & mink_os.PIE_DEFAULT) != 0;
 
     val page_r: res[u64, fail.Fail] = tuple_page_size(?reg.alloc, os_vt, arch_vt, of_vt);
     if (sel page_r.err) { ret res[binding.Binding, fail.Fail].err{page_r.err}; }
@@ -490,9 +508,17 @@ pub fun resolve(reg: *TargetRegistry, req: *TargetRequest) res[binding.Binding, 
         }
     }
 
+    # the selection the owners' target stands on: the baseline with the extensions
+    # the target adds, so a convention an added extension carries holds over it
+    var stands: opt[str] = opt[str].none{};
+    if (sel spelled_r.ok.some) {
+        val wide: res[str, fail.Fail] = target_baseline.widened(?reg.alloc, catalog_arch.owner_of(arch_vt.id), selected_model.extension_table, spelled_r.ok.some, selected_model.extensions);
+        if (sel wide.err) { ret res[binding.Binding, fail.Fail].err{wide.err}; }
+        stands = opt[str].some{wide.ok};
+    }
     t.scalars = layout.scalars_none();
     t.nans    = resolved.nans_of_rule(selected_model.nan_rule);
-    val owned_r: res[opt[target_owner.Owned], fail.Fail] = target_owner.owned_for(?reg.alloc, os_vt.id, arch_vt.id, abi_vt.id, selected_model.extension_table, selected_model.extensions);
+    val owned_r: res[opt[target_owner.Owned], fail.Fail] = target_owner.owned_for(?reg.alloc, os_vt.id, arch_vt.id, abi_vt.id, stands, selected_model.extension_table, selected_model.extensions);
     if (sel owned_r.err) { ret res[binding.Binding, fail.Fail].err{owned_r.err}; }
     if (sel owned_r.ok.some) {
         val held: layout.Scalars = owned_r.ok.some.scalars;
@@ -509,29 +535,36 @@ pub fun resolve(reg: *TargetRegistry, req: *TargetRequest) res[binding.Binding, 
     ret res[binding.Binding, fail.Fail].ok{b};
 }
 
-# the bits the target's baseline selects: the one it names, else the instruction
-# set's default, each read by masc's catalog for it. a freestanding target names
-# its baseline, since the chip decides it and no default is right. an instruction
-# set whose catalog spells no selection takes no baseline and stands on its
-# model's own extensions. `os_vt` is nil for a matrix cell, which no target names
-fun baseline_bits(a: *A.Allocator, os_vt: *lang_target_os.OsVTable, arch_vt: *isa.IsaVTable, named: str) res[u64, fail.Fail] {
-    val owner: *mink_arch.Arch = catalog_arch.owner_of(arch_vt.id);
-    if (!target_baseline.takes_baseline(owner, arch_vt.model.extension_table)) {
+# the selection the target stands on, as masc's catalog for its isa spells it:
+# the one it names, else the floor its host states. a target whose host states no
+# floor, as every freestanding one, names its baseline, since the chip decides it
+# and no default is right. none for an instruction set whose catalog spells no
+# selection, which takes no baseline and stands on its model's own extensions
+fun baseline_spelling(a: *A.Allocator, os_vt: *lang_target_os.OsVTable, arch_vt: *isa.IsaVTable, abi_vt: *abi.AbiVTable, named: str) res[opt[str], fail.Fail] {
+    if (!target_baseline.takes_baseline(catalog_arch.owner_of(arch_vt.id), arch_vt.model.extension_table)) {
         if (!str_empty(named)) {
-            ret res[u64, fail.Fail].err{fail.formatted(a,
+            ret res[opt[str], fail.Fail].err{fail.formatted(a,
                 "target: isa '{}' takes no `baseline`: masc's extension catalog for it spells no selection; name what it adds with `extensions`", arch_vt.name)};
         }
-        ret res[u64, fail.Fail].ok{arch_vt.model.extensions};
+        ret res[opt[str], fail.Fail].ok{opt[str].none{}};
     }
-    if (str_empty(named) && os_vt != nil && os_vt.id == catalog_os.FREESTANDING) {
-        ret res[u64, fail.Fail].err{fail.formatted_user(a, diagnostic_kind.TARGET_BASELINE_REQUIRED,
-            "target: a freestanding '{}' target must state its `baseline`, the selection its chip implements: the chip decides it, so no default is right", arch_vt.name)};
+    if (!str_empty(named)) { ret res[opt[str], fail.Fail].ok{opt[str].some{named}}; }
+    val floor: res[opt[str], fail.Fail] = target_host.floor(a, os_vt.id, arch_vt.id, abi_vt.id);
+    if (sel floor.err) { ret res[opt[str], fail.Fail].err{floor.err}; }
+    if (sel floor.ok.none) {
+        ret res[opt[str], fail.Fail].err{fail.formatted_user(a, diagnostic_kind.TARGET_BASELINE_REQUIRED,
+            "target: a '{}' target on {} must state its `baseline`, the selection its chip implements: the system states no floor, so no default is right", arch_vt.name, os_vt.name)};
     }
-    var spelled: str = catalog_arch.default_baseline(arch_vt.id);
-    if (!str_empty(named)) { spelled = named; }
-    val picked: res[u64, fail.Fail] = target_baseline.select(a, owner, arch_vt.model.extension_table, spelled);
+    ret floor;
+}
+
+# the bits the selection `spelled` selects, read by masc's catalog for the isa,
+# the model's own extensions where the isa takes no baseline
+fun baseline_bits(a: *A.Allocator, arch_vt: *isa.IsaVTable, spelled: opt[str]) res[u64, fail.Fail] {
+    if (sel spelled.none) { ret res[u64, fail.Fail].ok{arch_vt.model.extensions}; }
+    val picked: res[u64, fail.Fail] = target_baseline.select(a, catalog_arch.owner_of(arch_vt.id), arch_vt.model.extension_table, spelled.some);
     if (sel picked.err) {
-        ret res[u64, fail.Fail].err{fail.formatted(a, "target: baseline `{}` on isa '{}': {}", spelled, arch_vt.name, fail.describe(picked.err))};
+        ret res[u64, fail.Fail].err{fail.formatted(a, "target: baseline `{}` on isa '{}': {}", spelled.some, arch_vt.name, fail.describe(picked.err))};
     }
     ret picked;
 }
@@ -596,14 +629,18 @@ fun select_isa(arch_vt: *isa.IsaVTable, base: u64, added: u64, model: *target_mo
 }
 
 # the instruction set a [target.*] table selects by naming a registered isa and no
-# baseline: the template narrowed to the isa's default baseline. model backs the
+# baseline: the template narrowed to its host's floor, or the whole template
+# where the host states none and a target names the baseline. model backs the
 # returned vtable's model pointer and must outlive it
-pub fun registered_selection(arch_vt: *isa.IsaVTable, model: *target_model.Machine) isa.IsaVTable {
+pub fun registered_selection(os_vt: *lang_target_os.OsVTable, arch_vt: *isa.IsaVTable, abi_vt: *abi.AbiVTable, model: *target_model.Machine) isa.IsaVTable {
     var a: A.Allocator;
     page.make(?a);
-    var base: u64                 = arch_vt.model.extensions;
-    val bits: res[u64, fail.Fail] = baseline_bits(?a, nil, arch_vt, "");
-    if (sel bits.ok) { base = bits.ok; }
+    var base:    u64                      = arch_vt.model.extensions;
+    val spelled: res[opt[str], fail.Fail] = baseline_spelling(?a, os_vt, arch_vt, abi_vt, "");
+    if (sel spelled.ok) {
+        val bits: res[u64, fail.Fail] = baseline_bits(?a, arch_vt, spelled.ok);
+        if (sel bits.ok) { base = bits.ok; }
+    }
     ret select_isa(arch_vt, base, 0, model);
 }
 
@@ -613,7 +650,7 @@ pub fun registered_selection(arch_vt: *isa.IsaVTable, model: *target_model.Machi
 # abi passes in
 pub fun registered_tuple_capability(os_vt: *lang_target_os.OsVTable, arch_vt: *isa.IsaVTable, abi_vt: *abi.AbiVTable, of_vt: *target_of.OfVTable) u32 {
     var model:    target_model.Machine;
-    val selected: isa.IsaVTable = registered_selection(arch_vt, ?model);
+    val selected: isa.IsaVTable = registered_selection(os_vt, arch_vt, abi_vt, ?model);
     ret tuple.capability(os_vt, ?selected, abi_vt, of_vt);
 }
 
@@ -1233,7 +1270,10 @@ test select__page_size_comes_from_the_tuple {
     val elf_r: res[binding.Binding, fail.Fail] = select_of(reg, "x86_64", "freestanding", "sysv64", "elf");
     if (sel elf_r.err)                     { ret 2; }
     if (elf_r.ok.target.page_size != 4096) { ret 3; }
-    val arm_r: res[binding.Binding, fail.Fail] = select_of(reg, "aarch64", "freestanding", "aapcs64", "elf");
+    var arm_q: TargetRequest = target_request("aarch64", "freestanding", "aapcs64");
+    with_of(?arm_q, "elf");
+    with_baseline(?arm_q, "armv8-a+fp+simd");
+    val arm_r: res[binding.Binding, fail.Fail] = resolve(reg, ?arm_q);
     if (sel arm_r.err)                     { ret 4; }
     if (arm_r.ok.target.page_size != 4096) { ret 5; }
     var rv_q: TargetRequest = target_request("riscv32", "freestanding", "ilp32");
@@ -2277,6 +2317,7 @@ test select_of__every_capable_tuple_is_selectable_and_the_census_is_stable {
                         with_of(?req, of_vt.name);
                         if (isa_vt.id == catalog_arch.RISCV32)                                        { with_baseline(?req, "rv32imafdc"); }
                         or (isa_vt.id == catalog_arch.RISCV64 && os_vt.id == catalog_os.FREESTANDING) { with_baseline(?req, "rv64gc"); }
+                        or (isa_vt.id == catalog_arch.AARCH64 && os_vt.id == catalog_os.FREESTANDING) { with_baseline(?req, "armv8-a+fp+simd"); }
                         val r: res[binding.Binding, fail.Fail] = resolve(reg, ?req);
                         if (sel r.ok) { selectable = selectable + 1; }
                     }

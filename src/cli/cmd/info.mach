@@ -191,7 +191,7 @@ fun collect_cells(a: *A.Allocator, reg: *lang_target.TargetRegistry, cap: *usize
                         cells[n].abi  = abi_r.some;
                         cells[n].of   = of_r.some;
                         var model:    target_model.Machine;
-                        val selected: isa.IsaVTable = lang_target.registered_selection(isa_r.some, ?model);
+                        val selected: isa.IsaVTable = lang_target.registered_selection(os_r.some, isa_r.some, abi_r.some, ?model);
                         lang_target.selection_spelling(?selected, ?model, ?cells[n].isa_name[0], 32);
                         n = n + 1;
                     }
@@ -491,14 +491,16 @@ test render_targets__lists_the_host_and_only_the_composable_tuples {
     hb[ho] = 0;
     if (!str_contains(text, (?hb[0])::str)) { ret 2; }
 
-    # the riscv rows carry masc's spelling of the default baseline, and only the
-    # calling conventions that baseline can carry
+    # a hosted riscv row carries masc's spelling of its host's floor and only the
+    # calling conventions the floor can carry. a freestanding row has no floor,
+    # since its target names the baseline, so it carries every convention the
+    # isa can
     if (!str_contains(text, "freestanding-riscv32"))          { ret 3; }
-    if (!str_contains(text, "isa=rv32imac"))                  { ret 4; }
+    if (!t_row(text, "freestanding-riscv32", "isa=rv32i"))    { ret 4; }
     if (!str_contains(text, "isa=rv64imafdc_zicsr_zifencei")) { ret 5; }
     if (str_contains(text, "isa=riscv32"))                    { ret 6; }
-    if (t_row(text, "freestanding-riscv32", "abi=ilp32f"))    { ret 7; }
-    if (t_row(text, "freestanding-riscv32", "abi=ilp32d"))    { ret 8; }
+    if (!t_row(text, "freestanding-riscv32", "abi=ilp32f"))   { ret 7; }
+    if (!t_row(text, "freestanding-riscv32", "abi=ilp32d"))   { ret 8; }
     if (!t_row(text, "freestanding-riscv32", "abi=ilp32"))    { ret 9; }
     if (!t_row(text, "linux-riscv64", "abi=lp64d"))           { ret 10; }
     if (!t_row(text, "freestanding-x86_64", "object=flat"))   { ret 11; }

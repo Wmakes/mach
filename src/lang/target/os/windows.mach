@@ -22,15 +22,12 @@ val FS_POLICY: catalog_os.FsPolicy = catalog_os.FsPolicy{
 
 val SUPPORTED_OFS: [1]str = [1]str{"coff"};
 
-# no DIT declaration: windows on aarch64 documents no user-settable PSTATE.DIT
-# contract yet, so a DIT_MODE multiply row is refused there
 val ISA_ROWS: [2]lang_target_os.IsaRow = [2]lang_target_os.IsaRow{
     lang_target_os.IsaRow{
         arch:      catalog_arch.X86_64,
         abis:      lang_target_os.AbiSet{names: [lang_target_os.ABI_MAX]str{"win64", "", "", ""}, len: 1},
         va_list:   lang_target_os.VaList{size: 8, align: 8},
         fs_policy: ?FS_POLICY,
-        pie_exec:  true,
     },
     lang_target_os.IsaRow{
         arch:      catalog_arch.AARCH64,

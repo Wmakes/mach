@@ -111,7 +111,7 @@ A name the selected isa does not declare is a compile error, never a silent 0, a
 
 ```
 `$mach.build.extensions.sha`: `sha` is not an extension of isa 'aarch64'; its
-extensions are: sha2, sb, aes, pmull, fp16
+extensions are: FEAT_SHA1, FEAT_SB, FEAT_AES, FEAT_PMULL, FEAT_FP16
 ```
 
 So a source that serves several isas nests the extension question under an

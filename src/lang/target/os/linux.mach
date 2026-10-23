@@ -61,17 +61,6 @@ val ISA_ROWS: [3]lang_target_os.IsaRow = [3]lang_target_os.IsaRow{
         page_size: 65536,
         va_list:   lang_target_os.VaList{size: 32, align: 8},
         fs_policy: ?AARCH64_FS_POLICY,
-        # linux guarantees PSTATE.DIT for an aarch64 process: the kernel exposes
-        # the processor's FEAT_DIT as HWCAP_DIT (1 << 24) in AT_HWCAP since
-        # v4.17 (commit 7206dc93a58f "arm64: Expose Arm v8.4 features",
-        # 2018-03; Documentation/arch/arm64/elf_hwcaps.rst: "Functionality
-        # implied by ID_AA64PFR0_EL1.DIT == 0b0001"), user code sets the bit
-        # with `msr dit, #1` (Arm ARM DDI 0487, "About PSTATE.DIT": a direct
-        # write to DIT is permitted at EL0), and PSTATE is saved to SPSR_EL1 on
-        # every exception entry and restored on return, so the bit outlives a
-        # context switch. no other instruction set has a DIT_MODE row, so no
-        # other declares it
-        dit_guaranteed: true,
     },
     lang_target_os.IsaRow{
         arch: catalog_arch.RISCV64,
@@ -100,12 +89,6 @@ pub val VTABLE: lang_target_os.OsVTable = lang_target_os.OsVTable{
     mapped_by_loader:   true,
     naming:             target_of.SystemNaming{static_prefix: "lib", static_suffix: ".a", executable_suffix: ""},
 };
-
-test vtable__wires_dit_guaranteed {
-    if (!lang_target_os.dit_guaranteed_for(?VTABLE, catalog_arch.AARCH64)) { ret 3; }
-    if (lang_target_os.dit_guaranteed_for(?VTABLE, catalog_arch.X86_64))   { ret 4; }
-    ret 0;
-}
 
 #[testing]
 fun policy_of(arch_id: u32) catalog_os.FsPolicy {

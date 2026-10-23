@@ -1342,8 +1342,10 @@ pub fun check_stack_keys(alloc: *A.Allocator, itn: *intern.Interner, reg: *lang_
         if (td.stack_reserve == 0 && td.stack_commit == 0) { cnt; }
         var of_name: str = "";
         if (!intern.str_is_nil(td.of)) { of_name = intern.text(itn, td.of); }
-        val tr: res[lang_target.Binding, fail.Fail] = lang_target.select_of(reg,
-            intern.text(itn, td.isa), intern.text(itn, td.os), intern.text(itn, td.abi), of_name);
+        var baseline: str = "";
+        if (!intern.str_is_nil(td.baseline)) { baseline = intern.text(itn, td.baseline); }
+        val tr: res[lang_target.Binding, fail.Fail] = lang_target.select_on(reg,
+            intern.text(itn, td.isa), baseline, intern.text(itn, td.os), intern.text(itn, td.abi), of_name);
         if (sel tr.err) { cnt; }
         val t: lang_target.Binding = tr.ok;
         if (t.of.carries_stack_size) { cnt; }

@@ -3087,13 +3087,13 @@ fun t_walk_alias_reload(tgt: *lang_target.Binding, m: *lang_mir.MirModule, f: *l
 # frames and encodes. returns 0 when the encoder's answer matches `needle`
 # (nil: must accept), else a code naming the step
 #[testing]
-fun t_walk_control(arch: str, os_name: str, abi: str, case_id: u32, inject: bool, needle: str) i32 {
+fun t_walk_control(arch: str, baseline: str, os_name: str, abi: str, case_id: u32, inject: bool, needle: str) i32 {
     var alloc:  A.Allocator;
     val make_r: err[A.Error] = page.make(?alloc);
     if (sel make_r.err) { ret 1; }
     var interner: intern.Interner = intern.init(?alloc);
     fin { intern.dnit(?interner); }
-    val ts: res[lang_target.Binding, fail.Fail] = lang_target.t_select(arch, os_name, abi);
+    val ts: res[lang_target.Binding, fail.Fail] = lang_target.t_select_on(arch, baseline, os_name, abi);
     if (sel ts.err) { ret 3; }
     var tgt: lang_target.Binding        = ts.ok;
     val nr:  res[intern.StrId, A.Error] = intern.add(?interner, "late");
@@ -3192,19 +3192,19 @@ val WALK_MUL:     str = "uses a secret value in a variable-latency integer multi
 # each control runs its public sibling first, which must pass, then injects the
 # secret after allocation, where only the physical walk sees it
 #[testing]
-fun t_walk_case(arch: str, os_name: str, abi: str, case_id: u32, needle: str) i32 {
-    if (t_walk_control(arch, os_name, abi, case_id, false, nil) != 0) { ret 1; }
-    ret t_walk_control(arch, os_name, abi, case_id, true, needle);
+fun t_walk_case(arch: str, baseline: str, os_name: str, abi: str, case_id: u32, needle: str) i32 {
+    if (t_walk_control(arch, baseline, os_name, abi, case_id, false, nil) != 0) { ret 1; }
+    ret t_walk_control(arch, baseline, os_name, abi, case_id, true, needle);
 }
 
 # aarch64 and riscv64 guard the divide with a branch on the divisor; x86-64's
 # u64 conversion tests the sign of the source
 test walk__rejects_a_late_branch {
-    var r: i32 = t_walk_case("aarch64", "linux", "aapcs64", WALK_CASE_DIV, WALK_BRANCH);
+    var r: i32 = t_walk_case("aarch64", "", "linux", "aapcs64", WALK_CASE_DIV, WALK_BRANCH);
     if (r != 0) { ret r; }
-    r = t_walk_case("riscv64", "linux", "lp64d", WALK_CASE_DIV, WALK_BRANCH);
+    r = t_walk_case("riscv64", "", "linux", "lp64d", WALK_CASE_DIV, WALK_BRANCH);
     if (r != 0) { ret 40 + r; }
-    r = t_walk_case("x86_64", "linux", "sysv64", WALK_CASE_UI_TO_FP, WALK_BRANCH);
+    r = t_walk_case("x86_64", "", "linux", "sysv64", WALK_CASE_UI_TO_FP, WALK_BRANCH);
     if (r != 0) { ret 80 + r; }
     ret 0;
 }
@@ -3212,11 +3212,11 @@ test walk__rejects_a_late_branch {
 # the reload scratch aliases a spilled secret and is then the base of a load
 # the vreg walk saw through a public vreg
 test walk__rejects_a_load_through_the_reload_scratch_of_a_spilled_secret {
-    var r: i32 = t_walk_case("x86_64", "linux", "sysv64", WALK_CASE_LOAD, WALK_ADDRESS);
+    var r: i32 = t_walk_case("x86_64", "", "linux", "sysv64", WALK_CASE_LOAD, WALK_ADDRESS);
     if (r != 0) { ret r; }
-    r = t_walk_case("aarch64", "linux", "aapcs64", WALK_CASE_LOAD, WALK_ADDRESS);
+    r = t_walk_case("aarch64", "", "linux", "aapcs64", WALK_CASE_LOAD, WALK_ADDRESS);
     if (r != 0) { ret 40 + r; }
-    r = t_walk_case("riscv64", "linux", "lp64d", WALK_CASE_LOAD, WALK_ADDRESS);
+    r = t_walk_case("riscv64", "", "linux", "lp64d", WALK_CASE_LOAD, WALK_ADDRESS);
     if (r != 0) { ret 80 + r; }
     ret 0;
 }
@@ -3226,15 +3226,15 @@ test walk__rejects_a_load_through_the_reload_scratch_of_a_spilled_secret {
 # aarch64's rows hold under PSTATE.DIT, which linux declares and freestanding
 # does not; riscv64 declares none
 test walk__a_late_variable_latency_use_follows_the_declared_rows {
-    var r: i32 = t_walk_case("x86_64", "linux", "sysv64", WALK_CASE_DIV, WALK_DIV);
+    var r: i32 = t_walk_case("x86_64", "", "linux", "sysv64", WALK_CASE_DIV, WALK_DIV);
     if (r != 0) { ret r; }
-    r = t_walk_case("x86_64", "linux", "sysv64", WALK_CASE_MUL, nil);
+    r = t_walk_case("x86_64", "", "linux", "sysv64", WALK_CASE_MUL, nil);
     if (r != 0) { ret 40 + r; }
-    r = t_walk_case("aarch64", "linux", "aapcs64", WALK_CASE_MUL, nil);
+    r = t_walk_case("aarch64", "", "linux", "aapcs64", WALK_CASE_MUL, nil);
     if (r != 0) { ret 80 + r; }
-    r = t_walk_case("aarch64", "freestanding", "aapcs64", WALK_CASE_MUL, WALK_MUL);
+    r = t_walk_case("aarch64", "armv8-a+fp+simd", "freestanding", "aapcs64", WALK_CASE_MUL, WALK_MUL);
     if (r != 0) { ret 120 + r; }
-    r = t_walk_case("riscv64", "linux", "lp64d", WALK_CASE_MUL, WALK_MUL);
+    r = t_walk_case("riscv64", "", "linux", "lp64d", WALK_CASE_MUL, WALK_MUL);
     if (r != 0) { ret 160 + r; }
     ret 0;
 }
