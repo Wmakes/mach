@@ -75,6 +75,7 @@ target_available: false when the requested target context was not acquired; host
 diagnostics: the owned store, with related locations, fix edits and lost-diagnostic evidence
 sources: the owned source versions every diagnostic location refers to; analysis_source
                   finds one by FileId
+tree: the owned tree of a parse_text result; nil for an analysis of a buffer
 
 ## fun analysis_request
 
@@ -106,10 +107,11 @@ the AST of the analyzed buffer. raw products borrow the current serial view: a l
 open, update, close, dnit, analyze, build or query operation expires the view, after
 which every checked accessor answers a Fail and a pointer already obtained must not be
 dereferenced. a rejected parse can still expose a partial AST; a fatal acquisition
-exposes nil
+exposes nil. a parse_text result owns its tree, which stays valid until analysis_dnit
 reached only by mach-lsp
 
-result: the envelope, whose EditorSession and Session must both still exist
+result: the envelope, whose EditorSession and Session must both still exist unless
+        parse_text made it
 ret: the borrowed AST, or the expiry failure
 
 ## fun resolve_of
@@ -206,6 +208,37 @@ success leaves unrelated Session cache entries and stable source identities in p
 destroy the Session only after this succeeds; there is no separate close-all
 
 es: the editor session; nil is a no-op
+
+## fun parse_text
+
+```mach
+pub fun parse_text(alloc: *A.Allocator, text: str) res[AnalysisResult, fail.Fail];
+```
+
+parse a text on its own, with no buffer, project or session: the text is copied into the
+result as its source under FILE_NIL, and lexical and syntax errors become the result's
+diagnostics. ok means the owned envelope was produced; read result.status for the parse's
+standing and result.failure for a fatal parse, whose tree is left empty. the tree is
+read with ast_of and lives until analysis_dnit, which releases the result exactly once.
+resolve_of and sema_of answer a phase failure
+reached only by mach-lsp
+
+alloc: owns the result; must outlive it
+text: the source, borrowed only during the call
+ret: the owned result, or the allocation failure
+
+## fun same_shape
+
+```mach
+pub fun same_shape(x: *AnalysisResult, y: *AnalysisResult) res[bool, fail.Fail];
+```
+
+whether two results' trees have the same shape: the same node kinds, and declaration
+flags, in the same order, with the same number of every node a tree holds. spans,
+names and literal values are not compared
+reached only by mach-lsp
+
+ret: whether the shapes match, or either tree's expiry failure
 
 ## fun fail_dnit
 
