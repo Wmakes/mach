@@ -63,6 +63,7 @@ use mirl_global: mirl.ir.global;
 use mirl.ir.global.GlobalData;
 use mirl.ir.global.Section;
 use mirl.ir.id;
+use mirl_language: mirl.ir.language;
 use mirl.ir.linkage.Linkage;
 use mirl_module: mirl.ir.module;
 use mirl_point:  mirl.ir.point;
@@ -130,8 +131,9 @@ pub fun unit_init(a: *A.Allocator, machine: *Machine, name: intern.StrId, root_p
     val made: res[mirl_module.Module, mirl_module.Error] = mirl_module.init(a, machine.tuple);
     if (sel made.err) { ret res[Unit, fail.Fail].err{fail.message("lower: mirl refused the target tuple")}; }
     var u: Unit;
-    u.name         = name;
-    u.m            = made.ok;
+    u.name = name;
+    u.m    = made.ok;
+    mirl_module.state_language(?u.m, ?mirl_language.MACH);
     u.fns          = collections_vector.init[FnInfo](a);
     u.exports      = collections_vector.init[intern.StrId](a);
     u.root_project = root_project;
