@@ -155,43 +155,109 @@ pub rec Owned {
 # the most extensions a build adds over a cell's baseline
 val ADDED_CAP: usize = 64;
 
+# the target a cell means as mirl assembled it, and the build basis its selection opened,
+# which lowering lays types out under and compilation adds the selection's names to
+# ---
+# tuple: the five parts the target was assembled from, which name its modules
+# names: the names of masc's catalog the selection adds over the baseline
+pub rec Assembled {
+    tuple:  Tuple;
+    target: mirl_target.Target;
+    basis:  mirl_target.Basis;
+    based:  bool;
+    names:  [ADDED_CAP]str;
+    count:  usize;
+}
+
+# the target of the cell of `os_id`, `arch_id` and `abi_id` standing on the selection the
+# target spells, `spelled`, else the cell's own, under the selection `bits` of mach's
+# extension table `t`, none for a cell no owner assembles yet. given back by release
+pub fun assemble_for(a: *A.Allocator, os_id: u32, arch_id: u32, abi_id: u32, spelled: opt[str], t: *extension.Table, bits: u64) res[opt[*Assembled], fail.Fail] {
+    val n: opt[*Named] = named_of(os_id, arch_id, abi_id);
+    if (sel n.none) { ret res[opt[*Assembled], fail.Fail].ok{opt[*Assembled].none{}}; }
+    var baseline: str = nil;
+    if (sel spelled.some) { baseline = spelled.some; }
+    or {
+        val stands: res[str, fail.Fail] = baseline_of(a, n.some);
+        if (sel stands.err) { ret res[opt[*Assembled], fail.Fail].err{stands.err}; }
+        baseline = stands.ok;
+    }
+    val made: res[mirl_target.Target, fail.Fail] = assembled(a, n.some, baseline);
+    if (sel made.err) { ret res[opt[*Assembled], fail.Fail].err{made.err}; }
+    val boxed: res[*Assembled, A.Error] = A.allocate[Assembled](a, 1);
+    if (sel boxed.err) {
+        var target: mirl_target.Target = made.ok;
+        mirl_target.release(a, ?target);
+        ret res[opt[*Assembled], fail.Fail].err{fail.refused(boxed.err)};
+    }
+    val x: *Assembled = boxed.ok;
+    x.tuple  = Tuple{arch: view_of(n.some.architecture), system: view_of(n.some.system), env: view_of(n.some.env), convention: view_of(n.some.convention), baseline: view_of(baseline)};
+    x.target = made.ok;
+    x.based  = false;
+    x.count  = added_names(t, bits, ?x.names[0], ADDED_CAP);
+    if (sel x.target.baseline.required) {
+        val chosen: err[mirl_basis.Error] = mirl_target.choose(?x.basis, a, ?x.target, added(x));
+        if (sel chosen.err) {
+            mirl_target.release(a, ?x.target);
+            A.deallocate[Assembled](a, x, 1);
+            ret res[opt[*Assembled], fail.Fail].err{fail.formatted(a, "target: mirl opens no build of {} {} over {}", n.some.architecture, n.some.system, baseline)};
+        }
+        x.based = true;
+    }
+    ret res[opt[*Assembled], fail.Fail].ok{opt[*Assembled].some{x}};
+}
+
+# the target a resolved cell means, assembled over the selection it stands on
+pub fun assemble_resolved(a: *A.Allocator, t: *resolved.Target) res[opt[*Assembled], fail.Fail] {
+    ret assemble_for(a, t.os_id, t.arch_id, t.abi_id, t.stands, t.model.extension_table, t.model.extensions);
+}
+
+# the target of the cell an owner assembles for the instruction set alone that `t`
+# describes, its linux cell where it has one, as a fixture naming only an instruction
+# set lowers for
+#[testing]
+pub fun assemble_described(a: *A.Allocator, t: *resolved.Target) res[opt[*Assembled], fail.Fail] {
+    var pick: *Named = nil;
+    var i:    usize  = 0;
+    for (i < NAMED_COUNT) {
+        val n: *Named = ?NAMED[i];
+        if (n.arch == t.arch_id && (pick == nil || n.os == catalog_os.LINUX)) { pick = n; }
+        i = i + 1;
+    }
+    if (pick == nil) { ret res[opt[*Assembled], fail.Fail].ok{opt[*Assembled].none{}}; }
+    ret assemble_for(a, pick.os, pick.arch, pick.abi, opt[str].none{}, t.model.extension_table, t.model.extensions);
+}
+
+# the names the selection adds over the baseline
+pub fun added(x: *Assembled) Slice[str] {
+    ret Slice[str]{data: ?x.names[0], size: x.count};
+}
+
+# the build basis the selection opened, none for a target that states no baseline
+pub fun basis_of(x: *Assembled) opt[*mirl_target.Basis] {
+    if (x.based) { ret opt[*mirl_target.Basis].some{?x.basis}; }
+    ret mirl_target.NONE;
+}
+
+pub fun release(a: *A.Allocator, x: *Assembled) {
+    if (x.based) { mirl_target.drop(?x.basis); }
+    mirl_target.release(a, ?x.target);
+    A.deallocate[Assembled](a, x, 1);
+}
+
 # what the owners state of the cell of `os_id`, `arch_id` and `abi_id` standing on
 # the selection the target spells, `spelled`, else the cell's own, under the
 # selection `bits` of mach's extension table `t`, none for a cell no owner
 # assembles yet
 pub fun owned_for(a: *A.Allocator, os_id: u32, arch_id: u32, abi_id: u32, spelled: opt[str], t: *extension.Table, bits: u64) res[opt[Owned], fail.Fail] {
-    val n: opt[*Named] = named_of(os_id, arch_id, abi_id);
-    if (sel n.none) { ret res[opt[Owned], fail.Fail].ok{opt[Owned].none{}}; }
-    var baseline: str = nil;
-    if (sel spelled.some) { baseline = spelled.some; }
-    or {
-        val stands: res[str, fail.Fail] = baseline_of(a, n.some);
-        if (sel stands.err) { ret res[opt[Owned], fail.Fail].err{stands.err}; }
-        baseline = stands.ok;
-    }
-    val made: res[mirl_target.Target, fail.Fail] = assembled(a, n.some, baseline);
-    if (sel made.err) { ret res[opt[Owned], fail.Fail].err{made.err}; }
-    var target: mirl_target.Target = made.ok;
-    fin { mirl_target.release(a, ?target); }
-
-    var names: [ADDED_CAP]str;
-    val count: usize                   = added_names(t, bits, ?names[0], ADDED_CAP);
-    var b:     mirl_target.Basis;
-    var basis: opt[*mirl_target.Basis] = mirl_target.NONE;
-    if (sel target.baseline.required) {
-        val chosen: err[mirl_basis.Error] = mirl_target.choose(?b, a, ?target, Slice[str]{data: ?names[0], size: count});
-        if (sel chosen.err) {
-            ret res[opt[Owned], fail.Fail].err{fail.formatted(a, "target: mirl opens no build of {} {} over {}", n.some.architecture, n.some.system, baseline)};
-        }
-        basis = opt[*mirl_target.Basis].some{?b};
-    }
-    fin {
-        if (sel basis.some) { mirl_target.drop(basis.some); }
-    }
-
-    val held: res[layout.Scalars, fail.Fail] = scalars_of(a, ?target, basis);
+    val made: res[opt[*Assembled], fail.Fail] = assemble_for(a, os_id, arch_id, abi_id, spelled, t, bits);
+    if (sel made.err)       { ret res[opt[Owned], fail.Fail].err{made.err}; }
+    if (sel made.ok.none) { ret res[opt[Owned], fail.Fail].ok{opt[Owned].none{}}; }
+    val x: *Assembled = made.ok.some;
+    fin { release(a, x); }
+    val held: res[layout.Scalars, fail.Fail] = scalars_of(a, ?x.target, basis_of(x));
     if (sel held.err) { ret res[opt[Owned], fail.Fail].err{held.err}; }
-    ret res[opt[Owned], fail.Fail].ok{opt[Owned].some{Owned{scalars: held.ok, nans: nans_of(?target, basis)}}};
+    ret res[opt[Owned], fail.Fail].ok{opt[Owned].some{Owned{scalars: held.ok, nans: nans_of(?x.target, basis_of(x))}}};
 }
 
 # the nan each float format's operations return on `target` under `basis`,

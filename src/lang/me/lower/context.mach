@@ -44,6 +44,7 @@ use mach.lang.session;
 use lang_source: mach.lang.source;
 use mach.lang.stack;
 use target_definition: mach.lang.target.definition;
+use target_owner: mach.lang.target.owner;
 use mach.lang.target.resolved;
 use mach.lang.type;
 use type_query: mach.lang.type.query;
@@ -54,9 +55,6 @@ use core_state: masc.core.state;
 use mink.model.symbol;
 use std.collections.slice.Slice;
 use std.types.view.View;
-use mirl.ir.constant.Address;
-use mirl.ir.constant.Bits;
-use mirl.ir.constant.ConstantData;
 use mirl_debug: mirl.ir.debug;
 use mirl.ir.function.FunctionData;
 use mirl.ir.global.GlobalData;
@@ -89,6 +87,13 @@ pub rec Machine {
     tuple:  mirl_module.Tuple;
     target: *mirl_target.Target;
     ctx:    opt[*core_state.Context];
+}
+
+# the machine of a target the owners assembled, borrowing it
+pub fun machine_of(x: *target_owner.Assembled) Machine {
+    var ctx: opt[*core_state.Context] = opt[*core_state.Context].none{};
+    if (x.based) { ctx = opt[*core_state.Context].some{?x.basis.context}; }
+    ret Machine{tuple: x.tuple, target: ?x.target, ctx: ctx};
 }
 
 # what the driver reads of a lowered module beside its mirl module: its name and, for
@@ -250,6 +255,8 @@ pub rec LowerContext {
     fn_index:   u32;
     ret_type:   Type;
     fn_ret_sem: type.TypeId;
+    # the source name of the function being built, which diagnostics name it by
+    fn_shown: lang_source.Span;
 
     # the module's debug types by the substituted source type each describes
     debug_types: map.Map[type.TypeId, mirl_debug.Type];
@@ -1010,6 +1017,7 @@ pub fun begin_function(lc: *LowerContext, fn_index: u32, ret_type: Type) {
     lc.fn_index   = fn_index;
     lc.ret_type   = ret_type;
     lc.fn_ret_sem = type.TYPE_NIL;
+    lc.fn_shown   = lang_source.Span{offset: 0, len: 0};
 
     lc.pack_slots    = nil;
     lc.pack_types    = nil;

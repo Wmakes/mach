@@ -10,7 +10,6 @@ use std.types.result.res;
 use std.types.size.usize;
 use types_string: std.types.string;
 use std.types.string.str;
-use std.types.string.str_len;
 
 use A: std.allocator;
 
@@ -347,9 +346,8 @@ fun lower_decl_stmt(ctx: *lower_context.LowerContext, s: *ast_stmt.Stmt) err[fai
             ret err[fail.Fail].err{res_init.err};
         }
         val init:      value.Value    = res_init.ok;
-        val res_store: err[fail.Fail] = builder.emit_store(?ctx.builder, init, slot);
-        if (sel res_store.err)                                                             { ret res_store; }
-        if (lower_expr.type_is_volatile_record(ctx, lower_context.decl_type_of(ctx, did))) { builder.mark_last_volatile(?ctx.builder); }
+        val res_store: err[fail.Fail] = builder.emit_store_marked(?ctx.builder, init, slot, lower_expr.type_is_volatile_record(ctx, lower_context.decl_type_of(ctx, did)));
+        if (sel res_store.err) { ret res_store; }
         birth_val = init;
         # an aggregate lives in its own slot, never in the source or a temporary it came from
         if (irt.is_aggregate(?ctx.m.types, storage_ty)) { birth_val = slot; }

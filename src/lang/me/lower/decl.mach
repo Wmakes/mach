@@ -8,10 +8,10 @@ use std.types.result.res;
 use std.types.size.usize;
 use types_string: std.types.string;
 use std.types.string.str;
-use std.types.string.str_equals;
 use std.types.string.str_join;
 
 use A: std.allocator;
+use std_format: std.format;
 
 use mach.lang.diagnostic;
 use diagnostic_kind: mach.lang.diagnostic.kind;
@@ -33,6 +33,7 @@ use irt: mach.lang.me.lower.irt;
 use mach.lang.me.lower.value;
 use mach.lang.me.lower.constnode;
 use lower_context: mach.lang.me.lower.context;
+use lower_oblivious: mach.lang.me.lower.oblivious;
 use lower_expr:    mach.lang.me.lower.expr;
 use mach.lang.me.lower.mangle;
 use lower_stmt: mach.lang.me.lower.stmt;
@@ -510,6 +511,7 @@ fun enter_function(ctx: *lower_context.LowerContext, fn_index: u32, sig: lower_c
     }
     lower_context.begin_function(ctx, fn_index, irt.result_of(t, sig.sig));
     ctx.fn_ret_sem = ret_sem;
+    ctx.fn_shown   = at.span;
     builder.enter(?ctx.builder, id.Function{index: fn_index}, params.data, secrets.data, n);
     builder.set_loc(?ctx.builder, at);
     ret lower_context.builder_state(ctx);
@@ -608,9 +610,8 @@ fun param_home(ctx: *lower_context.LowerContext, w: u32, p_sem: type.TypeId) res
     }
     val res_slot: res[value.Value, fail.Fail] = lower_context.slot_for(ctx, p_sem, p_ir);
     if (sel res_slot.err) { ret res[Home, fail.Fail].err{res_slot.err}; }
-    val res_store: err[fail.Fail] = builder.emit_store(?ctx.builder, pval, res_slot.ok);
-    if (sel res_store.err)                              { ret res[Home, fail.Fail].err{res_store.err}; }
-    if (lower_expr.type_is_volatile_record(ctx, p_sem)) { builder.mark_last_volatile(?ctx.builder); }
+    val res_store: err[fail.Fail] = builder.emit_store_marked(?ctx.builder, pval, res_slot.ok, lower_expr.type_is_volatile_record(ctx, p_sem));
+    if (sel res_store.err) { ret res[Home, fail.Fail].err{res_store.err}; }
     ret res[Home, fail.Fail].ok{Home{slot: res_slot.ok, arrived: pval}};
 }
 
@@ -696,8 +697,57 @@ fun close_function(ctx: *lower_context.LowerContext) err[fail.Fail] {
     val sealed: err[fail.Fail] = builder.seal(?ctx.builder);
     var state:  err[fail.Fail] = lower_context.builder_state(ctx);
     if (sel sealed.err && !sel state.err) { state = sealed; }
+    val computed: opt[builder.Computed] = ctx.builder.computed;
     builder.leave(?ctx.builder);
-    ret state;
+    if (sel state.err)     { ret state; }
+    if (sel computed.none) { ret state; }
+    ret report_not_oblivious(ctx, computed.some);
+}
+
+# a function that computes on a secret without declaring `#[oblivious]` is refused at its
+# first such computation; an instance is named by the instantiation as well
+fun report_not_oblivious(ctx: *lower_context.LowerContext, at: builder.Computed) err[fail.Fail] {
+    val node: *FunctionData = ?ctx.m.functions.data[ctx.fn_index].data;
+    val shown: res[intern.StrId, A.Error] = intern.range_add(?ctx.s.interner, lower_context.module_source(ctx), ctx.fn_shown.offset, ctx.fn_shown.len);
+    if (sel shown.err) { ret err[fail.Fail].err{fail.refused(shown.err)}; }
+    val name: str = intern.text(?ctx.s.interner, shown.ok);
+    val mr: res[str, std_format.FormatError] = std_format.sprint(ctx.s.alloc,
+        "`{}` performs a constant-time {} on a secret value but is not declared `#[oblivious]`",
+        name, lower_oblivious.class_name(at.code));
+    if (sel mr.err) { ret err[fail.Fail].err{fail.format_refused(mr.err)}; }
+    val msg: str = mr.ok;
+    val br:  res[diagnostic.DiagnosticBuilder, fail.Fail] = diagnostic.builder_init(ctx.s.alloc, diagnostic_kind.SECRET_NOT_OBLIVIOUS, at.loc.file, at.loc.span, msg);
+    A.deallocate[u8](ctx.s.alloc, msg::*u8, str_len(msg) + 1);
+    if (sel br.err) { ret err[fail.Fail].err{br.err}; }
+    var b: diagnostic.DiagnosticBuilder = br.ok;
+    val info: opt[*lower_context.FnInfo] = lower_context.fn_info(ctx.unit, ctx.fn_index);
+    if (node.linkage.binding == ?symbol.WEAKLY && sel info.some) {
+        val nr: res[str, std_format.FormatError] = std_format.sprint(ctx.s.alloc, "in the instantiation `{}`", intern.text(?ctx.s.interner, info.some.name));
+        if (sel nr.err) {
+            diagnostic.builder_dnit(?b);
+            ret err[fail.Fail].err{fail.format_refused(nr.err)};
+        }
+        val noted: err[fail.Fail] = diagnostic.attach_note(?b, nr.ok);
+        A.deallocate[u8](ctx.s.alloc, nr.ok::*u8, str_len(nr.ok) + 1);
+        if (sel noted.err) {
+            diagnostic.builder_dnit(?b);
+            ret noted;
+        }
+    }
+    val helped: err[fail.Fail] = diagnostic.attach_help(?b,
+        "annotate the function with `#[oblivious]` to declare its constant-time contract; only a function that merely moves or stores secrets may omit it");
+    if (sel helped.err) {
+        diagnostic.builder_dnit(?b);
+        ret helped;
+    }
+    val committed: err[fail.Fail] = diagnostic.commit(?b, ctx.diags);
+    if (sel committed.err) {
+        diagnostic.builder_dnit(?b);
+        ret committed;
+    }
+    # the rest of the module is still lowered, so every such function is named
+    fail.reject(?ctx.status);
+    ret err[fail.Fail].ok{};
 }
 
 fun emit_default_terminator(ctx: *lower_context.LowerContext) err[fail.Fail] {

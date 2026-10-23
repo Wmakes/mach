@@ -3,7 +3,6 @@
 # value of an aggregate type is the address of storage holding it, typed as the aggregate
 use std.types.bool.bool;
 use std.types.bool.false;
-use std.types.bool.true;
 
 use mirl.ir.id;
 use mirl.ir.type.Type;

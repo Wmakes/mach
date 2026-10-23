@@ -29,7 +29,6 @@ use mirl.ir.id;
 use mirl.ir.instruction.Branch;
 use mirl.ir.instruction.Request;
 use mirl.ir.metadata.Flags;
-use mirl.ir.metadata.NO_FLAGS;
 use mirl.ir.module;
 use mirl.ir.opcode;
 use mirl.ir.opcode.Immediate;
@@ -49,6 +48,7 @@ use core_state: masc.core.state;
 use mach.lang.fail;
 use mach.lang.float;
 use irt: mach.lang.me.lower.irt;
+use mach.lang.me.lower.oblivious;
 use mach.lang.me.lower.value;
 use lang_source: mach.lang.source;
 use mach.lang.wide;
@@ -70,8 +70,16 @@ pub rec Builder {
     sources:  *lang_source.SourceMap;
     files:    vector.Vector[u32];
     failure:  opt[fail.Fail];
-    # the instruction built last, which a volatile access marks after the fact
-    last: opt[id.Instruction];
+    # whether the function being built is `#[oblivious]`, and the first computation on a
+    # secret it makes where it is not
+    oblivious: bool;
+    computed:  opt[Computed];
+}
+
+# a computation on a secret: where it is and its opcode
+pub rec Computed {
+    loc:  lang_source.Location;
+    code: Opcode;
 }
 
 val NO_BLOCK: id.Block = id.Block{index: 0xFFFFFFFF};
@@ -96,7 +104,8 @@ pub fun init(m: *module.Module, a: *A.Allocator, target: *mirl_target.Target, ct
     b.sources  = sources;
     b.files    = vector.init[u32](a);
     b.failure  = opt[fail.Fail].none{};
-    b.last     = opt[id.Instruction].none{};
+    b.oblivious = false;
+    b.computed  = opt[Computed].none{};
     ret b;
 }
 
@@ -106,7 +115,8 @@ pub fun dnit(b: *Builder) {
 }
 
 pub fun fault(b: *Builder, f: fail.Fail) {
-    if (sel b.failure.none) { b.failure = opt[fail.Fail].some{f}; }
+    if (sel b.failure.some) { ret; }
+    b.failure = opt[fail.Fail].some{f};
 }
 
 pub fun failed(b: *Builder) bool {
@@ -286,8 +296,10 @@ pub fun enter(b: *Builder, f: id.Function, params: *Type, secrets: *bool, n: u32
     b.allocas = 0;
     vector.clear[bool](?b.ended);
     mbuild.enter(?b.mb, f);
-    b.secret   = false;
-    b.volatile = false;
+    b.secret    = false;
+    b.volatile  = false;
+    b.oblivious = b.m.functions.data[f.index].data.constant_time;
+    b.computed  = opt[Computed].none{};
     val entry: id.Block = new_block_with(b, params, secrets, n);
     b.entry = entry;
     set_block(b, entry);
@@ -549,24 +561,33 @@ fun made(b: *Builder, code: Opcode, ops: *id.Value, n: u32, imm: *Immediate, ni:
     if (mbuild.failed(?b.mb)) { ret value.none(); }
     val d: res[mirl_value.ValueData, module.Error] = body.value_data(b.m, fn_of(b), v);
     if (sel d.err) { ret value.none(); }
-    if (sel d.ok.def.result) { b.last = opt[id.Instruction].some{d.ok.def.result.instruction}; }
+    if (d.ok.secret && !b.oblivious && sel b.computed.none && !oblivious.moves(code)) {
+        b.computed = opt[Computed].some{Computed{loc: b.loc, code: code}};
+    }
     ret value.ssa(v, d.ok.type, d.ok.secret);
 }
 
 fun placed(b: *Builder, code: Opcode, ops: *id.Value, n: u32, imm: *Immediate, ni: u32) err[fail.Fail] {
-    b.last = opt[id.Instruction].some{mbuild.emit(?b.mb, request(code, ops, n, imm, ni))};
+    mbuild.emit(?b.mb, request(code, ops, n, imm, ni));
     ret after_err(b);
 }
 
-# mark the instruction built last volatile: an access of a volatile place
-pub fun mark_last_volatile(b: *Builder) {
-    if (sel b.last.none || sel b.fn.none) { ret; }
-    val got: res[mirl_instruction.InstructionData, module.Error] = body.instruction_data(b.m, fn_of(b), b.last.some);
-    if (sel got.err) { ret; }
-    var md: mirl_metadata.Metadata = got.ok.metadata;
-    md.flags.volatile = true;
-    val set: err[module.Error] = body.set_metadata(b.m, fn_of(b), b.last.some, md);
-    if (sel set.err) { fault(b, fail.message("lower: mirl refused to mark an access volatile")); }
+# a store marked volatile where `vol` holds: an access of a volatile place
+pub fun emit_store_marked(b: *Builder, v: value.Value, ptr: value.Value, vol: bool) err[fail.Fail] {
+    if (!vol) { ret emit_store(b, v, ptr); }
+    set_volatile(b, true);
+    val r: err[fail.Fail] = emit_store(b, v, ptr);
+    set_volatile(b, false);
+    ret r;
+}
+
+# a load marked volatile where `vol` holds
+pub fun emit_load_marked(b: *Builder, ptr: value.Value, ty: Type, vol: bool) res[value.Value, fail.Fail] {
+    if (!vol) { ret emit_load(b, ptr, ty); }
+    set_volatile(b, true);
+    val r: res[value.Value, fail.Fail] = emit_load(b, ptr, ty);
+    set_volatile(b, false);
+    ret r;
 }
 
 fun unary(b: *Builder, code: Opcode, x: value.Value) res[value.Value, fail.Fail] {
