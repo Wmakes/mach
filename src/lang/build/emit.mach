@@ -27,20 +27,6 @@ use build_plan:      mach.lang.build.plan;
 use diagnostic_kind: mach.lang.diagnostic.kind;
 use mach.lang.driver;
 use mach.lang.driver.backend;
-use lower_context: mach.lang.me.lower.context;
-use text_item:    mirl.ir.text.item;
-use text_printer: mirl.ir.text.printer;
-use mink_fail: mink.base.fail;
-use mink.bytes.sink;
-use mink.bytes.sink.Sink;
-use mink.catalog.format.Format;
-use catalog_format: mink.catalog.format;
-use mink_output: mink.catalog.output;
-use mink.format.contract;
-use mink.link.input.Given;
-use mink.link.input.Source;
-use mink.model.object.Object;
-use std.types.view.View;
 use mach.lang.driver.cache;
 use mach.lang.driver.project;
 use mach.lang.driver.toolchain;
@@ -49,6 +35,7 @@ use mach.lang.growth;
 use mach.lang.intern;
 use mach.lang.linkage;
 use mach.lang.manifest;
+use lower_context: mach.lang.me.lower.context;
 use mach.lang.output;
 use mach.lang.readout;
 use mach.lang.session;
@@ -59,6 +46,19 @@ use mach.lang.target.input;
 use target_of: mach.lang.target.of;
 use mach.lang.target.of.ar;
 use of_destination: mach.lang.target.of.destination;
+use mink_fail:      mink.base.fail;
+use mink.bytes.sink;
+use mink.bytes.sink.Sink;
+use catalog_format: mink.catalog.format;
+use mink.catalog.format.Format;
+use mink_output: mink.catalog.output;
+use mink.format.contract;
+use mink.link.input.Given;
+use mink.link.input.Source;
+use mink.model.object.Object;
+use text_item:    mirl.ir.text.item;
+use text_printer: mirl.ir.text.printer;
+use std.types.view.View;
 
 # assembly listings come from masc's listing of the object mirl compiled, which masc
 # does not offer yet (masc#484)
@@ -331,7 +331,7 @@ pub fun link_image(p: *project.Project, kind: *mink_output.Kind, flat: bool, obj
     }
     if (count == 0) { ret err[fail.Fail].err{fail.message("a link requires an object")}; }
 
-    val total: usize = count::usize + ext_count::usize;
+    val total: usize                 = count::usize + ext_count::usize;
     val made:  res[*Source, A.Error] = A.allocate[Source](p.alloc, total);
     if (sel made.err) { ret err[fail.Fail].err{fail.refused(made.err)}; }
     val sources: *Source = made.ok;
@@ -361,7 +361,7 @@ pub fun link_image(p: *project.Project, kind: *mink_output.Kind, flat: bool, obj
     }
     var format: *Format = p.back.format;
     if (flat) { format = ?catalog_format.FLAT; }
-    val linked: res[Sink, fail.Fail] = backend.link(?p.back, p.alloc, kind, format, objects[0].target, sources, total, destination, true);
+    val linked: res[Sink, fail.Fail] = backend.link(?p.back, p.alloc, kind, format, sources, total, destination, true);
     if (sel linked.err) { ret err[fail.Fail].err{linked.err}; }
     var bytes: Sink = linked.ok;
     fin { val freed: err[mink_fail.Fail] = sink.release(?bytes); }
@@ -392,7 +392,7 @@ pub fun release_ordered(p: *project.Project, objects: **Object) {
 
 # every emitted module's object at its module index, for a reader that walks modules by id
 pub fun indexed_objects(p: *project.Project) res[**Object, fail.Fail] {
-    val n:    usize                 = project.module_count(p)::usize + 1;
+    val n:    usize                  = project.module_count(p)::usize + 1;
     val made: res[**Object, A.Error] = A.zallocate[*Object](p.alloc, n);
     if (sel made.err) { ret res[**Object, fail.Fail].err{fail.refused(made.err)}; }
     var i: u32 = 0;
@@ -789,7 +789,7 @@ pub fun write_object(w: *ObjectWrite, destination: str) err[fail.Fail] {
     if (w.record != nil && w.record.bytes != nil) {
         laid = backend.object_bytes_with(?w.p.back, w.p.alloc, w.o, backend.RECORD_SECTION, w.record.bytes, w.record.len::usize);
     }
-    or { laid = backend.object_bytes(?w.p.back, w.p.alloc, w.o); }
+    or                { laid = backend.object_bytes(?w.p.back, w.p.alloc, w.o); }
     if (sel laid.err) { ret err[fail.Fail].err{laid.err}; }
     var bytes: Sink = laid.ok;
     fin { val freed: err[mink_fail.Fail] = sink.release(?bytes); }
