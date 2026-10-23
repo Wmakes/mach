@@ -412,6 +412,19 @@ reached only by mach-lsp
 
 ret: whether the shapes match, or either tree's expiry failure
 
+## fun is_identifier
+
+```mach
+pub fun is_identifier(alloc: *A.Allocator, text: str) res[bool, fail.Fail];
+```
+
+whether a text is exactly one identifier token, as the lexer reads it standalone
+reached only by mach-lsp
+
+alloc: scratch for the lex, freed before return
+text: the candidate, borrowed only during the call
+ret: whether it is one identifier token, or the failure that stopped the lex
+
 ## fun fail_dnit
 
 ```mach
