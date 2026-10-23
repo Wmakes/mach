@@ -852,7 +852,7 @@ pub fun tokenize(result: *AnalysisResult) res[fe_lexer.TokenStream, fail.Fail] {
 # ret:   the owned result, or the allocation failure
 pub fun parse_text(alloc: *A.Allocator, text: str) res[AnalysisResult, fail.Fail] {
     var result: AnalysisResult = AnalysisResult{
-        alloc: alloc, file: lang_source.FILE_NIL, phase: PHASE_PARSE,
+        alloc:   alloc, file: lang_source.FILE_NIL, phase: PHASE_PARSE,
         sources: collections_vector.init[AnalysisSource](alloc)
     };
     var complete: bool = false;
@@ -864,8 +864,8 @@ pub fun parse_text(alloc: *A.Allocator, text: str) res[AnalysisResult, fail.Fail
     result.diagnostics  = store.ok;
     @result.diagnostics = diagnostic.store_init(alloc);
 
-    var borrowed: lang_source.SourceFile = lang_source.SourceFile{present: true, path: "", text: text};
-    val copied: res[lang_source.SourceFile, lang_source.Error] = lang_source.copy_file(?borrowed, alloc);
+    var borrowed: lang_source.SourceFile                         = lang_source.SourceFile{present: true, path: "", text: text};
+    val copied:   res[lang_source.SourceFile, lang_source.Error] = lang_source.copy_file(?borrowed, alloc);
     if (sel copied.err) { ret res[AnalysisResult, fail.Fail].err{fail.source_refused(copied.err)}; }
     var entry: AnalysisSource      = AnalysisSource{id: lang_source.FILE_NIL, file: copied.ok};
     val added: res[usize, A.Error] = collections_vector.push[AnalysisSource](?result.sources, entry);
@@ -884,9 +884,9 @@ pub fun parse_text(alloc: *A.Allocator, text: str) res[AnalysisResult, fail.Fail
     var stream: fe_lexer.TokenStream = lexed.ok;
     fin { fe_lexer.dnit(?stream, alloc); }
 
-    val fatal: opt[state.ParseFail] = parse_tokens(?stream, result.tree, result.diagnostics, ?result.status);
-    var message:     str      = "";
-    val status_text: opt[str] = fail.internal_text(result.status);
+    val fatal:       opt[state.ParseFail] = parse_tokens(?stream, result.tree, result.diagnostics, ?result.status);
+    var message:     str                  = "";
+    val status_text: opt[str]             = fail.internal_text(result.status);
     if (sel status_text.some) { message = status_text.some; }
     if (sel fatal.some)       { message = fatal.some.message; }
     val owned_message: res[str, types_string.StrError] = str_copy(alloc, message);
@@ -908,7 +908,7 @@ pub fun parse_text(alloc: *A.Allocator, text: str) res[AnalysisResult, fail.Fail
 # reached only by mach-lsp
 # ---
 # x, y: the results, each read through ast_of under its rules
-# ret:  whether the shapes match, or either tree's expiry failure
+# ret: whether the shapes match, or either tree's expiry failure
 pub fun same_shape(x: *AnalysisResult, y: *AnalysisResult) res[bool, fail.Fail] {
     val xr: res[*ast.Ast, fail.Fail] = ast_of(x);
     if (sel xr.err) { ret res[bool, fail.Fail].err{xr.err}; }
