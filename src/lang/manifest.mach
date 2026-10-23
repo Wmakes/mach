@@ -70,6 +70,7 @@ fwd mach.lang.manifest.edit.dep_table_remove;
 fwd mach.lang.manifest.target.host_tuple;
 fwd mach.lang.manifest.target.target_matches_host;
 fwd mach.lang.manifest.target.find_target_by_name;
+fwd mach.lang.manifest.target.resolve_declared;
 
 fwd mach.lang.manifest.load.project_parse;
 fwd mach.lang.manifest.load.parse;

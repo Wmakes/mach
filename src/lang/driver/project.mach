@@ -47,7 +47,6 @@ use lang_target:      mach.lang.target;
 use catalog_arch:     mach.lang.target.catalog.arch;
 use catalog_artifact: mach.lang.target.catalog.artifact;
 use catalog_os:       mach.lang.target.catalog.os;
-use mach.lang.target.extension;
 use mach.lang.target.isa;
 use mink.model.object.Object;
 use collections_vector: std.collections.vector;
@@ -62,18 +61,12 @@ pub rec TargetEntry {
     name:          intern.StrId;
     os_name:       intern.StrId;
     isa_name:      intern.StrId;
-    baseline_name: intern.StrId;
     abi_name:      intern.StrId;
     of_name:       intern.StrId;
     platform_name: intern.StrId;
-    env_name:      intern.StrId;
-    base:          u64;
-    stack_reserve: u64;
-    stack_commit:  u64;
-    # the manifest's `extensions` names, resolved against the isa at selection
-    extensions:      [extension.MAX_SELECTED]intern.StrId;
-    extension_count: u32;
-    entrypoint:      intern.StrId;
+    # the declared target the entry selects, with every key the manifest states
+    declared:   manifest.TargetDef;
+    entrypoint: intern.StrId;
     # where the artifact's `entry` is written in the manifest
     entry_at: fail.Place;
     kind:     catalog_artifact.Kind;
@@ -87,25 +80,19 @@ pub rec TargetEntry {
 # built, so every field is carried wherever an entry is made
 pub fun target_entry_of(bu: *manifest.BuildUnit) TargetEntry {
     ret TargetEntry{
-        name:            bu.target_name,
-        os_name:         bu.target.os,
-        isa_name:        bu.target.isa,
-        baseline_name:   bu.target.baseline,
-        abi_name:        bu.target.abi,
-        of_name:         bu.target.of,
-        platform_name:   bu.target.platform,
-        env_name:        bu.target.env,
-        base:            bu.target.base,
-        stack_reserve:   bu.target.stack_reserve,
-        stack_commit:    bu.target.stack_commit,
-        extensions:      bu.target.extensions,
-        extension_count: bu.target.extension_count,
-        entrypoint:      bu.entry,
-        entry_at:        bu.artifact.entry_at,
-        kind:            bu.artifact.kind,
-        optimize:        bu.optimize,
-        libs:            bu.libs,
-        lib_count:       bu.lib_count,
+        name:          bu.target_name,
+        os_name:       bu.target.os,
+        isa_name:      bu.target.isa,
+        abi_name:      bu.target.abi,
+        of_name:       bu.target.of,
+        platform_name: bu.target.platform,
+        declared:      @bu.target,
+        entrypoint:    bu.entry,
+        entry_at:      bu.artifact.entry_at,
+        kind:          bu.artifact.kind,
+        optimize:      bu.optimize,
+        libs:          bu.libs,
+        lib_count:     bu.lib_count,
     };
 }
 
@@ -634,7 +621,6 @@ pub fun id_is(itn: *intern.Interner, id: intern.StrId, text: str) bool {
 }
 
 # the module loaded under `fqn`, nil when none is
-#[testing]
 pub fun module_named(p: *Project, fqn: str) session.ModuleId {
     val id: res[intern.StrId, A.Error] = intern.add(?p.s.interner, fqn);
     if (sel id.err) { ret session.MODULE_NIL; }
