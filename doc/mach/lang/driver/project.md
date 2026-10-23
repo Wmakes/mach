@@ -222,6 +222,14 @@ pub fun free_dep_entries(alloc: *A.Allocator, deps: *DepEntry, count: u32, capac
 release `count` dependency entries and their array of `capacity`; a nil array owns
 nothing
 
+## fun module_named
+
+```mach
+pub fun module_named(p: *Project, fqn: str) session.ModuleId;
+```
+
+the module loaded under `fqn`, nil when none is
+
 ## fun module_count
 
 ```mach
