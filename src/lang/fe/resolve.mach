@@ -440,6 +440,12 @@ pub fun origin_of(s: *session.Session, sym: *Symbol) session.ModuleId {
     ret session.module_id_for_stable(s, sym.origin);
 }
 
+# whether `sym` names a binding a module other than `own` declares: an import, or a `fwd` of one,
+# which carries the kind the binding is declared with there as its own
+pub fun foreign_to(s: *session.Session, sym: *Symbol, own: session.ModuleId) bool {
+    ret !module.same(origin_of(s, sym), own);
+}
+
 # the module a `use` symbol names, as the current operation numbers it
 pub fun use_target(s: *session.Session, sym: *Symbol) session.ModuleId {
     ret session.module_id_for_stable(s, sym.slot::session.StableModuleId);
@@ -2170,7 +2176,9 @@ fun collect_fwd(rc: *ResolveContext, decl_id: ast_id.DeclId, df: *ast_decl.DeclF
     var slot: u32 = 0;
     if (ps.kind == SYM_USE) { slot = ps.slot; }
 
-    val r_sym: res[SymbolId, fail.Fail] = add_symbol(rc, ps.kind, SYM_FLAG_PUB, name_id, ps.canon, ast_id.DECL_NIL, slot, ps.origin);
+    # a `fwd` binds its name at module scope, so what it forwards is module-level here as it is
+    # where it is declared
+    val r_sym: res[SymbolId, fail.Fail] = add_symbol(rc, ps.kind, SYM_FLAG_PUB | SYM_FLAG_MODULE, name_id, ps.canon, ast_id.DECL_NIL, slot, ps.origin);
     if (sel r_sym.err) {
         fail.internal(?rc.status, fail.describe(r_sym.err));
         ret err[fail.Fail].err{r_sym.err};

@@ -39,9 +39,14 @@ use std.types.result.res;
 use std.types.size.usize;
 use std.types.string.str;
 
+# whether `sym` names a binding a module other than this view's declares
+pub fun foreign(sc: *SemaContext, sym: *resolve.Symbol) bool {
+    ret resolve.foreign_to(sc.s, sym, sc.view.own_module);
+}
+
 pub fun imported_definition(sc: *SemaContext, sym: *resolve.Symbol,
     phase: sema_product.DefinitionPhase) res[sema_product.DefinedSymbol, fail.Fail] {
-    if (module.same(resolve.origin_of(sc.s, sym), sc.view.own_module) || sc.typing.deps == nil) {
+    if (!foreign(sc, sym) || sc.typing.deps == nil) {
         val reason: fail.Fail = fail.message("foreign definition acquisition cannot refresh the active semantic owner");
         fail.internal(?sc.status, fail.describe(reason));
         ret res[sema_product.DefinedSymbol, fail.Fail].err{reason};
@@ -57,7 +62,7 @@ pub fun imported_definition(sc: *SemaContext, sym: *resolve.Symbol,
 
 pub fun symbol_definition(sc: *SemaContext, sym: *resolve.Symbol,
     phase: sema_product.DefinitionPhase) res[sema_product.DefinedSymbol, fail.Fail] {
-    if (!module.same(resolve.origin_of(sc.s, sym), sc.view.own_module)) { ret imported_definition(sc, sym, phase); }
+    if (foreign(sc, sym)) { ret imported_definition(sc, sym, phase); }
     if (sc.view.a == nil || sc.view.rr == nil || ast_id.decl_is_nil(sym.decl) || ast_id.decl_index(sym.decl) >= sc.view.a.decls.len::u32) {
         val reason: fail.Fail = fail.message("symbol has no declaration in the active semantic owner");
         fail.internal(?sc.status, fail.describe(reason));
@@ -709,7 +714,7 @@ fun public_type_for(sc: *SemaContext, sym: *resolve.Symbol) opt[sema_product.Typ
 pub fun decl_type_for(sc: *SemaContext, sym: *resolve.Symbol) type.TypeId {
     if (sym.kind == resolve.SYM_PARAM)   { ret param_type_for(sc, sym); }
     if (sym.kind == resolve.SYM_GENERIC) { ret generic_param_type_for(sc, sym); }
-    if (module.same(resolve.origin_of(sc.s, sym), sc.view.own_module)) {
+    if (!foreign(sc, sym)) {
         if (sc.view.decl_type == nil || ast_id.decl_is_nil(sym.decl) || ast_id.decl_index(sym.decl) >= sc.view.a.decls.len::u32) {
             fail.internal(?sc.status, "a declared symbol has no declaration type in this view");
             ret type.TYPE_ERROR;
@@ -1024,7 +1029,7 @@ pub fun resolve_module_member_const(sc: *SemaContext, eid: ast_id.ExprId) res[op
         ret res[opt[comptime.CTValue], comptime.EvalFail].ok{opt[comptime.CTValue].none{}};
     }
     val sym: *resolve.Symbol = ?rr.symbols[resolve.symbol_index(sid)];
-    if (sym.kind != resolve.SYM_IMPORTED) {
+    if (!foreign(sc, sym)) {
         ret res[opt[comptime.CTValue], comptime.EvalFail].ok{opt[comptime.CTValue].none{}};
     }
     val exported: opt[sema_product.TypeExport] = public_type_for(sc, sym);
