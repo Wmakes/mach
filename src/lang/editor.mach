@@ -321,6 +321,7 @@ pub fun ast_of(result: *AnalysisResult) res[*ast.Ast, fail.Fail] {
 # ---
 # ret: the borrowed product, or the expiry or phase failure
 pub fun resolve_of(result: *AnalysisResult) res[*resolve.ResolveResult, fail.Fail] {
+    if (result.tree != nil) { ret res[*resolve.ResolveResult, fail.Fail].err{fail.message("analysis did not request resolution")}; }
     val buffer: res[*Buffer, fail.Fail] = result_buffer(result);
     if (sel buffer.err)               { ret res[*resolve.ResolveResult, fail.Fail].err{buffer.err}; }
     if (result.phase < PHASE_RESOLVE) { ret res[*resolve.ResolveResult, fail.Fail].err{fail.message("analysis did not request resolution")}; }
@@ -332,6 +333,7 @@ pub fun resolve_of(result: *AnalysisResult) res[*resolve.ResolveResult, fail.Fai
 # ---
 # ret: the borrowed product, or the expiry or phase failure
 pub fun sema_of(result: *AnalysisResult) res[*fe_sema.SemaResult, fail.Fail] {
+    if (result.tree != nil) { ret res[*fe_sema.SemaResult, fail.Fail].err{fail.message("analysis did not request type checking")}; }
     val buffer: res[*Buffer, fail.Fail] = result_buffer(result);
     if (sel buffer.err)             { ret res[*fe_sema.SemaResult, fail.Fail].err{buffer.err}; }
     if (result.phase != PHASE_SEMA) { ret res[*fe_sema.SemaResult, fail.Fail].err{fail.message("analysis did not request type checking")}; }
@@ -902,9 +904,7 @@ pub fun parse_text(alloc: *A.Allocator, text: str) res[AnalysisResult, fail.Fail
     ret res[AnalysisResult, fail.Fail].ok{result};
 }
 
-# whether two results' trees have the same shape: the same node kinds, and declaration
-# flags, in the same order, with the same number of every node a tree holds. spans,
-# names and literal values are not compared
+# whether two results' trees have the same shape, as ast.same_shape compares them
 # reached only by mach-lsp
 # ---
 # x, y: the results, each read through ast_of under its rules
@@ -917,34 +917,7 @@ pub fun same_shape(x: *AnalysisResult, y: *AnalysisResult) res[bool, fail.Fail] 
     val a: *ast.Ast = xr.ok;
     val b: *ast.Ast = yr.ok;
     if (a == nil || b == nil) { ret res[bool, fail.Fail].err{fail.message("analysis has no tree")}; }
-    if (a.modules.len != b.modules.len || a.exprs.len != b.exprs.len || a.stmts.len != b.stmts.len
-        || a.decls.len != b.decls.len || a.types.len != b.types.len || a.typed_names.len != b.typed_names.len
-        || a.tag_cases.len != b.tag_cases.len || a.field_inits.len != b.field_inits.len
-        || a.generic_names.len != b.generic_names.len || a.comptime_branches.len != b.comptime_branches.len
-        || a.decorators.len != b.decorators.len) {
-        ret res[bool, fail.Fail].ok{false};
-    }
-    var i: usize = 0;
-    for (i < a.exprs.len) {
-        if (a.exprs.data[i].kind != b.exprs.data[i].kind) { ret res[bool, fail.Fail].ok{false}; }
-        i = i + 1;
-    }
-    i = 0;
-    for (i < a.stmts.len) {
-        if (a.stmts.data[i].kind != b.stmts.data[i].kind) { ret res[bool, fail.Fail].ok{false}; }
-        i = i + 1;
-    }
-    i = 0;
-    for (i < a.decls.len) {
-        if (a.decls.data[i].kind != b.decls.data[i].kind || a.decls.data[i].flags != b.decls.data[i].flags) { ret res[bool, fail.Fail].ok{false}; }
-        i = i + 1;
-    }
-    i = 0;
-    for (i < a.types.len) {
-        if (a.types.data[i].kind != b.types.data[i].kind) { ret res[bool, fail.Fail].ok{false}; }
-        i = i + 1;
-    }
-    ret res[bool, fail.Fail].ok{true};
+    ret res[bool, fail.Fail].ok{ast.same_shape(a, b)};
 }
 
 # a project module without the requested product: the tolerant load kept the
