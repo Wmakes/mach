@@ -6,18 +6,18 @@ use A: std.allocator;
 use std.types.bool.false;
 use std.types.string.str_equals;
 
+use mir_debug:       mach.lang.mir.debug;
+use mir_unit:        mach.lang.mir.unit;
 use catalog_arch:    mach.lang.target.catalog.arch;
 use extension_spirv: mach.lang.target.extension.spirv;
 use mach.lang.target.isa;
-use mir_debug: mach.lang.mir.debug;
-use mir_unit:  mach.lang.mir.unit;
-use target_of: mach.lang.target.of;
 use isa_environment: mach.lang.target.isa.environment;
 use isa_spirv:       mach.lang.target.isa.spirv;
 use mach.lang.target.isa.spirv.defs;
 use mach.lang.target.isa.spirv.types;
 use target_model: mach.lang.target.model;
 use model_spirv:  mach.lang.target.model.spirv;
+use target_of:    mach.lang.target.of;
 
 # the environments a module names, each the extensions it guarantees
 val ENVIRONMENTS: [isa_spirv.ENV_PROFILE_COUNT]isa_environment.Environment = [isa_spirv.ENV_PROFILE_COUNT]isa_environment.Environment{

@@ -19,13 +19,13 @@ use A: std.allocator;
 use mach.lang.fail;
 use mach.lang.fe.comptime;
 use comptime_deep: mach.lang.fe.comptime.deep;
+use mach.lang.fe.resolve;
 use mach.lang.float;
 use mach.lang.intern;
-use mach.lang.fe.resolve;
-use irt: mach.lang.me.lower.irt;
-use mach.lang.me.lower.value;
 use lower_context: mach.lang.me.lower.context;
+use mach.lang.me.lower.irt;
 use mach.lang.me.lower.mangle;
+use mach.lang.me.lower.value;
 use mach.lang.module;
 use mach.lang.session;
 use mach.lang.type;
@@ -120,7 +120,7 @@ fun constant_of_image(ctx: *lower_context.LowerContext, image: *Image, ity: Type
             at = end;
         }
         if (r < image.relocs.len) {
-            val rl:   Reloc                      = image.relocs.data[r];
+            val rl:   Reloc                       = image.relocs.data[r];
             val addr: res[id.Constant, fail.Fail] = made(ctx, ConstantData.address{Address{type: ptr, symbol: rl.symbol, offset: rl.addend}});
             if (sel addr.err) { ret addr; }
             val pushed: err[fail.Fail] = member_add(?members, ?offsets, ?elements, ptr, at, addr.ok);
@@ -173,7 +173,7 @@ fun byte_run(ctx: *lower_context.LowerContext, blob: *u8, at: u64, len: u64) res
     for (i < len) {
         val bv: u32 = blob[at + i]::u32;
         if (each[bv] == 0xFFFFFFFF) {
-            var word: [1]u64 = [1]u64{bv::u64};
+            var word: [1]u64                      = [1]u64{bv::u64};
             val one:  res[id.Constant, fail.Fail] = made(ctx, ConstantData.integer{Bits{type: i8t.ok, words: Slice[u64]{data: ?word[0], size: 1}}});
             if (sel one.err) { ret res[Pair, fail.Fail].err{one.err}; }
             each[bv] = one.ok.index;
@@ -195,7 +195,7 @@ pub fun bytes_constant(ctx: *lower_context.LowerContext, data: *u8, len: u64) re
 }
 
 fun made(ctx: *lower_context.LowerContext, data: ConstantData) res[id.Constant, fail.Fail] {
-    val c: id.Constant = mbuild.constant(?ctx.builder.mb, data);
+    val c:   id.Constant    = mbuild.constant(?ctx.builder.mb, data);
     val why: err[fail.Fail] = lower_context.builder_state(ctx);
     if (sel why.err) { ret res[id.Constant, fail.Fail].err{why.err}; }
     ret res[id.Constant, fail.Fail].ok{c};
@@ -212,9 +212,9 @@ fun all_zero(blob: *u8, len: u64) bool {
 
 fun place(ctx: *lower_context.LowerContext, store: *comptime_deep.Store, node: u32, ity: Type, base: u64, image: *Image) err[fail.Fail] {
     val n: *comptime_deep.Node = comptime_deep.node_at(store, node);
-    if (n.kind == comptime_deep.NODE_REFUSED) { ret err[fail.Fail].err{fail.message("lower: a constant value holds a leaf with no compile-time value")}; }
-    if (n.kind == comptime_deep.NODE_ADDRESS) { ret place_address(ctx, store, n, base, image); }
-    if (n.kind == comptime_deep.NODE_LITERAL && !intern.str_is_nil(n.head)) { ret place_tag(ctx, store, n, ity, base, image); }
+    if (n.kind == comptime_deep.NODE_REFUSED)                                { ret err[fail.Fail].err{fail.message("lower: a constant value holds a leaf with no compile-time value")}; }
+    if (n.kind == comptime_deep.NODE_ADDRESS)                                { ret place_address(ctx, store, n, base, image); }
+    if (n.kind == comptime_deep.NODE_LITERAL && !intern.str_is_nil(n.head))  { ret place_tag(ctx, store, n, ity, base, image); }
     if (irt.is_struct(?ctx.m.types, ity) || irt.is_union(?ctx.m.types, ity)) { ret place_record(ctx, store, n, ity, base, image); }
     if (irt.is_array(?ctx.m.types, ity) || irt.is_vector(?ctx.m.types, ity)) { ret place_elements(ctx, store, n, ity, base, image); }
     ret place_scalar(ctx, n, ity, base, image);
@@ -248,7 +248,7 @@ fun place_tag(ctx: *lower_context.LowerContext, store: *comptime_deep.Store, n: 
     if (sel dsz.err) { ret err[fail.Fail].err{dsz.err}; }
     write_bits(image.blob, base, wide.from_u64(case_ix.some::u64), dsz.ok);
     val payload: opt[comptime_deep.Member] = comptime_deep.member_at(store, n, 0);
-    if (sel payload.none) { ret err[fail.Fail].ok{}; }
+    if (sel payload.none)                                             { ret err[fail.Fail].ok{}; }
     if (!lower_context.tag_case_has_payload(ctx, n.ty, case_ix.some)) { ret err[fail.Fail].err{fail.message("lower: a constant tag holds a payload its case does not")}; }
     val at: res[u64, fail.Fail] = irt.offset(?ctx.builder.layout, ity, lower_context.TAG_PAYLOAD);
     if (sel at.err) { ret err[fail.Fail].err{at.err}; }
@@ -298,7 +298,7 @@ fun place_scalar(ctx: *lower_context.LowerContext, n: *comptime_deep.Node, ity: 
     if (n.kind != comptime_deep.NODE_SCALAR) { ret err[fail.Fail].err{fail.message("lower: a constant scalar is an aggregate")}; }
     val v:    comptime.CTValue    = n.value;
     val size: res[u64, fail.Fail] = size_of(ctx, ity);
-    if (sel size.err) { ret err[fail.Fail].err{size.err}; }
+    if (sel size.err)                   { ret err[fail.Fail].err{size.err}; }
     if (v.kind == comptime.CT_KIND_STR) { ret place_string(ctx, v.data.s, base, image); }
     if (size.ok == 0 || size.ok > 16)   { ret err[fail.Fail].err{fail.message("lower: a constant scalar has an unsupported size")}; }
     if (v.kind == comptime.CT_KIND_INT) {

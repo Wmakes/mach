@@ -41,24 +41,24 @@ use mach.lang.intern;
 use mach.lang.layout;
 #[testing]
 use mach.lang.linkage;
-use mirl_verify:     mirl.verify;
-use lower_context:   mach.lang.me.lower.context;
-#[testing]
-use text_item: mirl.ir.text.item;
-#[testing]
-use text_sink: mirl.ir.text.sink;
-#[testing]
-use text_printer: mirl.ir.text.printer;
+use lower_context: mach.lang.me.lower.context;
+use lower_decl:    mach.lang.me.lower.decl;
+use mach.lang.session;
+use lang_source:  mach.lang.source;
 #[testing]
 use target_owner: mach.lang.target.owner;
-#[testing]
-use std.types.view.View;
-use lower_decl:      mach.lang.me.lower.decl;
-use mach.lang.session;
-use lang_source: mach.lang.source;
 use mach.lang.type;
 #[testing]
 use mach.lang.type.query.extent;
+#[testing]
+use text_item:    mirl.ir.text.item;
+#[testing]
+use text_printer: mirl.ir.text.printer;
+#[testing]
+use text_sink:    mirl.ir.text.sink;
+use mirl_verify:  mirl.verify;
+#[testing]
+use std.types.view.View;
 
 fwd lower_context.LoopFrame;
 fwd lower_context.Unit;
@@ -372,7 +372,7 @@ fun lowered_dnit(l: *Lowered) {
         if (l.lowered[i]) { lower_context.unit_dnit(?l.units[i]); }
         i = i + 1;
     }
-    if (l.printed) { text_sink.dnit(?l.text); }
+    if (l.printed)          { text_sink.dnit(?l.text); }
     if (l.assembled != nil) { target_owner.release(?l.c.r.alloc, l.assembled); }
     sema_checked.checked_dnit(?l.c);
     linkage.dnit(?l.linkage);
@@ -400,11 +400,11 @@ fun lowered_unit(l: *Lowered, fqn: str) *lower_context.Unit {
 #[testing]
 fun lowered_text(l: *Lowered, fqn: str) View {
     val u: *lower_context.Unit = lowered_unit(l, fqn);
-    if (u == nil) { ret View{data: nil, len: 0}; }
+    if (u == nil)  { ret View{data: nil, len: 0}; }
     if (l.printed) { text_sink.dnit(?l.text); }
     l.text    = text_sink.init(?l.c.r.alloc);
     l.printed = true;
-    var w:       io_writer.Writer = text_sink.writer(?l.text);
+    var w:       io_writer.Writer        = text_sink.writer(?l.text);
     val written: err[text_printer.Error] = text_item.print(?w, ?u.m);
     if (sel written.err) { ret View{data: nil, len: 0}; }
     ret text_sink.view(?l.text);
@@ -1234,17 +1234,17 @@ test module_const__folds_across_modules {
     }
     # an own `val` folds, so its global is declared and nothing reads it
     val gx: opt[u64] = t_number(t_initializer(m, "t.main.X"));
-    if (sel gx.none)                                                     { ret 20; }
-    if (gx.some != 707 || t_count(m, "@t.main.X") != 1)                  { ret 20; }
+    if (sel gx.none)                                    { ret 20; }
+    if (gx.some != 707 || t_count(m, "@t.main.X") != 1) { ret 20; }
     val gn: opt[u64] = t_number(t_initializer(m, "t.main.N"));
-    if (sel gn.none)                                                     { ret 21; }
-    if (gn.some != 6543 || t_count(m, "@t.main.N") != 1)                 { ret 21; }
-    if (!t_declares(m, "t.a.f", false))                                  { ret 22; }
-    if (!t_declares(m, "t.a.G", true))                                   { ret 23; }
-    if (t_constants(m, 7) != 1 || t_constants(m, 9) != 0)                { ret 24; }
-    if (t_declares(m, "t.c.N", true))                                    { ret 25; }
-    if (!t_declares(m, "t.c.PH", true))                                  { ret 26; }
-    if (!t_declares(m, "t.a.MSG", true))                                 { ret 27; }
+    if (sel gn.none)                                      { ret 21; }
+    if (gn.some != 6543 || t_count(m, "@t.main.N") != 1)  { ret 21; }
+    if (!t_declares(m, "t.a.f", false))                   { ret 22; }
+    if (!t_declares(m, "t.a.G", true))                    { ret 23; }
+    if (t_constants(m, 7) != 1 || t_constants(m, 9) != 0) { ret 24; }
+    if (t_declares(m, "t.c.N", true))                     { ret 25; }
+    if (!t_declares(m, "t.c.PH", true))                   { ret 26; }
+    if (!t_declares(m, "t.a.MSG", true))                  { ret 27; }
     ret 0;
 }
 
@@ -1348,9 +1348,9 @@ test const_aggregate__folds_cast_leaves {
     var l: Lowered;
     fin { lowered_dnit(?l); }
     val m: View = t_lowered(?l, "val BIG: u32 = 0x1CAFE;\nval SMALL: u8 = 200;\nval PI64: f64 = 3.5;\nval HALFf: f32 = 0.5;\nval QRTf: f32 = 0.25;\npub val IPACK: [2]u32 = [2]u32{BIG::u16::u32, SMALL::u32};\npub val FNARROW: [1]f32 = [1]f32{PI64::f32};\npub val FWIDE: [2]f64 = [2]f64{HALFf::f64, QRTf::f64};\n");
-    if (m.len == 0)                         { ret 1; }
-    if (!t_holds(m, "i32 51966, i32 200")) { ret 2; }
-    if (!t_holds(m, "f32 0x40600000"))     { ret 3; }
+    if (m.len == 0)                                                                                                                     { ret 1; }
+    if (!t_holds(m, "i32 51966, i32 200"))                                                                                              { ret 2; }
+    if (!t_holds(m, "f32 0x40600000"))                                                                                                  { ret 3; }
     if (!t_holds(m, "f64 0x3fe0000000000000, f64 0x3fd0000000000000") && !t_holds(m, "f64 0x3FE0000000000000, f64 0x3FD0000000000000")) { ret 4; }
     ret 0;
 }
@@ -1364,7 +1364,7 @@ test linkage_name__dotted_shapes {
     if (sel made.err || !lowered_accepted(?l)) { ret 1; }
     val itn:   *intern.Interner    = ?l.c.r.s.interner;
     val m:     *lower_context.Unit = lowered_unit(?l, "t.main");
-    var exact: [12]str          = [12]str{
+    var exact: [12]str             = [12]str{
         "t.lib.wrap$t.lib.Leaf", "t.lib.wrap$t.lib.Box$$t.lib.Leaf", "t.lib.wrap$t.lib.Box$$t.lib.Box$$$t.lib.Leaf",
         "t.lib.wrap$p$t.lib.Leaf", "t.lib.wrap$arr4$u8", "t.lib.wrap$sec$u32", "t.lib.wrap$fn$$i64$$i64$$i64",
         "t.lib.pair$t.lib.Box$$t.lib.Leaf$i64", "t.lib.pair$p$t.lib.Box$$t.lib.Leaf$u8", "t.lib.tag$7", "t.lib.tag$n3",
@@ -1378,7 +1378,7 @@ test linkage_name__dotted_shapes {
     if (t_defined_in(m, itn, "t.lib.wrap$", false) != 7) { ret 14; }
     # the plain function is defined once in lib, and main refers to it by the same name
     if (t_defined_in(lowered_unit(?l, "t.lib"), itn, "t.lib.plain", true) != 1) { ret 16; }
-    if (!t_declares(lowered_text(?l, "t.main"), "t.lib.plain", false))           { ret 15; }
+    if (!t_declares(lowered_text(?l, "t.main"), "t.lib.plain", false))          { ret 15; }
     ret 0;
 }
 

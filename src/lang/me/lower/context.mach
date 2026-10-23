@@ -3,9 +3,9 @@ use std.allocator.page;
 use std.collections.map;
 use collections_vector: std.collections.vector;
 use std.types.bool.bool;
-use std.types.char.char;
 use std.types.bool.false;
 use std.types.bool.true;
+use std.types.char.char;
 use std.types.error.err;
 use std.types.option.opt;
 use std.types.result.res;
@@ -30,13 +30,13 @@ use mach.lang.fe.comptime.intrinsic;
 use mach.lang.fe.resolve;
 use fe_sema:       mach.lang.fe.sema;
 use sema_declared: mach.lang.fe.sema.declared;
-use mach.lang.fe.sema.typename;
 use mach.lang.fe.sema.recipe;
+use mach.lang.fe.sema.typename;
 use mach.lang.float;
 use mach.lang.intern;
 use mach.lang.linkage;
 use mach.lang.me.lower.builder;
-use irt: mach.lang.me.lower.irt;
+use mach.lang.me.lower.irt;
 use mach.lang.me.lower.mangle;
 use mach.lang.me.lower.value;
 use mach.lang.module;
@@ -44,7 +44,7 @@ use mach.lang.session;
 use lang_source: mach.lang.source;
 use mach.lang.stack;
 use target_definition: mach.lang.target.definition;
-use target_owner: mach.lang.target.owner;
+use target_owner:      mach.lang.target.owner;
 use mach.lang.target.resolved;
 use mach.lang.type;
 use type_query: mach.lang.type.query;
@@ -53,24 +53,24 @@ use mach.lang.type.query.subst;
 
 use core_state: masc.core.state;
 use mink.model.symbol;
-use std.collections.slice.Slice;
-use std.types.view.View;
-use mirl_debug: mirl.ir.debug;
+use mirl_slice:    mirl.base.slice;
+use mbuild:        mirl.build;
+use mirl_constant: mirl.ir.constant;
+use mirl_debug:    mirl.ir.debug;
+use mirl_function: mirl.ir.function;
 use mirl.ir.function.FunctionData;
+use mirl_global: mirl.ir.global;
 use mirl.ir.global.GlobalData;
 use mirl.ir.global.Section;
-use mirl_global: mirl.ir.global;
-use mirl_function: mirl.ir.function;
-use mirl_slice: mirl.base.slice;
-use mirl_constant: mirl.ir.constant;
 use mirl.ir.id;
 use mirl.ir.linkage.Linkage;
 use mirl_module: mirl.ir.module;
-use types: mirl.ir.type;
+use mirl_point:  mirl.ir.point;
+use types:       mirl.ir.type;
 use mirl.ir.type.Type;
-use mirl_point: mirl.ir.point;
 use mirl_target: mirl.target;
-use mbuild: mirl.build;
+use std.collections.slice.Slice;
+use std.types.view.View;
 
 val INITIAL_STACK_CAP: u32 = 8;
 
@@ -265,7 +265,7 @@ pub rec LowerContext {
     debug_types: map.Map[type.TypeId, mirl_debug.Type];
     # whether each type holds a secret in its own storage, asked once per type: 1 when
     # it does, 2 when it does not
-    held:        map.Map[type.TypeId, u8];
+    held: map.Map[type.TypeId, u8];
     # the pointees the debug types name by key, described once every other type is
     debug_pointees: collections_vector.Vector[DebugPointee];
 
@@ -425,10 +425,10 @@ pub fun request(
     checks: bool,
     diags: *diagnostic.DiagnosticStore,
     interfaces: fe_sema.interface.Reader) res[LowerRequest, fail.Fail] {
-    if (l == nil)      { ret res[LowerRequest, fail.Fail].err{fail.message("lower: a lowering request requires the project's linkage")}; }
-    if (tgt == nil)    { ret res[LowerRequest, fail.Fail].err{fail.message("lower: a lowering request requires a resolved target")}; }
+    if (l == nil)       { ret res[LowerRequest, fail.Fail].err{fail.message("lower: a lowering request requires the project's linkage")}; }
+    if (tgt == nil)     { ret res[LowerRequest, fail.Fail].err{fail.message("lower: a lowering request requires a resolved target")}; }
     if (machine == nil) { ret res[LowerRequest, fail.Fail].err{fail.message("lower: a lowering request requires the target mirl assembled")}; }
-    if (malloc == nil) { ret res[LowerRequest, fail.Fail].err{fail.message("lower: a lowering request requires an allocator")}; }
+    if (malloc == nil)  { ret res[LowerRequest, fail.Fail].err{fail.message("lower: a lowering request requires an allocator")}; }
 
     if (interfaces.read == nil) { ret res[LowerRequest, fail.Fail].err{fail.message("lower: a lowering request requires a reader of imported interfaces")}; }
     if (diags == nil)           { ret res[LowerRequest, fail.Fail].err{fail.message("lower: a lowering request requires a diagnostic store")}; }
@@ -492,28 +492,28 @@ pub fun scope_leave(lc: *LowerContext, mark: ScopeMark) err[fail.Fail] {
 pub fun init_context(lc: *LowerContext, req: *LowerRequest, unit: *Unit) err[fail.Fail] {
     if (req == nil) { ret err[fail.Fail].err{fail.message("lower: init_context requires a lowering request")}; }
     val s: *session.Session = req.s;
-    lc.status            = fail.accepted();
-    lc.s                 = s;
-    lc.linkage           = req.linkage;
-    lc.interfaces        = req.interfaces;
-    lc.foreign           = collections_vector.init[ForeignScope](s.alloc);
-    lc.diags             = req.diags;
-    lc.tgt               = req.tgt;
-    lc.machine           = req.machine;
-    lc.scope             = req.module;
-    lc.scopes            = nil;
-    lc.scope_len         = 0;
-    lc.scope_cap         = 0;
-    lc.scope_generation  = 0;
-    lc.scope_top         = 0;
-    lc.normal_object     = req.normal_object;
-    lc.shared_artifact   = req.shared_artifact;
-    lc.debug             = req.debug;
-    lc.checks            = req.checks;
-    lc.unit              = unit;
-    lc.m                 = ?unit.m;
-    unit.root_project    = session.module_is_root_project(s, req.module.own_module);
-    lc.builder           = builder.init(?unit.m, s.alloc, req.machine.target, req.machine.ctx, ?s.sources, req.debug);
+    lc.status           = fail.accepted();
+    lc.s                = s;
+    lc.linkage          = req.linkage;
+    lc.interfaces       = req.interfaces;
+    lc.foreign          = collections_vector.init[ForeignScope](s.alloc);
+    lc.diags            = req.diags;
+    lc.tgt              = req.tgt;
+    lc.machine          = req.machine;
+    lc.scope            = req.module;
+    lc.scopes           = nil;
+    lc.scope_len        = 0;
+    lc.scope_cap        = 0;
+    lc.scope_generation = 0;
+    lc.scope_top        = 0;
+    lc.normal_object    = req.normal_object;
+    lc.shared_artifact  = req.shared_artifact;
+    lc.debug            = req.debug;
+    lc.checks           = req.checks;
+    lc.unit             = unit;
+    lc.m                = ?unit.m;
+    unit.root_project   = session.module_is_root_project(s, req.module.own_module);
+    lc.builder          = builder.init(?unit.m, s.alloc, req.machine.target, req.machine.ctx, ?s.sources, req.debug);
 
     val caps_r: res[comptime.PhaseCapabilities[LowerContext], fail.Fail] = comptime.lowering_capabilities[LowerContext](
         resolve_module_member_const, constant_store_capability,
@@ -570,8 +570,8 @@ pub fun init_context(lc: *LowerContext, req: *LowerRequest, unit: *Unit) err[fai
     lc.pack_len      = 0;
     lc.pack_ret_type = type.TYPE_NIL;
 
-    lc.debug_types = map.init[type.TypeId, mirl_debug.Type](s.alloc);
-    lc.held        = map.init[type.TypeId, u8](s.alloc);
+    lc.debug_types    = map.init[type.TypeId, mirl_debug.Type](s.alloc);
+    lc.held           = map.init[type.TypeId, u8](s.alloc);
     lc.debug_pointees = collections_vector.init[DebugPointee](s.alloc);
 
     built = true;
@@ -1144,7 +1144,7 @@ pub fun lower_type(lc: *LowerContext, tid: type.TypeId) res[Type, fail.Fail] {
     }
 
     if (k == type.TYPE_VECTOR) {
-        val ed:   type.PrimDesc      = type.prim_desc(t.data.vector.element);
+        val ed:   type.PrimDesc        = type.prim_desc(t.data.vector.element);
         var lane: res[Type, fail.Fail] = irt.int(?lc.m.types, ed.bits);
         if (ed.class == type.PRIM_CLASS_FLOAT) { lane = irt.float(?lc.m.types, ed.bits); }
         if (sel lane.err)                      { ret lane; }
@@ -1239,7 +1239,7 @@ pub fun tag_disc_type(lc: *LowerContext, tid: type.TypeId) res[Type, fail.Fail] 
 
 fun lower_tag(lc: *LowerContext, tid: type.TypeId) res[Type, fail.Fail] {
     val disc: res[Type, fail.Fail] = tag_disc_type(lc, tid);
-    if (sel disc.err) { ret disc; }
+    if (sel disc.err)                            { ret disc; }
     if (type.field_count(?lc.s.types, tid) == 0) { ret res[Type, fail.Fail].err{fail.message("lower: a tag has no cases")}; }
 
     var payloads: collections_vector.Vector[Type] = collections_vector.init[Type](lc.s.alloc);
@@ -1277,7 +1277,7 @@ fun lower_nominal(lc: *LowerContext, tid: type.TypeId, is_union: bool) res[Type,
         i      = i + 1;
     }
 
-    if (is_union) { ret irt.union_of(?lc.m.types, buf, fields_len); }
+    if (is_union)    { ret irt.union_of(?lc.m.types, buf, fields_len); }
     if (!dec.packed) { ret irt.structure(?lc.m.types, buf, fields_len); }
 
     val res_off: res[*u64, A.Error] = A.allocate[u64](lc.s.alloc, fields_len::usize);
@@ -1299,7 +1299,7 @@ fun lower_nominal(lc: *LowerContext, tid: type.TypeId, is_union: bool) res[Type,
 # the alignment a value of the source type `tid`, held in `ir`, is stored at: a decorated
 # record's, else the target's
 pub fun storage_align(lc: *LowerContext, tid: type.TypeId, ir: Type) u64 {
-    val base: type.TypeId = type.strip_secret(?lc.s.types, substitute_type(lc, tid));
+    val base: type.TypeId     = type.strip_secret(?lc.s.types, substitute_type(lc, tid));
     val t:    opt[*type.Type] = type.get(?lc.s.types, base);
     if (sel t.some) {
         val k: type.TypeKind = t.some.kind;
@@ -1386,7 +1386,7 @@ fun debug_name(lc: *LowerContext, t: *type.Type, tid: type.TypeId) res[View, fai
 # describe the source type `tid` in the module's debug table, once
 fun debug_describe(lc: *LowerContext, tid: type.TypeId) res[mirl_debug.Type, fail.Fail] {
     val found: opt[*mirl_debug.Type] = map.get[type.TypeId, mirl_debug.Type](?lc.debug_types, ?tid);
-    if (sel found.some) { ret res[mirl_debug.Type, fail.Fail].ok{@found.some}; }
+    if (sel found.some)    { ret res[mirl_debug.Type, fail.Fail].ok{@found.some}; }
     if (stack.exhausted()) { ret res[mirl_debug.Type, fail.Fail].err{refuse_type_nesting(lc)}; }
 
     val to: opt[*type.Type] = type.get(?lc.s.types, tid);
@@ -1403,14 +1403,14 @@ fun debug_describe(lc: *LowerContext, tid: type.TypeId) res[mirl_debug.Type, fai
 
     val d: type.PrimDesc = type.prim_desc(k);
     if (d.class != type.PRIM_CLASS_NONE || k == type.TYPE_FUN) {
-        var enc: mirl_debug.Encoding = mirl_debug.Encoding.unsigned{};
-        var width: u32               = d.bits;
+        var enc:   mirl_debug.Encoding = mirl_debug.Encoding.unsigned{};
+        var width: u32                 = d.bits;
         if (d.class == type.PRIM_CLASS_FLOAT) { enc = mirl_debug.Encoding.float{}; }
         or (d.class == type.PRIM_CLASS_PTR || k == type.TYPE_FUN) {
             enc   = mirl_debug.Encoding.address{};
             width = (builder.size_of(?lc.builder, layout.ok) * 8)::u32;
         }
-        or (d.signed) { enc = mirl_debug.Encoding.signed{}; }
+        or (d.signed)   { enc = mirl_debug.Encoding.signed{}; }
         if (width == 0) { width = 8; }
         val made: res[mirl_debug.Declared, fail.Fail] = declare_debug(lc, tid, mirl_debug.Entry{key: view_of(key.ok), name: name.ok,
             head: mirl_debug.Head.base{mirl_debug.Base{encoding: enc, width: width}}});
@@ -1419,7 +1419,7 @@ fun debug_describe(lc: *LowerContext, tid: type.TypeId) res[mirl_debug.Type, fai
     }
 
     if (k == type.TYPE_POINTER) {
-        val pointee: type.TypeId = type.strip_secret(?lc.s.types, t.data.pointer.base);
+        val pointee: type.TypeId         = type.strip_secret(?lc.s.types, t.data.pointer.base);
         val pkey:    res[str, fail.Fail] = debug_key(lc, pointee);
         if (sel pkey.err) { ret res[mirl_debug.Type, fail.Fail].err{pkey.err}; }
         val made: res[mirl_debug.Declared, fail.Fail] = declare_debug(lc, tid, mirl_debug.Entry{key: view_of(key.ok), name: view_of(nil),
@@ -1440,7 +1440,7 @@ fun debug_describe(lc: *LowerContext, tid: type.TypeId) res[mirl_debug.Type, fai
             count    = t.data.vector.lanes::u64;
         }
         val made: res[mirl_debug.Declared, fail.Fail] = declare_debug(lc, tid, mirl_debug.Entry{key: view_of(key.ok), name: view_of(nil), head: mirl_debug.Head.array{}});
-        if (sel made.err) { ret res[mirl_debug.Type, fail.Fail].err{made.err}; }
+        if (sel made.err)      { ret res[mirl_debug.Type, fail.Fail].err{made.err}; }
         if (sel made.ok.known) { ret res[mirl_debug.Type, fail.Fail].ok{made.ok.known}; }
         val elem: res[mirl_debug.Type, fail.Fail] = debug_describe(lc, type.strip_secret(?lc.s.types, elem_tid));
         if (sel elem.err) { ret elem; }
@@ -1456,13 +1456,13 @@ fun debug_describe(lc: *LowerContext, tid: type.TypeId) res[mirl_debug.Type, fai
         ret res[mirl_debug.Type, fail.Fail].ok{declared_type(made.ok)};
     }
 
-    val is_tag:   bool = type.is_tag(?lc.s.types, tid);
-    val is_union: bool = !is_tag && type.is_union(?lc.s.types, tid);
-    var head: mirl_debug.Head = mirl_debug.Head.structure{layout.ok};
-    if (is_tag)        { head = mirl_debug.Head.tagged{layout.ok}; }
-    or (is_union)      { head = mirl_debug.Head.union{layout.ok}; }
+    val is_tag:   bool            = type.is_tag(?lc.s.types, tid);
+    val is_union: bool            = !is_tag && type.is_union(?lc.s.types, tid);
+    var head:     mirl_debug.Head = mirl_debug.Head.structure{layout.ok};
+    if (is_tag)   { head = mirl_debug.Head.tagged{layout.ok}; }
+    or (is_union) { head = mirl_debug.Head.union{layout.ok}; }
     val made: res[mirl_debug.Declared, fail.Fail] = declare_debug(lc, tid, mirl_debug.Entry{key: view_of(key.ok), name: name.ok, head: head});
-    if (sel made.err) { ret res[mirl_debug.Type, fail.Fail].err{made.err}; }
+    if (sel made.err)      { ret res[mirl_debug.Type, fail.Fail].err{made.err}; }
     if (sel made.ok.known) { ret res[mirl_debug.Type, fail.Fail].ok{made.ok.known}; }
     val self: mirl_debug.Type = made.ok.fresh;
 
@@ -1470,7 +1470,7 @@ fun debug_describe(lc: *LowerContext, tid: type.TypeId) res[mirl_debug.Type, fai
     if (is_tag) {
         var cases: collections_vector.Vector[mirl_debug.Case] = collections_vector.init[mirl_debug.Case](lc.s.alloc);
         fin { collections_vector.dnit[mirl_debug.Case](?cases); }
-        val disc_tid: type.TypeId = type.tag_discriminator(?lc.s.types, tid);
+        val disc_tid: type.TypeId                     = type.tag_discriminator(?lc.s.types, tid);
         val disc:     res[mirl_debug.Type, fail.Fail] = debug_describe(lc, disc_tid);
         if (sel disc.err) { ret disc; }
         var i: u32 = 0;
@@ -1780,7 +1780,7 @@ pub fun ext_of(lc: *LowerContext, sem: type.TypeId) types.Extension {
 # a signature of `fixed` parameters of the function type `fn` and then the `extra` types a
 # pack expands to, returning `ret_sem`
 fun signature_of(lc: *LowerContext, ret_sem: type.TypeId, fn: *type.Type, fixed: u32, extra: *type.TypeId, extra_len: u32) res[FnSig, fail.Fail] {
-    val total: u32 = fixed + extra_len;
+    val total:  u32                                        = fixed + extra_len;
     var params: collections_vector.Vector[Type]            = collections_vector.init[Type](lc.s.alloc);
     var exts:   collections_vector.Vector[types.Extension] = collections_vector.init[types.Extension](lc.s.alloc);
     fin {
@@ -1872,11 +1872,11 @@ pub fun declared_op(lc: *LowerContext, d: Declared, out_op: *u32) u32 {
 pub fun emit_dbg_birth(lc: *LowerContext, name_span: lang_source.Span, ty_sem: type.TypeId, param: opt[u32], val_v: value.Value,
     slot: opt[value.Value]) err[fail.Fail] {
     val debug_type: res[opt[mirl_debug.Type], fail.Fail] = debug_type_of(lc, substitute_type(lc, ty_sem));
-    if (sel debug_type.err)  { ret err[fail.Fail].err{debug_type.err}; }
+    if (sel debug_type.err)     { ret err[fail.Fail].err{debug_type.err}; }
     if (sel debug_type.ok.none) { ret err[fail.Fail].ok{}; }
     val declared: opt[mirl_debug.Location] = builder.location_of(?lc.builder, lang_source.location(lc.scope.a.file_id, name_span));
     if (sel declared.none) { ret err[fail.Fail].ok{}; }
-    val name: View = View{data: (?lc.scope.source[name_span.offset])::str, len: name_span.len};
+    val name:  View                                      = View{data: (?lc.scope.source[name_span.offset])::str, len: name_span.len};
     val bound: res[mirl_debug.Binding, mirl_debug.Error] = mirl_debug.bind(?lc.m.debug,
         mirl_debug.Variable{name: name, type: debug_type.ok.some, declared: declared.some, parameter: param});
     if (sel bound.err) { ret err[fail.Fail].err{debug_failed(bound.err)}; }
@@ -1959,7 +1959,7 @@ pub fun define_function(lc: *LowerContext, data: FunctionData, info: FnInfo) res
 # the module's definition of a global, in place of a declaration a reference made
 pub fun define_global(lc: *LowerContext, g: GlobalData) res[u32, fail.Fail] {
     val found: opt[id.Symbol] = mirl_module.find(lc.m, g.name);
-    if (sel found.none) { ret add_global(lc, g); }
+    if (sel found.none)         { ret add_global(lc, g); }
     if (!sel found.some.global) { ret res[u32, fail.Fail].err{fail.message("lower: a global shares its symbol with a function of the module")}; }
     val at:   u32               = found.some.global.index;
     val node: *mirl_global.Node = ?lc.m.globals.data[at];
@@ -2022,7 +2022,7 @@ pub fun add_global(lc: *LowerContext, g: GlobalData) res[u32, fail.Fail] {
 pub fun constant_global(lc: *LowerContext, v: value.Value) res[value.Value, fail.Fail] {
     val res_name: res[intern.StrId, fail.Fail] = anon_global_name(lc, lc.m.globals.len::u32);
     if (sel res_name.err) { ret res[value.Value, fail.Fail].err{res_name.err}; }
-    val c: id.Constant = builder.constant_of(?lc.builder, v);
+    val c:     id.Constant    = builder.constant_of(?lc.builder, v);
     val built: err[fail.Fail] = builder_state(lc);
     if (sel built.err) { ret res[value.Value, fail.Fail].err{built.err}; }
     var g: GlobalData;
@@ -2229,7 +2229,7 @@ test request__refuses_a_module_product_that_does_not_correspond {
     var machine: Machine;
     machine.target = nil;
     machine.ctx    = opt[*core_state.Context].none{};
-    var l:   linkage.Linkage = linkage.init(?alloc);
+    var l: linkage.Linkage = linkage.init(?alloc);
     fin { linkage.dnit(?l); }
     val reader: fe_sema.interface.Reader = fe_sema.interface.Reader{ctx: nil, read: fixture_interface};
     val unread: fe_sema.interface.Reader = fe_sema.interface.Reader{ctx: nil, read: nil};

@@ -1,7 +1,7 @@
 use std.allocator.arena;
 use std.allocator.page;
 use collections_vector: std.collections.vector;
-use fs: std.filesystem;
+use fs:                 std.filesystem;
 use std.print;
 use std.text.string.str_free;
 use std.types.bool.bool;
@@ -33,10 +33,8 @@ use lang_fingerprint: mach.lang.fingerprint;
 use mach.lang.intern;
 use mach.lang.linkage;
 use mach.lang.manifest;
-use mach.lang.me.lower.testrunner;
 use lower_context: mach.lang.me.lower.context;
-use mink.model.object.Object;
-use mink_output: mink.catalog.output;
+use mach.lang.me.lower.testrunner;
 use output_testing: mach.lang.output.testing;
 use mach.lang.session;
 use lang_source: mach.lang.source;
@@ -48,6 +46,8 @@ use target_of:         mach.lang.target.of;
 use target_testing:    mach.lang.target.testing;
 use mach.lang.testrun;
 use mach.lang.wire;
+use mink_output: mink.catalog.output;
+use mink.model.object.Object;
 
 pub fun classify_subprocess(term: *subprocess.SubprocessTerminal, expired: bool, cap_ok: bool, cap: *subprocess.CaptureIoResult) testrun.GateResult {
     if (cap_ok && (cap.read_failed || cap.write_failed || cap.close_failed)) {
@@ -231,13 +231,13 @@ fun build_dispatch_executable(p: *project.Project, dispatcher: str, artifact: st
     if (sel compiled.err) { ret err[fail.Fail].err{compiled.err}; }
     var entry_object: Object = compiled.ok;
     fin { backend.release_object(?entry_object); }
-    var written: build_emit.ObjectWrite = build_emit.ObjectWrite{p: p, o: ?entry_object, record: nil};
-    val res_emit: err[fail.Fail] = build_emit.write_object(?written, dispatcher);
+    var written:  build_emit.ObjectWrite = build_emit.ObjectWrite{p: p, o: ?entry_object, record: nil};
+    val res_emit: err[fail.Fail]         = build_emit.write_object(?written, dispatcher);
     if (sel res_emit.err) { ret err[fail.Fail].err{fail.as_user(diagnostic_kind.OUTPUT_WRITE, res_emit.err)}; }
 
     # the dispatcher is the test executable's `main`: an artifact's own `main` yields to it
     # as a weak definition, in a copy, so the normal object stays as the cache holds it
-    val total: u32 = module_len + 1;
+    val total: u32                    = module_len + 1;
     val made:  res[**Object, A.Error] = A.allocate[*Object](p.alloc, total::usize);
     if (sel made.err) { ret err[fail.Fail].err{fail.refused(made.err)}; }
     val objects: **Object = made.ok;

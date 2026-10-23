@@ -19,20 +19,20 @@ use mach.lang.fe.resolve;
 use mach.lang.intern;
 use mach.lang.me.lower.builder;
 use lower_context: mach.lang.me.lower.context;
-use irt: mach.lang.me.lower.irt;
+use mach.lang.me.lower.irt;
 use mach.lang.me.lower.value;
 use mach.lang.session;
 
-use collections_vector: std.collections.vector;
-use std.types.string.str_len;
-use std.types.view.View;
 use mink.model.symbol;
 use mirl.ir.function.FunctionData;
 use mirl.ir.id;
 use mirl.ir.linkage.Linkage;
 use mirl_module: mirl.ir.module;
-use types: mirl.ir.type;
+use types:       mirl.ir.type;
 use mirl.ir.type.Type;
+use collections_vector: std.collections.vector;
+use std.types.string.str_len;
+use std.types.view.View;
 
 # name: the qualified name `<module path>#<identifier>`, which is also the test's symbol
 pub rec Test {
@@ -158,7 +158,7 @@ fun view_of(s: *session.Session, name: intern.StrId) View {
 }
 
 fun build_dispatcher(s: *session.Session, machine: *lower_context.Machine, u: *lower_context.Unit, tests: *Test, count: u32) err[fail.Fail] {
-    val t: *types.Table = ?u.m.types;
+    val t: *types.Table    = ?u.m.types;
     var b: builder.Builder = builder.init(?u.m, s.alloc, machine.target, machine.ctx, ?s.sources, false);
     fin { builder.dnit(?b); }
 
@@ -167,21 +167,21 @@ fun build_dispatcher(s: *session.Session, machine: *lower_context.Machine, u: *l
     val i64t: Type = builder.int_type(?b, 64);
     val ptrt: Type = builder.ptr_type(?b);
 
-    var test_result: Type            = i32t;
-    var test_ext:    types.Extension = types.Extension.sext{};
-    val res_tsig: res[Type, fail.Fail] = irt.signature(t, nil, nil, 0, ?test_result, ?test_ext, 1);
+    var test_result: Type                 = i32t;
+    var test_ext:    types.Extension      = types.Extension.sext{};
+    val res_tsig:    res[Type, fail.Fail] = irt.signature(t, nil, nil, 0, ?test_result, ?test_ext, 1);
     if (sel res_tsig.err) { ret err[fail.Fail].err{res_tsig.err}; }
     val tsig: Type = res_tsig.ok;
 
-    var main_params: [2]Type            = [2]Type{i64t, ptrt};
-    var main_ext:    [2]types.Extension = [2]types.Extension{types.Extension.none{}, types.Extension.none{}};
-    var main_result: Type               = i64t;
-    var main_rext:   types.Extension    = types.Extension.none{};
-    val res_msig: res[Type, fail.Fail] = irt.signature(t, ?main_params[0], ?main_ext[0], 2, ?main_result, ?main_rext, 1);
+    var main_params: [2]Type              = [2]Type{i64t, ptrt};
+    var main_ext:    [2]types.Extension   = [2]types.Extension{types.Extension.none{}, types.Extension.none{}};
+    var main_result: Type                 = i64t;
+    var main_rext:   types.Extension      = types.Extension.none{};
+    val res_msig:    res[Type, fail.Fail] = irt.signature(t, ?main_params[0], ?main_ext[0], 2, ?main_result, ?main_rext, 1);
     if (sel res_msig.err) { ret err[fail.Fail].err{res_msig.err}; }
     val msig: Type = res_msig.ok;
 
-    val global: Linkage = Linkage{binding: ?symbol.GLOBAL, visibility: ?symbol.DEFAULT};
+    val global:  Linkage                                = Linkage{binding: ?symbol.GLOBAL, visibility: ?symbol.DEFAULT};
     var callees: collections_vector.Vector[value.Value] = collections_vector.init[value.Value](s.alloc);
     fin { collections_vector.dnit[value.Value](?callees); }
     var k: u32 = 0;
@@ -203,7 +203,7 @@ fun build_dispatcher(s: *session.Session, machine: *lower_context.Machine, u: *l
     val argv:    value.Value = builder.block_param(?b, b_entry, 1, ptrt);
 
     # the digit loop carries the character pointer and the index read so far
-    var loop_tys: [2]Type = [2]Type{ptrt, i64t};
+    var loop_tys: [2]Type  = [2]Type{ptrt, i64t};
     val b_bad:    id.Block = builder.new_block_with(?b, nil, nil, 0);
     val b_getarg: id.Block = builder.new_block_with(?b, nil, nil, 0);
     val b_head:   id.Block = builder.new_block_with(?b, ?loop_tys[0], nil, 2);
@@ -244,7 +244,8 @@ fun build_dispatcher(s: *session.Session, machine: *lower_context.Machine, u: *l
     val digit: value.Value    = builder.sub(?b, builder.zext(?b, c, i64t), value.const_int(48, i64t));
     var next:  [2]value.Value = [2]value.Value{
         builder.take(?b, builder.emit_step(?b, p, i8t, value.const_int(1, i64t))),
-        builder.add(?b, builder.mul(?b, acc, value.const_int(10, i64t)), digit)};
+        builder.add(?b, builder.mul(?b, acc, value.const_int(10, i64t)), digit)
+    };
     builder.take_err(?b, builder.emit_br_args(?b, b_head, ?next[0], 2));
 
     # one case per test; any other index is malformed

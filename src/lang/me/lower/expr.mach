@@ -27,11 +27,11 @@ use fe_sema: mach.lang.fe.sema;
 use mach.lang.float;
 use mach.lang.intern;
 use mach.lang.me.lower.builder;
-use irt: mach.lang.me.lower.irt;
-use mach.lang.me.lower.value;
 use mach.lang.me.lower.constnode;
 use lower_context: mach.lang.me.lower.context;
+use mach.lang.me.lower.irt;
 use mach.lang.me.lower.mangle;
+use mach.lang.me.lower.value;
 use mach.lang.module;
 use mach.lang.session;
 use lang_source: mach.lang.source;
@@ -41,8 +41,8 @@ use mach.lang.type;
 use mirl.ir.id;
 use mirl.ir.opcode;
 use mirl.ir.opcode.Opcode;
-use mirl.ir.type.Type;
 use types: mirl.ir.type;
+use mirl.ir.type.Type;
 use collections_vector: std.collections.vector;
 
 pub fun lower_rvalue(ctx: *lower_context.LowerContext, eid: ast_id.ExprId) res[value.Value, fail.Fail] {
@@ -98,7 +98,7 @@ fun lower_rvalue_kind(ctx: *lower_context.LowerContext, eid: ast_id.ExprId, e: *
 # classified where it is made. an aggregate is its storage's address, which is public
 fun stamp_secret(ctx: *lower_context.LowerContext, eid: ast_id.ExprId, v: value.Value) res[value.Value, fail.Fail] {
     var sec: bool = lower_context.expr_is_secret(ctx, eid);
-    if (!sec) { sec = compare_operand_secret(ctx, eid); }
+    if (!sec)                                 { sec = compare_operand_secret(ctx, eid); }
     if (!sec || v.secret || value.is_none(v)) { ret res[value.Value, fail.Fail].ok{v}; }
     if (irt.is_aggregate(?ctx.m.types, v.ty)) {
         var out: value.Value = v;
@@ -207,7 +207,7 @@ fun lower_ident_rvalue(ctx: *lower_context.LowerContext, eid: ast_id.ExprId) res
 
     val opt_local: opt[value.Value] = lower_context.lookup_local(ctx, sid);
     if (sel opt_local.some) {
-        val slot:   value.Value                      = opt_local.some;
+        val slot:   value.Value          = opt_local.some;
         val res_ir: res[Type, fail.Fail] = ir_type_of_expr(ctx, eid);
         if (sel res_ir.err) { ret res[value.Value, fail.Fail].err{res_ir.err}; }
         ret rvalue_at(ctx, slot, res_ir.ok, lower_context.expr_type_of(ctx, eid), access_is_volatile(ctx, eid));
@@ -926,8 +926,8 @@ pub fun try_lower_comptime_intrinsic(ctx: *lower_context.LowerContext, eid: ast_
         if (opt_f.ok.kind != ast_expr.EXPR_KIND_IDENT) {
             ret opt[res[value.Value, fail.Fail]].some{res[value.Value, fail.Fail].err{fail.message("lower: offset_of field argument is not a bare identifier")}};
         }
-        val field_ix: u32 = field_index_in_type(ctx, op_ty, opt_f.ok.data.ident.tok);
-        val at: res[u64, fail.Fail] = lower_context.member_offset(ctx, op_ty, op_ir, field_ix);
+        val field_ix: u32                 = field_index_in_type(ctx, op_ty, opt_f.ok.data.ident.tok);
+        val at:       res[u64, fail.Fail] = lower_context.member_offset(ctx, op_ty, op_ir, field_ix);
         if (sel at.err) { ret opt[res[value.Value, fail.Fail]].some{res[value.Value, fail.Fail].err{at.err}}; }
         n = at.ok;
     }
@@ -1667,8 +1667,8 @@ fun lower_logical(ctx: *lower_context.LowerContext, e: *ast_expr.Expr) res[value
     val rhs_block: id.Block = res_rhs_block.ok;
 
     # the join takes the operand that decided the result, the left's when it short-circuits
-    var joined: [1]Type = [1]Type{i8};
-    var secret: [1]bool = [1]bool{lhs[0].secret};
+    var joined: [1]Type  = [1]Type{i8};
+    var secret: [1]bool  = [1]bool{lhs[0].secret};
     val join:   id.Block = builder.new_block_with(?ctx.builder, ?joined[0], ?secret[0], 1);
 
     val res_short: res[id.Block, fail.Fail] = builder.new_block(?ctx.builder);
@@ -1678,7 +1678,7 @@ fun lower_logical(ctx: *lower_context.LowerContext, e: *ast_expr.Expr) res[value
     var res_cbr: err[fail.Fail] = err[fail.Fail].ok{};
     if (e.data.binary.op == ast_expr.BIN_AND) { res_cbr = builder.emit_cbr(?ctx.builder, lhs[0], rhs_block, short); }
     or                                        { res_cbr = builder.emit_cbr(?ctx.builder, lhs[0], short, rhs_block); }
-    if (sel res_cbr.err) { ret res[value.Value, fail.Fail].err{res_cbr.err}; }
+    if (sel res_cbr.err)                      { ret res[value.Value, fail.Fail].err{res_cbr.err}; }
 
     builder.set_block(?ctx.builder, short);
     val res_skip: err[fail.Fail] = builder.emit_br_args(?ctx.builder, join, ?lhs[0], 1);
@@ -1689,7 +1689,7 @@ fun lower_logical(ctx: *lower_context.LowerContext, e: *ast_expr.Expr) res[value
     if (sel res_rhs.err) { ret res_rhs; }
     val res_rhs_condition: res[value.Value, fail.Fail] = condition_value(ctx, e.data.binary.rhs, res_rhs.ok);
     if (sel res_rhs_condition.err) { ret res_rhs_condition; }
-    var rhs: [1]value.Value = [1]value.Value{res_rhs_condition.ok};
+    var rhs:    [1]value.Value = [1]value.Value{res_rhs_condition.ok};
     val res_br: err[fail.Fail] = builder.emit_br_args(?ctx.builder, join, ?rhs[0], 1);
     if (sel res_br.err) { ret res[value.Value, fail.Fail].err{res_br.err}; }
 
@@ -1956,7 +1956,7 @@ fun lower_vector_lit(ctx: *lower_context.LowerContext, eid: ast_id.ExprId, e: *a
     if (sel res_vec_ir.err) { ret res[value.Value, fail.Fail].err{res_vec_ir.err}; }
     val vec_ir: Type = res_vec_ir.ok;
 
-    val n: u32 = e.data.vector_lit.elems_len;
+    val n:     u32                                    = e.data.vector_lit.elems_len;
     var lanes: collections_vector.Vector[value.Value] = collections_vector.init[value.Value](ctx.s.alloc);
     fin { collections_vector.dnit[value.Value](?lanes); }
     var li: u32 = 0;
@@ -2283,7 +2283,7 @@ fun ir_type_of_expr(ctx: *lower_context.LowerContext, eid: ast_id.ExprId) res[Ty
 fun widen_index(ctx: *lower_context.LowerContext, v: value.Value, sem_ty: type.TypeId) res[value.Value, fail.Fail] {
     val xty: Type = builder.index_type(?ctx.builder);
     if (scalar_bits(ctx, sem_ty) >= irt.int_width(?ctx.m.types, xty)) { ret res[value.Value, fail.Fail].ok{v}; }
-    if (is_signed_type(ctx, sem_ty))                                   { ret builder.emit_sext(?ctx.builder, v, xty); }
+    if (is_signed_type(ctx, sem_ty))                                  { ret builder.emit_sext(?ctx.builder, v, xty); }
     ret builder.emit_zext(?ctx.builder, v, xty);
 }
 

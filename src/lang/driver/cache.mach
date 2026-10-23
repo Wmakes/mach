@@ -36,16 +36,15 @@ use std.types.string.str;
 use std.types.string.str_join;
 use std.types.string.str_len;
 
+use mach.lang.driver.backend;
 use mach.lang.driver.cache.compiler;
 use mach.lang.driver.cache.memo;
 use cache_record: mach.lang.driver.cache.record;
 use mach.lang.driver.declared;
 use mach.lang.driver.surface;
 use mach.lang.driver.toolchain;
-use mach.lang.me.lower.testrunner;
 use lower_context: mach.lang.me.lower.context;
-use mach.lang.driver.backend;
-use mink.model.object.Object;
+use mach.lang.me.lower.testrunner;
 use mach.lang.module;
 use mach.lang.output;
 use mach.lang.query;
@@ -53,6 +52,7 @@ use mach.lang.readout;
 use mach.lang.session;
 use target_of: mach.lang.target.of;
 use mach.lang.wire;
+use mink.model.object.Object;
 use std.allocator.page;
 use std.chrono.time;
 use std.collections.map;
@@ -353,9 +353,9 @@ pub fun read(p: *project.Project, location: str, expected: *[32]u8) res[opt[Cach
     fin {
         if (!handed) { backend.release_object(?object); }
     }
-    var record_len: usize = 0;
-    val record:     *u8   = backend.section_bytes(?object, backend.RECORD_SECTION, ?record_len);
-    val decoded: res[opt[cache_record.Record], fail.Fail] = cache_record.decode(p.s.alloc, ?p.s.interner, record, record_len);
+    var record_len: usize                                    = 0;
+    val record:     *u8                                      = backend.section_bytes(?object, backend.RECORD_SECTION, ?record_len);
+    val decoded:    res[opt[cache_record.Record], fail.Fail] = cache_record.decode(p.s.alloc, ?p.s.interner, record, record_len);
     if (sel decoded.err)     { ret res[opt[Cached], fail.Fail].err{decoded.err}; }
     if (sel decoded.ok.none) { ret res[opt[Cached], fail.Fail].ok{opt[Cached].none{}}; }
     var found: cache_record.Record = decoded.ok.some;
@@ -472,7 +472,7 @@ fun restore(p: *project.Project, m: *project.ModuleEntry) res[bool, fail.Fail] {
     @boxed.ok = cached.object;
     handed    = true;
     cache_record.facts_dnit(p.s.alloc, ?m.staged_facts);
-    m.staged = boxed.ok;
+    m.staged       = boxed.ok;
     m.staged_facts = cached.facts;
     m.cache_hit    = true;
     p.cache_hits   = p.cache_hits + 1;
@@ -685,7 +685,7 @@ fun key_modules(p: *project.Project, scratch: *A.Allocator, config: *u8, config_
     if (sel configured.err) { ret configured; }
     k.variant = SURFACE_BARE;
     if (p.req.opt == request.OPT_RELEASE) { k.variant = SURFACE_WHOLE; }
-    or (p.req.debug)                       { k.variant = SURFACE_PLACED; }
+    or (p.req.debug)                      { k.variant = SURFACE_PLACED; }
     val clock: time.Clock = time.now();
     k.now = opt[time.Time].none{};
     if (sel clock.ok) { k.now = opt[time.Time].some{clock.ok}; }

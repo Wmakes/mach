@@ -56,11 +56,11 @@ use lang_target: mach.lang.target;
 # the back-end suites driven through a project: they build through the engine, so only a
 # module above it reaches them, and they leave with the back end
 #[testing]
-use riscv_tests:   mach.lang.target.isa.riscv.tests;
+use riscv_tests: mach.lang.target.isa.riscv.tests;
 #[testing]
-use x64_probe:     mach.lang.target.isa.x64.probe;
+use x64_probe:   mach.lang.target.isa.x64.probe;
 #[testing]
-use T:             std.allocator.testing;
+use T:           std.allocator.testing;
 
 # length of BUILD_TABLES
 val BUILD_TABLES_N: usize = 12;

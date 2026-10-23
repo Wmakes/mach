@@ -2577,7 +2577,6 @@ test expect__acknowledges_named_warnings_inside_its_declaration {
 #[testing]
 val T_X86_64: str = "isa = \"x86_64\"\nos = \"linux\"\nabi = \"sysv64\"\n";
 
-
 # a string value's logical text, decoded into `buf` and terminated; nil when
 # the value is not a string or does not fit
 #[testing]

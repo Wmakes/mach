@@ -52,9 +52,9 @@ pub fun int(t: *types.Table, bits: u32) res[Type, fail.Fail] {
 
 pub fun float(t: *types.Table, bits: u32) res[Type, fail.Fail] {
     var f: types.Format = types.BINARY64;
-    if (bits == 16)      { f = types.BINARY16; }
-    or (bits == 32)      { f = types.BINARY32; }
-    or (bits != 64)      { ret res[Type, fail.Fail].err{fail.message("lower: a float width mirl has no format for")}; }
+    if (bits == 16) { f = types.BINARY16; }
+    or (bits == 32) { f = types.BINARY32; }
+    or (bits != 64) { ret res[Type, fail.Fail].err{fail.message("lower: a float width mirl has no format for")}; }
     ret interned(t, types.Shape.float{types.Float{format: f}});
 }
 
@@ -187,8 +187,8 @@ pub fun is_aggregate(t: *types.Table, ty: Type) bool {
 # a float or a vector of floats
 pub fun is_float_like(t: *types.Table, ty: Type) bool {
     val s: opt[types.Shape] = shape(t, ty);
-    if (sel s.none) { ret false; }
-    if (sel s.some.float) { ret true; }
+    if (sel s.none)        { ret false; }
+    if (sel s.some.float)  { ret true; }
     if (sel s.some.vector) { ret is_float(t, s.some.vector.element); }
     ret false;
 }
@@ -196,7 +196,7 @@ pub fun is_float_like(t: *types.Table, ty: Type) bool {
 # a pointer or a vector of pointers
 pub fun is_ptr_like(t: *types.Table, ty: Type) bool {
     val s: opt[types.Shape] = shape(t, ty);
-    if (sel s.none) { ret false; }
+    if (sel s.none)         { ret false; }
     if (sel s.some.pointer) { ret true; }
     if (sel s.some.vector)  { ret is_ptr(t, s.some.vector.element); }
     ret false;

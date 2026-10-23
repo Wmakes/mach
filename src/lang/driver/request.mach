@@ -791,7 +791,7 @@ test levers_compose__the_command_line_wins_over_the_profile {
     var a:      A.Allocator;
     val make_r: err[A.Error] = page.make(?a);
     if (sel make_r.err) { ret 1; }
-    var itn: intern.Interner = intern.init(?a);
+    var itn: intern.Interner            = intern.init(?a);
     val id:  res[intern.StrId, A.Error] = intern.add(?itn, "p");
     if (sel id.err) { ret 2; }
     var pf: manifest.ResolvedProfile;
@@ -813,7 +813,7 @@ test levers_compose__the_command_line_wins_over_the_profile {
     o.debug    = LEVER_ON;
     r          = defaults();
     val overridden: err[fail.Fail] = levers_compose(?a, ?itn, ?pf, ?o, ?r);
-    if (sel overridden.err)                                { ret 7; }
+    if (sel overridden.err)                               { ret 7; }
     if (r.opt != OPT_RELEASE || !r.debug || !r.overrides) { ret 8; }
 
     var held: Overrides = overrides_init(?a);

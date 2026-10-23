@@ -21,9 +21,9 @@ pub rec DebugTarget {
 }
 
 pub rec DebugProgram {
-    alloc:    *A.Allocator;
-    interner: *intern.Interner;
-    sources:  *lang_source.SourceMap;
+    alloc:         *A.Allocator;
+    interner:      *intern.Interner;
+    sources:       *lang_source.SourceMap;
     mir_module:    *lang_mir.MirModule;
     layout:        layout.Machine;
     pointer_width: u32;

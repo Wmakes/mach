@@ -251,7 +251,7 @@ pub fun release(a: *A.Allocator, x: *Assembled) {
 # assembles yet
 pub fun owned_for(a: *A.Allocator, os_id: u32, arch_id: u32, abi_id: u32, spelled: opt[str], t: *extension.Table, bits: u64) res[opt[Owned], fail.Fail] {
     val made: res[opt[*Assembled], fail.Fail] = assemble_for(a, os_id, arch_id, abi_id, spelled, t, bits);
-    if (sel made.err)       { ret res[opt[Owned], fail.Fail].err{made.err}; }
+    if (sel made.err)     { ret res[opt[Owned], fail.Fail].err{made.err}; }
     if (sel made.ok.none) { ret res[opt[Owned], fail.Fail].ok{opt[Owned].none{}}; }
     val x: *Assembled = made.ok.some;
     fin { release(a, x); }

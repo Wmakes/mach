@@ -28,16 +28,16 @@ use mach.lang.fe.comptime.intrinsic;
 use mach.lang.fe.resolve;
 use mach.lang.intern;
 use mach.lang.me.lower.builder;
-use irt: mach.lang.me.lower.irt;
-use mach.lang.me.lower.value;
-use mirl.ir.id;
-use mirl.ir.type.Type;
 use lower_context: mach.lang.me.lower.context;
 use lower_expr:    mach.lang.me.lower.expr;
-use lang_source:   mach.lang.source;
+use mach.lang.me.lower.irt;
+use mach.lang.me.lower.value;
+use lang_source: mach.lang.source;
 use mach.lang.stack;
 use catalog_arch: mach.lang.target.catalog.arch;
 use mach.lang.type;
+use mirl.ir.id;
+use mirl.ir.type.Type;
 
 pub fun lower_stmt(ctx: *lower_context.LowerContext, sid: ast_id.StmtId) err[fail.Fail] {
     val opt_stmt: opt[*ast_stmt.Stmt] = ast.get_stmt(ctx.scope.a, sid);
@@ -268,7 +268,7 @@ fun lower_brk(ctx: *lower_context.LowerContext) err[fail.Fail] {
     val lf: *lower_context.LoopFrame = lower_context.current_loop(ctx);
     if (lf == nil) { ret err[fail.Fail].err{fail.message("lower: brk outside a loop")}; }
 
-    val exit:     id.Block  = lf.exit;
+    val exit:     id.Block       = lf.exit;
     val floor:    u32            = lf.fin_depth;
     val res_fins: err[fail.Fail] = replay_fins_from(ctx, floor);
     if (sel res_fins.err)                    { ret res_fins; }
@@ -280,7 +280,7 @@ fun lower_cnt(ctx: *lower_context.LowerContext) err[fail.Fail] {
     val lf: *lower_context.LoopFrame = lower_context.current_loop(ctx);
     if (lf == nil) { ret err[fail.Fail].err{fail.message("lower: cnt outside a loop")}; }
 
-    val header:   id.Block  = lf.header;
+    val header:   id.Block       = lf.header;
     val floor:    u32            = lf.fin_depth;
     val res_fins: err[fail.Fail] = replay_fins_from(ctx, floor);
     if (sel res_fins.err)                    { ret res_fins; }
@@ -354,13 +354,13 @@ fun lower_decl_stmt(ctx: *lower_context.LowerContext, s: *ast_stmt.Stmt) err[fai
     }
     or (irt.is_aggregate(?ctx.m.types, storage_ty) || irt.is_vector(?ctx.m.types, storage_ty)) {
         val res_mz: err[fail.Fail] = builder.emit_memzero(?ctx.builder, slot, storage_ty);
-        if (sel res_mz.err)                                                          { ret res_mz; }
+        if (sel res_mz.err) { ret res_mz; }
         birth_val = slot;
     }
     or {
         val zc:        value.Value    = zero_const(ctx, slot_ty);
         val res_store: err[fail.Fail] = builder.emit_store(?ctx.builder, zc, slot);
-        if (sel res_store.err)                                                       { ret res_store; }
+        if (sel res_store.err) { ret res_store; }
         birth_val = zc;
     }
 

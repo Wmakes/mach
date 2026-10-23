@@ -268,7 +268,6 @@ fun render_targets(a: *A.Allocator, reg: *lang_target.TargetRegistry) res[str, f
     ret finish(?b);
 }
 
-
 #[testing]
 fun t_line_count(text: str) usize {
     var n:   usize = 0;

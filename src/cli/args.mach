@@ -1581,7 +1581,7 @@ pub fun build_cli_invocation(a: *A.Allocator, inv: *ParsedInvocation, argv: **u8
     var o: request.Overrides = request.overrides_init(nil);
     o.emit_asm = given(inv, ?EMIT_ASM);
     o.emit_ir  = given(inv, ?EMIT_IR);
-    o.pie = given(inv, ?PIE);
+    o.pie      = given(inv, ?PIE);
     val subsystem: *u8 = value_or_nil(inv, argv, ?SUBSYSTEM);
     if (subsystem != nil) {
         val flag: opt[request.SubsystemFlag] = request.subsystem_flag_from_name(subsystem::str);

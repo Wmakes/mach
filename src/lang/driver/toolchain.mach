@@ -19,8 +19,8 @@ use std.types.bool.false;
 use mach.lang.fail;
 use mach.lang.intern;
 use mach.lang.session;
-use target_of: mach.lang.target.of;
 use lang_target: mach.lang.target;
+use target_of:   mach.lang.target.of;
 
 # the composition root's one exception to borrowing an allocator: the registry
 # outlives every session and caller, so it lives in a page allocator of its own

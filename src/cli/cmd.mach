@@ -243,7 +243,7 @@ test build_cli_invocation__levers_read_as_given {
     if (r1.some.overrides.optimize != request.LEVER_OFF || r1.some.overrides.debug != request.LEVER_ON) { ret 4; }
     var a3: [5]*u8            = [5]*u8{"mach", "test", "--simd", "scalarize", "."};
     val r3: opt[args.CliArgs] = t_cli(5, ?a3[0]);
-    if (sel r3.none)                    { ret 7; }
+    if (sel r3.none)                     { ret 7; }
     if (sel r3.some.overrides.simd.none) { ret 8; }
     var an: [3]*u8            = [3]*u8{"mach", "build", "."};
     val rn: opt[args.CliArgs] = t_cli(3, ?an[0]);

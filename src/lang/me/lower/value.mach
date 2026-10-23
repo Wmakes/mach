@@ -8,17 +8,17 @@ use mirl.ir.id;
 use mirl.ir.type.Type;
 
 use mach.lang.float;
-use irt: mach.lang.me.lower.irt;
+use mach.lang.me.lower.irt;
 use mach.lang.wide;
 
 pub def ValueKind: u8;
 
-# none:  no value, what a call of a function that gives nothing yields
-# ssa:   a mirl value of the function being built
-# int:   an integer constant, its bits in `bits`
-# float: a float constant, the bits of its binary64 encoding in `bits`
-# null:  every bit zero
-# fn:    function `index` of the module, called by name or taken as an address
+# none:   no value, what a call of a function that gives nothing yields
+# ssa:    a mirl value of the function being built
+# int:    an integer constant, its bits in `bits`
+# float:  a float constant, the bits of its binary64 encoding in `bits`
+# null:   every bit zero
+# fn:     function `index` of the module, called by name or taken as an address
 # global: the address of global `index` of the module
 # const:  constant `index` of the module, a scalar or an aggregate laid out as its type
 pub val VAL_NONE:   ValueKind = 0;
