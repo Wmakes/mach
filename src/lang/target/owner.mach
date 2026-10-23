@@ -20,6 +20,7 @@ use std.types.view.View;
 
 use A: std.allocator;
 use std.allocator.page;
+use std.collections.bitset;
 use std.collections.slice.Slice;
 use std.collections.vector;
 use std.memory;
@@ -141,7 +142,7 @@ fun baseline_change(a: *A.Allocator, u: *mirl_target.Unmet) res[str, fail.Fail] 
     val m:   *mirl_target.Missing = ?u.alternatives.data[at.some];
     var out: vector.Vector[u8]    = vector.init[u8](a);
     fin { vector.dnit[u8](?out); }
-    val written: err[A.Error] = change_put(?out, u, m);
+    val written: err[A.Error] = change_put(a, ?out, u, m);
     if (sel written.err) { ret res[str, fail.Fail].err{fail.refused(written.err)}; }
     val copied: res[*u8, A.Error] = A.allocate[u8](a, out.len + 1);
     if (sel copied.err) { ret res[str, fail.Fail].err{fail.refused(copied.err)}; }
@@ -151,11 +152,11 @@ fun baseline_change(a: *A.Allocator, u: *mirl_target.Unmet) res[str, fail.Fail] 
 }
 
 # the atoms `m` lacks and bars, worded onto `out`
-fun change_put(out: *vector.Vector[u8], u: *mirl_target.Unmet, m: *mirl_target.Missing) err[A.Error] {
+fun change_put(a: *A.Allocator, out: *vector.Vector[u8], u: *mirl_target.Unmet, m: *mirl_target.Missing) err[A.Error] {
     if (m.lacks.len > 0) {
         val lead: err[A.Error] = text_put(out, "add ");
         if (sel lead.err) { ret lead; }
-        val lacks: err[A.Error] = atoms_put(out, u, m.lacks);
+        val lacks: err[A.Error] = atoms_put(a, out, u, m.lacks);
         if (sel lacks.err) { ret lacks; }
     }
     if (m.bars.len > 0) {
@@ -163,42 +164,56 @@ fun change_put(out: *vector.Vector[u8], u: *mirl_target.Unmet, m: *mirl_target.M
         if (m.lacks.len > 0) { word = " and drop "; }
         val lead: err[A.Error] = text_put(out, word);
         if (sel lead.err) { ret lead; }
-        val bars: err[A.Error] = atoms_put(out, u, m.bars);
+        val bars: err[A.Error] = atoms_put(a, out, u, m.bars);
         if (sel bars.err) { ret bars; }
     }
     ret text_put(out, " to its baseline");
 }
 
 # the atoms `ids` spelled onto `out`, joined by `+` as a baseline joins them
-fun atoms_put(out: *vector.Vector[u8], u: *mirl_target.Unmet, ids: requirement.Ids) err[A.Error] {
+fun atoms_put(a: *A.Allocator, out: *vector.Vector[u8], u: *mirl_target.Unmet, ids: requirement.Ids) err[A.Error] {
     var i: u32 = 0;
     for (i < ids.len) {
         if (i > 0) {
             val joined: err[A.Error] = text_put(out, "+");
             if (sel joined.err) { ret joined; }
         }
-        val put: err[A.Error] = text_put(out, atom_spelling(u, ids.at[i]));
+        val put: err[A.Error] = atom_put(a, out, u, ids.at[i]);
         if (sel put.err) { ret put; }
         i = i + 1;
     }
     ret err[A.Error].ok{};
 }
 
-# the name a manifest's baseline gives atom `id`: masc's spelling of the row in its
-# baseline syntax, else the catalog's own name for it
-fun atom_spelling(u: *mirl_target.Unmet, id: requirement.Id) str {
+# atom `id` spelled onto `out` as a manifest's baseline names it: masc's spelling of a
+# selection of the one extension in the architecture's syntax, without its `+`, else the
+# catalog's name for it
+fun atom_put(a: *A.Allocator, out: *vector.Vector[u8], u: *mirl_target.Unmet, id: requirement.Id) err[A.Error] {
     if (sel u.set.some) {
         val c: *masc_extension.Catalog = u.set.some.extensions;
-        var i: u32                     = 0;
-        for (i < c.names.len) {
-            val e: *masc_extension.NameEntry = ?c.names.at[i];
-            if (!e.canonical && e.rows.len == 1 && e.rows.at[0] == id) { ret e.key; }
-            i = i + 1;
+        if (id < c.count) {
+            val made: res[bitset.Bitset, A.Error] = bitset.init(a, c.count::usize);
+            if (sel made.err) { ret err[A.Error].err{made.err}; }
+            var one: masc_extension.Selection = masc_extension.Selection{catalog: c, members: made.ok, stated: masc_extension.Stated{at: [masc_extension.MAX_STATED]requirement.Id{0, 0, 0, 0, 0, 0, 0, 0}, len: 0}};
+            fin { val dropped: err[A.Error] = bitset.dnit(?one.members); }
+            bitset.set(?one.members, id::usize);
+            var spelled: vector.Vector[u8] = vector.init[u8](a);
+            fin { vector.dnit[u8](?spelled); }
+            val wrote: err[A.Error] = masc_extension.spell(?one, ?spelled);
+            if (sel wrote.err) { ret wrote; }
+            var from: usize = 0;
+            if (spelled.len > 0 && spelled.data[0] == '+') { from = 1; }
+            for (from < spelled.len) {
+                val pushed: res[usize, A.Error] = vector.push[u8](out, spelled.data[from]);
+                if (sel pushed.err) { ret err[A.Error].err{pushed.err}; }
+                from = from + 1;
+            }
+            ret err[A.Error].ok{};
         }
     }
     val named: opt[str] = mirl_target.unmet_name(u, id);
-    if (sel named.some) { ret named.some; }
-    ret "an atom of the architecture's state";
+    if (sel named.some) { ret text_put(out, named.some); }
+    ret text_put(out, "an atom of the architecture's state");
 }
 
 fun text_put(out: *vector.Vector[u8], text: str) err[A.Error] {
