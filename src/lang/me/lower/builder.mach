@@ -115,7 +115,8 @@ pub fun dnit(b: *Builder) {
 }
 
 pub fun fault(b: *Builder, f: fail.Fail) {
-    if (sel b.failure.some) { ret; }
+    val held: bool = sel b.failure.some;
+    if (held) { ret; }
     b.failure = opt[fail.Fail].some{f};
 }
 

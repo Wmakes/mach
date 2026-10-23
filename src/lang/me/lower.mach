@@ -62,6 +62,12 @@ use mach.lang.type;
 use mach.lang.type.query.extent;
 
 fwd lower_context.LoopFrame;
+fwd lower_context.Unit;
+fwd lower_context.FnInfo;
+fwd lower_context.Machine;
+fwd lower_context.unit_dnit;
+fwd lower_context.fn_info;
+fwd lower_context.machine_of;
 fwd lower_context.LowerContext;
 fwd lower_context.LowerRequest;
 fwd lower_context.NormalObject;
@@ -1227,9 +1233,11 @@ test module_const__folds_across_modules {
     }
     # an own `val` folds, so its global is declared and nothing reads it
     val gx: opt[u64] = t_number(t_initializer(m, "t.main.X"));
-    if (sel gx.none || gx.some != 707 || t_count(m, "@t.main.X") != 1)   { ret 20; }
+    if (sel gx.none)                                                     { ret 20; }
+    if (gx.some != 707 || t_count(m, "@t.main.X") != 1)                  { ret 20; }
     val gn: opt[u64] = t_number(t_initializer(m, "t.main.N"));
-    if (sel gn.none || gn.some != 6543 || t_count(m, "@t.main.N") != 1) { ret 21; }
+    if (sel gn.none)                                                     { ret 21; }
+    if (gn.some != 6543 || t_count(m, "@t.main.N") != 1)                 { ret 21; }
     if (!t_declares(m, "t.a.f", false))                                  { ret 22; }
     if (!t_declares(m, "t.a.G", true))                                   { ret 23; }
     if (t_constants(m, 7) != 1 || t_constants(m, 9) != 0)                { ret 24; }

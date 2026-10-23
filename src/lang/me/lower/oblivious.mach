@@ -2,8 +2,6 @@
 # only moves, stores or converts a secret may omit it. which opcodes move a value rather than
 # compute on it is mach's reading of mirl's rows
 use std.types.bool.bool;
-use std.types.bool.false;
-use std.types.bool.true;
 use std.types.string.str;
 
 use mirl.ir.opcode;

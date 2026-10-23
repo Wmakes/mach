@@ -632,7 +632,8 @@ fun lower_test(ctx: *lower_context.LowerContext, did: ast_id.DeclId, d: *ast_dec
     if (sel res_name.err) { ret err[fail.Fail].err{res_name.err}; }
     val name: intern.StrId = res_name.ok;
 
-    if (sel lower_context.function_named(ctx, name).some) { ret err[fail.Fail].err{fail.message("lower: a test name sema accepted is emitted twice")}; }
+    val twice: opt[u32] = lower_context.function_named(ctx, name);
+    if (sel twice.some) { ret err[fail.Fail].err{fail.message("lower: a test name sema accepted is emitted twice")}; }
 
     var line: u32 = 0;
     val opt_sf: opt[*lang_source.SourceFile] = lang_source.get(?ctx.s.sources, ctx.scope.a.file_id);

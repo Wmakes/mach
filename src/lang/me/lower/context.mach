@@ -121,6 +121,8 @@ pub rec Unit {
     fns:          collections_vector.Vector[FnInfo];
     exports:      collections_vector.Vector[intern.StrId];
     root_project: bool;
+    # compiling rewrites the module in place, so a unit compiles once
+    compiled: bool;
 }
 
 # an empty unit named `name`, its module built for the machine's target
@@ -133,6 +135,7 @@ pub fun unit_init(a: *A.Allocator, machine: *Machine, name: intern.StrId, root_p
     u.fns          = collections_vector.init[FnInfo](a);
     u.exports      = collections_vector.init[intern.StrId](a);
     u.root_project = root_project;
+    u.compiled     = false;
     ret res[Unit, fail.Fail].ok{u};
 }
 
@@ -1541,12 +1544,12 @@ pub fun debug_types_finish(lc: *LowerContext) err[fail.Fail] {
         }
         i = i + 1;
     }
-    var open: opt[View] = mirl_debug.pending(?lc.m.debug);
-    for (sel open.some) {
+    for (true) {
+        val open: opt[View] = mirl_debug.pending(?lc.m.debug);
+        if (sel open.none) { brk; }
         val opaque: res[mirl_debug.Declared, mirl_debug.Error] = mirl_debug.declare(?lc.m.debug, ?lc.m.types,
             mirl_debug.Entry{key: open.some, name: view_of(nil), head: mirl_debug.Head.base{mirl_debug.Base{encoding: mirl_debug.Encoding.unsigned{}, width: 8}}});
         if (sel opaque.err) { ret err[fail.Fail].err{debug_failed(opaque.err)}; }
-        open = mirl_debug.pending(?lc.m.debug);
     }
     val linked: err[mirl_debug.Error] = mirl_debug.finish(?lc.m.debug);
     if (sel linked.err) { ret err[fail.Fail].err{debug_failed(linked.err)}; }
@@ -1757,10 +1760,9 @@ pub fun lower_fn_sig(lc: *LowerContext, did: ast_id.DeclId) res[FnSig, fail.Fail
 # the signature a value of the source function type `tid` is called through
 pub fun fn_sig_of_type(lc: *LowerContext, tid: type.TypeId) res[FnSig, fail.Fail] {
     val t_opt: opt[*type.Type] = type.get(?lc.s.types, type.strip_secret(?lc.s.types, substitute_type(lc, tid)));
-    if (sel t_opt.none || t_opt.some.kind != type.TYPE_FUN) {
-        ret res[FnSig, fail.Fail].err{fail.message("lower: a signature asked of a type that is no function")};
-    }
+    if (sel t_opt.none) { ret res[FnSig, fail.Fail].err{fail.message("lower: a signature asked of a type that is no function")}; }
     val fn: *type.Type = t_opt.some;
+    if (fn.kind != type.TYPE_FUN) { ret res[FnSig, fail.Fail].err{fail.message("lower: a signature asked of a type that is no function")}; }
     ret signature_of(lc, fn.data.fn.ret_type, fn, fn.data.fn.params_len, nil, 0);
 }
 
@@ -1983,7 +1985,8 @@ pub fun define_global(lc: *LowerContext, g: GlobalData) res[u32, fail.Fail] {
 pub fun ensure_extern_function(lc: *LowerContext, name: intern.StrId, sig: FnSig) res[u32, fail.Fail] {
     val existing: opt[u32] = function_named(lc, name);
     if (sel existing.some) { ret res[u32, fail.Fail].ok{existing.some}; }
-    if (sel global_named(lc, name).some) {
+    val shared: opt[u32] = global_named(lc, name);
+    if (sel shared.some) {
         ret res[u32, fail.Fail].err{fail.message("lower: a function shares its symbol with a global of the module")};
     }
     ret add_function(lc, FunctionData{name: view_text(lc, name), signature: sig.sig, linkage: external_linkage(), constant_time: false},
