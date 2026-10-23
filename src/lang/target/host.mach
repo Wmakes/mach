@@ -1,0 +1,82 @@
+# the host a mach target cell runs on
+#
+# a cell's host is mink's row for its system, under the environment the os runs
+# under, for its architecture, held under the traits its calling convention
+# states, as riscv's float abi picks one of linux's riscv64 rows. what a host
+# says of the cell, the capabilities it offers and the instruction set floor
+# every machine it runs has, is read from that row and stated nowhere in mach
+use std.types.error.err;
+use std.types.option.opt;
+use std.types.result.res;
+use std.types.size.usize;
+use std.types.string.str;
+
+use A: std.allocator;
+
+use mink_fail: mink.base.fail;
+use mink.base.table;
+use mink.base.table.Table;
+use mink_arch:  mink.catalog.arch;
+use mink_os:    mink.catalog.os;
+use mink_trait: mink.catalog.trait;
+
+use mach.lang.fail;
+use catalog_abi:  mach.lang.target.catalog.abi;
+use catalog_arch: mach.lang.target.catalog.arch;
+use catalog_os:   mach.lang.target.catalog.os;
+
+fun refusal(a: *A.Allocator, f: mink_fail.Fail) fail.Fail {
+    if (f.subject == nil) { ret fail.formatted(a, "target: mink's catalog: {}", f.text); }
+    ret fail.formatted(a, "target: mink's catalog: {}: {}", f.subject, f.text);
+}
+
+# mink's host of the cell of `os_id`, `arch_id` and `abi_id`, refused where mink
+# names no system or architecture for it or no host of the system holds
+pub fun of(a: *A.Allocator, os_id: u32, arch_id: u32, abi_id: u32) res[*mink_os.Host, fail.Fail] {
+    val system: *mink_os.System = catalog_os.owner_of(os_id);
+    val arch:   *mink_arch.Arch = catalog_arch.owner_of(arch_id);
+    if (system == nil || arch == nil) {
+        ret res[*mink_os.Host, fail.Fail].err{fail.message("target: the cell names no system or architecture of mink's catalog")};
+    }
+    var ts:       Table[mink_trait.Trait]            = table.make[mink_trait.Trait](a);
+    val h:        res[*mink_os.Host, mink_fail.Fail] = held(?ts, system, catalog_os.env_of(os_id), arch, abi_id);
+    val released: err[mink_fail.Fail]                = table.release[mink_trait.Trait](?ts);
+    if (sel h.err)        { ret res[*mink_os.Host, fail.Fail].err{refusal(a, h.err)}; }
+    if (sel released.err) { ret res[*mink_os.Host, fail.Fail].err{refusal(a, released.err)}; }
+    ret res[*mink_os.Host, fail.Fail].ok{h.ok};
+}
+
+# the host of `system` under `env` for `arch` that holds of the traits the
+# calling convention `abi_id` states, gathered into `ts`. a convention mink's
+# family of the architecture does not name states none
+fun held(ts: *Table[mink_trait.Trait], system: *mink_os.System, env: opt[*mink_os.Env], arch: *mink_arch.Arch, abi_id: u32) res[*mink_os.Host, mink_fail.Fail] {
+    val convention: opt[*mink_arch.Abi] = mink_arch.abi(arch, catalog_abi.name_for(abi_id));
+    if (sel convention.some) {
+        var i: usize = 0;
+        for (i < convention.some.count) {
+            val put: err[mink_fail.Fail] = mink_trait.add(ts, convention.some.settings[i]);
+            if (sel put.err) { ret res[*mink_os.Host, mink_fail.Fail].err{put.err}; }
+            i = i + 1;
+        }
+    }
+    ret mink_os.host(system, env, arch, ts);
+}
+
+# the capabilities the host of the cell offers an image that states no oldest
+# system version, so it runs on the oldest the system states
+pub fun caps(a: *A.Allocator, os_id: u32, arch_id: u32, abi_id: u32) res[mink_os.Caps, fail.Fail] {
+    val h: res[*mink_os.Host, fail.Fail] = of(a, os_id, arch_id, abi_id);
+    if (sel h.err) { ret res[mink_os.Caps, fail.Fail].err{h.err}; }
+    val c: res[mink_os.Caps, mink_fail.Fail] = mink_os.caps_of(h.ok, opt[mink_os.Version].none{});
+    if (sel c.err) { ret res[mink_os.Caps, fail.Fail].err{refusal(a, c.err)}; }
+    ret res[mink_os.Caps, fail.Fail].ok{c.ok};
+}
+
+# the instruction set floor of the cell's host, in masc's selection spelling,
+# none where the system bounds the machine not at all, as a freestanding one
+pub fun floor(a: *A.Allocator, os_id: u32, arch_id: u32, abi_id: u32) res[opt[str], fail.Fail] {
+    val h: res[*mink_os.Host, fail.Fail] = of(a, os_id, arch_id, abi_id);
+    if (sel h.err)           { ret res[opt[str], fail.Fail].err{h.err}; }
+    if (sel h.ok.floor.none) { ret res[opt[str], fail.Fail].ok{opt[str].none{}}; }
+    ret res[opt[str], fail.Fail].ok{opt[str].some{h.ok.floor.some}};
+}

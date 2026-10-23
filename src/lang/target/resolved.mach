@@ -69,11 +69,13 @@ pub rec Target {
     va_list_size:            u32;
     va_list_align:           u32;
     fs_policy:               catalog_os.FsPolicy;
-    # the os guarantees the data-independent-timing mode `model.dit_mode` names
+    # the host guarantees the data-independent-timing mode `model.dit_mode` names
     dit_guaranteed: bool;
-    env_id:         u32;
-    env_profile:    u32;
-    env_name:       str;
+    # the host runs an executable position independent unless asked otherwise
+    pie_default: bool;
+    env_id:      u32;
+    env_profile: u32;
+    env_name:    str;
     # whether `asm` blocks reach the backend, and the rule an asm body returns by;
     # nil where the instruction set takes no assembly
     has_assembly:     bool;
@@ -111,7 +113,7 @@ pub fun nans_none() Nans {
 # the rule of a target cell no owner assembles yet, read from mach's own (#4779)
 pub fun nans_of_rule(r: float.NanRule) Nans {
     var rule: mirl_capability.Nans = mirl_capability.Nans.unstated{};
-    if (r == float.NAN_PRESERVE)    { rule = mirl_capability.Nans.propagate{}; }
+    if (r == float.NAN_PRESERVE)    { rule = mirl_capability.Nans.propagate{mirl_capability.Propagation{default: mirl_capability.Default.unstated{}, priority: mirl_capability.Priority.unstated{}, fused: mirl_capability.Fused.unstated{}}}; }
     if (r == float.NAN_CANONICAL)   { rule = mirl_capability.Nans.canonical{}; }
     if (r == float.NAN_UNSPECIFIED) { rule = mirl_capability.Nans.unspecified{}; }
     var n: Nans  = nans_none();
@@ -150,7 +152,7 @@ pub fun layout_machine(tgt: *Target) layout.Machine {
 }
 
 # whether the target guarantees the data-independent-timing mode a DIT_MODE
-# row needs: the os declares it per instruction set
+# row needs: mink's host of the target declares it
 pub fun dit_mode_guaranteed(tgt: *Target) bool {
     if (tgt == nil) { ret false; }
     ret tgt.dit_guaranteed;

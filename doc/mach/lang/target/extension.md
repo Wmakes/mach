@@ -100,8 +100,9 @@ the name of a row
 pub fun bit_of(t: *Table, name: str, len: usize) u64;
 ```
 
-the bits `t` gives the extension `name[0..len]` names, 0 when it names none the code
-generator emits against or names a level
+the bits `t` gives every extension `name[0..len]` names, as an edit of a selection
+by that name enables them, 0 when it names none the code generator emits against
+or names a level
 
 ## fun level_of
 

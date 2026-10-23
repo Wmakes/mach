@@ -715,7 +715,9 @@ fun plan_unit(a: *A.Allocator, itn: *intern.Interner, reg: *lang_target.TargetRe
     val of_opt: opt[str] = intern.get(itn, bu.target.of);
     if (sel of_opt.some) { of_s = of_opt.some; }
 
-    val tr: res[lang_target.Binding, fail.Fail] = lang_target.select_of(reg, isa_s, os_s, abi_s, of_s);
+    var baseline_s: str = "";
+    if (!intern.str_is_nil(bu.target.baseline)) { baseline_s = intern.text(itn, bu.target.baseline); }
+    val tr: res[lang_target.Binding, fail.Fail] = lang_target.select_on(reg, isa_s, baseline_s, os_s, abi_s, of_s);
     if (sel tr.err) {
         ret res[BuildUnit, fail.Fail].err{fail.as_user(diagnostic_kind.TARGET_UNSUPPORTED, tr.err)};
     }

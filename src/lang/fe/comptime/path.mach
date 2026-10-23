@@ -415,15 +415,16 @@ fun project_field(value: intern.StrId) res[comptime_value.CTValue, comptime_fail
     ret comptime_value.str_value(value);
 }
 
-# `$mach.build.extensions.<name>`: 1 when the target selects the extension and 0
-# when it does not; the name is read against the selected isa's vocabulary only,
-# and one it does not declare is refused, never folded, as `$mach.arch.*` is
+# `$mach.build.extensions.<name>`: 1 when the target selects the extension the
+# name stands for and 0 when it does not; the name is read against the selected
+# isa's vocabulary only, and one it does not declare is refused, never folded, as
+# `$mach.arch.*` is
 fun extension_value(c: *comptime_scope.ComptimeCtx, name: View) res[comptime_value.CTValue, comptime_failure.EvalFail] {
     val ext: target_model.ExtensionView = c.env.target.extensions;
     if (ext.table == nil) { ret comptime_value.reject(diagnostic_kind.COMPTIME_PATH_UNAVAILABLE, "`$mach.build.extensions.*` is not available in this context"); }
-    val bit: u64 = extension.bit_of(ext.table, name.data::str, name.len);
-    if (bit != 0) {
-        if ((ext.selected & bit) != 0) { ret comptime_value.u8_value(1); }
+    val row: *extension.Extension = extension.row_of(ext.table, name.data::str, name.len);
+    if (row != nil) {
+        if ((ext.selected & row.bit) != 0) { ret comptime_value.u8_value(1); }
         ret comptime_value.u8_value(0);
     }
     val known_r: res[str, fail.Fail] = target_model.table_names(c.env.alloc, ext.table);

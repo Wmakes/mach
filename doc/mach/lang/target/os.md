@@ -124,12 +124,6 @@ resolution and `mach init` use; "" when the os has no port to the isa
 pub fun page_size_checked_for(vt: *OsVTable, arch_id: u32) res[u64, fail.Fail];
 ```
 
-## fun pie_exec_for
-
-```mach
-pub fun pie_exec_for(vt: *OsVTable, arch_id: u32) bool;
-```
-
 ## fun variadic_stack_for
 
 ```mach
@@ -141,15 +135,6 @@ pub fun variadic_stack_for(vt: *OsVTable, arch_id: u32) bool;
 ```mach
 pub fun reserved_gp_for(vt: *OsVTable, arch_id: u32) u32;
 ```
-
-## fun dit_guaranteed_for
-
-```mach
-pub fun dit_guaranteed_for(vt: *OsVTable, arch_id: u32) bool;
-```
-
-the one door onto the DIT declaration: an os that declares nothing
-guarantees nothing
 
 ## fun natural_stack_args_for
 

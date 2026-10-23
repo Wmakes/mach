@@ -1,8 +1,7 @@
 # mach.lang.target.catalog.arch
 
 the instruction set catalog: the architectures of mink's catalog mach has a
-target for, each with its id, its fingerprint tag and the baseline a target of it
-stands on when it names none. it is an explicit projection: a row names mink's architecture
+target for, each with its id and its fingerprint tag. it is an explicit projection: a row names mink's architecture
 row and is spelled by it, and an architecture of mink's no row names (x86,
 arm64e, wasm32, ...) is no instruction set here and no `$mach.arch` tag
 
@@ -69,15 +68,6 @@ version 2: catalog id 4 is reserved with no row and the tags after it moved up
 ```mach
 pub fun id_for(name: str) u32;
 ```
-
-## fun default_baseline
-
-```mach
-pub fun default_baseline(id: u32) str;
-```
-
-the baseline a hosted target of the instruction set `id` stands on when it names
-none, in masc's spelling; nil when its catalog spells no selection, so it takes no baseline
 
 ## fun host_id
 

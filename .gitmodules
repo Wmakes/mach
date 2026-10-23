@@ -1,6 +1,9 @@
 [submodule "dep/std"]
 	path = dep/std
 	url = https://github.com/briar-systems/mach-std
+[submodule "dep/yaml"]
+	path = dep/yaml
+	url = https://github.com/briar-systems/mach-yaml
 [submodule "dep/mink"]
 	path = dep/mink
 	url = https://github.com/briar-systems/mink

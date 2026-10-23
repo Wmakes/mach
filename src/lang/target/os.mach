@@ -50,8 +50,6 @@ pub rec IsaRow {
     # size 0 when the os declares no layout
     va_list:   VaList;
     fs_policy: *catalog_os.FsPolicy;
-    # whether an executable is position independent by default
-    pie_exec: bool;
     # whether a variadic call passes every unnamed argument on the stack
     variadic_stack: bool;
     # whether a fixed argument on the stack takes its natural size rather than a slot
@@ -67,12 +65,6 @@ pub rec IsaRow {
     declared_agg_align: bool;
     # the general registers the platform keeps for itself, one bit per register
     reserved_gp: u32;
-    # whether the os guarantees the processor's data-independent-timing mode a
-    # DIT_MODE constant-time multiply row needs: a process can set the mode at
-    # start, the kernel exposes whether the processor has it, and the mode is
-    # per-thread state the os preserves. declared with its citations beside the
-    # row, never derived
-    dit_guaranteed: bool;
 }
 
 pub rec OsVTable {
@@ -291,11 +283,6 @@ pub fun page_size_checked_for(vt: *OsVTable, arch_id: u32) res[u64, fail.Fail] {
     ret res[u64, fail.Fail].ok{size};
 }
 
-pub fun pie_exec_for(vt: *OsVTable, arch_id: u32) bool {
-    val row: *IsaRow = row_for(vt, arch_id);
-    ret row != nil && row.pie_exec;
-}
-
 pub fun variadic_stack_for(vt: *OsVTable, arch_id: u32) bool {
     val row: *IsaRow = row_for(vt, arch_id);
     ret row != nil && row.variadic_stack;
@@ -305,13 +292,6 @@ pub fun reserved_gp_for(vt: *OsVTable, arch_id: u32) u32 {
     val row: *IsaRow = row_for(vt, arch_id);
     if (row == nil) { ret 0; }
     ret row.reserved_gp;
-}
-
-# the one door onto the DIT declaration: an os that declares nothing
-# guarantees nothing
-pub fun dit_guaranteed_for(vt: *OsVTable, arch_id: u32) bool {
-    val row: *IsaRow = row_for(vt, arch_id);
-    ret row != nil && row.dit_guaranteed;
 }
 
 pub fun natural_stack_args_for(vt: *OsVTable, arch_id: u32) bool {

@@ -813,8 +813,8 @@ that one precedes the call, because only the program knows how it detects the
 processor's features and when that answer holds.
 
 - **Names come from every instruction set.** A name no extension catalog names
-  is refused, and the refusal names the catalogs it was read against (masc's x86
-  and riscv catalogs, and mach's own aarch64 and spirv vocabularies) and lists
+  is refused, and the refusal names the catalogs it was read against (masc's x86,
+  aarch64 and riscv catalogs, and mach's own spirv vocabulary) and lists
   the names the compiler emits against. A name a catalog holds that the compiler
   emits nothing against, or that another instruction set declares, admits
   nothing on this target and is not an error, so one
