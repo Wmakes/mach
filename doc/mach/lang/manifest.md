@@ -360,6 +360,14 @@ fwd mach.lang.manifest.target.find_target_by_name
 
 forwards [`mach.lang.manifest.target.find_target_by_name`](manifest/target.md#fun-find_target_by_name)
 
+## fwd mach.lang.manifest.target.resolve_declared
+
+```mach
+fwd mach.lang.manifest.target.resolve_declared
+```
+
+forwards [`mach.lang.manifest.target.resolve_declared`](manifest/target.md#fun-resolve_declared)
+
 ## fwd mach.lang.manifest.load.project_parse
 
 ```mach

@@ -151,14 +151,6 @@ pub fun with_image(req: *TargetRequest, base: u64, stack_reserve: u64, stack_com
 pub fun select_of(reg: *TargetRegistry, isa_name: str, os_name: str, abi_name: str, of_name: str) res[binding.Binding, fail.Fail];
 ```
 
-## fun select_on
-
-```mach
-pub fun select_on(reg: *TargetRegistry, isa_name: str, baseline_name: str, os_name: str, abi_name: str, of_name: str) res[binding.Binding, fail.Fail];
-```
-
-select_of on the baseline a target names, "" for none
-
 ## fun resolve
 
 ```mach
