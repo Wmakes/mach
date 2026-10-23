@@ -21,7 +21,11 @@ use std.types.view.View;
 use A: std.allocator;
 use std.allocator.page;
 use std.collections.slice.Slice;
+use std.collections.vector;
+use std.memory;
 
+use masc_extension: masc.core.extension;
+use masc.core.requirement;
 use mirl.ir.module.Tuple;
 use types:           mirl.ir.type;
 use mirl_target:     mirl.target;
@@ -115,14 +119,97 @@ fun assembled(a: *A.Allocator, n: *Named, baseline: str) res[mirl_target.Target,
     val made:  res[mirl_target.Target, mirl_target.Refusal] = mirl_target.assemble(a, tuple);
     if (sel made.err) {
         if (sel made.err.requires) {
+            var unmet: mirl_target.Unmet = made.err.requires;
+            fin { mirl_target.unmet_release(a, ?unmet); }
+            val change: res[str, fail.Fail] = baseline_change(a, ?unmet);
+            if (sel change.err) { ret res[mirl_target.Target, fail.Fail].err{change.err}; }
             ret res[mirl_target.Target, fail.Fail].err{fail.formatted(a,
-                "target: baseline `{}` does not hold what calling convention `{}` requires on {}, so mirl assembles no target from it; state a baseline that holds it",
-                baseline, n.convention, n.architecture)};
+                "target: baseline `{}` does not hold what calling convention `{}` requires on {}, so mirl assembles no target from it; {}",
+                baseline, n.convention, n.architecture, change.ok)};
         }
         ret res[mirl_target.Target, fail.Fail].err{fail.formatted(a, "target: mirl assembles no target from {} {} {} {} {}: {}",
             n.architecture, n.system, n.env, n.convention, baseline, mirl_target.rule(made.err))};
     }
     ret res[mirl_target.Target, fail.Fail].ok{made.ok};
+}
+
+# the cheapest change to a baseline that admits a convention's requirement, as the atoms to
+# add and the atoms to drop, each spelled as a manifest's baseline spells it
+fun baseline_change(a: *A.Allocator, u: *mirl_target.Unmet) res[str, fail.Fail] {
+    val at: opt[usize] = mirl_target.nearest(u);
+    if (sel at.none) { ret res[str, fail.Fail].ok{"state a baseline that holds it"}; }
+    val m:   *mirl_target.Missing = ?u.alternatives.data[at.some];
+    var out: vector.Vector[u8]    = vector.init[u8](a);
+    fin { vector.dnit[u8](?out); }
+    val written: err[A.Error] = change_put(?out, u, m);
+    if (sel written.err) { ret res[str, fail.Fail].err{fail.refused(written.err)}; }
+    val copied: res[*u8, A.Error] = A.allocate[u8](a, out.len + 1);
+    if (sel copied.err) { ret res[str, fail.Fail].err{fail.refused(copied.err)}; }
+    memory.raw_copy(copied.ok::ptr, out.data::ptr, out.len);
+    copied.ok[out.len] = 0;
+    ret res[str, fail.Fail].ok{copied.ok::str};
+}
+
+# the atoms `m` lacks and bars, worded onto `out`
+fun change_put(out: *vector.Vector[u8], u: *mirl_target.Unmet, m: *mirl_target.Missing) err[A.Error] {
+    if (m.lacks.len > 0) {
+        val lead: err[A.Error] = text_put(out, "add ");
+        if (sel lead.err) { ret lead; }
+        val lacks: err[A.Error] = atoms_put(out, u, m.lacks);
+        if (sel lacks.err) { ret lacks; }
+    }
+    if (m.bars.len > 0) {
+        var word: str = "drop ";
+        if (m.lacks.len > 0) { word = " and drop "; }
+        val lead: err[A.Error] = text_put(out, word);
+        if (sel lead.err) { ret lead; }
+        val bars: err[A.Error] = atoms_put(out, u, m.bars);
+        if (sel bars.err) { ret bars; }
+    }
+    ret text_put(out, " to its baseline");
+}
+
+# the atoms `ids` spelled onto `out`, joined by `+` as a baseline joins them
+fun atoms_put(out: *vector.Vector[u8], u: *mirl_target.Unmet, ids: requirement.Ids) err[A.Error] {
+    var i: u32 = 0;
+    for (i < ids.len) {
+        if (i > 0) {
+            val joined: err[A.Error] = text_put(out, "+");
+            if (sel joined.err) { ret joined; }
+        }
+        val put: err[A.Error] = text_put(out, atom_spelling(u, ids.at[i]));
+        if (sel put.err) { ret put; }
+        i = i + 1;
+    }
+    ret err[A.Error].ok{};
+}
+
+# the name a manifest's baseline gives atom `id`: masc's spelling of the row in its
+# baseline syntax, else the catalog's own name for it
+fun atom_spelling(u: *mirl_target.Unmet, id: requirement.Id) str {
+    if (sel u.set.some) {
+        val c: *masc_extension.Catalog = u.set.some.extensions;
+        var i: u32                     = 0;
+        for (i < c.names.len) {
+            val e: *masc_extension.NameEntry = ?c.names.at[i];
+            if (!e.canonical && e.rows.len == 1 && e.rows.at[0] == id) { ret e.key; }
+            i = i + 1;
+        }
+    }
+    val named: opt[str] = mirl_target.unmet_name(u, id);
+    if (sel named.some) { ret named.some; }
+    ret "an atom of the architecture's state";
+}
+
+fun text_put(out: *vector.Vector[u8], text: str) err[A.Error] {
+    val n: usize = str_len(text);
+    var i: usize = 0;
+    for (i < n) {
+        val pushed: res[usize, A.Error] = vector.push[u8](out, text[i]);
+        if (sel pushed.err) { ret err[A.Error].err{pushed.err}; }
+        i = i + 1;
+    }
+    ret err[A.Error].ok{};
 }
 
 # the names of masc's catalog a selection of `t` holds, as a build adds them
