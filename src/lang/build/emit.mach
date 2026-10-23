@@ -316,18 +316,18 @@ fun write_image(img: *Image, path: str) err[fail.Fail] {
 }
 
 # the image of `kind` mink links in memory from the `count` objects at `objects`, in link order,
-# and the `ext_count` external inputs at `ext`, written to `destination`. a dynamic image, a
-# position independent one and an executable carrying resources wait for mink to link them
+# and the `ext_count` external inputs at `ext`, written to `destination`. a link against a
+# library by name, a position independent image and an executable carrying resources are refused
 pub fun link_image(p: *project.Project, kind: *mink_output.Kind, flat: bool, objects: **Object, count: u32,
     ext: *target_of.ObjectInput, ext_count: u32, dynlib_len: u32, destination: str, image: *LoadedImageOptions) err[fail.Fail] {
     if (dynlib_len != 0) {
-        ret err[fail.Fail].err{fail.user(diagnostic_kind.LINK_NO_LOADER, "linking against a shared library waits for mink to link dynamic images for mach")};
+        ret err[fail.Fail].err{fail.user(diagnostic_kind.LINK_NO_LOADER, "linking against a library by name waits for mink to search libraries (mink#537)")};
     }
     if (p.req.pie || p.target.target.pie_default) {
-        ret err[fail.Fail].err{fail.user(diagnostic_kind.LINK_NO_LOADER, "a position independent executable waits for mink to link position independent images for mach")};
+        ret err[fail.Fail].err{fail.user(diagnostic_kind.LINK_NO_LOADER, "a position independent executable is not yet linked through mink")};
     }
     if (image != nil && image.resource != nil) {
-        ret err[fail.Fail].err{fail.user(diagnostic_kind.LINK_SECTION_UNSUPPORTED, "an executable's icon and manifest wait for mink to write resources")};
+        ret err[fail.Fail].err{fail.user(diagnostic_kind.LINK_SECTION_UNSUPPORTED, "an executable's icon and manifest wait for mink to write PE resources (mink#539)")};
     }
     if (count == 0) { ret err[fail.Fail].err{fail.message("a link requires an object")}; }
 

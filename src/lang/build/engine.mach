@@ -71,7 +71,6 @@ use mach.lang.subprocess;
 use lang_target:       mach.lang.target;
 use catalog_artifact:  mach.lang.target.catalog.artifact;
 use catalog_subsystem: mach.lang.target.catalog.subsystem;
-#[testing]
 use target_of: mach.lang.target.of;
 use mach.lang.testrun;
 use mach.lang.wire;
@@ -964,7 +963,7 @@ fun link_phase(p: *project.Project, unit: *build_plan.BuildUnit, st: *UnitState,
         ret err[fail.Fail].ok{};
     }
     if (te.kind == catalog_artifact.SHARED) {
-        ret err[fail.Fail].err{fail.user(diagnostic_kind.LINK_NO_LOADER, "a shared library waits for mink to link shared images for mach")};
+        ret err[fail.Fail].err{fail.user(diagnostic_kind.LINK_NO_LOADER, "a shared library is not yet linked through mink")};
     }
     if (te.kind == catalog_artifact.OBJECTS) {
         st.out_path = unit.obj_dir::*u8;
@@ -1366,9 +1365,10 @@ fun pcg_worker_main(arg: *u8) {
         if (sel made.err) {
             # a refusal of the source stops nothing, so the one reported is the first in
             # module order, as a threadless build reports it
-            slot.fail   = made.err;
+            val refused: fail.Fail = made.err;
+            slot.fail   = refused;
             slot.failed = true;
-            if (!fail.is_user(made.err)) {
+            if (!sel refused.user) {
                 atomic.store(?pc.stop, 1::i64);
                 ret;
             }

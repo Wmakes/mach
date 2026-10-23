@@ -721,8 +721,9 @@ fun report_not_oblivious(ctx: *lower_context.LowerContext, at: builder.Computed)
     A.deallocate[u8](ctx.s.alloc, msg::*u8, str_len(msg) + 1);
     if (sel br.err) { ret err[fail.Fail].err{br.err}; }
     var b: diagnostic.DiagnosticBuilder = br.ok;
-    val info: opt[*lower_context.FnInfo] = lower_context.fn_info(ctx.unit, ctx.fn_index);
-    if (node.linkage.binding == ?symbol.WEAKLY && sel info.some) {
+    var info: opt[*lower_context.FnInfo] = opt[*lower_context.FnInfo].none{};
+    if (node.linkage.binding == ?symbol.WEAKLY) { info = lower_context.fn_info(ctx.unit, ctx.fn_index); }
+    if (sel info.some) {
         val nr: res[str, std_format.FormatError] = std_format.sprint(ctx.s.alloc, "in the instantiation `{}`", intern.text(?ctx.s.interner, info.some.name));
         if (sel nr.err) {
             diagnostic.builder_dnit(?b);

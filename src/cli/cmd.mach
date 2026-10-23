@@ -38,7 +38,6 @@ use mach.cli.exit;
 use mach.cli.fixture;
 use mach.cli.util;
 use mach.lang.driver.request;
-#[testing]
 
 # length of COMMANDS; the compiler refuses a COMMANDS literal of any other length
 val COMMANDS_N: usize = 11;

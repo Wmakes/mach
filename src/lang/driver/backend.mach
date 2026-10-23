@@ -185,7 +185,7 @@ pub fun read_object(b: *Back, a: *A.Allocator, file: str, data: *u8, len: usize)
 }
 
 # the section an object carries mach's cache record in. mink states no flag a link drops a
-# section by, so the section is unreferenced and the link's collection leaves it out
+# section by (mink#538), so the section is unreferenced and the link's collection leaves it out
 pub val RECORD_SECTION: str = ".mach.cache";
 
 # the bytes of `o` with the section `name` holding the `len` bytes at `data` added, laid out in

@@ -5517,8 +5517,9 @@ fun unit_defined_count(s: *session.Session, u: *lower_context.Unit, needle: str,
     for (i < u.fns.len) {
         val f:  *lower_context.FnInfo = ?u.fns.data[i];
         val nm: opt[str]              = intern.get(?s.interner, f.name);
-        if (f.defined && sel nm.some) {
-            if ((exact && str_equals(nm.some, needle)) || (!exact && str_contains(nm.some, needle))) { hits = hits + 1; }
+        if (sel nm.some) {
+            val text: str = nm.some;
+            if (f.defined && ((exact && str_equals(text, needle)) || (!exact && str_contains(text, needle)))) { hits = hits + 1; }
         }
         i = i + 1;
     }

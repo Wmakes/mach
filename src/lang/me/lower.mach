@@ -1,7 +1,6 @@
 #[testing]
 use io_writer: std.io.writer;
 use std.types.bool.bool;
-#[testing]
 use std.types.bool.false;
 use std.types.bool.true;
 use std.types.error.err;
@@ -1189,8 +1188,10 @@ test comptime_gate__reads_a_float_at_its_width {
     var gi:     usize  = 0;
     for (gi < 4) {
         val got: opt[u64] = t_number(t_initializer(m, labels[gi]));
-        if (sel got.none)         { bad = 1; }
-        or (got.some != want[gi]) { bad = 1; }
+        if (sel got.some) {
+            if (got.some != want[gi]) { bad = 1; }
+        }
+        or { bad = 1; }
         gi = gi + 1;
     }
 
