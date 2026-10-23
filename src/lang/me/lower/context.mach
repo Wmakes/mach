@@ -574,10 +574,9 @@ pub rec Declared {
     declaration: *fe_sema.interface.Declaration;
 }
 
-# whether `sym` names a binding another module declares: an import, or a `fwd` of one, which
-# carries the kind the binding is declared with there as its own
+# whether `sym` names a binding a module other than the one in scope declares
 pub fun foreign(lc: *LowerContext, sym: *resolve.Symbol) bool {
-    ret !module.same(resolve.origin_of(lc.s, sym), lc.scope.own_module);
+    ret resolve.foreign_to(lc.s, sym, lc.scope.own_module);
 }
 
 # the declaration `sym` names: one of the module in scope by its id, or another module's by

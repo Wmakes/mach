@@ -39,10 +39,9 @@ use std.types.result.res;
 use std.types.size.usize;
 use std.types.string.str;
 
-# whether `sym` names a binding another module declares: an import, or a `fwd` of one, which
-# carries the kind the binding is declared with there as its own
+# whether `sym` names a binding a module other than this view's declares
 pub fun foreign(sc: *SemaContext, sym: *resolve.Symbol) bool {
-    ret !module.same(resolve.origin_of(sc.s, sym), sc.view.own_module);
+    ret resolve.foreign_to(sc.s, sym, sc.view.own_module);
 }
 
 pub fun imported_definition(sc: *SemaContext, sym: *resolve.Symbol,
