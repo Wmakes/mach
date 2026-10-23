@@ -207,6 +207,7 @@ rec AnalysisSource {
 # diagnostics:      the owned store, with related locations, fix edits and lost-diagnostic evidence
 # sources:          the owned source versions every diagnostic location refers to; analysis_source
 #                   finds one by FileId
+# tree:             the owned tree of a parse_text result; nil for an analysis of a buffer
 pub rec AnalysisResult {
     alloc:              *A.Allocator;
     editor:             *EditorSession;
@@ -228,6 +229,7 @@ pub rec AnalysisResult {
     message:            str;
     diagnostics:        *diagnostic.DiagnosticStore;
     sources:            Vector[AnalysisSource];
+    tree:               *ast.Ast;
 }
 
 # a request for one buffer at one phase with the default build selection
@@ -257,6 +259,10 @@ pub fun analysis_dnit(result: *AnalysisResult) {
     str_free(result.alloc, result.profile);
     str_free(result.alloc, result.message);
     if (sel result.failure.some) { fail.places_dnit(result.alloc, result.failure.some); }
+    if (result.tree != nil) {
+        ast.dnit(result.tree);
+        A.deallocate[ast.Ast](result.alloc, result.tree, 1);
+    }
     @result = AnalysisResult{};
 }
 
@@ -295,12 +301,14 @@ fun result_buffer(result: *AnalysisResult) res[*Buffer, fail.Fail] {
 # open, update, close, dnit, analyze, build or query operation expires the view, after
 # which every checked accessor answers a Fail and a pointer already obtained must not be
 # dereferenced. a rejected parse can still expose a partial AST; a fatal acquisition
-# exposes nil
+# exposes nil. a parse_text result owns its tree, which stays valid until analysis_dnit
 # reached only by mach-lsp
 # ---
-# result: the envelope, whose EditorSession and Session must both still exist
+# result: the envelope, whose EditorSession and Session must both still exist unless
+#         parse_text made it
 # ret:    the borrowed AST, or the expiry failure
 pub fun ast_of(result: *AnalysisResult) res[*ast.Ast, fail.Fail] {
+    if (result.tree != nil) { ret res[*ast.Ast, fail.Fail].ok{result.tree}; }
     val buffer: res[*Buffer, fail.Fail] = result_buffer(result);
     if (sel buffer.err) { ret res[*ast.Ast, fail.Fail].err{buffer.err}; }
     ret res[*ast.Ast, fail.Fail].ok{buffer.ok.a};
@@ -829,6 +837,114 @@ pub fun tokenize(result: *AnalysisResult) res[fe_lexer.TokenStream, fail.Fail] {
     val file: opt[*lang_source.SourceFile] = analysis_source(result, result.file);
     if (sel file.none) { ret res[fe_lexer.TokenStream, fail.Fail].err{fail.message("analysis has no owned source version")}; }
     ret fe_lexer.tokenize(file.some.text, result.alloc, result.file);
+}
+
+# parse a text on its own, with no buffer, project or session: the text is copied into the
+# result as its source under FILE_NIL, and lexical and syntax errors become the result's
+# diagnostics. ok means the owned envelope was produced; read result.status for the parse's
+# standing and result.failure for a fatal parse, whose tree is left empty. the tree is
+# read with ast_of and lives until analysis_dnit, which releases the result exactly once.
+# resolve_of and sema_of answer a phase failure
+# reached only by mach-lsp
+# ---
+# alloc: owns the result; must outlive it
+# text:  the source, borrowed only during the call
+# ret:   the owned result, or the allocation failure
+pub fun parse_text(alloc: *A.Allocator, text: str) res[AnalysisResult, fail.Fail] {
+    var result: AnalysisResult = AnalysisResult{
+        alloc: alloc, file: lang_source.FILE_NIL, phase: PHASE_PARSE,
+        sources: collections_vector.init[AnalysisSource](alloc)
+    };
+    var complete: bool = false;
+    fin {
+        if (!complete) { analysis_dnit(?result); }
+    }
+    val store: res[*diagnostic.DiagnosticStore, A.Error] = A.allocate[diagnostic.DiagnosticStore](alloc, 1);
+    if (sel store.err) { ret res[AnalysisResult, fail.Fail].err{fail.refused(store.err)}; }
+    result.diagnostics  = store.ok;
+    @result.diagnostics = diagnostic.store_init(alloc);
+
+    var borrowed: lang_source.SourceFile = lang_source.SourceFile{present: true, path: "", text: text};
+    val copied: res[lang_source.SourceFile, lang_source.Error] = lang_source.copy_file(?borrowed, alloc);
+    if (sel copied.err) { ret res[AnalysisResult, fail.Fail].err{fail.source_refused(copied.err)}; }
+    var entry: AnalysisSource      = AnalysisSource{id: lang_source.FILE_NIL, file: copied.ok};
+    val added: res[usize, A.Error] = collections_vector.push[AnalysisSource](?result.sources, entry);
+    if (sel added.err) {
+        lang_source.dnit_file(?entry.file, alloc);
+        ret res[AnalysisResult, fail.Fail].err{fail.refused(added.err)};
+    }
+
+    val tree: res[*ast.Ast, A.Error] = A.allocate[ast.Ast](alloc, 1);
+    if (sel tree.err) { ret res[AnalysisResult, fail.Fail].err{fail.refused(tree.err)}; }
+    result.tree  = tree.ok;
+    @result.tree = ast.init(alloc, lang_source.FILE_NIL);
+
+    val lexed: res[fe_lexer.TokenStream, fail.Fail] = lex_text(result.sources.data[0].file.text, alloc, lang_source.FILE_NIL, result.diagnostics);
+    if (sel lexed.err) { ret res[AnalysisResult, fail.Fail].err{lexed.err}; }
+    var stream: fe_lexer.TokenStream = lexed.ok;
+    fin { fe_lexer.dnit(?stream, alloc); }
+
+    val fatal: opt[state.ParseFail] = parse_tokens(?stream, result.tree, result.diagnostics, ?result.status);
+    var message:     str      = "";
+    val status_text: opt[str] = fail.internal_text(result.status);
+    if (sel status_text.some) { message = status_text.some; }
+    if (sel fatal.some)       { message = fatal.some.message; }
+    val owned_message: res[str, types_string.StrError] = str_copy(alloc, message);
+    if (sel owned_message.err) { ret res[AnalysisResult, fail.Fail].err{fail.str_refused(owned_message.err)}; }
+    result.message = owned_message.ok;
+    if (sel status_text.some) { result.status.kind = fail.PhaseKind.internal{result.message}; }
+    if (sel fatal.some) {
+        val owned: res[fail.Fail, A.Error] = fail.places_retain(alloc, fail.with_text(state.failure(fatal.some), result.message));
+        if (sel owned.err) { ret res[AnalysisResult, fail.Fail].err{fail.refused(owned.err)}; }
+        result.failure = opt[fail.Fail].some{owned.ok};
+    }
+    complete = true;
+    ret res[AnalysisResult, fail.Fail].ok{result};
+}
+
+# whether two results' trees have the same shape: the same node kinds, and declaration
+# flags, in the same order, with the same number of every node a tree holds. spans,
+# names and literal values are not compared
+# reached only by mach-lsp
+# ---
+# x, y: the results, each read through ast_of under its rules
+# ret:  whether the shapes match, or either tree's expiry failure
+pub fun same_shape(x: *AnalysisResult, y: *AnalysisResult) res[bool, fail.Fail] {
+    val xr: res[*ast.Ast, fail.Fail] = ast_of(x);
+    if (sel xr.err) { ret res[bool, fail.Fail].err{xr.err}; }
+    val yr: res[*ast.Ast, fail.Fail] = ast_of(y);
+    if (sel yr.err) { ret res[bool, fail.Fail].err{yr.err}; }
+    val a: *ast.Ast = xr.ok;
+    val b: *ast.Ast = yr.ok;
+    if (a == nil || b == nil) { ret res[bool, fail.Fail].err{fail.message("analysis has no tree")}; }
+    if (a.modules.len != b.modules.len || a.exprs.len != b.exprs.len || a.stmts.len != b.stmts.len
+        || a.decls.len != b.decls.len || a.types.len != b.types.len || a.typed_names.len != b.typed_names.len
+        || a.tag_cases.len != b.tag_cases.len || a.field_inits.len != b.field_inits.len
+        || a.generic_names.len != b.generic_names.len || a.comptime_branches.len != b.comptime_branches.len
+        || a.decorators.len != b.decorators.len) {
+        ret res[bool, fail.Fail].ok{false};
+    }
+    var i: usize = 0;
+    for (i < a.exprs.len) {
+        if (a.exprs.data[i].kind != b.exprs.data[i].kind) { ret res[bool, fail.Fail].ok{false}; }
+        i = i + 1;
+    }
+    i = 0;
+    for (i < a.stmts.len) {
+        if (a.stmts.data[i].kind != b.stmts.data[i].kind) { ret res[bool, fail.Fail].ok{false}; }
+        i = i + 1;
+    }
+    i = 0;
+    for (i < a.decls.len) {
+        if (a.decls.data[i].kind != b.decls.data[i].kind || a.decls.data[i].flags != b.decls.data[i].flags) { ret res[bool, fail.Fail].ok{false}; }
+        i = i + 1;
+    }
+    i = 0;
+    for (i < a.types.len) {
+        if (a.types.data[i].kind != b.types.data[i].kind) { ret res[bool, fail.Fail].ok{false}; }
+        i = i + 1;
+    }
+    ret res[bool, fail.Fail].ok{true};
 }
 
 # a project module without the requested product: the tolerant load kept the
@@ -1643,18 +1759,35 @@ fun tokenize_inner(es: *EditorSession, fid: lang_source.FileId) res[fe_lexer.Tok
     if (sel opt_file.none) {
         ret res[fe_lexer.TokenStream, fail.Fail].err{fail.message("editor: buffer not open")};
     }
-    val file: *lang_source.SourceFile = opt_file.some;
+    ret lex_text(opt_file.some.text, es.alloc, fid, ?es.s.diags);
+}
 
-    val res_tokens: res[fe_lexer.TokenStream, fail.Fail] = fe_lexer.tokenize(file.text, es.alloc, fid);
+# lex a text, its lexical errors recorded as diagnostics; the caller frees the stream
+fun lex_text(text: str, alloc: *A.Allocator, fid: lang_source.FileId, diags: *diagnostic.DiagnosticStore) res[fe_lexer.TokenStream, fail.Fail] {
+    val res_tokens: res[fe_lexer.TokenStream, fail.Fail] = fe_lexer.tokenize(text, alloc, fid);
     if (sel res_tokens.err) { ret res_tokens; }
     var stream: fe_lexer.TokenStream = res_tokens.ok;
 
-    val res_emit: err[fail.Fail] = fe_lexer.emit_diagnostics(?stream, ?es.s.diags);
+    val res_emit: err[fail.Fail] = fe_lexer.emit_diagnostics(?stream, diags);
     if (sel res_emit.err) {
-        fe_lexer.dnit(?stream, es.alloc);
+        fe_lexer.dnit(?stream, alloc);
         ret res[fe_lexer.TokenStream, fail.Fail].err{res_emit.err};
     }
     ret res[fe_lexer.TokenStream, fail.Fail].ok{stream};
+}
+
+# parse a token stream into an initialized tree, writing the parse's standing to status;
+# a fatal parse rejects at the depth limit, fails internally otherwise, and is returned
+fun parse_tokens(stream: *fe_lexer.TokenStream, a: *ast.Ast, diags: *diagnostic.DiagnosticStore, status: *fail.PhaseStatus) opt[state.ParseFail] {
+    val parse_r: res[fail.PhaseStatus, state.ParseFail] = fe_parser.parse(stream, a, diags);
+    if (sel parse_r.err) {
+        val f: state.ParseFail = parse_r.err;
+        if (f.kind == state.PARSE_FAIL_DEPTH) { fail.reject(status); }
+        or                                    { fail.internal(status, f.message); }
+        ret opt[state.ParseFail].some{f};
+    }
+    @status = parse_r.ok;
+    ret opt[state.ParseFail].none{};
 }
 
 fun parse_inner(es: *EditorSession, fid: lang_source.FileId) res[*ast.Ast, fail.Fail] {
@@ -1674,19 +1807,12 @@ fun parse_inner(es: *EditorSession, fid: lang_source.FileId) res[*ast.Ast, fail.
     if (sel res_ast.err) { ret res_ast; }
     val a: *ast.Ast = res_ast.ok;
 
-    val parse_r: res[fail.PhaseStatus, state.ParseFail] = fe_parser.parse(?stream, a, ?es.s.diags);
-
-    if (sel parse_r.err) {
-        val f: state.ParseFail = parse_r.err;
-        b.a                  = a;
-        es.operation_failure = opt[fail.Fail].some{state.failure(f)};
-        if (f.kind == state.PARSE_FAIL_DEPTH) { fail.reject(?b.parse_status); }
-        or                                    { fail.internal(?b.parse_status, f.message); }
-        ret res[*ast.Ast, fail.Fail].err{fail.message(f.message)};
+    b.a = a;
+    val fatal: opt[state.ParseFail] = parse_tokens(?stream, a, ?es.s.diags, ?b.parse_status);
+    if (sel fatal.some) {
+        es.operation_failure = opt[fail.Fail].some{state.failure(fatal.some)};
+        ret res[*ast.Ast, fail.Fail].err{fail.message(fatal.some.message)};
     }
-
-    b.a            = a;
-    b.parse_status = parse_r.ok;
     ret res[*ast.Ast, fail.Fail].ok{a};
 }
 
