@@ -262,6 +262,8 @@ pub fun target_request(isa_name: str, os_name: str, abi_name: str) TargetRequest
     r.base            = 0;
     r.stack_reserve   = 0;
     r.stack_commit    = 0;
+    r.env_name        = "";
+    r.env_origin      = "";
     r.extensions      = nil;
     r.extension_count = 0;
     r.baseline_name   = "";
@@ -293,14 +295,8 @@ pub fun with_image(req: *TargetRequest, base: u64, stack_reserve: u64, stack_com
 }
 
 pub fun select_of(reg: *TargetRegistry, isa_name: str, os_name: str, abi_name: str, of_name: str) res[binding.Binding, fail.Fail] {
-    ret select_on(reg, isa_name, "", os_name, abi_name, of_name);
-}
-
-# select_of on the baseline a target names, "" for none
-pub fun select_on(reg: *TargetRegistry, isa_name: str, baseline_name: str, os_name: str, abi_name: str, of_name: str) res[binding.Binding, fail.Fail] {
     var req: TargetRequest = target_request(isa_name, os_name, abi_name);
     with_of(?req, of_name);
-    with_baseline(?req, baseline_name);
     ret resolve(reg, ?req);
 }
 

@@ -171,6 +171,7 @@ pub rec Requirements {
 # isa:             `{target.isa}`
 # os:              `{target.os}`
 # abi:             `{target.abi}`
+# declared:        the declared target the values name, nil when none
 # profile:         `{profile.name}`
 # format:          the target's explicit `of` override, "" when the format is derived
 # artifact_suffix: `{artifact.suffix}`, set for the artifact whose output is named
@@ -182,9 +183,9 @@ pub rec Requirements {
 pub rec Values {
     target:          str;
     isa:             str;
-    baseline:        str;
     os:              str;
     abi:             str;
+    declared:        *TargetDef;
     profile:         str;
     format:          str;
     artifact_suffix: str;
@@ -201,12 +202,12 @@ pub rec Values {
 # pn:  the profile name
 pub fun values_of(itn: *intern.Interner, t: *TargetDef, pn: str) Values {
     var v: Values = values_empty();
-    v.target = intern.text(itn, t.name);
-    v.isa    = intern.text(itn, t.isa);
-    if (!intern.str_is_nil(t.baseline)) { v.baseline = intern.text(itn, t.baseline); }
-    v.os      = intern.text(itn, t.os);
-    v.abi     = intern.text(itn, t.abi);
-    v.profile = pn;
+    v.target   = intern.text(itn, t.name);
+    v.isa      = intern.text(itn, t.isa);
+    v.os       = intern.text(itn, t.os);
+    v.abi      = intern.text(itn, t.abi);
+    v.declared = t;
+    v.profile  = pn;
     if (!intern.str_is_nil(t.of)) { v.format = intern.text(itn, t.of); }
     ret v;
 }
@@ -235,7 +236,7 @@ pub fun embed_values(reqs: *Requirement, req_count: u32, dependency: str) Values
 
 # values that name nothing, each field set by the caller that has it
 pub fun values_empty() Values {
-    ret Values{target: "", isa: "", baseline: "", os: "", abi: "", profile: "", format: "", artifact_suffix: nil, run_out: nil,
+    ret Values{target: "", isa: "", os: "", abi: "", declared: nil, profile: "", format: "", artifact_suffix: nil, run_out: nil,
         reqs: nil, req_count: 0, dependency: ""};
 }
 
