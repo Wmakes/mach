@@ -1,5 +1,6 @@
 use mach.lang.growth;
 use std.collections.map;
+use std.collections.slice.Slice;
 use collections_vector: std.collections.vector;
 use std.types.bool.bool;
 use std.types.bool.false;
@@ -10,6 +11,8 @@ use std.types.result.res;
 use std.types.size.usize;
 use types_string: std.types.string;
 use std.types.string.str;
+use std.types.string.str_len;
+use std.types.view.View;
 
 use A: std.allocator;
 
@@ -36,6 +39,9 @@ use lang_source: mach.lang.source;
 use mach.lang.stack;
 use catalog_arch: mach.lang.target.catalog.arch;
 use mach.lang.type;
+use masc_operand:  masc.core.operand;
+use masc_inline:   masc.inline.inline;
+use mirl_assembly: mirl.ir.assembly;
 use mirl.ir.id;
 use mirl.ir.type.Type;
 
@@ -370,11 +376,56 @@ fun lower_decl_stmt(ctx: *lower_context.LowerContext, s: *ast_stmt.Stmt) err[fai
     ret err[fail.Fail].ok{};
 }
 
-# an asm block is refused where it is written until mirl carries inline assembly
+# an asm block, handed to mirl as an inline assembly item: its text with its comments blanked,
+# so every offset is the source's, and each `{name}` a memory operand the block reads and
+# writes, bound to the local's slot. the block may reach any memory through its registers
 fun lower_asm(ctx: *lower_context.LowerContext, sid: ast_id.StmtId, s: *ast_stmt.Stmt) err[fail.Fail] {
-    fail.reject(?ctx.status);
-    val loc: lang_source.Location = lang_source.location(ctx.scope.a.file_id, s.span);
-    ret err[fail.Fail].err{diagnostic.reject(ctx.diags, diagnostic_kind.ASM_INSTRUCTION_UNAVAILABLE, loc, "inline assembly waits for mirl to carry an asm block")};
+    val txt:       str                 = lower_context.module_source(ctx);
+    val span:      lang_source.Span    = s.data.asm_.body;
+    val res_strip: res[str, fail.Fail] = fe_asm.comments_strip(ctx.s.alloc, txt, span);
+    if (sel res_strip.err) { ret err[fail.Fail].err{res_strip.err}; }
+    val stripped: str = res_strip.ok;
+    fin { A.deallocate[u8](ctx.s.alloc, stripped::*u8, span.len + 1); }
+
+    var binds: collections_vector.Vector[resolve.AsmBind] = collections_vector.init[resolve.AsmBind](ctx.s.alloc);
+    fin { collections_vector.dnit[resolve.AsmBind](?binds); }
+    val got: err[fail.Fail] = resolve.asm_binds_at(ctx.scope.rr, sid, ?binds);
+    if (sel got.err) { ret got; }
+    if (binds.len > mirl_assembly.MOST_OPERANDS::usize) {
+        fail.reject(?ctx.status);
+        val loc: lang_source.Location = lang_source.location(ctx.scope.a.file_id, s.span);
+        ret err[fail.Fail].err{diagnostic.reject(ctx.diags, diagnostic_kind.ASM_OPERAND, loc, "an asm block binds more than 30 locals")};
+    }
+
+    var operands: collections_vector.Vector[mirl_assembly.Operand] = collections_vector.init[mirl_assembly.Operand](ctx.s.alloc);
+    fin { collections_vector.dnit[mirl_assembly.Operand](?operands); }
+    var values: collections_vector.Vector[value.Value] = collections_vector.init[value.Value](ctx.s.alloc);
+    fin { collections_vector.dnit[value.Value](?values); }
+    var i: usize = 0;
+    for (i < binds.len) {
+        val b:    *resolve.AsmBind = ?binds.data[i];
+        val slot: opt[value.Value] = lower_context.lookup_local(ctx, b.symbol);
+        if (sel slot.none) { ret err[fail.Fail].err{fail.message("lower: an asm block names a local lowering never bound")}; }
+        val name: str                   = intern.text(?ctx.s.interner, b.name);
+        val op:   mirl_assembly.Operand = mirl_assembly.Operand{
+            name:       View{data: name::*u8, len: str_len(name)},
+            role:       masc_operand.READ_WRITE,
+            constraint: masc_inline.Constraint.memory{},
+            ty:         builder.ptr_type(?ctx.builder)
+        };
+        val pushed: res[usize, A.Error] = collections_vector.push[mirl_assembly.Operand](?operands, op);
+        if (sel pushed.err) { ret err[fail.Fail].err{fail.refused(pushed.err)}; }
+        val held: res[usize, A.Error] = collections_vector.push[value.Value](?values, slot.some);
+        if (sel held.err) { ret err[fail.Fail].err{fail.refused(held.err)}; }
+        i = i + 1;
+    }
+    var block: mirl_assembly.Assembly = mirl_assembly.Assembly{
+        text:     View{data: stripped::*u8, len: span.len},
+        operands: Slice[mirl_assembly.Operand]{data: operands.data, size: operands.len},
+        reads:    true,
+        writes:   true
+    };
+    ret builder.emit_asm(?ctx.builder, ?block, values.data, values.len::u32);
 }
 
 fun lower_comptime_if(ctx: *lower_context.LowerContext, s: *ast_stmt.Stmt) err[fail.Fail] {

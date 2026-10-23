@@ -22,6 +22,9 @@ use lower_context: mach.lang.me.lower.context;
 use target_owner:  mach.lang.target.owner;
 use mach.lang.target.resolved;
 
+use mirl_machine: mirl.machine.compile;
+use mirl_inline:  mirl.machine.inline;
+use mirl_engine:  mirl.machine.select.engine;
 use mirl_pass:    mirl.pass.schedule;
 use mirl_compile: mirl.target.compile;
 use mirl_family:  mirl.target.family;
@@ -150,6 +153,8 @@ fun uncompiled(a: *A.Allocator, name: str, e: mirl_compile.Error) fail.Fail {
     if (sel e.timing) {
         ret fail.user_of(diagnostic_kind.SECRET_TARGET_UNVERIFIABLE, fail.join(a, "'", name, "' requires constant time, which mirl cannot hold on this target: its instruction set classifies no timing for the operations the function performs"));
     }
+    val block: opt[fail.Fail] = assembly_refused(a, name, e);
+    if (sel block.some) { ret block.some; }
     var why: str = "its back end refused it";
     if (sel e.unserved)   { why = "no family of mirl serves the target"; }
     or (sel e.listing)    { why = "mirl's families do not list their owners"; }
@@ -159,6 +164,37 @@ fun uncompiled(a: *A.Allocator, name: str, e: mirl_compile.Error) fail.Fail {
     or (sel e.introduced) { why = "mirl's schedule left an operation the target's family does not serve"; }
     or (sel e.alloc)      { ret fail.refused(e.alloc); }
     ret fail.message_of(fail.join(a, "mirl did not compile '", name, "': ", why));
+}
+
+# an asm block of the module `name` that selection refused, which the source states,
+# none for any other refusal
+fun assembly_refused(a: *A.Allocator, name: str, e: mirl_compile.Error) opt[fail.Fail] {
+    if (sel e.back) {
+        val back: mirl_family.Back = e.back;
+        if (sel back.register) {
+            val machine: mirl_machine.Error = back.register;
+            if (sel machine.function) {
+                val stage: mirl_machine.Stage = machine.function.stage;
+                if (sel stage.select) {
+                    val selection: mirl_engine.Error = stage.select;
+                    if (sel selection.assembly) { ret opt[fail.Fail].some{block_refused(a, name, selection.assembly.refusal)}; }
+                }
+            }
+        }
+    }
+    ret opt[fail.Fail].none{};
+}
+
+# why mirl compiles no asm block of the module `name` as it is written
+fun block_refused(a: *A.Allocator, name: str, r: mirl_inline.Refusal) fail.Fail {
+    if (sel r.alloc)  { ret fail.refused(r.alloc); }
+    if (sel r.parsed) { ret fail.user_of(diagnostic_kind.ASM_SYNTAX, fail.join(a, "an asm block of '", name, "': ", r.parsed)); }
+    if (sel r.leaves) {
+        ret fail.user_of(diagnostic_kind.ASM_UNSUPPORTED, fail.join(a, "an asm block of '", name, "' transfers control out of itself other than by a call, as a system call does, which mirl compiles no block for"));
+    }
+    if (sel r.operands) { ret fail.user_of(diagnostic_kind.ASM_OPERAND, fail.join(a, "an asm block of '", name, "' binds more names than one block may")); }
+    if (sel r.class)    { ret fail.user_of(diagnostic_kind.ASM_OPERAND, fail.join(a, "an asm block of '", name, "' binds a name in another register class than its operand takes")); }
+    ret fail.user_of(diagnostic_kind.ASM_UNSUPPORTED, fail.join(a, "an asm block of '", name, "' binds an address as an immediate, which mirl carries no relocation for yet"));
 }
 
 # the bytes of `o` laid out in the target's object format, given back with sink.release

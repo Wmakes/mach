@@ -21,6 +21,7 @@ use std.collections.vector;
 use core_state: masc.core.state;
 use mbuild:     mirl.build;
 use mirl.build.failure;
+use mirl.ir.assembly.Assembly;
 use mirl.ir.body;
 use mirl.ir.constant.Address;
 use mirl.ir.constant.Bits;
@@ -1252,6 +1253,21 @@ pub fun emit_ret(b: *Builder, v: value.Value) err[fail.Fail] {
 
 pub fun emit_ret_void(b: *Builder) err[fail.Fail] {
     ret branch(b, opcode.RET, nil, 0, nil, 0, nil, 0);
+}
+
+# an inline assembly block at the cursor, binding the `n` values at `values` in its operands'
+# order. the instruction copies the block, so it may be borrowed
+pub fun emit_asm(b: *Builder, block: *Assembly, values: *value.Value, n: u32) err[fail.Fail] {
+    var ops: vector.Vector[id.Value] = vector.init[id.Value](b.a);
+    fin { vector.dnit[id.Value](?ops); }
+    var i: u32 = 0;
+    for (i < n) {
+        val pushed: res[usize, A.Error] = vector.push[id.Value](?ops, use(b, values[i]));
+        if (sel pushed.err) { ret err[fail.Fail].err{fail.refused(pushed.err)}; }
+        i = i + 1;
+    }
+    var imm: [1]Immediate = [1]Immediate{Immediate.assembly{block}};
+    ret placed(b, opcode.ASM, ops.data, ops.len::u32, ?imm[0], 1);
 }
 
 pub fun emit_unreachable(b: *Builder) err[fail.Fail] {
