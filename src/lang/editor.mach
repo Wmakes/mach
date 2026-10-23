@@ -868,11 +868,9 @@ pub fun project_module_by_path(snap: *ProjectSnapshot, path: str) opt[u32] {
 # the module the snapshot loaded under the fully qualified name `fqn`, none when it loaded none
 pub fun project_module_by_fqn(snap: *ProjectSnapshot, fqn: str) opt[u32] {
     if (snap.alloc == nil || !snap.loaded) { ret opt[u32].none{}; }
-    val id: res[intern.StrId, A.Error] = intern.add(?snap.session.interner, fqn);
-    if (sel id.err) { ret opt[u32].none{}; }
-    val found: opt[session.ModuleId] = fe_load.module_find(?snap.project.loader, id.ok);
-    if (sel found.none) { ret opt[u32].none{}; }
-    ret opt[u32].some{found.some::u32};
+    val mid: session.ModuleId = project.module_named(?snap.project, fqn);
+    if (module.is_nil(mid)) { ret opt[u32].none{}; }
+    ret opt[u32].some{mid::u32};
 }
 
 fun snapshot_module(snap: *ProjectSnapshot, index: u32) res[*project.ModuleEntry, fail.Fail] {
