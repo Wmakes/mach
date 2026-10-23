@@ -123,14 +123,22 @@ pub fun load_status(p: *project.Project) fail.PhaseStatus;
 
 the standing of the load walk alone, over every module it reached
 
+## fun module_status
+
+```mach
+pub fun module_status(p: *project.Project, m: *project.ModuleEntry) fail.PhaseStatus;
+```
+
+the standing of one module: its load's and that of each product this project's operations
+published for it
+
 ## fun frontend_status
 
 ```mach
 pub fun frontend_status(p: *project.Project) fail.PhaseStatus;
 ```
 
-the standing of the front end over every module: the load's, and that of each product this
-project's operations published
+the standing of the front end over every module
 
 ## rec ParsedModule
 
