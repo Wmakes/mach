@@ -6,7 +6,9 @@
 pub val SHA2: u64 = 0x1
 ```
 
-the aarch64 extension vocabulary over the AdvSIMD baseline
+the sha256h, sha256h2, sha256su0 and sha256su1 rounds. masc's FEAT_SHA1 and
+FEAT_SHA256 imply each other, and `sha2` names both and stands for FEAT_SHA1,
+so the row is FEAT_SHA1
 
 ## val SB
 

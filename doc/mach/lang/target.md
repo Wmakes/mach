@@ -151,6 +151,14 @@ pub fun with_image(req: *TargetRequest, base: u64, stack_reserve: u64, stack_com
 pub fun select_of(reg: *TargetRegistry, isa_name: str, os_name: str, abi_name: str, of_name: str) res[binding.Binding, fail.Fail];
 ```
 
+## fun select_on
+
+```mach
+pub fun select_on(reg: *TargetRegistry, isa_name: str, baseline_name: str, os_name: str, abi_name: str, of_name: str) res[binding.Binding, fail.Fail];
+```
+
+select_of on the baseline a target names, "" for none
+
 ## fun resolve
 
 ```mach
@@ -160,11 +168,12 @@ pub fun resolve(reg: *TargetRegistry, req: *TargetRequest) res[binding.Binding, 
 ## fun registered_selection
 
 ```mach
-pub fun registered_selection(arch_vt: *isa.IsaVTable, model: *target_model.Machine) isa.IsaVTable;
+pub fun registered_selection(os_vt: *lang_target_os.OsVTable, arch_vt: *isa.IsaVTable, abi_vt: *abi.AbiVTable, model: *target_model.Machine) isa.IsaVTable;
 ```
 
 the instruction set a [target.*] table selects by naming a registered isa and no
-baseline: the template narrowed to the isa's default baseline. model backs the
+baseline: the template narrowed to its host's floor, or the whole template
+where the host states none and a target names the baseline. model backs the
 returned vtable's model pointer and must outlive it
 
 ## fun registered_tuple_capability

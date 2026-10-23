@@ -85,7 +85,7 @@ pub fun dit_mode_guaranteed(tgt: *Target) bool;
 ```
 
 whether the target guarantees the data-independent-timing mode a DIT_MODE
-row needs: the os declares it per instruction set
+row needs: mink's host of the target declares it
 
 ## fun ct_mul_admitted
 

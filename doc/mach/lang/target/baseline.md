@@ -58,3 +58,13 @@ the spelling masc gives the rows of `t` in `bits` on mink's architecture `arch`,
 with each member's revision when `versioned`, as an object's attributes state the
 selection it was built for; owned by `a`
 
+## fun widened
+
+```mach
+pub fun widened(a: *A.Allocator, arch: *mink_arch.Arch, t: *extension.Table, spelling: str, bits: u64) res[str, fail.Fail];
+```
+
+the spelling masc gives the selection `spelling` reads with each row of `t` in
+`bits` added, the whole selection a target stands on: its baseline, every row of
+the catalog the baseline brings included, and the extensions it adds; owned by `a`
+
