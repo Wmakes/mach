@@ -632,7 +632,6 @@ pub fun id_is(itn: *intern.Interner, id: intern.StrId, text: str) bool {
 }
 
 # the module loaded under `fqn`, nil when none is
-#[testing]
 pub fun module_named(p: *Project, fqn: str) session.ModuleId {
     val id: res[intern.StrId, A.Error] = intern.add(?p.s.interner, fqn);
     if (sel id.err) { ret session.MODULE_NIL; }
