@@ -129,23 +129,25 @@ pub rec ResolvedTarget {
 
 # the profile a selection resolves to, copied out of its `ProfileDef`
 # ---
-# name:     the profile's name
-# optimize: as `ProfileDef`
-# pass:     as `ProfileDef`, borrowed from the manifest
-# skip:     as `ProfileDef`, borrowed from the manifest
-# relax:    as `ProfileDef`
-# debug:    as `ProfileDef`
-# simd:     as `ProfileDef`
-# allow:    as `ProfileDef`
+# name:         the profile's name
+# optimize:     as `ProfileDef`
+# pass:         as `ProfileDef`, borrowed from the manifest
+# skip:         as `ProfileDef`, borrowed from the manifest
+# relax:        as `ProfileDef`, borrowed from the manifest
+# linker_relax: as `ProfileDef`
+# debug:        as `ProfileDef`
+# simd:         as `ProfileDef`
+# allow:        as `ProfileDef`
 pub rec ResolvedProfile {
-    name:     intern.StrId;
-    optimize: bool;
-    pass:     NameList;
-    skip:     NameList;
-    relax:    bool;
-    debug:    bool;
-    simd:     SimdMode;
-    allow:    diagnostic_kind.KindSet;
+    name:         intern.StrId;
+    optimize:     bool;
+    pass:         NameList;
+    skip:         NameList;
+    relax:        NameList;
+    linker_relax: bool;
+    debug:        bool;
+    simd:         SimdMode;
+    allow:        diagnostic_kind.KindSet;
 }
 
 fun artifact_pinned_target(itn: *intern.Interner, m: *Manifest, a: *ArtifactDef) *TargetDef {
@@ -284,14 +286,15 @@ fun no_host_target(alloc: *A.Allocator, itn: *intern.Interner, m: *Manifest) fai
 
 fun profile_resolved(pf: *ProfileDef) ResolvedProfile {
     var rp: ResolvedProfile;
-    rp.name     = pf.name;
-    rp.optimize = pf.optimize;
-    rp.pass     = pf.pass;
-    rp.skip     = pf.skip;
-    rp.relax    = pf.relax;
-    rp.debug    = pf.debug;
-    rp.simd     = pf.simd;
-    rp.allow    = pf.allow;
+    rp.name         = pf.name;
+    rp.optimize     = pf.optimize;
+    rp.pass         = pf.pass;
+    rp.skip         = pf.skip;
+    rp.relax        = pf.relax;
+    rp.linker_relax = pf.linker_relax;
+    rp.debug        = pf.debug;
+    rp.simd         = pf.simd;
+    rp.allow        = pf.allow;
     ret rp;
 }
 
@@ -1198,14 +1201,15 @@ test resolve_profile__carries_the_profile_levers {
     if (!tinit(?backing, ?ar, ?alloc, ?itn)) { ret 1; }
     fin { arena.dnit(?ar); }
     val head: str                      = "[project]\nmach=\">=5\"\nid=\"x\"\nversion=\"1\"\nsrc=\"src\"\nwork=\"out\"\n";
-    val a:    res[Manifest, fail.Fail] = tparse(?alloc, ?itn, t_fmt(?alloc, "{}{}", head, "[profile.p]\noptimize=true\ndebug=false\nsimd=\"require\"\nskip=[\"vectorize\"]\nrelax=false\n"));
+    val a:    res[Manifest, fail.Fail] = tparse(?alloc, ?itn, t_fmt(?alloc, "{}{}", head, "[profile.p]\noptimize=true\ndebug=false\nsimd=\"require\"\nskip=[\"vectorize\"]\nrelax=[\"float-reassoc\"]\n"));
     if (sel a.err) { ret 2; }
     var ma: Manifest                        = a.ok;
     val ra: res[ResolvedProfile, fail.Fail] = resolve_profile(?alloc, ?itn, ?ma, "p");
     if (sel ra.err) { ret 3; }
     val rp: ResolvedProfile = ra.ok;
-    if (!rp.optimize || rp.debug || rp.simd != SIMD_REQUIRE)  { ret 4; }
-    if (rp.pass.count != 0 || rp.skip.count != 1 || rp.relax) { ret 5; }
+    if (!rp.optimize || rp.debug || rp.simd != SIMD_REQUIRE)                { ret 4; }
+    if (rp.pass.count != 0 || rp.skip.count != 1 || rp.relax.count != 1)    { ret 5; }
+    if (!str_equals(intern.text(?itn, rp.relax.items[0]), "float-reassoc")) { ret 6; }
     val d: res[Manifest, fail.Fail] = tparse(?alloc, ?itn, t_fmt(?alloc, "{}{}", head, "[profile.p]\noptimize=1\ndebug=false\nsimd=\"scalarize\"\n"));
     if (!(sel d.err && str_contains(fail.describe(d.err), "optimize must be a boolean"))) { ret 7; }
     ret 0;

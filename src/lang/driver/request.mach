@@ -193,8 +193,8 @@ pub rec BuildRequest {
     overrides: bool;
     debug:     bool;
     pie:       bool;
-    # whether the linker may relax the code, which mirl's build option states
-    relax:          bool;
+    # whether the linker may relax the code, which mirl's relax build option states
+    linker_relax:   bool;
     subsystem_flag: SubsystemFlag;
     subsystem:      catalog_subsystem.Subsystem;
     simd:           manifest.SimdMode;
@@ -231,7 +231,7 @@ pub fun defaults() BuildRequest {
     r.opt            = OPT_DEBUG;
     r.debug          = false;
     r.pie            = false;
-    r.relax          = true;
+    r.linker_relax   = true;
     r.subsystem_flag = SUBSYSTEM_FLAG_NONE;
     r.subsystem      = catalog_subsystem.CONSOLE;
     r.simd           = manifest.SIMD_SCALARIZE;
@@ -371,9 +371,9 @@ pub fun compose(a: *A.Allocator, itn: *intern.Interner, m: *manifest.Manifest,
 # into `r`: built-in defaults, then the profile, then the command line
 fun levers_compose(a: *A.Allocator, itn: *intern.Interner, pf: *manifest.ResolvedProfile, o: *Overrides, r: *BuildRequest) err[fail.Fail] {
     if (pf.optimize) { r.opt = OPT_RELEASE; }
-    r.debug = pf.debug;
-    r.simd  = pf.simd;
-    r.relax = pf.relax;
+    r.debug        = pf.debug;
+    r.simd         = pf.simd;
+    r.linker_relax = pf.linker_relax;
 
     val profiled: BuildRequest = @r;
     if (o.optimize == LEVER_ON)  { r.opt = OPT_RELEASE; }
@@ -393,7 +393,8 @@ val SIMD_REQUIRE_REFUSED: str = "simd = \"require\" is not accepted: mirl legali
 
 # every profile's keys name what a build can hold, so a profile is refused where
 # it is written whichever profile is selected: mirl schedules its passes by level,
-# so no profile names passes, and none requires packed vector forms
+# so no profile names passes, none names a relaxation mirl has no option for, and
+# none requires packed vector forms
 fun profiles_check(a: *A.Allocator, itn: *intern.Interner, m: *manifest.Manifest) err[fail.Fail] {
     var i: u32 = 0;
     for (i < m.profile_count) {
@@ -403,6 +404,8 @@ fun profiles_check(a: *A.Allocator, itn: *intern.Interner, m: *manifest.Manifest
         if (sel passes.err) { ret passes; }
         val skips: err[fail.Fail] = no_names(a, itn, pf.name, ?pf.skip, "skip");
         if (sel skips.err) { ret skips; }
+        val relaxed: err[fail.Fail] = no_relaxation(a, itn, pf.name, ?pf.relax);
+        if (sel relaxed.err) { ret relaxed; }
     }
     ret err[fail.Fail].ok{};
 }
@@ -412,6 +415,15 @@ fun no_names(a: *A.Allocator, itn: *intern.Interner, profile: intern.StrId, name
     if (names.count == 0) { ret err[fail.Fail].ok{}; }
     val refused: fail.Fail = fail.formatted_user(a, diagnostic_kind.MANIFEST_INVALID_VALUE,
         "mach.toml: [profile.{}].{} is not accepted: mirl schedules its passes by optimization level, which `optimize` sets", intern.text(itn, profile), key);
+    ret err[fail.Fail].err{fail.at(a, refused, names.sites[0])};
+}
+
+# a profile's `relax` list refused where its first name is written: mirl's build
+# options state no departure from exact semantics
+fun no_relaxation(a: *A.Allocator, itn: *intern.Interner, profile: intern.StrId, names: *manifest.NameList) err[fail.Fail] {
+    if (names.count == 0) { ret err[fail.Fail].ok{}; }
+    val refused: fail.Fail = fail.formatted_user(a, diagnostic_kind.MANIFEST_INVALID_VALUE,
+        "mach.toml: [profile.{}].relax names \"{}\", which is not accepted yet: mirl has no build option that permits it", intern.text(itn, profile), intern.text(itn, names.items[0]));
     ret err[fail.Fail].err{fail.at(a, refused, names.sites[0])};
 }
 
@@ -464,7 +476,7 @@ fun write_semantic_fields(s: *wire.Sink, r: *BuildRequest) {
     wire.put_u8(s, r.opt);
     put_flag(s, r.debug);
     put_flag(s, r.pie);
-    put_flag(s, r.relax);
+    put_flag(s, r.linker_relax);
     wire.put_u8(s, r.simd);
     put_flag(s, r.include_deps);
 }
@@ -798,13 +810,14 @@ test levers_compose__the_command_line_wins_over_the_profile {
     val id:  res[intern.StrId, A.Error] = intern.add(?itn, "p");
     if (sel id.err) { ret 2; }
     var pf: manifest.ResolvedProfile;
-    pf.name     = id.ok;
-    pf.optimize = false;
-    pf.debug    = false;
-    pf.simd     = manifest.SIMD_SCALARIZE;
-    pf.pass     = manifest.NameList{items: nil, sites: nil, count: 0};
-    pf.skip     = manifest.NameList{items: nil, sites: nil, count: 0};
-    pf.relax    = true;
+    pf.name         = id.ok;
+    pf.optimize     = false;
+    pf.debug        = false;
+    pf.simd         = manifest.SIMD_SCALARIZE;
+    pf.pass         = manifest.NameList{items: nil, sites: nil, count: 0};
+    pf.skip         = manifest.NameList{items: nil, sites: nil, count: 0};
+    pf.relax        = manifest.NameList{items: nil, sites: nil, count: 0};
+    pf.linker_relax = true;
 
     var o:           Overrides      = overrides_init(?a);
     var r:           BuildRequest   = defaults();
