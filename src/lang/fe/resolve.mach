@@ -2170,7 +2170,9 @@ fun collect_fwd(rc: *ResolveContext, decl_id: ast_id.DeclId, df: *ast_decl.DeclF
     var slot: u32 = 0;
     if (ps.kind == SYM_USE) { slot = ps.slot; }
 
-    val r_sym: res[SymbolId, fail.Fail] = add_symbol(rc, ps.kind, SYM_FLAG_PUB, name_id, ps.canon, ast_id.DECL_NIL, slot, ps.origin);
+    # a `fwd` binds its name at module scope, so what it forwards is module-level here as it is
+    # where it is declared
+    val r_sym: res[SymbolId, fail.Fail] = add_symbol(rc, ps.kind, SYM_FLAG_PUB | SYM_FLAG_MODULE, name_id, ps.canon, ast_id.DECL_NIL, slot, ps.origin);
     if (sel r_sym.err) {
         fail.internal(?rc.status, fail.describe(r_sym.err));
         ret err[fail.Fail].err{r_sym.err};

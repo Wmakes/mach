@@ -59,12 +59,11 @@ pub fun named(sc: *sema_context.SemaContext, eid: ast_id.ExprId) res[opt[comptim
     val aggregate: res[opt[comptime.CTValue], comptime.EvalFail] = aggregate_value(sc, sym);
     if (sel aggregate.err)     { ret aggregate; }
     if (sel aggregate.ok.some) { ret aggregate; }
-    if (sym.kind == resolve.SYM_IMPORTED) {
+    if (sema_context.foreign(sc, sym)) {
         if (gated_in_union(sc, sym)) { ret refuse_gated(sc, sym); }
         ret sema_context.resolve_module_member_const(sc, eid);
     }
-    if (sym.kind != resolve.SYM_VAL || (sym.flags & resolve.SYM_FLAG_MODULE) == 0 || ast_id.decl_is_nil(sym.decl)
-        || !module.same(resolve.origin_of(sc.s, sym), sc.view.own_module)) {
+    if (sym.kind != resolve.SYM_VAL || (sym.flags & resolve.SYM_FLAG_MODULE) == 0 || ast_id.decl_is_nil(sym.decl)) {
         ret res[opt[comptime.CTValue], comptime.EvalFail].ok{opt[comptime.CTValue].none{}};
     }
     ret bound_of(sc, sym.decl);
@@ -125,12 +124,12 @@ fun projected_value(sc: *sema_context.SemaContext, eid: ast_id.ExprId) res[opt[c
 # symbol, and for a constant a union build binds per target tuple
 fun aggregate_value(sc: *sema_context.SemaContext, sym: *resolve.Symbol) res[opt[comptime.CTValue], comptime.EvalFail] {
     val none: res[opt[comptime.CTValue], comptime.EvalFail] = res[opt[comptime.CTValue], comptime.EvalFail].ok{opt[comptime.CTValue].none{}};
-    if (!names_constant(sym)) { ret none; }
-    if (module.same(resolve.origin_of(sc.s, sym), sc.view.own_module)) {
+    if (!names_constant(sc, sym)) { ret none; }
+    if (!sema_context.foreign(sc, sym)) {
         if (!reads_published(sc, sym)) { ret none; }
         type_initializer(sc, sym);
     }
-    if (!module.same(resolve.origin_of(sc.s, sym), sc.view.own_module)) {
+    if (sema_context.foreign(sc, sym)) {
         if (gated_in_union(sc, sym)) { ret none; }
         val found: res[opt[Published], fail.Fail] = published(sc, sym);
         if (sel found.err)     { ret res[opt[comptime.CTValue], comptime.EvalFail].err{comptime.eval_from_fail(found.err, diagnostic_kind.COMPTIME_NOT_CONSTANT, "")}; }
@@ -327,7 +326,7 @@ fun published(sc: *sema_context.SemaContext, sym: *resolve.Symbol) res[opt[Publi
     if (sel acquired.err) { ret res[opt[Published], fail.Fail].err{acquired.err}; }
     val iface: *interface.Interface = acquired.ok;
     var decl:  ast_id.DeclId        = sym.decl;
-    if (sym.kind == resolve.SYM_IMPORTED) {
+    if (sema_context.foreign(sc, sym)) {
         val named: res[*interface.Declaration, fail.Fail] = interface.declaration_for(iface, sym.definition_kind, sym.canon);
         if (sel named.err) {
             fail.internal(?sc.status, fail.describe(named.err));
@@ -344,7 +343,7 @@ fun published(sc: *sema_context.SemaContext, sym: *resolve.Symbol) res[opt[Publi
 # whether `sym` is an imported constant a union build refuses to read: its exporter binds it under
 # a per-target-tuple condition, so no one tuple's value may stand for it
 pub fun gated_in_union(sc: *sema_context.SemaContext, sym: *resolve.Symbol) bool {
-    if (sym.kind != resolve.SYM_IMPORTED || !sc.view.ctx.env.build.union_build) { ret false; }
+    if (!sema_context.foreign(sc, sym) || sym.kind == resolve.SYM_USE || !sc.view.ctx.env.build.union_build) { ret false; }
     val found: res[opt[Published], fail.Fail] = published(sc, sym);
     if (sel found.err) {
         fail.internal(?sc.status, fail.describe(found.err));
@@ -375,7 +374,7 @@ pub fun report_gated(sc: *sema_context.SemaContext, sym: *resolve.Symbol, span: 
 pub fun array_value(sc: *sema_context.SemaContext, sym: *resolve.Symbol) res[opt[comptime.CTValue], fail.Fail] {
     val none: res[opt[comptime.CTValue], fail.Fail] = res[opt[comptime.CTValue], fail.Fail].ok{opt[comptime.CTValue].none{}};
     val own:  u32                                   = module.stable_index(sc.typing.module);
-    if (sym.kind == resolve.SYM_VAL && (sym.flags & resolve.SYM_FLAG_MODULE) == 0) {
+    if (sym.kind == resolve.SYM_VAL && (sym.flags & resolve.SYM_FLAG_MODULE) == 0 && !sema_context.foreign(sc, sym)) {
         val d_opt: opt[*ast_decl.Decl] = ast.get_decl(sc.view.a, sym.decl);
         if (sel d_opt.none) { ret none; }
         val init: ast_id.ExprId = d_opt.some.data.bind.init;
@@ -384,7 +383,7 @@ pub fun array_value(sc: *sema_context.SemaContext, sym: *resolve.Symbol) res[opt
         if (sel local.err) { ret res[opt[comptime.CTValue], fail.Fail].err{local.err}; }
         ret res[opt[comptime.CTValue], fail.Fail].ok{opt[comptime.CTValue].some{comptime.node_ref(own, local.ok, type.index(type_at(sc, init)))}};
     }
-    if (module.same(resolve.origin_of(sc.s, sym), sc.view.own_module) && sc.view.constant_node != nil) {
+    if (!sema_context.foreign(sc, sym) && sc.view.constant_node != nil) {
         val built: res[u32, fail.Fail] = own_value(sc, sym);
         if (sel built.err)              { ret res[opt[comptime.CTValue], fail.Fail].err{built.err}; }
         if (built.ok == interface.NONE) { ret none; }
@@ -632,7 +631,7 @@ fun reach(sc: *sema_context.SemaContext, eid: ast_id.ExprId, depth: u32) res[Rea
     if (stack.exhausted()) { ret res[Reach, fail.Fail].err{refused_nesting(sc, e.span)}; }
     val named: opt[*resolve.Symbol] = sema_context.symbol_for_expr(sc, eid);
     if (sel named.some) {
-        if (names_constant(named.some)) { ret reach_constant(sc, named.some); }
+        if (names_constant(sc, named.some)) { ret reach_constant(sc, named.some); }
         ret none;
     }
     if (e.kind == ast_expr.EXPR_KIND_CAST) {
@@ -650,8 +649,8 @@ fun reach(sc: *sema_context.SemaContext, eid: ast_id.ExprId, depth: u32) res[Rea
     ret none;
 }
 
-fun names_constant(sym: *resolve.Symbol) bool {
-    if (sym.kind == resolve.SYM_IMPORTED) { ret sym.definition_kind == resolve.SYM_VAL; }
+fun names_constant(sc: *sema_context.SemaContext, sym: *resolve.Symbol) bool {
+    if (sema_context.foreign(sc, sym)) { ret sym.definition_kind == resolve.SYM_VAL; }
     ret sym.kind == resolve.SYM_VAL && (sym.flags & resolve.SYM_FLAG_MODULE) != 0 && !ast_id.decl_is_nil(sym.decl);
 }
 
@@ -659,7 +658,7 @@ fun names_constant(sym: *resolve.Symbol) bool {
 # module published, which a union build refuses when that module binds it per target tuple
 fun reach_constant(sc: *sema_context.SemaContext, sym: *resolve.Symbol) res[Reach, fail.Fail] {
     val none: res[Reach, fail.Fail] = res[Reach, fail.Fail].ok{Reach{kind: REACH_NONE}};
-    if (module.same(resolve.origin_of(sc.s, sym), sc.view.own_module)) {
+    if (!sema_context.foreign(sc, sym)) {
         val built: res[u32, fail.Fail] = own_value(sc, sym);
         if (sel built.err)              { ret res[Reach, fail.Fail].err{built.err}; }
         if (built.ok == interface.NONE) { ret none; }
@@ -863,8 +862,7 @@ fun address_build(sc: *sema_context.SemaContext, eid: ast_id.ExprId, ty: type.Ty
 }
 
 fun names_function(sym: *resolve.Symbol) bool {
-    if (sym.kind == resolve.SYM_IMPORTED) { ret sym.definition_kind == resolve.SYM_FUN; }
-    ret sym.kind == resolve.SYM_FUN;
+    ret sym.definition_kind == resolve.SYM_FUN;
 }
 
 # the binding an address points into, or why the place it spells has no fixed address
@@ -942,14 +940,14 @@ fun address_root(sc: *sema_context.SemaContext, eid: ast_id.ExprId, steps: *coll
 # the binding `sym` names as an address leaf points into it: a module-level function, `val` or
 # `var`, this module's or another's
 fun root_of(sc: *sema_context.SemaContext, sym: *resolve.Symbol) res[Root, fail.Fail] {
-    var kind: resolve.SymKind = sym.kind;
-    if (kind == resolve.SYM_IMPORTED) { kind = sym.definition_kind; }
-    val module_level: bool = sym.kind == resolve.SYM_IMPORTED || (sym.flags & resolve.SYM_FLAG_MODULE) != 0;
+    val elsewhere:    bool            = sema_context.foreign(sc, sym);
+    val kind:         resolve.SymKind = sym.definition_kind;
+    val module_level: bool            = elsewhere || (sym.flags & resolve.SYM_FLAG_MODULE) != 0;
     if (kind != resolve.SYM_FUN && !((kind == resolve.SYM_VAL || kind == resolve.SYM_VAR) && module_level)) {
         ret root_refused("only the address of a module-level function, `val` or `var`, or of a place in one, is a constant");
     }
     var decl: ast_id.DeclId = sym.decl;
-    if (sym.kind == resolve.SYM_IMPORTED) {
+    if (elsewhere) {
         val found: res[opt[Published], fail.Fail] = published(sc, sym);
         if (sel found.err)     { ret res[Root, fail.Fail].err{found.err}; }
         if (sel found.ok.none) { ret res[Root, fail.Fail].err{fail.message("sema: an imported binding has no declaration in its module's interface")}; }
