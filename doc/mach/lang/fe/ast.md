@@ -183,6 +183,16 @@ pub fun mark(a: *Ast) AstMark;
 pub fun rollback(a: *Ast, m: AstMark) bool;
 ```
 
+## fun same_shape
+
+```mach
+pub fun same_shape(x: *Ast, y: *Ast) bool;
+```
+
+whether two trees have the same shape: the same number of every node, and the same
+expression, statement, declaration and type kinds, and declaration flags, in the same
+order. spans, names and literal values are not compared
+
 ## fun span_contains
 
 ```mach

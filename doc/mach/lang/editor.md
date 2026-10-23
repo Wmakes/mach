@@ -233,9 +233,7 @@ ret: the owned result, or the allocation failure
 pub fun same_shape(x: *AnalysisResult, y: *AnalysisResult) res[bool, fail.Fail];
 ```
 
-whether two results' trees have the same shape: the same node kinds, and declaration
-flags, in the same order, with the same number of every node a tree holds. spans,
-names and literal values are not compared
+whether two results' trees have the same shape, as ast.same_shape compares them
 reached only by mach-lsp
 
 ret: whether the shapes match, or either tree's expiry failure
