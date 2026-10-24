@@ -506,7 +506,8 @@ pub fun resolve(reg: *TargetRegistry, req: *TargetRequest) res[binding.Binding, 
 
     # the selection the owners' target stands on: the baseline with the extensions
     # the target adds, so a convention an added extension carries holds over it
-    var stands: opt[str] = opt[str].none{};
+    # a target whose isa takes no baseline stands on what its environment sets
+    var stands: opt[str] = isa_environment.stands(?arch_vt.environments, env_r.ok);
     if (sel spelled_r.ok.some) {
         val wide: res[str, fail.Fail] = target_baseline.widened(?reg.alloc, catalog_arch.owner_of(arch_vt.id), selected_model.extension_table, spelled_r.ok.some, selected_model.extensions);
         if (sel wide.err) { ret res[binding.Binding, fail.Fail].err{wide.err}; }
