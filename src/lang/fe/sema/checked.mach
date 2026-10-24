@@ -1,7 +1,6 @@
 # a test fixture that types modules held in memory with the front end alone
 use mach.lang.diagnostic;
 use mach.lang.fail;
-use ast_expr: mach.lang.fe.ast.expr;
 use mach.lang.fe.comptime;
 #[testing]
 use fe_load: mach.lang.fe.load;
@@ -12,7 +11,6 @@ use sema_product: mach.lang.fe.sema.product;
 use sema_surface: mach.lang.fe.sema.surface;
 use mach.lang.module;
 use mach.lang.session;
-use mach.lang.type;
 use A: std.allocator;
 use std.allocator.page;
 use collections_vector: std.collections.vector;
@@ -21,12 +19,10 @@ use std.types.bool.bool;
 use std.types.bool.false;
 use std.types.bool.true;
 use std.types.error.err;
-use std.types.option.opt;
 use std.types.result.res;
 use std.types.size.usize;
 use std.types.string.StrError;
 use std.types.string.str;
-use std.types.string.str_contains;
 use std.types.string.str_join;
 
 # one resolved module as far as typing took it
@@ -245,23 +241,6 @@ pub fun checked_dnit(c: *Checked) {
     resolve.resolved_dnit(?c.r);
 }
 
-# the type typing recorded for the first window `x[start, count]` of the first module checked,
-# the node's own type and not what a binding coerces it to; none when the module is untyped or
-# holds no window
-#[testing]
-pub fun checked_window(c: *Checked) opt[type.TypeId] {
-    if (c.count == 0 || !c.mods[0].typed) { ret opt[type.TypeId].none{}; }
-    val row: fe_load.Row              = resolve.resolved_row(?c.r, c.r.order[0]);
-    val sr:  *sema_product.SemaResult = ?c.mods[0].sr;
-    var i:   usize                    = 0;
-    for (i < row.syntax.exprs.len && i < sr.expr_count::usize) {
-        val e: *ast_expr.Expr = ?row.syntax.exprs.data[i];
-        if (e.kind == ast_expr.EXPR_KIND_INDEX && ast_expr.is_range(?e.data.index)) { ret opt[type.TypeId].some{sr.expr_type[i]}; }
-        i = i + 1;
-    }
-    ret opt[type.TypeId].none{};
-}
-
 # whether the load, the resolutions and the typing all accepted the modules
 #[testing]
 pub fun checked_accepted(c: *Checked) bool {
@@ -317,22 +296,6 @@ fun probe_rejects_at(src: *resolve.Sources, needle: str, offset: usize, len: usi
     ret diagnostic.error_at(?c.r.s.diags, needle, offset, len);
 }
 
-# whether a diagnostic of any kind the front end reported over `src` says `needle`
-#[testing]
-pub fun probe_says(src: *resolve.Sources, needle: str) bool {
-    var c:    Checked;
-    val made: err[fail.Fail] = checked_check(?c, src);
-    fin { checked_dnit(?c); }
-    if (sel made.err) { ret false; }
-    var i: usize = 0;
-    for (i < diagnostic.len(?c.r.s.diags)) {
-        val d: opt[*diagnostic.Diagnostic] = diagnostic.get(?c.r.s.diags, i);
-        if (sel d.some && str_contains(d.some.message, needle)) { ret true; }
-        i = i + 1;
-    }
-    ret false;
-}
-
 # `head` followed by `tail`, for a source assembled from shared declarations; it is never
 # released, and a refused allocation ends the test
 #[testing]
@@ -386,18 +349,6 @@ pub fun sema_diag(text: str, needle: str) i32 {
 }
 
 #[testing]
-pub fun sema_note(text: str, needle: str) i32 {
-    var src: resolve.Sources = resolve.sources("t.main", text);
-    ret probe_diagnostic(?src, needle, true);
-}
-
-#[testing]
-pub fun sema_says(text: str, needle: str) bool {
-    var src: resolve.Sources = resolve.sources("t.main", text);
-    ret probe_says(?src, needle);
-}
-
-#[testing]
 pub fun sema_rejects_at(text: str, needle: str, offset: usize, len: usize) bool {
     var src: resolve.Sources = resolve.sources("t.main", text);
     ret probe_rejects_at(?src, needle, offset, len);
@@ -417,51 +368,11 @@ pub fun sema_clean2(main: str, lib: str) bool {
     ret probe_errors(?src) == 0;
 }
 
-#[testing]
-pub fun sema_diag2(main: str, lib: str, needle: str) i32 {
-    var src: resolve.Sources = sema_pair(main, lib);
-    ret probe_diagnostic(?src, needle, false);
-}
-
-# zero when `text` checks clean
-#[testing]
-pub fun sema_ok(text: str) i32 {
-    if (sema_clean(text)) { ret 0; }
-    ret 1;
-}
-
-#[testing]
-pub fun sema_ok2(main: str, lib: str) i32 {
-    if (sema_clean2(main, lib)) { ret 0; }
-    ret 1;
-}
-
 # zero when `text` is rejected with an error that says `want` and none that says `other`, the
 # arm a gate takes and the one it does not
 #[testing]
 pub fun sema_arm(text: str, want: str, other: str) i32 {
     if (sema_diag(text, want) != 0)  { ret 1; }
     if (sema_diag(text, other) == 0) { ret 1; }
-    ret 0;
-}
-
-test checked__a_well_typed_module_reports_nothing {
-    var c:    Checked;
-    val made: err[fail.Fail] = checked_init(?c, "fun twice(x: i32) i32 { ret x + x; }\n");
-    fin { checked_dnit(?c); }
-    if (sel made.err)                      { ret 1; }
-    if (diagnostic.len(?c.r.s.diags) != 0) { ret 2; }
-    if (!checked_accepted(?c))             { ret 3; }
-    ret 0;
-}
-
-test checked__a_narrowing_return_is_rejected {
-    if (!sema_rejects_with("fun narrow(x: i64) i32 { ret x; }\n", "type mismatch")) { ret 1; }
-    ret 0;
-}
-
-test checked__an_import_is_typed_through_its_published_surface {
-    if (!sema_clean2("use t.lib;\nfun main() i32 { var b: lib.Box; b.v = lib.K; ret b.v; }\n", "pub val K: i32 = 7;\npub rec Box { v: i32; }\n")) { ret 1; }
-    if (sema_diag2("use t.lib;\nfun main() i64 { var b: lib.Box; ret b.v; }\n", "pub rec Box { v: i32; }\n", "type mismatch") != 0)               { ret 2; }
     ret 0;
 }

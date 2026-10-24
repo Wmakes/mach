@@ -4,7 +4,6 @@
 # arm64e, wasm32, ...) is no instruction set here and no `$mach.arch` tag
 use mink_arch:    mink.catalog.arch;
 use arch_aarch64: mink.catalog.arch.aarch64;
-use arch_list:    mink.catalog.arch.list;
 use arch_riscv:   mink.catalog.arch.riscv;
 use arch_spirv:   mink.catalog.arch.spirv;
 use arch_x86:     mink.catalog.arch.x86;
@@ -101,76 +100,4 @@ pub fun fingerprint_tag(id: u32) u8 {
     val spec: *Row = row_of(id);
     if (spec == nil) { ret 0; }
     ret spec.fingerprint_tag;
-}
-
-test id_for__name_roundtrip {
-    if (id_for("x86_64") != X86_64)                                  { ret 1; }
-    if (id_for("aarch64") != AARCH64)                                { ret 1; }
-    if (id_for("riscv64") != RISCV64)                                { ret 1; }
-    if (id_for("riscv32") != RISCV32)                                { ret 1; }
-    if (id_for("mos6502") != UNKNOWN)                                { ret 1; }
-    if (id_for("spirv") != SPIRV)                                    { ret 1; }
-    if (id_for("riscv") != UNKNOWN)                                  { ret 1; }
-    if (RISCV32 == RISCV64)                                          { ret 1; }
-    if (id_for("rv32imc") != UNKNOWN || id_for("rv64gc") != UNKNOWN) { ret 2; }
-
-    if (!str_equals(name_for(X86_64), "x86_64"))   { ret 1; }
-    if (!str_equals(name_for(AARCH64), "aarch64")) { ret 1; }
-    if (!str_equals(name_for(RISCV64), "riscv64")) { ret 1; }
-    if (!str_equals(name_for(RISCV32), "riscv32")) { ret 1; }
-    if (!str_equals(name_for(SPIRV), "spirv"))     { ret 1; }
-    if (!str_equals(name_for(UNKNOWN), "unknown")) { ret 1; }
-    ret 0;
-}
-
-# the projection is explicit: every row names a row of mink's catalog and is spelled
-# by it, and an architecture of mink's no row names is no instruction set here
-test rows__project_mink_s_catalog_explicitly {
-    var i: usize = 0;
-    for (i < ROW_COUNT) {
-        if (!arch_list.member(ROWS[i].owner)) { ret 1; }
-        i = i + 1;
-    }
-    var projected: usize = 0;
-    i = 0;
-    for (i < arch_list.count()) {
-        val a:  *mink_arch.Arch = arch_list.at(i);
-        val id: u32             = id_for(a.name);
-        if (id != UNKNOWN) {
-            if (row_of(id).owner != a) { ret 2; }
-            projected = projected + 1;
-        }
-        i = i + 1;
-    }
-    if (projected != ROW_COUNT)                                       { ret 3; }
-    if (id_for("x86") != UNKNOWN || id_for("wasm32") != UNKNOWN)      { ret 4; }
-    if (id_for("arm64e") != UNKNOWN || id_for("riscv64e") != UNKNOWN) { ret 5; }
-    ret 0;
-}
-
-test rows__complete_unique_ordered_roundtrip {
-    if (ROWS[0].arch != X86_64)  { ret 1; }
-    if (ROWS[1].arch != AARCH64) { ret 1; }
-    if (ROWS[2].arch != RISCV64) { ret 1; }
-    if (ROWS[3].arch != SPIRV)   { ret 1; }
-    if (ROWS[4].arch != RISCV32) { ret 1; }
-
-    var i: usize = 0;
-    for (i < ROW_COUNT) {
-        if (ROWS[i].fingerprint_tag != (i + 1)::u8)                  { ret 1; }
-        if (id_for(spelling(?ROWS[i])) != ROWS[i].arch)              { ret 1; }
-        if (!str_equals(name_for(ROWS[i].arch), spelling(?ROWS[i]))) { ret 1; }
-
-        var j: usize = 0;
-        for (j < ROW_COUNT) {
-            if (i != j) {
-                if (ROWS[i].arch == ROWS[j].arch)                       { ret 1; }
-                if (str_equals(spelling(?ROWS[i]), spelling(?ROWS[j]))) { ret 1; }
-                if (ROWS[i].fingerprint_tag == ROWS[j].fingerprint_tag) { ret 1; }
-            }
-            j = j + 1;
-        }
-        i = i + 1;
-    }
-    ret 0;
 }

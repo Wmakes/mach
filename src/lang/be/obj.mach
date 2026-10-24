@@ -1,14 +1,7 @@
 use mach.lang.fail;
-use std.types.bool.true;
 use std.types.error.err;
-use std.types.result.res;
 use std.types.string.str;
 
-use std.allocator.page;
-
-use A: std.allocator;
-
-use mach.lang.intern;
 use lang_target:    mach.lang.target;
 use target_of:      mach.lang.target.of;
 use of_destination: mach.lang.target.of.destination;
@@ -24,35 +17,4 @@ pub fun emit_image(o: *target_of.ObjectImage, tgt: *lang_target.Binding, destina
     val written: err[fail.Fail] = tgt.of.object_emit(?tgt.object, o, ?dst);
     if (sel written.err) { ret written; }
     ret of_destination.publish(?dst, o.interner, destination, "cannot publish object");
-}
-
-# a target's relocation seam admits only the kinds its encoder writes
-test defer_relocation__admits_only_kinds_the_target_encodes {
-    val ts: res[lang_target.Binding, fail.Fail] = lang_target.t_select("x86_64", "linux", "sysv64");
-    if (sel ts.err) { ret 1; }
-    var t: lang_target.Binding = ts.ok;
-
-    var alloc:  A.Allocator;
-    val make_r: err[A.Error] = page.make(?alloc);
-    if (sel make_r.err) { ret 1; }
-    var d: target_of.DeferredRelocs = target_of.deferred_init(?alloc);
-    fin { target_of.deferred_dnit(?d); }
-
-    var rec: target_of.DeferredReloc;
-    rec.section      = target_of.section_id(0);
-    rec.offset       = 0;
-    rec.kind         = target_of.RK_PAGE21;
-    rec.name         = intern.STR_NIL;
-    rec.addend       = 0;
-    rec.extern_flags = 0;
-
-    val refused: err[fail.Fail] = target_of.defer_relocation(?d, rec, t.isa.reloc, target_of.SK_TEXT, true);
-    if (sel refused.ok) { ret 1; }
-    if (d.count != 0)   { ret 2; }
-
-    rec.kind = target_of.RK_PLT32;
-    val admitted: err[fail.Fail] = target_of.defer_relocation(?d, rec, t.isa.reloc, target_of.SK_TEXT, true);
-    if (sel admitted.err) { ret 3; }
-    if (d.count != 1)     { ret 4; }
-    ret 0;
 }

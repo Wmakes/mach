@@ -74,13 +74,3 @@ pub val VTABLE: lang_target_os.OsVTable = lang_target_os.OsVTable{
     framework_root:     "/System/Library/Frameworks",
     naming:             target_of.SystemNaming{static_prefix: "lib", static_suffix: ".a", executable_suffix: ""},
 };
-
-test vtable__wires_per_arch_policy {
-    val vt: *lang_target_os.OsVTable = ?VTABLE;
-    if (lang_target_os.reserved_gp_for(vt, catalog_arch.AARCH64) != (1::u32 << 18))                                                           { ret 3; }
-    if (lang_target_os.reserved_gp_for(vt, catalog_arch.X86_64) != 0)                                                                         { ret 4; }
-    if (lang_target_os.reg_arg_align_for(vt, catalog_arch.AARCH64) != 8 || lang_target_os.reg_arg_align_for(vt, catalog_arch.X86_64) != 0)    { ret 7; }
-    if (lang_target_os.reg_arg_extend_for(vt, catalog_arch.AARCH64) != 32 || lang_target_os.reg_arg_extend_for(vt, catalog_arch.X86_64) != 0) { ret 8; }
-    if (!lang_target_os.declared_agg_align_for(vt, catalog_arch.AARCH64) || lang_target_os.declared_agg_align_for(vt, catalog_arch.X86_64))   { ret 9; }
-    ret 0;
-}

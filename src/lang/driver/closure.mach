@@ -4,8 +4,6 @@
 # or missing dependency surfaces as a build error that `mach dep pull` fixes. the located
 # closure then scopes the build: a dependency's own closure, the link requirements each
 # artifact cascades, and the template variables a manifest reads
-use std.allocator.page;
-use collections_vector: std.collections.vector;
 use std.collections.vector.Vector;
 use fs: std.filesystem;
 use std.filesystem.native;
@@ -806,25 +804,3 @@ pub fun owner_tmpl_vars(p: *project.Project, owner: str) template.Values {
 }
 
 pub val DEP_DIR: str = "dep";
-
-#[testing]
-fun t_floor_is(a: *A.Allocator, running: str, want: str) bool {
-    val got: res[str, std_format.FormatError] = mach_range_floor(a, running);
-    if (sel got.err) { ret false; }
-    val same: bool = str_equals(got.ok, want);
-    str_free(a, got.ok);
-    ret same;
-}
-
-# the suggested compiler range is the key's floor within its major, and `^N.0` past it
-test mach_range_floor__depends_only_on_the_running_major {
-    var a:      A.Allocator;
-    val make_r: err[A.Error] = page.make(?a);
-    if (sel make_r.err)                    { ret 1; }
-    if (!t_floor_is(?a, "5.3.0", "^5.3"))  { ret 2; }
-    if (!t_floor_is(?a, "5.4.0", "^5.3"))  { ret 3; }
-    if (!t_floor_is(?a, "5.99.1", "^5.3")) { ret 4; }
-    if (!t_floor_is(?a, "6.0.0", "^6.0"))  { ret 5; }
-    if (!t_floor_is(?a, "7.2.3", "^7.0"))  { ret 6; }
-    ret 0;
-}

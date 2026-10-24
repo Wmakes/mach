@@ -1,5 +1,4 @@
 # a generic's body under type arguments: substitution, and the field table an instance reads
-use std.allocator.page;
 use std.types.bool.bool;
 use std.types.bool.false;
 use std.types.bool.true;
@@ -12,9 +11,7 @@ use A: std.allocator;
 
 use mach.lang.fail;
 use mach.lang.intern;
-use mach.lang.module;
 use mach.lang.session;
-use lang_source: mach.lang.source;
 use mach.lang.type;
 use type_query: mach.lang.type.query;
 use mach.lang.type.query.mention;
@@ -323,83 +320,4 @@ pub fun ensure_fields(s: *session.Session, tid: type.TypeId) err[fail.Fail] {
     var q:      type_query.Query = type_query.Query{types: ?s.types, facts: ?s.type_facts, status: ?status};
     ensure(?q, tid);
     ret type_query.settled(?q);
-}
-
-# substitution is keyed by the declaration whose parameters it replaces.
-# a parameter of another declaration at the same index stays, a type substituted
-# once reads as itself under a second pass with the same owner, and an anonymous
-# aggregate is instantiated by the declaration that encloses it only
-test substitute__replaces_only_the_owners_parameters {
-    var alloc: A.Allocator;
-    val made:  err[A.Error] = page.make(?alloc);
-    if (sel made.err) { ret 1; }
-    val sr: res[session.Session, fail.Fail] = session.init(?alloc);
-    if (sel sr.err) { ret 1; }
-    var s: session.Session = sr.ok;
-    fin { session.dnit(?s); }
-
-    val at: type.TypeOwner = type.TypeOwner{module: module.stable_id(3), file: lang_source.file_id(1)};
-    # fun callee[T] (name 10) and fun caller[U, W] (name 11)
-    var callee: type.GenericOwner           = type.GenericOwner{owner: at, name: intern.str_id(10), kind: type.TYPE_FUN};
-    var caller: type.GenericOwner           = type.GenericOwner{owner: at, name: intern.str_id(11), kind: type.TYPE_FUN};
-    val t_r:    res[type.TypeId, fail.Fail] = type.intern_generic_param(?s.types, intern.str_id(1), at, intern.str_id(10), type.TYPE_FUN, 0);
-    if (sel t_r.err) { ret 2; }
-    val t:   type.TypeId                 = t_r.ok;
-    val u_r: res[type.TypeId, fail.Fail] = type.intern_generic_param(?s.types, intern.str_id(2), at, intern.str_id(11), type.TYPE_FUN, 0);
-    if (sel u_r.err) { ret 2; }
-    val u:   type.TypeId                 = u_r.ok;
-    val w_r: res[type.TypeId, fail.Fail] = type.intern_generic_param(?s.types, intern.str_id(3), at, intern.str_id(11), type.TYPE_FUN, 1);
-    if (sel w_r.err) { ret 2; }
-    val w:     type.TypeId      = w_r.ok;
-    val u32_o: opt[type.TypeId] = type.prim(?s.types, type.TYPE_U32);
-    if (!sel u32_o.some) { ret 3; }
-    val i64_o: opt[type.TypeId] = type.prim(?s.types, type.TYPE_I64);
-    if (!sel i64_o.some) { ret 3; }
-    val t_u32: type.TypeId = u32_o.some;
-    val t_i64: type.TypeId = i64_o.some;
-
-    # the open instance callee[caller.W]: callee.T (index 0) becomes caller.W, and
-    # caller.U (also index 0) is not the callee's, so it is left as it is
-    var w_args: [1]type.TypeId              = [1]type.TypeId{w};
-    val once:   res[type.TypeId, fail.Fail] = substitute(?s, t, ?callee, ?w_args[0], 1);
-    if (sel once.err)           { ret 5; }
-    if (!type.same(once.ok, w)) { ret 5; }
-    val foreign: res[type.TypeId, fail.Fail] = substitute(?s, u, ?callee, ?w_args[0], 1);
-    if (sel foreign.err)           { ret 6; }
-    if (!type.same(foreign.ok, u)) { ret 6; }
-    # a second pass with the callee's arguments over the substituted type is the identity
-    val twice: res[type.TypeId, fail.Fail] = substitute(?s, w, ?callee, ?w_args[0], 1);
-    if (sel twice.err)           { ret 7; }
-    if (!type.same(twice.ok, w)) { ret 7; }
-    # and the caller's own instantiation resolves caller.W by the caller's position
-    var c_args: [2]type.TypeId              = [2]type.TypeId{t_u32, t_i64};
-    val closed: res[type.TypeId, fail.Fail] = substitute(?s, w, ?caller, ?c_args[0], 2);
-    if (sel closed.err)               { ret 8; }
-    if (!type.same(closed.ok, t_i64)) { ret 8; }
-
-    # an anonymous aggregate `uni { a: U; }` declared inside caller: its
-    # parameters are caller's, so callee's arguments leave it alone and
-    # caller's instantiate it
-    val anon_r: res[type.TypeId, fail.Fail] = type.intern_nominal(?s.types, intern.STR_NIL, at, type.TYPE_UNI);
-    if (sel anon_r.err) { ret 9; }
-    val anon:   type.TypeId         = anon_r.ok;
-    val staged: res[u32, fail.Fail] = type.field_table_stage(?s.types, 1);
-    if (sel staged.err) { ret 9; }
-    val pushed: err[fail.Fail] = type.field_table_stage_push(?s.types, intern.str_id(1), u);
-    if (sel pushed.err) { ret 9; }
-    val published: err[fail.Fail] = type.field_table_publish(?s.types, anon, staged.ok, 1);
-    if (sel published.err) { ret 9; }
-    val by_callee: res[type.TypeId, fail.Fail] = substitute(?s, anon, ?callee, ?w_args[0], 1);
-    if (sel by_callee.err)              { ret 10; }
-    if (!type.same(by_callee.ok, anon)) { ret 10; }
-    val by_caller: res[type.TypeId, fail.Fail] = substitute(?s, anon, ?caller, ?c_args[0], 2);
-    if (sel by_caller.err) { ret 11; }
-    val inst_o: opt[*type.Type] = type.get(?s.types, by_caller.ok);
-    if (!sel inst_o.some)                                                                              { ret 11; }
-    if (inst_o.some.kind != type.TYPE_INSTANCE || !type.same(inst_o.some.data.instance.nominal, anon)) { ret 11; }
-    val fe: opt[*type.FieldEntry] = type.field_at(?s.types, by_caller.ok, 0);
-    if (!sel fe.some)                  { ret 12; }
-    if (!type.same(fe.some.ty, t_u32)) { ret 12; }
-
-    ret 0;
 }

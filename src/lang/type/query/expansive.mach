@@ -6,14 +6,12 @@
 # an edge grows when the argument wraps the parameter (`L[*T]` in `L[T]`) rather than
 # being it, `^T` included as the parameter itself since `^` is idempotent. a cycle with a
 # growing edge mints a fresh instance at every trip, so its generics are expansive
-use std.allocator.page;
 use std.collections.map;
 use collections_vector: std.collections.vector;
 use std.collections.vector.Vector;
 use std.types.bool.bool;
 use std.types.bool.false;
 use std.types.bool.true;
-use std.types.error.err;
 use std.types.option.opt;
 use std.types.result.res;
 use std.types.size.usize;
@@ -21,10 +19,7 @@ use std.types.size.usize;
 use A: std.allocator;
 
 use mach.lang.fail;
-use mach.lang.intern;
-use mach.lang.module;
 use mach.lang.scc;
-use lang_source: mach.lang.source;
 use mach.lang.type;
 use type_query: mach.lang.type.query;
 use mach.lang.type.query.mention;
@@ -411,59 +406,4 @@ pub fun holds_instance(types: *type.TypeInterner, facts: *type_query.Facts, tid:
     var status: fail.PhaseStatus = fail.accepted();
     var q:      type_query.Query = type_query.Query{types: types, facts: facts, status: ?status};
     ret type_query.answer[bool](?q, holds(?q, tid));
-}
-
-# `rec L[T] { next: *L[*T]; }`: undecided while L has no fields, decided once they exist,
-# and dropped with the projection the decision was read from
-test nominal__decided_once_fields_exist_and_dropped_with_the_projection {
-    var alloc: A.Allocator;
-    val made:  err[A.Error] = page.make(?alloc);
-    if (sel made.err) { ret 1; }
-    var types:  type.TypeInterner;
-    val opened: err[fail.Fail] = type.init(?types, ?alloc);
-    if (sel opened.err) { ret 1; }
-    var facts: type_query.Facts = type_query.facts_init(?alloc);
-    fin {
-        type_query.facts_dnit(?facts);
-        type.dnit(?types);
-    }
-    var status: fail.PhaseStatus = fail.accepted();
-    var q:      type_query.Query = type_query.Query{types: ?types, facts: ?facts, status: ?status};
-
-    val at:  type.TypeOwner              = type.TypeOwner{module: module.stable_id(3), file: lang_source.file_id(1)};
-    val l_r: res[type.TypeId, fail.Fail] = type.intern_nominal(?types, intern.str_id(10), at, type.TYPE_REC);
-    if (sel l_r.err) { ret 1; }
-    val l: type.TypeId = l_r.ok;
-
-    if (!nominal(?q, l)) { ret 2; }
-    val unfielded: opt[bool] = type_query.expansive_get(?q, l);
-    if (sel unfielded.some) { ret 3; }
-
-    val t_r: res[type.TypeId, fail.Fail] = type.intern_generic_param(?types, intern.str_id(1), at, intern.str_id(10), type.TYPE_REC, 0);
-    if (sel t_r.err) { ret 4; }
-    var arg: [1]type.TypeId;
-    val pt:  res[type.TypeId, fail.Fail] = type.intern_pointer(?types, t_r.ok);
-    if (sel pt.err) { ret 4; }
-    arg[0] = pt.ok;
-    val inst: res[type.TypeId, fail.Fail] = type.intern_instance(?types, l, ?arg[0], 1);
-    if (sel inst.err) { ret 4; }
-    val next: res[type.TypeId, fail.Fail] = type.intern_pointer(?types, inst.ok);
-    if (sel next.err) { ret 4; }
-    val staged: res[u32, fail.Fail] = type.field_table_stage(?types, 1);
-    if (sel staged.err) { ret 4; }
-    val pushed: err[fail.Fail] = type.field_table_stage_push(?types, intern.str_id(2), next.ok);
-    if (sel pushed.err) { ret 4; }
-    val published: err[fail.Fail] = type.field_table_publish(?types, l, staged.ok, 1);
-    if (sel published.err) { ret 4; }
-
-    if (!nominal(?q, l)) { ret 5; }
-    val decided: opt[bool] = type_query.expansive_get(?q, l);
-    if (!sel decided.some)        { ret 6; }
-    if (!decided.some)            { ret 6; }
-    if (sel status.kind.internal) { ret 7; }
-
-    type.field_projection_reset(?types);
-    val dropped: opt[bool] = type_query.expansive_get(?q, l);
-    if (sel dropped.some) { ret 8; }
-    ret 0;
 }

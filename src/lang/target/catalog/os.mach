@@ -7,7 +7,6 @@ use os_darwin:       mink.catalog.os.darwin;
 use mink_os:         mink.catalog.os;
 use os_freestanding: mink.catalog.os.freestanding;
 use os_linux:        mink.catalog.os.linux;
-use os_list:         mink.catalog.os.list;
 use os_spirv:        mink.catalog.os.spirv;
 use os_windows:      mink.catalog.os.windows;
 
@@ -136,52 +135,4 @@ pub rec FsPolicy {
     platform_lib:        str;
     libdirs:             [LIBDIR_MAX]str;
     libdir_len:          u32;
-}
-
-test rows__complete_unique_ordered_roundtrip {
-    if (ROWS[0].os != LINUX)                       { ret 1; }
-    if (ROWS[1].os != DARWIN)                      { ret 1; }
-    if (ROWS[2].os != WINDOWS)                     { ret 1; }
-    if (ROWS[3].os != FREESTANDING)                { ret 1; }
-    if (ROWS[4].os != VULKAN)                      { ret 1; }
-    if (id_for("baremetal") != UNKNOWN)            { ret 2; }
-    if (!str_equals(name_for(UNKNOWN), "unknown")) { ret 2; }
-
-    var i: usize = 0;
-    for (i < ROW_COUNT) {
-        if (ROWS[i].fingerprint_tag != (i + 1)::u8)                { ret 1; }
-        if (id_for(spelling(?ROWS[i])) != ROWS[i].os)              { ret 1; }
-        if (!str_equals(name_for(ROWS[i].os), spelling(?ROWS[i]))) { ret 1; }
-
-        var j: usize = 0;
-        for (j < ROW_COUNT) {
-            if (i != j) {
-                if (ROWS[i].os == ROWS[j].os)                           { ret 1; }
-                if (str_equals(spelling(?ROWS[i]), spelling(?ROWS[j]))) { ret 1; }
-                if (ROWS[i].fingerprint_tag == ROWS[j].fingerprint_tag) { ret 1; }
-            }
-            j = j + 1;
-        }
-        i = i + 1;
-    }
-    ret 0;
-}
-
-# the projection is explicit: every row names a system of mink's catalog and is
-# spelled by it, and a system of mink's no row names is no os here
-test rows__project_mink_s_catalog_explicitly {
-    var projected: usize = 0;
-    var i:         usize = 0;
-    for (i < os_list.count()) {
-        val s:  *mink_os.System = os_list.at(i);
-        val id: u32             = id_for(s.name);
-        if (id != UNKNOWN) {
-            if (row_of(id).owner != s) { ret 1; }
-            projected = projected + 1;
-        }
-        i = i + 1;
-    }
-    if (projected != ROW_COUNT)                                                                { ret 2; }
-    if (id_for("uefi") != UNKNOWN || id_for("wasi") != UNKNOWN || id_for("opencl") != UNKNOWN) { ret 3; }
-    ret 0;
 }

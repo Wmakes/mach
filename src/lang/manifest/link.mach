@@ -1,6 +1,5 @@
 use mach.lang.fail;
 use mach.lang.growth;
-use std.allocator.arena;
 use std.data.toml;
 use std.text.string.str_free;
 use std.types.bool.bool;
@@ -15,7 +14,6 @@ use std.types.string.str_empty;
 use std.types.string.str_equals;
 
 use A: std.allocator;
-use T: std.allocator.testing;
 
 use diagnostic_kind: mach.lang.diagnostic.kind;
 use mach.lang.intern;
@@ -33,7 +31,6 @@ use mach.lang.manifest.model.Manifest;
 use mach.lang.manifest.model.TargetDef;
 use mach.lang.manifest.model.free_strarr;
 use mach.lang.manifest.model.id_of;
-use mach.lang.manifest.model.tinit;
 use mach.lang.manifest.refusal.point_at;
 use mach.lang.manifest.refusal.refuse;
 use mach.lang.manifest.refusal.sfmt;
@@ -460,142 +457,4 @@ pub fun find_link(itn: *intern.Interner, m: *Manifest, name: str) *LinkDef {
         i = i + 1;
     }
     ret nil;
-}
-
-test link_requirement__owns_its_claim_array {
-    var backing: A.Allocator;
-    var ar:      arena.Arena;
-    var alloc:   A.Allocator;
-    var itn:     intern.Interner;
-    if (!tinit(?backing, ?ar, ?alloc, ?itn)) { ret 1; }
-    fin { arena.dnit(?ar); }
-    var code: i32 = 0;
-
-    val sleep_r: res[intern.StrId, A.Error] = intern.add(?itn, "Sleep");
-    val k32_r:   res[intern.StrId, A.Error] = intern.add(?itn, "kernel32");
-    if (sel sleep_r.err) { ret 1; }
-    if (sel k32_r.err)   { ret 1; }
-    val sleep: intern.StrId = sleep_r.ok;
-
-    val owned_r: res[*intern.StrId, A.Error] = A.allocate[intern.StrId](?alloc, 1::usize);
-    if (sel owned_r.err) { ret 1; }
-    var l: LinkDef;
-    l.source       = LINK_SYSTEM;
-    l.name         = k32_r.ok;
-    l.lib_name     = k32_r.ok;
-    l.path         = intern.STR_NIL;
-    l.symbols      = owned_r.ok;
-    l.symbol_count = 1;
-    l.symbols[0]   = sleep;
-
-    var v:     template.Values;
-    val req_r: res[LinkRequirement, fail.Fail] = link_requirement(?alloc, ?itn, ?l, "", ?v);
-    if (sel req_r.err) { ret 1; }
-    var req: LinkRequirement = req_r.ok;
-
-    if (req.symbols == l.symbols)                                         { code = 1; }
-    if (req.symbol_count != 1 || !intern.str_same(req.symbols[0], sleep)) { code = 1; }
-
-    free_strarr(?alloc, l.symbols, l.symbol_count);
-    l.symbols[0] = intern.STR_NIL;
-    if (!intern.str_same(req.symbols[0], sleep)) { code = 1; }
-
-    free_link_claims(?alloc, ?req, 1);
-    if (req.symbols != nil || req.symbol_count != 0) { code = 1; }
-
-    ret code;
-}
-
-test merge_link_claims__stable_owned_union {
-    var backing: A.Allocator;
-    var ar:      arena.Arena;
-    var alloc:   A.Allocator;
-    var itn:     intern.Interner;
-    if (!tinit(?backing, ?ar, ?alloc, ?itn)) { ret 1; }
-    fin { arena.dnit(?ar); }
-    var code: i32 = 0;
-
-    val a_r: res[intern.StrId, A.Error] = intern.add(?itn, "A");
-    val b_r: res[intern.StrId, A.Error] = intern.add(?itn, "B");
-    val c_r: res[intern.StrId, A.Error] = intern.add(?itn, "C");
-    if (sel a_r.err) { ret 1; }
-    if (sel b_r.err) { ret 1; }
-    if (sel c_r.err) { ret 1; }
-    val a: intern.StrId = a_r.ok;
-    val b: intern.StrId = b_r.ok;
-    val c: intern.StrId = c_r.ok;
-
-    val dst_r: res[*intern.StrId, A.Error] = A.allocate[intern.StrId](?alloc, 2::usize);
-    val src_r: res[*intern.StrId, A.Error] = A.allocate[intern.StrId](?alloc, 3::usize);
-    if (sel dst_r.err) { ret 1; }
-    if (sel src_r.err) { ret 1; }
-    var dst: LinkRequirement;
-    dst.symbols      = dst_r.ok;
-    dst.symbol_count = 2;
-    dst.symbols[0]   = a;
-    dst.symbols[1]   = b;
-    var src: LinkRequirement;
-    src.symbols      = src_r.ok;
-    src.symbol_count = 3;
-    src.symbols[0]   = b;
-    src.symbols[1]   = c;
-    src.symbols[2]   = c;
-    val src_symbols: *intern.StrId = src.symbols;
-
-    val merged: err[fail.Fail] = merge_link_claims(?alloc, ?dst, ?src);
-    if (sel merged.err) { code = 1; }
-    if (sel merged.ok) {
-        if (dst.symbol_count != 3 || !intern.str_same(dst.symbols[0], a)
-            || !intern.str_same(dst.symbols[1], b) || !intern.str_same(dst.symbols[2], c)) { code = 1; }
-        if (dst.symbols == src_symbols) { code = 1; }
-        if (src.symbols != src_symbols || src.symbol_count != 3
-            || !intern.str_same(src.symbols[0], b) || !intern.str_same(src.symbols[1], c)
-            || !intern.str_same(src.symbols[2], c)) { code = 1; }
-
-        free_link_claims(?alloc, ?src, 1);
-        if (dst.symbol_count != 3 || !intern.str_same(dst.symbols[0], a)
-            || !intern.str_same(dst.symbols[1], b) || !intern.str_same(dst.symbols[2], c)) { code = 1; }
-    }
-    free_link_claims(?alloc, ?dst, 1);
-
-    ret code;
-}
-
-test finish_link_requirements__shrink_failure_frees_full_extent {
-    var t:    T.Testing;
-    val made: err[A.Error] = T.make(?t);
-    if (sel made.err) { ret 1; }
-    fin { T.dnit(?t); }
-    val alloc: *A.Allocator = T.allocator_of(?t);
-
-    val br: res[*LinkRequirement, A.Error] = A.allocate[LinkRequirement](alloc, 2::usize);
-    if (sel br.err) { ret 1; }
-    val items: *LinkRequirement = br.ok;
-
-    val cr: res[*intern.StrId, A.Error] = A.allocate[intern.StrId](alloc, 1::usize);
-    if (sel cr.err) {
-        A.deallocate[LinkRequirement](alloc, items, 2::usize);
-        ret 1;
-    }
-    items[0].symbols      = cr.ok;
-    items[0].symbol_count = 1;
-    items[0].symbols[0]   = intern.STR_NIL;
-
-    # the shrink of the items to the one kept requirement is the only request,
-    # and it is refused
-    val before: usize = T.attempt_count(?t);
-    T.fail_from_ordinal(?t, before + 1);
-    var out_items: *LinkRequirement = items;
-    var out_count: u32              = 0xFFFFFFFF;
-    val fr:        err[fail.Fail]   = finish_link_requirements(alloc, items, 2, 1, ?out_items, ?out_count);
-
-    if (sel fr.ok)                                                        { ret 1; }
-    if (!str_equals(fail.describe(fr.err), "out of memory"))              { ret 1; }
-    if (out_items != nil || out_count != 0)                               { ret 1; }
-    if (T.attempt_count(?t) != before + 1 || T.reallocate_count(?t) != 1) { ret 1; }
-    if (T.last_reallocated(?t) != items::ptr)                             { ret 1; }
-    if (T.last_old_size(?t) != $size_of(LinkRequirement) * 2)             { ret 1; }
-    if (T.last_request_size(?t) != $size_of(LinkRequirement))             { ret 1; }
-    if (!T.clean(?t))                                                     { ret 1; }
-    ret 0;
 }

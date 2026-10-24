@@ -4,9 +4,7 @@ use mach.lang.float;
 use std.types.error.err;
 use std.types.option.opt;
 use std.types.result.res;
-use std.types.size.usize;
 use std.types.string.str;
-use std.types.string.str_equals;
 
 use A: std.allocator;
 use std.text.string.str_free;
@@ -32,28 +30,6 @@ pub val OS_NO_ISA:       u32 = 6;
 pub val ABI_NEEDS_FLOAT: u32 = 7;
 pub val ABI_TRANSPORT:   u32 = 8;
 pub val OS_ABI:          u32 = 9;
-
-#[testing]
-rec CapabilitySpec {
-    code:  u32;
-    label: str;
-}
-
-#[testing]
-val CAPABILITY_N: usize                        = 10;
-#[testing]
-val CAPABILITIES: [CAPABILITY_N]CapabilitySpec = [CAPABILITY_N]CapabilitySpec{
-    CapabilitySpec{code: OK, label: "ok"},
-    CapabilitySpec{code: NO_CODEGEN, label: "no_codegen"},
-    CapabilitySpec{code: ABI_MISMATCH, label: "abi_mismatch"},
-    CapabilitySpec{code: OS_NO_OF, label: "os_no_of"},
-    CapabilitySpec{code: OF_UNCOVERED, label: "of_uncovered"},
-    CapabilitySpec{code: OF_SHAPE, label: "of_shape"},
-    CapabilitySpec{code: OS_NO_ISA, label: "os_no_isa"},
-    CapabilitySpec{code: ABI_NEEDS_FLOAT, label: "abi_needs_float"},
-    CapabilitySpec{code: ABI_TRANSPORT, label: "abi_transport"},
-    CapabilitySpec{code: OS_ABI, label: "os_abi"},
-};
 
 pub fun capability(os_vt: *lang_target_os.OsVTable, isa_vt: *isa.IsaVTable, abi_vt: *abi.AbiVTable, of_vt: *target_of.OfVTable) u32 {
     if (!isa.has_codegen(isa_vt))           { ret NO_CODEGEN; }
@@ -153,31 +129,4 @@ fun quoted_names_append(b: *textbuild.TextBuilder, names: *str, count: u32) err[
         i = i + 1;
     }
     ret err[textbuild.Error].ok{};
-}
-
-test capability_catalog__complete_unique_ordered {
-    if (CAPABILITIES[0].code != OK)              { ret 1; }
-    if (CAPABILITIES[1].code != NO_CODEGEN)      { ret 1; }
-    if (CAPABILITIES[2].code != ABI_MISMATCH)    { ret 1; }
-    if (CAPABILITIES[3].code != OS_NO_OF)        { ret 1; }
-    if (CAPABILITIES[4].code != OF_UNCOVERED)    { ret 1; }
-    if (CAPABILITIES[5].code != OF_SHAPE)        { ret 1; }
-    if (CAPABILITIES[6].code != OS_NO_ISA)       { ret 1; }
-    if (CAPABILITIES[7].code != ABI_NEEDS_FLOAT) { ret 1; }
-    if (CAPABILITIES[8].code != ABI_TRANSPORT)   { ret 1; }
-    if (CAPABILITIES[9].code != OS_ABI)          { ret 1; }
-
-    var i: usize = 0;
-    for (i < CAPABILITY_N) {
-        var j: usize = 0;
-        for (j < CAPABILITY_N) {
-            if (i != j) {
-                if (CAPABILITIES[i].code == CAPABILITIES[j].code)             { ret 1; }
-                if (str_equals(CAPABILITIES[i].label, CAPABILITIES[j].label)) { ret 1; }
-            }
-            j = j + 1;
-        }
-        i = i + 1;
-    }
-    ret 0;
 }

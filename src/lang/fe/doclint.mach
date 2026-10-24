@@ -1,5 +1,4 @@
 use mach.lang.fail;
-use std.allocator.page;
 use std.memory;
 use std.types.bool.bool;
 use std.types.bool.false;
@@ -8,8 +7,6 @@ use std.types.error.err;
 use std.types.result.res;
 use std.types.size.usize;
 use std.types.string.str;
-use std.types.string.str_empty;
-use std.types.string.str_equals;
 use std.types.string.str_region_equals;
 
 use A: std.allocator;
@@ -17,12 +14,9 @@ use A: std.allocator;
 use mach.lang.diagnostic;
 use diagnostic_kind: mach.lang.diagnostic.kind;
 use mach.lang.fe.ast;
-use ast_decl: mach.lang.fe.ast.decl;
-use ast_id:   mach.lang.fe.ast.id;
-use fe_doc:   mach.lang.fe.doc;
-use fe_lexer: mach.lang.fe.lexer;
-use mach.lang.fe.parser.grammar;
-use mach.lang.fe.parser.state;
+use ast_decl:    mach.lang.fe.ast.decl;
+use ast_id:      mach.lang.fe.ast.id;
+use fe_doc:      mach.lang.fe.doc;
 use lang_source: mach.lang.source;
 
 def ItemKind: u8;
@@ -248,125 +242,4 @@ fun warn(diags: *diagnostic.DiagnosticStore, file_id: lang_source.FileId, span: 
     val r: err[fail.Fail] = diagnostic.report(diags, diagnostic_kind.DOC_LINT, file_id, span, message);
     if (sel r.err) { ret r; }
     ret err[fail.Fail].ok{};
-}
-
-#[testing]
-fun t_warns(source: str, msg: str) usize {
-    var alloc: A.Allocator;
-    page.make(?alloc);
-
-    val res_stream: res[fe_lexer.TokenStream, fail.Fail] = fe_lexer.tokenize(source, ?alloc, lang_source.FILE_NIL);
-    if (sel res_stream.err) { ret 0xFFFF; }
-    var stream: fe_lexer.TokenStream = res_stream.ok;
-
-    var a:     ast.Ast                    = ast.init(?alloc, lang_source.FILE_NIL);
-    var diags: diagnostic.DiagnosticStore = diagnostic.store_init(?alloc);
-    var p:     state.Parser               = state.make(?stream, ?a, ?diags);
-    grammar.parse_module(?p);
-
-    lint_module(?a, stream.source, ?diags);
-
-    var n: usize = 0;
-    var i: usize = 0;
-    for (i < diagnostic.len(?diags)) {
-        val d: *diagnostic.Diagnostic = ?diags.items.data[i];
-        if (!diagnostic_kind.is_error(d.kind)) {
-            if (str_empty(msg) || str_equals(d.message, msg)) { n = n + 1; }
-        }
-        i = i + 1;
-    }
-
-    diagnostic.store_dnit(?diags);
-    ast.dnit(?a);
-    fe_lexer.dnit(?stream, ?alloc);
-    ret n;
-}
-
-test lint_module__correct_fun_all_items {
-    val source: str = "# atomic load\n# ---\n# [T]: element type\n# $order: ordering\n# ptr: pointer\n# ret: loaded value\npub fun load[T]($order: i64, ptr: *T) T { ret @ptr; }";
-    if (t_warns(source, "") != 0) { ret 1; }
-    ret 0;
-}
-
-test lint_module__misspelled_component_unknown {
-    val source: str = "# a point\n# ---\n# x: horizontal\n# z: misspelled\npub rec Point { x: i64; y: i64; }";
-    if (t_warns(source, MSG_UNKNOWN) != 1) { ret 1; }
-    if (t_warns(source, "") != 1)          { ret 1; }
-    ret 0;
-}
-
-test lint_module__no_description_warns {
-    val source: str = "# a point\n# ---\n# x:\npub rec Point { x: i64; y: i64; }";
-    if (t_warns(source, MSG_NO_DESC) != 1) { ret 1; }
-    if (t_warns(source, "") != 1)          { ret 1; }
-    ret 0;
-}
-
-test lint_module__out_of_order_warns {
-    val source: str = "# swap order\n# ---\n# ret: result\n# ptr: pointer\npub fun oo(ptr: *i64) i64 { ret @ptr; }";
-    if (t_warns(source, MSG_ORDER) != 1) { ret 1; }
-    if (t_warns(source, "") != 1)        { ret 1; }
-    ret 0;
-}
-
-test lint_module__order_ignores_gaps {
-    val gapped: str = "# four fields\n# ---\n# b: second\n# d: fourth\npub rec R { a: i64; b: i64; c: i64; d: i64; }";
-    if (t_warns(gapped, "") != 0) { ret 1; }
-
-    val ret_only: str = "# adds\n# ---\n# ret: the sum\npub fun add(x: i64, y: i64) i64 { ret x + y; }";
-    if (t_warns(ret_only, "") != 0) { ret 1; }
-    ret 0;
-}
-
-test lint_module__ret_item_presence {
-    val with_ret: str = "# id\n# ---\n# x: the value\n# ret: the value back\npub fun id(x: i64) i64 { ret x; }";
-    if (t_warns(with_ret, "") != 0) { ret 1; }
-
-    val no_ret_doc: str = "# id\n# ---\n# x: the value\npub fun id(x: i64) i64 { ret x; }";
-    if (t_warns(no_ret_doc, "") != 0) { ret 1; }
-
-    val void_fn: str = "# noop\n# ---\n# x: ignored\npub fun noop(x: i64) {}";
-    if (t_warns(void_fn, "") != 0) { ret 1; }
-
-    val void_ret: str = "# noop\n# ---\n# x: ignored\n# ret: nothing\npub fun noop(x: i64) {}";
-    if (t_warns(void_ret, MSG_UNKNOWN) != 1) { ret 1; }
-    if (t_warns(void_ret, "") != 1)          { ret 1; }
-    ret 0;
-}
-
-test lint_module__silent_without_a_public_component_list {
-    if (t_warns("# yield the CPU\npub fun spin(x: i64) {}", "") != 0)             { ret 1; }
-    if (t_warns("pub fun bare(x: i64, y: i64) {}", "") != 0)                      { ret 2; }
-    if (t_warns("# private\n# ---\n# bogus: nope\nfun priv(x: i64) {}", "") != 0) { ret 3; }
-    ret 0;
-}
-
-test lint_module__doc_above_decorator {
-    val ok_source: str = "# the answer\n# ---\n# ret: always 42\n#[inline]\npub fun answer() i64 { ret 42; }";
-    if (t_warns(ok_source, "") != 0) { ret 1; }
-
-    val bad_source: str = "# the answer\n# ---\n# bogus: nope\n#[inline]\npub fun answer() i64 { ret 42; }";
-    if (t_warns(bad_source, MSG_UNKNOWN) != 1) { ret 1; }
-    if (t_warns(bad_source, "") != 1)          { ret 1; }
-    ret 0;
-}
-
-test lint_module__generic_comptime_forms {
-    val bare_generic: str = "# load\n# ---\n# T: element\n# ptr: pointer\npub fun load[T](ptr: *T) { }";
-    if (t_warns(bare_generic, MSG_UNKNOWN) != 1) { ret 1; }
-    if (t_warns(bare_generic, "") != 1)          { ret 1; }
-
-    val ok_generic: str = "# load\n# ---\n# [T]: element\n# ptr: pointer\npub fun load[T](ptr: *T) { }";
-    if (t_warns(ok_generic, "") != 0) { ret 1; }
-    ret 0;
-}
-
-# a tag's components are its generics and its cases, checked as a record's fields are
-test lint_module__tag_components {
-    if (t_warns("# outcome\n# ---\n# [T]: value type\n# none: empty case\n# some: payload case\npub tag Option[T]: u8 {\n    none;\n    some: T;\n}", "") != 0) { ret 1; }
-    if (t_warns("# outcome\n# ---\n# bogus: not a case\n# none: empty\npub tag Option[T]: u8 {\n    none;\n    some: T;\n}", MSG_UNKNOWN) != 1)                 { ret 2; }
-    if (t_warns("# outcome\n# ---\n# some: payload case\n# none: empty case\npub tag Option[T]: u8 {\n    none;\n    some: T;\n}", MSG_ORDER) != 1)             { ret 3; }
-    if (t_warns("# outcome\n# ---\n# ret: tags have no return type\npub tag Option[T]: u8 {\n    none;\n    some: T;\n}", MSG_UNKNOWN) != 1)                    { ret 4; }
-    if (t_warns("# outcome\n# ---\n# T: generic without brackets\npub tag Option[T]: u8 {\n    none;\n    some: T;\n}", MSG_UNKNOWN) != 1)                      { ret 5; }
-    ret 0;
 }

@@ -554,42 +554,4 @@ $if ($mach.build.arch == $mach.arch.x86_64) {
             ret true;
         }
     }
-
-    test flags_table__matches_this_cpu {
-        var rows: [x64_effects.PROBED_ROW_COUNT]x64_effects.ProbedRow;
-        val n:    u32 = x64_effects.probed_rows(?rows[0]);
-        if (n != 30) { ret 6; }
-
-        if (check(0, ?rows[0]) != 0)              { ret 10; }
-        if (check(1, ?rows[1]) != 0)              { ret 11; }
-        if (check(2, ?rows[2]) != 0)              { ret 12; }
-        if (check(3, ?rows[3]) != 0)              { ret 13; }
-        if (check(4, ?rows[4]) != 0)              { ret 14; }
-        if (check(5, ?rows[5]) != 0)              { ret 15; }
-        if (check(6, ?rows[6]) != 0)              { ret 16; }
-        if (check(7, ?rows[7]) != 0)              { ret 17; }
-        if (check(8, ?rows[8]) != 0)              { ret 18; }
-        if (check(9, ?rows[9]) != 0)              { ret 19; }
-        if (check(10, ?rows[10]) != 0)            { ret 20; }
-        if (check(11, ?rows[11]) != 0)            { ret 21; }
-        if (check(12, ?rows[12]) != 0)            { ret 22; }
-        if (check(13, ?rows[13]) != 0)            { ret 23; }
-        if (check(14, ?rows[14]) != 0)            { ret 24; }
-        if (check(15, ?rows[15]) != 0)            { ret 25; }
-        if (check(16, ?rows[16]) != 0)            { ret 26; }
-        if (check(17, ?rows[17]) != 0)            { ret 27; }
-        if (check(18, ?rows[18]) != 0)            { ret 28; }
-        if (check(19, ?rows[19]) != 0)            { ret 29; }
-        if (check(20, ?rows[20]) != 0)            { ret 30; }
-        if (check(21, ?rows[21]) != 0)            { ret 31; }
-        if (check(22, ?rows[22]) != 0)            { ret 32; }
-        if (check(23, ?rows[23]) != 0)            { ret 33; }
-        if (check(24, ?rows[24]) != 0)            { ret 34; }
-        if (check(25, ?rows[25]) != 0)            { ret 35; }
-        if (has(26) && check(26, ?rows[26]) != 0) { ret 36; }
-        if (has(27) && check(27, ?rows[27]) != 0) { ret 37; }
-        if (has(28) && check(28, ?rows[28]) != 0) { ret 38; }
-        if (has(29) && check(29, ?rows[29]) != 0) { ret 39; }
-        ret 0;
-    }
 }

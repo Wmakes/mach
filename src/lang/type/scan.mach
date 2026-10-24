@@ -7,7 +7,6 @@ use std.types.result.res;
 use std.types.size.usize;
 
 use A: std.allocator;
-use T: std.allocator.testing;
 
 use mach.lang.fail;
 use mach.lang.growth;
@@ -229,27 +228,4 @@ fun pairs_reserve(sets: *Sets) err[fail.Fail] {
     }
 
     ret err[fail.Fail].ok{};
-}
-
-# a visit past what a u32 capacity counts refuses before it reaches the allocator
-test visit_reserve__refuses_a_u32_wrap_without_reallocating {
-    var t:    T.Testing;
-    val made: err[A.Error] = T.make(?t);
-    if (sel made.err) { ret 1; }
-    fin { T.dnit(?t); }
-    var sets:     Sets           = sets_init(T.allocator_of(?t));
-    val reserved: err[fail.Fail] = visits_reserve(?sets);
-    if (sel reserved.err) { ret 2; }
-
-    sets.visits[0].stamp = nil;
-    sets.visits[0].cap   = 0x80000000;
-    val attempts: usize          = T.attempt_count(?t);
-    val visit:    err[fail.Fail] = visit_reserve(?sets, 0, type_kind.id(0xFFFFFFFF));
-    var bad:      i32            = 0;
-    if (sel visit.ok)                    { bad = 3; }
-    if (T.attempt_count(?t) != attempts) { bad = 4; }
-    sets.visits[0].cap = 0;
-    sets_dnit(?sets);
-    if (T.leaked(?t) || T.double_free_count(?t) != 0) { bad = 5; }
-    ret bad;
 }

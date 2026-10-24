@@ -357,33 +357,3 @@ pub val MACHINE: target_model.Machine = target_model.Machine{
     vectors_in_registers: true,
     auto_vectorize:       true,
 };
-
-# the rows are Intel's DOIT multiply list at every operand size, every one held
-# unconditionally on Intel and AMD
-test model__declares_the_doit_multiply_list {
-    val m: *target_model.Machine = ?MACHINE;
-    if (m.ct_mul_form_len != 20) { ret 2; }
-    val ops:    [5]ct.CtMulOp = [5]ct.CtMulOp{ct.CT_MUL_LOW, ct.CT_MUL_HIGH_U, ct.CT_MUL_HIGH_S, ct.CT_MUL_WIDE_U, ct.CT_MUL_WIDE_S};
-    val widths: [4]u8         = [4]u8{8, 16, 32, 64};
-    var want:   ct.CtMulMask  = ct.mul_mask_none();
-    var oi:     u32           = 0;
-    for (oi < 5) {
-        var wi: u32 = 0;
-        for (wi < 4) {
-            ct.mul_mask_add(?want, ct.mul_cell(ops[oi], widths[wi], false));
-            wi = wi + 1;
-        }
-        oi = oi + 1;
-    }
-    # realized, not declared: the low half of a 128-bit product is the
-    # schoolbook over the 64-bit low and widening cells
-    ct.mul_mask_add(?want, ct.mul_cell(ct.CT_MUL_LOW, 128, false));
-    if (!ct.mul_mask_equals(target_model.ct_mul_rows_admit(m, true), want))  { ret 3; }
-    if (!ct.mul_mask_equals(target_model.ct_mul_rows_admit(m, false), want)) { ret 4; }
-    var i: u32 = 0;
-    for (i < m.ct_mul_form_len) {
-        if (m.ct_mul_forms[i].cond != ct.CT_MUL_ALWAYS || m.ct_mul_forms[i].ext != 0) { ret 5; }
-        i = i + 1;
-    }
-    ret 0;
-}

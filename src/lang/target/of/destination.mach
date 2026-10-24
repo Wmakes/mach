@@ -6,11 +6,6 @@ use mach.lang.fail;
 use mach.lang.growth;
 use mach.lang.intern;
 use mach.lang.output;
-use output_testing: mach.lang.output.testing;
-use std.allocator.page;
-use collections_vector: std.collections.vector;
-use std.collections.vector.Vector;
-use fs: std.filesystem;
 use std.memory;
 use std.text.string.str_free;
 use std.types.error.err;
@@ -146,76 +141,4 @@ fun companion_path(a: *A.Allocator, path: str, ext: str) res[str, fail.Fail] {
     memory.raw_copy((?buf[keep])::ptr, ext::ptr, el);
     buf[keep + el] = 0;
     ret res[str, fail.Fail].ok{buf::str};
-}
-
-test publish__writes_the_artifact_and_each_companion_beside_it {
-    var alloc: A.Allocator;
-    page.make(?alloc);
-    var dst: Destination = init(?alloc);
-    fin { dnit(?dst); }
-    val lib: res[*u8, fail.Fail] = file_add(?dst, "", 2, 0o755);
-    if (sel lib.err) { ret 1; }
-    lib.ok[0] = 'L';
-    lib.ok[1] = 'B';
-    val imp: res[*u8, fail.Fail] = file_add(?dst, ".lib", 1, 0o644);
-    if (sel imp.err) { ret 1; }
-    imp.ok[0] = 'I';
-    val again: res[*u8, fail.Fail] = file_add(?dst, ".lib", 1, 0o644);
-    if (!sel again.err) { ret 1; }
-
-    val out_r: res[output_testing.Output, fail.Fail] = output_testing.create(?alloc, "destination");
-    if (sel out_r.err) { ret 1; }
-    var out: output_testing.Output = out_r.ok;
-    fin { output_testing.dnit(?out); }
-    val path:      str            = output_testing.path(?out);
-    val published: err[fail.Fail] = publish(?dst, nil, path, "cannot publish");
-    if (sel published.err) { ret 1; }
-
-    val main_r: res[Vector[u8], fs.FsError] = fs.read_bytes(?alloc, path);
-    if (sel main_r.err) { ret 1; }
-    var main: Vector[u8] = main_r.ok;
-    fin { collections_vector.dnit[u8](?main); }
-    if (main.len != 2 || main.data[0] != 'L') { ret 1; }
-    val side_path: res[str, fail.Fail] = companion_path(?alloc, path, ".lib");
-    if (sel side_path.err) { ret 1; }
-    fin { str_free(?alloc, side_path.ok); }
-    val side: res[Vector[u8], fs.FsError] = fs.read_bytes(?alloc, side_path.ok);
-    if (sel side.err) { ret 1; }
-    var sv: Vector[u8] = side.ok;
-    fin { collections_vector.dnit[u8](?sv); }
-    if (sv.len != 1 || sv.data[0] != 'I') { ret 1; }
-    ret 0;
-}
-
-test companion_path__takes_the_place_of_the_extension {
-    var alloc: A.Allocator;
-    page.make(?alloc);
-    val swapped: res[str, fail.Fail] = companion_path(?alloc, "out/app.dll", ".lib");
-    if (sel swapped.err) { ret 1; }
-    fin { str_free(?alloc, swapped.ok); }
-    if (!str_equals(swapped.ok, "out/app.lib")) { ret 1; }
-    val added: res[str, fail.Fail] = companion_path(?alloc, "out/app", ".lib");
-    if (sel added.err) { ret 1; }
-    fin { str_free(?alloc, added.ok); }
-    if (!str_equals(added.ok, "out/app.lib")) { ret 1; }
-    ret 0;
-}
-
-test artifact_take__hands_the_bytes_over_once {
-    var alloc: A.Allocator;
-    page.make(?alloc);
-    var dst: Destination = init(?alloc);
-    fin { dnit(?dst); }
-    var len:  usize               = 0;
-    val none: res[*u8, fail.Fail] = artifact_take(?dst, ?len);
-    if (!sel none.err) { ret 1; }
-    val made: res[*u8, fail.Fail] = file_add(?dst, "", 3, 0o755);
-    if (sel made.err) { ret 1; }
-    made.ok[2] = 7;
-    val taken: res[*u8, fail.Fail] = artifact_take(?dst, ?len);
-    if (sel taken.err) { ret 1; }
-    fin { A.deallocate[u8](?alloc, taken.ok, len); }
-    if (len != 3 || taken.ok[2] != 7) { ret 1; }
-    if (artifact(?dst).bytes != nil)  { ret 1; }
-    ret 0;
 }

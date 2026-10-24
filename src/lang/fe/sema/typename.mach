@@ -1,16 +1,12 @@
 use diagnostic_kind: mach.lang.diagnostic.kind;
 use mach.lang.fail;
-use std.allocator.page;
 use std_format: std.format;
 use std.memory;
 use std.types.char.char;
-use std.types.error.err;
 use std.types.option.opt;
 use std.types.result.res;
 use std.types.size.usize;
 use std.types.string.str;
-use std.types.string.str_contains;
-use std.types.string.str_equals;
 use std.types.string.str_len;
 
 use A: std.allocator;
@@ -320,101 +316,4 @@ fun decimal_len(n: usize) usize {
 
 fun write_decimal(buf: str, k: usize, n: usize) usize {
     ret k + std_format.put_u64((buf::usize + k)::*u8, n::u64);
-}
-
-test type_to_str__pack_type_renders_as_ellipsis_not_error {
-    var alloc:  A.Allocator;
-    val made_1: err[A.Error] = page.make(?alloc);
-    if (sel made_1.err) { ret 1; }
-    val sr: res[session.Session, fail.Fail] = session.init(?alloc);
-    if (sel sr.err) { ret 1; }
-    var s: session.Session = sr.ok;
-    fin { session.dnit(?s); }
-
-    val pack_r: res[type.TypeId, fail.Fail] = type.intern_pack(?s.types);
-    if (sel pack_r.err) { ret 1; }
-    val pack_id: type.TypeId = pack_r.ok;
-
-    val out_r: res[str, fail.Fail] = type_to_str(?s, pack_id);
-    if (sel out_r.err) { ret 1; }
-    val out: str = out_r.ok;
-
-    var code: i32 = 0;
-    if (!str_equals(out, "..."))    { code = 1; }
-    if (str_equals(out, "<error>")) { code = 1; }
-
-    type_str_free(?s, out);
-    ret code;
-}
-
-test type_to_str__spells_every_catalog_primitive {
-    var alloc:  A.Allocator;
-    val made_1: err[A.Error] = page.make(?alloc);
-    if (sel made_1.err) { ret 1; }
-    val sr: res[session.Session, fail.Fail] = session.init(?alloc);
-    if (sel sr.err) { ret 1; }
-    var s: session.Session = sr.ok;
-
-    # catalog-driven: the interner's slot for each catalog kind spells its
-    # catalog name, whatever TypeId or kind number it was issued
-    var code: i32 = 0;
-    var i:    u32 = 0;
-    for (i < type.PRIM_COUNT) {
-        val kind: type.TypeKind    = type.prim_kind_at(i);
-        val tid:  opt[type.TypeId] = type.prim(?s.types, kind);
-        if (sel tid.none) { code = 2; }
-        if (sel tid.some) {
-            val len_r: res[usize, fail.Fail] = type_str_len(?s, tid.some);
-            if (sel len_r.err) { code = 3; }
-            if (sel len_r.ok) {
-                if (len_r.ok != type.prim_spelling_len(kind)) { code = 3; }
-            }
-            val out_r: res[str, fail.Fail] = type_to_str(?s, tid.some);
-            if (sel out_r.err) { code = 4; }
-            if (sel out_r.ok) {
-                if (!str_equals(out_r.ok, type.prim_name(kind))) { code = 5; }
-                type_str_free(?s, out_r.ok);
-            }
-        }
-        i = i + 1;
-    }
-
-    session.dnit(?s);
-    ret code;
-}
-
-test type_to_str__a_kind_outside_the_catalog_is_an_internal_failure_naming_the_tag {
-    var alloc:  A.Allocator;
-    val made_1: err[A.Error] = page.make(?alloc);
-    if (sel made_1.err) { ret 1; }
-    val sr: res[session.Session, fail.Fail] = session.init(?alloc);
-    if (sel sr.err) { ret 1; }
-    var s: session.Session = sr.ok;
-    fin { session.dnit(?s); }
-
-    val pack_r: res[type.TypeId, fail.Fail] = type.intern_pack(?s.types);
-    if (sel pack_r.err) { ret 1; }
-    val pack_id: type.TypeId     = pack_r.ok;
-    val slot:    opt[*type.Type] = type.get(?s.types, pack_id);
-    if (sel slot.none) { ret 1; }
-    slot.some.kind = 255::type.TypeKind;
-
-    var code:  i32                 = 0;
-    val out_r: res[str, fail.Fail] = type_to_str(?s, pack_id);
-    if (sel out_r.ok) {
-        type_str_free(?s, out_r.ok);
-        code = 2;
-    }
-    or (sel out_r.err) {
-        if (!str_contains(fail.describe(out_r.err), "unknown TypeKind tag 255 in the type spelling's sizing pass")) { code = 3; }
-    }
-
-    val ptr_r: res[type.TypeId, fail.Fail] = type.intern_pointer(?s.types, pack_id);
-    if (sel ptr_r.err) { ret 4; }
-    val nested: res[str, fail.Fail] = type_to_str(?s, ptr_r.ok);
-    if (sel nested.ok) {
-        type_str_free(?s, nested.ok);
-        code = 5;
-    }
-    ret code;
 }

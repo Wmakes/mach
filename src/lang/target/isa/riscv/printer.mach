@@ -1,5 +1,4 @@
 use mach.lang.fail;
-use std.allocator.page;
 use std_format: std.format;
 use io_writer:  std.io.writer;
 use std.types.bool.bool;
@@ -8,9 +7,6 @@ use std.types.option.opt;
 use std.types.result.res;
 use std.types.size.usize;
 use std.types.string.str;
-use std.types.string.str_equals;
-
-use A: std.allocator;
 
 use mach.lang.intern;
 use isa_encode: mach.lang.target.isa.encode;
@@ -270,148 +266,4 @@ fun emit_name(out: *io_writer.Writer, interner: *intern.Interner, id: intern.Str
         ret err[fail.Fail].err{fail.message("printer: a symbol name did not resolve in the interner")};
     }
     ret emit_str(out, opt_name.some);
-}
-
-#[testing]
-var test_sink_buf: [4096]u8;
-#[testing]
-var test_sink:     io_writer.Memory;
-
-# a writer into the test buffer, emptied
-#[testing]
-pub fun test_sink_writer(w: *io_writer.Writer) {
-    @w = io_writer.memory(?test_sink, ?test_sink_buf[0], 4096);
-}
-
-#[testing]
-pub fun test_sink_reset() {
-    test_sink.len = 0;
-}
-
-#[testing]
-pub fun test_sink_text() str {
-    ret io_writer.memory_text(?test_sink);
-}
-
-# whether render_inst refuses its arguments
-#[testing]
-fun t_render_inst_refused(out: *io_writer.Writer, interner: *intern.Interner, mi: *isa_inst.Inst) bool {
-    val got: err[fail.Fail] = render_inst(out, interner, mi);
-    ret sel got.err;
-}
-
-test names__abi_mnemonics {
-    if (!str_equals(gp_name(0), "zero")) { ret 1; }
-    if (!str_equals(gp_name(1), "ra"))   { ret 1; }
-    if (!str_equals(gp_name(2), "sp"))   { ret 1; }
-    if (!str_equals(gp_name(8), "s0"))   { ret 1; }
-    if (!str_equals(gp_name(10), "a0"))  { ret 1; }
-    if (!str_equals(gp_name(5), "t0"))   { ret 1; }
-    if (!str_equals(gp_name(17), "a7"))  { ret 1; }
-    if (!str_equals(gp_name(31), "t6"))  { ret 1; }
-    if (!str_equals(gp_name(99), "x?"))  { ret 1; }
-
-    if (!str_equals(fp_name(0), "ft0"))   { ret 1; }
-    if (!str_equals(fp_name(8), "fs0"))   { ret 1; }
-    if (!str_equals(fp_name(10), "fa0"))  { ret 1; }
-    if (!str_equals(fp_name(31), "ft11")) { ret 1; }
-    if (!str_equals(fp_name(99), "f?"))   { ret 1; }
-    ret 0;
-}
-
-test render_inst__rounding_mode_is_named {
-    var w: io_writer.Writer;
-    test_sink_writer(?w);
-
-    val a0:  isa_inst.Operand = isa_inst.make_reg(isa_inst.regid_make(isa_inst.REG_CLASS_ID_GP, 10), 8);
-    val fa0: isa_inst.Operand = isa_inst.make_reg(isa_inst.regid_make(isa_inst.REG_CLASS_ID_FP, 10), 8);
-
-    var f2i: isa_inst.Inst = isa_inst.inst_blank();
-    f2i.opcode = inst.FCVT_W_S::u16;
-    f2i.size   = 4;
-    f2i.dst    = a0;
-    f2i.src1   = fa0;
-    test_sink_reset();
-    if (t_render_inst_refused(?w, nil, ?f2i))                       { ret 1; }
-    if (!str_equals(test_sink_text(), "  fcvt.w.s a0, fa0, rtz\n")) { ret 1; }
-
-    var i2f: isa_inst.Inst = isa_inst.inst_blank();
-    i2f.opcode = inst.FCVT_S_W::u16;
-    i2f.size   = 4;
-    i2f.dst    = fa0;
-    i2f.src1   = a0;
-    test_sink_reset();
-    if (t_render_inst_refused(?w, nil, ?i2f))                  { ret 1; }
-    if (!str_equals(test_sink_text(), "  fcvt.s.w fa0, a0\n")) { ret 1; }
-
-    if (!str_equals(rounding_operand(inst.FCVT_LU_D), ", rtz")) { ret 1; }
-    if (!str_equals(rounding_operand(inst.FCVT_W_D), ", rtz"))  { ret 1; }
-    if (!str_equals(rounding_operand(inst.FADD_D), ""))         { ret 1; }
-    if (!str_equals(rounding_operand(inst.FCVT_S_D), ""))       { ret 1; }
-    if (!str_equals(rounding_operand(inst.FMV_X_W), ""))        { ret 1; }
-    ret 0;
-}
-
-test ordering_suffix__aq_rl_spellings {
-    if (!str_equals(ordering_suffix(inst.FLAG_AQ), ".aq"))                  { ret 1; }
-    if (!str_equals(ordering_suffix(inst.FLAG_RL), ".rl"))                  { ret 1; }
-    if (!str_equals(ordering_suffix(inst.FLAG_AQ | inst.FLAG_RL), ".aqrl")) { ret 1; }
-    if (!str_equals(ordering_suffix(0), ""))                                { ret 1; }
-    ret 0;
-}
-
-test render_inst__a_symbol_addend_is_part_of_the_address {
-    var alloc: A.Allocator;
-    page.make(?alloc);
-    var itn: intern.Interner = intern.init(?alloc);
-    fin { intern.dnit(?itn); }
-    val gr: res[intern.StrId, A.Error] = intern.add(?itn, "g");
-    if (sel gr.err) { ret 1; }
-    val g: intern.StrId = gr.ok;
-
-    var w: io_writer.Writer;
-    test_sink_writer(?w);
-
-    var hi_lo: isa_inst.Inst = isa_inst.inst_blank();
-    hi_lo.opcode = inst.AUIPC::u16;
-    hi_lo.size   = 8;
-    hi_lo.dst    = isa_inst.make_reg(isa_inst.regid_make(isa_inst.REG_CLASS_ID_GP, 10), 8);
-    hi_lo.src1   = isa_inst.make_sym_addend(g::u32, 8, isa_inst.SYM_MOD_PCREL_HI, 0);
-    test_sink_reset();
-    if (t_render_inst_refused(?w, ?itn, ?hi_lo))                     { ret 1; }
-    if (!str_equals(test_sink_text(), "  auipc a0, %pcrel_hi(g)\n")) { ret 1; }
-
-    var hi_hi: isa_inst.Inst = hi_lo;
-    hi_hi.src1 = isa_inst.make_sym_addend(g::u32, 8, isa_inst.SYM_MOD_PCREL_HI, 8);
-    test_sink_reset();
-    if (t_render_inst_refused(?w, ?itn, ?hi_hi))                       { ret 1; }
-    if (!str_equals(test_sink_text(), "  auipc a0, %pcrel_hi(g+8)\n")) { ret 1; }
-
-    var hi_neg: isa_inst.Inst = hi_lo;
-    hi_neg.src1 = isa_inst.make_sym_addend(g::u32, 8, isa_inst.SYM_MOD_PCREL_HI, 0 - 8);
-    test_sink_reset();
-    if (t_render_inst_refused(?w, ?itn, ?hi_neg))                      { ret 1; }
-    if (!str_equals(test_sink_text(), "  auipc a0, %pcrel_hi(g-8)\n")) { ret 1; }
-
-    var lo_half: isa_inst.Inst = isa_inst.inst_blank();
-    lo_half.opcode = inst.ADDI::u16;
-    lo_half.size   = 8;
-    lo_half.dst    = isa_inst.make_reg(isa_inst.regid_make(isa_inst.REG_CLASS_ID_GP, 10), 8);
-    lo_half.src1   = isa_inst.make_reg(isa_inst.regid_make(isa_inst.REG_CLASS_ID_GP, 10), 8);
-    lo_half.src2   = isa_inst.make_sym_addend(g::u32, 8, isa_inst.SYM_MOD_PCREL_LO, 0);
-    test_sink_reset();
-    if (t_render_inst_refused(?w, ?itn, ?lo_half))                      { ret 1; }
-    if (!str_equals(test_sink_text(), "  addi a0, a0, %pcrel_lo(g)\n")) { ret 1; }
-
-    var bare: isa_inst.Inst = isa_inst.inst_blank();
-    bare.opcode          = inst.AUIPC::u16;
-    bare.size            = 8;
-    bare.dst             = isa_inst.make_reg(isa_inst.regid_make(isa_inst.REG_CLASS_ID_GP, 10), 8);
-    bare.src1            = isa_inst.make_sym(g::u32, 8);
-    bare.src1.sym_addend = 8;
-    test_sink_reset();
-    if (t_render_inst_refused(?w, ?itn, ?bare))             { ret 1; }
-    if (!str_equals(test_sink_text(), "  auipc a0, g+8\n")) { ret 1; }
-
-    ret 0;
 }

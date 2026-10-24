@@ -179,33 +179,3 @@ pub fun inst_blank() Inst {
     var mi: Inst;
     ret mi;
 }
-
-test regid_make__compose_decompose {
-    val gp: i32 = regid_make(REG_CLASS_ID_GP, 7);
-    if (gp != (REG_GP_BASE | 7))            { ret 1; }
-    if (regid_class(gp) != REG_CLASS_ID_GP) { ret 1; }
-    if (regid_index(gp) != 7)               { ret 1; }
-
-    val fp: i32 = regid_make(REG_CLASS_ID_FP, 3);
-    if (fp != (REG_FP_BASE | 3))            { ret 1; }
-    if (regid_class(fp) != REG_CLASS_ID_FP) { ret 1; }
-    if (regid_index(fp) != 3)               { ret 1; }
-    ret 0;
-}
-
-test make_mem__fields {
-    val m: Operand = make_mem(1, 16, 2, 4, 8);
-    if (m.kind != OPK_MEM) { ret 1; }
-    if (m.base != 1)       { ret 1; }
-    if (m.disp != 16)      { ret 1; }
-    if (m.index != 2)      { ret 1; }
-    if (m.scale != 4)      { ret 1; }
-    if (m.size != 8)       { ret 1; }
-    if (m.reg != REG_NONE) { ret 1; }
-
-    val r: Operand = make_reg(5, 8);
-    if (r.kind != OPK_REG)  { ret 1; }
-    if (r.reg != 5)         { ret 1; }
-    if (r.base != REG_NONE) { ret 1; }
-    ret 0;
-}

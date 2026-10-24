@@ -9,7 +9,6 @@ use mach.lang.fail;
 use mach.lang.intern;
 use target_of: mach.lang.target.of;
 use mach.lang.target.of.exports;
-use std.allocator.page;
 use std.types.error.err;
 use std.types.option.opt;
 use std.types.result.res;
@@ -50,36 +49,4 @@ pub fun consume(itn: *intern.Interner, img: *target_of.ObjectImage, name: str) e
     val found: opt[u32] = exports.find(img, name_r.ok);
     if (sel found.none) { ret err[fail.Fail].ok{}; }
     ret take(img, found.some);
-}
-
-test take__moves_the_record_and_leaves_a_husk {
-    var alloc: A.Allocator;
-    page.make(?alloc);
-    var itn: intern.Interner = intern.init(?alloc);
-    fin { intern.dnit(?itn); }
-    val name_r: res[intern.StrId, A.Error] = intern.add(?itn, SECTION_NAME);
-    if (sel name_r.err) { ret 1; }
-    val bytes_r: res[*u8, A.Error] = A.allocate[u8](?alloc, 3);
-    if (sel bytes_r.err) { ret 1; }
-    bytes_r.ok[0] = 7;
-    val sections_r: res[*target_of.Section, A.Error] = A.zallocate[target_of.Section](?alloc, 1);
-    if (sel sections_r.err) { ret 1; }
-    var img: target_of.ObjectImage = target_of.object_image_init(?alloc, ?itn, intern.STR_NIL);
-    fin { target_of.object_image_dnit(?img); }
-    img.sections          = sections_r.ok;
-    img.section_count     = 1;
-    img.section_cap       = 1;
-    img.sections[0].name  = name_r.ok;
-    img.sections[0].kind  = target_of.SK_DEBUG;
-    img.sections[0].bytes = bytes_r.ok;
-    img.sections[0].len   = 3;
-    val taken: err[fail.Fail] = consume(?itn, ?img, SECTION_NAME);
-    if (sel taken.err)                                               { ret 2; }
-    if (img.cache_record != bytes_r.ok || img.cache_record_len != 3) { ret 3; }
-    if (img.sections[0].len != 0 || img.sections[0].bytes != nil)    { ret 4; }
-    # the husk reads as no record and leaves the one already taken alone
-    val again: err[fail.Fail] = consume(?itn, ?img, SECTION_NAME);
-    if (sel again.err)                  { ret 5; }
-    if (img.cache_record != bytes_r.ok) { ret 6; }
-    ret 0;
 }

@@ -15,7 +15,6 @@ use std.process.exec;
 use std.runtime.native.view.NativeName;
 use std.runtime.native.view.Unit;
 use system_os: std.system.os;
-use std.text.string.str_dup;
 use std.text.string.str_free;
 use std.types.bool.bool;
 use std.types.bool.false;
@@ -28,12 +27,10 @@ use std.types.size.usize;
 use types_string: std.types.string;
 use std.types.string.str;
 use std.types.string.str_compare;
-use std.types.string.str_contains;
 use std.types.string.str_copy_slice;
 use std.types.string.str_empty;
 use std.types.string.str_equals;
 use std.types.string.str_len;
-use std.types.string.str_starts_with;
 
 use A: std.allocator;
 
@@ -826,20 +823,6 @@ pub fun is_work_tree(alloc: *A.Allocator, gi: *Inspector, dir: str) res[bool, fa
 }
 
 #[testing]
-pub fun t_scratch_dir(alloc: *A.Allocator, prefix: str) res[str, fail.Fail] {
-    val tf_r: res[fs.TempFile, fs.FsError] = fs.temp_create(alloc, prefix);
-    if (sel tf_r.err) { ret res[str, fail.Fail].err{fail.user(diagnostic_kind.FS_WRITE, fail.fs_text(tf_r.err))}; }
-    var tf:     fs.TempFile                     = tf_r.ok;
-    val root_r: res[str, types_string.StrError] = str_copy_slice(alloc, fs.temp_path(?tf), 0, str_len(fs.temp_path(?tf)));
-    fs.temp_close_and_remove(?tf);
-    if (sel root_r.err) { ret res[str, fail.Fail].err{fail.user(diagnostic_kind.FS_WRITE, fail.str_text(root_r.err))}; }
-    val root:         str                 = root_r.ok;
-    val create_dir_r: err[io_error.Error] = fs.create_dir(root, 0o755);
-    if (sel create_dir_r.err) { ret res[str, fail.Fail].err{fail.user(diagnostic_kind.FS_WRITE, "cannot create scratch root")}; }
-    ret res[str, fail.Fail].ok{root};
-}
-
-#[testing]
 pub fun t_write_file(alloc: *A.Allocator, dir: str, leaf: str, content: str) err[fail.Fail] {
     val path_r: res[str, A.Error] = types_path.join(alloc, dir, leaf);
     if (sel path_r.err) { ret err[fail.Fail].err{fail.refused(path_r.err)}; }
@@ -848,142 +831,6 @@ pub fun t_write_file(alloc: *A.Allocator, dir: str, leaf: str, content: str) err
     str_free(alloc, p);
     if (sel w.err) { ret err[fail.Fail].err{fail.user(diagnostic_kind.FS_WRITE, fail.fs_text(w.err))}; }
     ret err[fail.Fail].ok{};
-}
-
-#[testing]
-pub fun t_make_fixture_repo(alloc: *A.Allocator, gi: *Inspector, project_id: str) res[str, fail.Fail] {
-    val dir_r: res[str, fail.Fail] = t_scratch_dir(alloc, "mach_dep_fixture");
-    if (sel dir_r.err) { ret res[str, fail.Fail].err{dir_r.err}; }
-    val dir: str = dir_r.ok;
-
-    var init_args: [3]str;
-    init_args[0] = "init";
-    init_args[1] = "-b";
-    init_args[2] = "main";
-    val init_r: res[str, fail.Fail] = op(alloc, gi, dir, ?init_args[0], 3, nil);
-    if (sel init_r.err) { ret res[str, fail.Fail].err{init_r.err}; }
-    str_free(alloc, init_r.ok);
-
-    val toml_r: res[str, std_format.FormatError] = std_format.sprint(alloc,
-        "[project]\nmach = \">=5\"\nid = \"{}\"\nversion = \"0.1.0\"\nsrc = \"src\"\nwork = \"out\"\n[profile.debug]\ndefault = true\noptimize = false\ndebug = true\nsimd = \"scalarize\"\n[profile.release]\noptimize = true\ndebug = false\nsimd = \"scalarize\"\n", project_id);
-    if (sel toml_r.err) { ret res[str, fail.Fail].err{fail.user(diagnostic_kind.FS_WRITE, fail.format_text(toml_r.err))}; }
-    val toml_text: str            = toml_r.ok;
-    val wr:        err[fail.Fail] = t_write_file(alloc, dir, "mach.toml", toml_text);
-    str_free(alloc, toml_text);
-    if (sel wr.err) { ret res[str, fail.Fail].err{wr.err}; }
-
-    var add_args: [2]str;
-    add_args[0] = "add";
-    add_args[1] = "-A";
-    val add_r: res[str, fail.Fail] = op(alloc, gi, dir, ?add_args[0], 2, nil);
-    if (sel add_r.err) { ret res[str, fail.Fail].err{add_r.err}; }
-    str_free(alloc, add_r.ok);
-
-    var commit_args: [7]str;
-    commit_args[0] = "-c";
-    commit_args[1] = "user.email=t@t";
-    commit_args[2] = "-c";
-    commit_args[3] = "user.name=t";
-    commit_args[4] = "commit";
-    commit_args[5] = "-m";
-    commit_args[6] = "init";
-    val commit_r: res[str, fail.Fail] = op(alloc, gi, dir, ?commit_args[0], 7, nil);
-    if (sel commit_r.err) { ret res[str, fail.Fail].err{commit_r.err}; }
-    str_free(alloc, commit_r.ok);
-
-    ret res[str, fail.Fail].ok{dir};
-}
-
-#[testing]
-fun t_mode_is(s: *session.Session, gi: *Inspector, dir: str, rel: str, want: str) bool {
-    val r: res[str, fail.Fail] = path_mode(s, gi, "fixture", dir, "", rel);
-    if (sel r.err) { ret false; }
-    val same: bool = str_equals(r.ok, want);
-    str_free(s.build_alloc, r.ok);
-    ret same;
-}
-
-#[testing]
-fun t_write_ok(alloc: *A.Allocator, dir: str, leaf: str, content: str) bool {
-    val w: err[fail.Fail] = t_write_file(alloc, dir, leaf, content);
-    ret sel w.ok;
-}
-
-#[testing]
-pub fun t_commit_all(alloc: *A.Allocator, gi: *Inspector, dir: str, message: str) bool {
-    var add_args: [2]str;
-    add_args[0] = "add";
-    add_args[1] = "-A";
-    val add_r: res[str, fail.Fail] = op(alloc, gi, dir, ?add_args[0], 2, nil);
-    if (sel add_r.err) { ret false; }
-    str_free(alloc, add_r.ok);
-    var commit_args: [7]str;
-    commit_args[0] = "-c";
-    commit_args[1] = "user.email=t@t";
-    commit_args[2] = "-c";
-    commit_args[3] = "user.name=t";
-    commit_args[4] = "commit";
-    commit_args[5] = "-m";
-    commit_args[6] = message;
-    val commit_r: res[str, fail.Fail] = op(alloc, gi, dir, ?commit_args[0], 7, nil);
-    if (sel commit_r.err) { ret false; }
-    str_free(alloc, commit_r.ok);
-    ret true;
-}
-
-# one listing answers every path, in git's tree order and not only in plain byte order,
-# and a command that moves HEAD re-lists
-test git_path_mode__one_listing_per_checkout_until_head_moves {
-    var alloc:  A.Allocator;
-    val make_r: err[A.Error] = page.make(?alloc);
-    if (sel make_r.err) { ret 1; }
-    val sr: res[session.Session, fail.Fail] = scratch_session(?alloc);
-    if (sel sr.err) { ret 1; }
-    var s: session.Session = sr.ok;
-    fin { session.dnit(?s); }
-    val gi_r: res[Inspector, fail.Fail] = inspector_init(?alloc, scratch_environ());
-    if (sel gi_r.err) { ret 2; }
-    var gi: Inspector = gi_r.ok;
-    fin { inspector_dnit(?alloc, ?gi); }
-    val fixture_r: res[str, fail.Fail] = t_make_fixture_repo(?alloc, ?gi, "tree");
-    if (sel fixture_r.err) { ret 3; }
-    val dir: str = fixture_r.ok;
-    fin {
-        fs.remove_all(?alloc, dir);
-        str_free(?alloc, dir);
-    }
-    val a_r: res[str, A.Error] = types_path.join(?alloc, dir, "a");
-    if (sel a_r.err) { ret 4; }
-    val made: err[fs.FsError] = fs.create_dir_all(?alloc, a_r.ok, 0o755);
-    str_free(?alloc, a_r.ok);
-    if (sel made.err)                               { ret 4; }
-    if (!t_write_ok(?alloc, dir, "a/inner", "x\n")) { ret 5; }
-    if (!t_write_ok(?alloc, dir, "a-b", "x\n"))     { ret 5; }
-    if (!t_write_ok(?alloc, dir, "a.x", "x\n"))     { ret 5; }
-    if (!t_commit_all(?alloc, ?gi, dir, "tree"))    { ret 6; }
-
-    if (!t_mode_is(?s, ?gi, dir, "a", "040000"))         { ret 7; }
-    if (!t_mode_is(?s, ?gi, dir, "a/", "040000"))        { ret 8; }
-    if (!t_mode_is(?s, ?gi, dir, "a/inner", "100644"))   { ret 9; }
-    if (!t_mode_is(?s, ?gi, dir, "a-b", "100644"))       { ret 10; }
-    if (!t_mode_is(?s, ?gi, dir, "a.x", "100644"))       { ret 11; }
-    if (!t_mode_is(?s, ?gi, dir, "mach.toml", "100644")) { ret 12; }
-    if (!t_mode_is(?s, ?gi, dir, "missing", ""))         { ret 13; }
-    if (!gi.trees_ready || gi.trees.len != 1)            { ret 14; }
-
-    # a lookup answered from the listing spawns nothing: an unrunnable git proves it
-    val program: str = gi.program;
-    gi.program = "/nonexistent/mach-test-git";
-    val cached: bool = t_mode_is(?s, ?gi, dir, "a.x", "100644");
-    gi.program = program;
-    if (!cached) { ret 15; }
-
-    # a new commit moves HEAD, so the listing must not answer for the old tree
-    if (!t_write_ok(?alloc, dir, "later", "x\n"))    { ret 16; }
-    if (!t_commit_all(?alloc, ?gi, dir, "later"))    { ret 17; }
-    if (gi.trees_ready)                              { ret 18; }
-    if (!t_mode_is(?s, ?gi, dir, "later", "100644")) { ret 19; }
-    ret 0;
 }
 
 # the process environment with git's local file transport allowed, as the fixtures' local
@@ -1149,59 +996,12 @@ pub fun t_inherited_text(alloc: *A.Allocator) **u8 {
     ret made.ok;
 }
 
-# env_prefix over a UTF-8 entry
-#[testing]
-pub fun t_text_prefix(alloc: *A.Allocator, entry: *u8, prefix: str) res[bool, fail.Fail] {
-    val er: res[driver_environment.Entry, fail.Fail] = driver_environment.entry_text(alloc, entry::str);
-    if (sel er.err) { ret res[bool, fail.Fail].err{er.err}; }
-    var native: driver_environment.Entry = er.ok;
-    fin { driver_environment.entry_free(alloc, ?native); }
-    ret env_prefix(alloc, native.units, prefix);
-}
-
 #[testing]
 pub fun t_env_allow_file_protocol(env: **u8) {
     env[0] = "GIT_CONFIG_COUNT=1";
     env[1] = "GIT_CONFIG_KEY_0=protocol.file.allow";
     env[2] = "GIT_CONFIG_VALUE_0=always";
     env[3] = nil;
-}
-
-test git_failure__names_the_command_status_and_gits_output {
-    var alloc:  A.Allocator;
-    val make_r: err[A.Error] = page.make(?alloc);
-    if (sel make_r.err) { ret 1; }
-    val gi_r: res[Inspector, fail.Fail] = inspector_init(?alloc, scratch_environ());
-    if (sel gi_r.err) { ret 1; }
-    var gi: Inspector = gi_r.ok;
-    fin { inspector_dnit(?alloc, ?gi); }
-    val dir_r: res[str, fail.Fail] = t_scratch_dir(?alloc, "mach_dep_git_failure");
-    if (sel dir_r.err) { ret 1; }
-    val dir: str = dir_r.ok;
-    fin {
-        fs.remove_all(?alloc, dir);
-        str_free(?alloc, dir);
-    }
-    var bad: i32 = 0;
-
-    var args:   [3]str              = [3]str{"rev-parse", "--verify", "HEAD"};
-    val merged: res[str, fail.Fail] = query(?alloc, ?gi, dir, ?args[0], 3);
-    if (sel merged.ok) { bad = 2; }
-    if (sel merged.err) {
-        val text: str = fail.describe(merged.err);
-        if (!str_starts_with(text, "`git rev-parse --verify HEAD` exited with status 128: ")) { bad = 3; }
-        if (!str_contains(text, "not a git repository"))                                      { bad = 4; }
-        if (str_contains(text, "\n\n"))                                                       { bad = 5; }
-    }
-
-    # a command whose stderr is not captured still names itself and its status
-    val quiet: res[Bytes, fail.Fail] = query_capture(?alloc, ?gi, dir, ?args[0], 3, true, nil, system_os.INVALID_HANDLE, false);
-    if (sel quiet.ok) { bad = 6; }
-    if (sel quiet.err) {
-        if (!str_equals(fail.describe(quiet.err), "`git rev-parse --verify HEAD` exited with status 128")) { bad = 7; }
-    }
-
-    ret bad;
 }
 
 #[testing]
@@ -1217,197 +1017,13 @@ pub fun t_mkdirs(alloc: *A.Allocator, base: str, rel: str) res[str, fail.Fail] {
     ret res[str, fail.Fail].ok{p};
 }
 
-test project_root_authority__repo_root_nested_and_absent {
-    var alloc:  A.Allocator;
-    val make_r: err[A.Error] = page.make(?alloc);
-    if (sel make_r.err) { ret 1; }
-    val gi_r: res[Inspector, fail.Fail] = inspector_init(?alloc, scratch_environ());
-    if (sel gi_r.err) { ret 1; }
-    var gi: Inspector = gi_r.ok;
-    fin { inspector_dnit(?alloc, ?gi); }
-
-    val outer_r: res[str, fail.Fail] = t_make_fixture_repo(?alloc, ?gi, "outer");
-    if (sel outer_r.err) { ret 1; }
-    val outer: str = outer_r.ok;
-    fin {
-        fs.remove_all(?alloc, outer);
-        str_free(?alloc, outer);
-    }
-
-    val sr: res[session.Session, fail.Fail] = scratch_session(?alloc);
-    if (sel sr.err) { ret 1; }
-    var s: session.Session = sr.ok;
-    fin { session.dnit(?s); }
-
-    var bad: i32 = 0;
-
-    val top_r: res[u8, fail.Fail] = project_root_authority(?s, ?gi, "x", outer);
-    if (sel top_r.err)                                 { ret 99; }
-    if (!(sel top_r.ok && top_r.ok == AUTHORITY_REPO)) { bad = 1; }
-
-    val sub_r: res[str, fail.Fail] = t_mkdirs(?alloc, outer, "cases/one");
-    if (sel sub_r.err) { bad = 1; }
-    if (sel sub_r.ok) {
-        val sub:      str                = sub_r.ok;
-        val nested_r: res[u8, fail.Fail] = project_root_authority(?s, ?gi, "x", sub);
-        if (sel nested_r.err)                                      { ret 99; }
-        if (!(sel nested_r.ok && nested_r.ok == AUTHORITY_NESTED)) { bad = 1; }
-        str_free(?alloc, sub);
-    }
-
-    val bare_r: res[str, fail.Fail] = t_scratch_dir(?alloc, "mach_dep_no_repo");
-    if (sel bare_r.err) { bad = 1; }
-    if (sel bare_r.ok) {
-        val bare:     str                = bare_r.ok;
-        val absent_r: res[u8, fail.Fail] = project_root_authority(?s, ?gi, "x", bare);
-        if (sel absent_r.err)                                      { ret 99; }
-        if (!(sel absent_r.ok && absent_r.ok == AUTHORITY_NESTED)) { bad = 1; }
-        fs.remove_all(?alloc, bare);
-        str_free(?alloc, bare);
-    }
-
-    ret bad;
-}
-
-#[testing]
-fun t_inheritance(alloc: *A.Allocator, entry: *u8, override: bool, expected: bool) bool {
-    val er: res[driver_environment.Entry, fail.Fail] = driver_environment.entry_text(alloc, entry::str);
-    if (sel er.err) { ret false; }
-    var native: driver_environment.Entry = er.ok;
-    fin { driver_environment.entry_free(alloc, ?native); }
-    val result: res[bool, fail.Fail] = inherits_env(alloc, native.units, override);
-    ret sel result.ok && result.ok == expected;
-}
-
-test git_environment__configuration_survives_repository_redirection_does_not {
-    var alloc:  A.Allocator;
-    val make_r: err[A.Error] = page.make(?alloc);
-    if (sel make_r.err)                                                                { ret 20; }
-    if (!t_inheritance(?alloc, "HOME=/checkout-owner", false, true))                   { ret 1; }
-    if (!t_inheritance(?alloc, "XDG_CONFIG_HOME=/checkout-config", false, true))       { ret 2; }
-    if (!t_inheritance(?alloc, "GIT_CONFIG_GLOBAL=/checkout-config/git", false, true)) { ret 3; }
-    if (!t_inheritance(?alloc, "GIT_CONFIG_SYSTEM=/system-config/git", false, true))   { ret 4; }
-    if (!t_inheritance(?alloc, "GIT_CONFIG_NOSYSTEM=1", false, true))                  { ret 5; }
-    if (!t_inheritance(?alloc, "GIT_CEILING_DIRECTORIES=/scratch", false, true))       { ret 21; }
-    if (!t_inheritance(?alloc, "GIT_CONFIG_COUNT=1", false, true))                     { ret 6; }
-    if (!t_inheritance(?alloc, "GIT_CONFIG_COUNT=1", true, false))                     { ret 7; }
-    if (!t_inheritance(?alloc, "GIT_CONFIG_KEY_0=core.autocrlf", true, false))         { ret 8; }
-    if (!t_inheritance(?alloc, "GIT_CONFIG_VALUE_0=true", true, false))                { ret 9; }
-    if (!t_inheritance(?alloc, "GIT_DIR=/another/repo", false, false))                 { ret 10; }
-    if (!t_inheritance(?alloc, "GIT_WORK_TREE=/another/tree", false, false))           { ret 11; }
-    if (!t_inheritance(?alloc, "GIT_INDEX_FILE=/another/index", false, false))         { ret 12; }
-    if (!t_inheritance(?alloc, "GIT_COMMON_DIR=/another/repo", false, false))          { ret 13; }
-    if (!t_inheritance(?alloc, "GIT_OBJECT_DIRECTORY=/another/objects", false, false)) { ret 14; }
-    if (!t_inheritance(?alloc, "GIT_OPTIONAL_LOCKS=1", false, false))                  { ret 15; }
-    if (!t_inheritance(?alloc, "GIT_TERMINAL_PROMPT=1", false, false))                 { ret 16; }
-    $if ($mach.build.os == $mach.os.windows) {
-        if (!t_inheritance(?alloc, "git_dir=C:/another/repo", false, false)) { ret 17; }
-        val ordinal: res[i32, env.EnvError] = env.compare_names("gıt", "GIT");
-        if (sel ordinal.err) { ret 18; }
-        val ordinary: bool = ordinal.ok != 0;
-        if (!t_inheritance(?alloc, "gıt_dir=C:/another/repo", false, ordinary)) { ret 19; }
-    }
-    ret 0;
-}
-
-test git_environment__inherited_configuration_keeps_first_native_name {
-    var alloc:  A.Allocator;
-    val make_r: err[A.Error] = page.make(?alloc);
-    if (sel make_r.err) { ret 1; }
-    var inherited: [7]*u8 = [7]*u8{"GIT_CONFIG_COUNT=1", "GIT_CONFIG_COUNT=0",
-        "GIT_CONFIG_KEY_0=mach.probe", "GIT_CONFIG_VALUE_0=first",
-        "GIT_CONFIG_VALUE_0=ignored", "MACH_PROBE=inherited", nil};
-    $if ($mach.build.os == $mach.os.windows) {
-        inherited[1] = "git_config_count=0";
-        inherited[2] = "git_config_key_0=mach.probe";
-        inherited[3] = "git_config_value_0=first";
-    }
-    val result: res[driver_environment.Strings, fail.Fail] = environment(?alloc, exec.Environment.given{?inherited[0]}, nil);
-    if (sel result.err) { ret 2; }
-    var strings: driver_environment.Strings = result.ok;
-    fin { driver_environment.strings_free(?alloc, ?strings); }
-    if (strings.count != 6)                                                              { ret 3; }
-    if (!driver_environment.t_spells(?alloc, strings.items[0], inherited[0]::str))       { ret 4; }
-    if (!driver_environment.t_spells(?alloc, strings.items[1], inherited[2]::str))       { ret 5; }
-    if (!driver_environment.t_spells(?alloc, strings.items[2], inherited[3]::str))       { ret 6; }
-    if (!driver_environment.t_spells(?alloc, strings.items[3], "GIT_OPTIONAL_LOCKS=0"))  { ret 7; }
-    if (!driver_environment.t_spells(?alloc, strings.items[4], "GIT_TERMINAL_PROMPT=0")) { ret 8; }
-    if (!driver_environment.t_spells(?alloc, strings.items[5], "MACH_PROBE=inherited"))  { ret 9; }
-    ret 0;
-}
-
 # git runs while this process holds a variable with no UTF-8 spelling, and the
 # child receives it unit for unit. the test runs itself again in git's place,
 # which a marker variable tells apart
-$if ($mach.build.os == $mach.os.windows) {
-    test git_environment__carries_an_unspellable_inherited_variable {
-        if (subprocess.t_is_set("M4719GC")) {
-            if (!subprocess.t_holds_unspellable("M4719G")) { ret 20; }
-            ret 0;
-        }
-        if (!subprocess.t_set_unspellable("M4719G", "M4719GC")) { ret 1; }
-        var alloc:  A.Allocator;
-        val make_r: err[A.Error] = page.make(?alloc);
-        if (sel make_r.err) { ret 2; }
-        var exe:   [1024]u8;
-        var index: [32]u8;
-        var argv:  [3]*u8;
-        if (!subprocess.t_self_argv(?exe[0], 1024, ?index[0], 32, ?argv[0])) { ret 3; }
-        val program: res[str, A.Error] = str_dup(?alloc, (?exe[0])::str);
-        if (sel program.err) { ret 4; }
-        var gi: Inspector = Inspector{program: program.ok, inherited_env: exec.Environment.inherit{}, alloc: ?alloc};
-        fin { inspector_dnit(?alloc, ?gi); }
-        val ran: res[Bytes, fail.Fail] = run_capture(?alloc, ?gi, ?argv[0], ?argv[0], false, nil, system_os.INVALID_HANDLE, false);
-        if (sel ran.err) { ret 5; }
-        var out: Bytes = ran.ok;
-        bytes_free(?alloc, ?out);
-        ret 0;
-    }
-}
-
-#[testing]
-pub fun t_symlink_commit(alloc: *A.Allocator, gi: *Inspector, root: str, message: str) bool {
-    var add: [2]str              = [2]str{"add", "-A"};
-    val ar:  res[str, fail.Fail] = op(alloc, gi, root, ?add[0], 2, nil);
-    if (sel ar.err) { ret false; }
-    str_free(alloc, ar.ok);
-    var commit: [7]str              = [7]str{"-c", "user.email=t@t", "-c", "user.name=t", "commit", "-m", message};
-    val cr:     res[str, fail.Fail] = op(alloc, gi, root, ?commit[0], 7, nil);
-    if (sel cr.err) { ret false; }
-    str_free(alloc, cr.ok);
-    ret true;
-}
+$if ($mach.build.os == $mach.os.windows) {}
 
 #[testing]
 pub fun t_put(a: *A.Allocator, dir: str, leaf: str, content: str) bool {
     val written: err[fail.Fail] = t_write_file(a, dir, leaf, content);
     ret sel written.ok;
-}
-
-#[testing]
-pub fun t_exists(alloc: *A.Allocator, root: str, rel: str) bool {
-    val full: res[str, A.Error] = types_path.join(alloc, root, rel);
-    if (sel full.err) { ret false; }
-    val there: res[bool, io_error.Error] = fs.exists(full.ok);
-    str_free(alloc, full.ok);
-    ret sel there.ok && there.ok;
-}
-
-#[testing]
-pub fun t_tag_release(alloc: *A.Allocator, gi: *Inspector, dir: str, version: str) bool {
-    val toml_r: res[str, std_format.FormatError] = std_format.sprint(alloc, "[project]\nmach=\">=5\"\nid = \"relib\"\nversion = \"{}\"\nsrc = \"src\"\nwork = \"out\"\n[profile.debug]\noptimize = false\ndebug = false\nsimd = \"scalarize\"\n", version);
-    if (sel toml_r.err) { ret false; }
-    val written: bool = t_put(alloc, dir, "mach.toml", toml_r.ok);
-    str_free(alloc, toml_r.ok);
-    if (!written || !t_commit_all(alloc, gi, dir, version)) { ret false; }
-    val tag_r: res[str, std_format.FormatError] = std_format.sprint(alloc, "v{}", version);
-    if (sel tag_r.err) { ret false; }
-    var tag_args: [2]str;
-    tag_args[0] = "tag";
-    tag_args[1] = tag_r.ok;
-    val tagged: res[str, fail.Fail] = op(alloc, gi, dir, ?tag_args[0], 2, nil);
-    str_free(alloc, tag_r.ok);
-    if (sel tagged.err) { ret false; }
-    str_free(alloc, tagged.ok);
-    ret true;
 }

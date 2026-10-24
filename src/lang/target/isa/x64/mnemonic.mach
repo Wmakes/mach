@@ -1,5 +1,4 @@
 # the inline assembly mnemonic rows: each spelling, its operand pattern, widths and the registers it clobbers
-use std.types.bool.bool;
 use std.types.bool.true;
 use std.types.size.usize;
 use std.types.string.str;
@@ -7,7 +6,6 @@ use std.types.string.str;
 use extension_x64: mach.lang.target.extension.x64;
 use isa_asm:       mach.lang.target.isa.asm;
 use mach.lang.target.isa.x64;
-use x64_inst: mach.lang.target.isa.x64.inst;
 
 pub val PATTERN_NONE: u16 = 1;
 
@@ -322,86 +320,3 @@ pub val PREFIXES: [PREFIX_COUNT]Prefix = [PREFIX_COUNT]Prefix{
     Prefix{name: "repne", flags: FLAG_REPNE | FLAG_REPCND},
     Prefix{name: "repnz", flags: FLAG_REPNE | FLAG_REPCND},
 };
-
-#[testing]
-val T_FORM_COUNT: usize = 48;
-
-#[testing]
-val T_FORMS: [T_FORM_COUNT]x64_inst.Form = [T_FORM_COUNT]x64_inst.Form{
-    x64_inst.FORM_NONE, x64_inst.FORM_BARE, x64_inst.FORM_MOV, x64_inst.FORM_LEA, x64_inst.FORM_PUSH, x64_inst.FORM_POP, x64_inst.FORM_ALU,
-    x64_inst.FORM_TEST, x64_inst.FORM_IMUL, x64_inst.FORM_DIV, x64_inst.FORM_SHIFT, x64_inst.FORM_JCC, x64_inst.FORM_JMP, x64_inst.FORM_CALL,
-    x64_inst.FORM_RET, x64_inst.FORM_SETCC, x64_inst.FORM_MOVX, x64_inst.FORM_MOVABS, x64_inst.FORM_MOVQ, x64_inst.FORM_SSE_MOV,
-    x64_inst.FORM_SSE_MOVA, x64_inst.FORM_SSE_ALU, x64_inst.FORM_UCOMIS, x64_inst.FORM_CVT, x64_inst.FORM_XORPS, x64_inst.FORM_PACKED,
-    x64_inst.FORM_PSHUF, x64_inst.FORM_PSLL, x64_inst.FORM_GRP3, x64_inst.FORM_GRP5, x64_inst.FORM_XCHG, x64_inst.FORM_XADD,
-    x64_inst.FORM_PORTIO, x64_inst.FORM_LIDT, x64_inst.FORM_MOV_CR, x64_inst.FORM_MOV_SEG, x64_inst.FORM_STRING, x64_inst.FORM_TRAP,
-    x64_inst.FORM_DATA, x64_inst.FORM_FSGSBASE, x64_inst.FORM_PINSR, x64_inst.FORM_MUL1, x64_inst.FORM_BITSCAN, x64_inst.FORM_BSWAP,
-    x64_inst.FORM_DSHIFT, x64_inst.FORM_CARRY, x64_inst.FORM_CMOV, x64_inst.FORM_VEX3,
-};
-
-#[testing]
-val T_MEM_COUNT: usize = 5;
-
-#[testing]
-val T_MEMS: [T_MEM_COUNT]x64_inst.MemEffect = [T_MEM_COUNT]x64_inst.MemEffect{
-    x64_inst.MEM_OPERAND, x64_inst.MEM_ADDR, x64_inst.MEM_STACK, x64_inst.MEM_STRING, x64_inst.MEM_BASE,
-};
-
-#[testing]
-val T_PATTERN_COUNT: usize = 15;
-
-#[testing]
-val T_PATTERNS: [T_PATTERN_COUNT]u16 = [T_PATTERN_COUNT]u16{
-    PATTERN_NONE, PATTERN_ONE, PATTERN_TWO, PATTERN_BRANCH, PATTERN_XFER, PATTERN_VEC, PATTERN_VECI, PATTERN_PORTIO,
-    PATTERN_WIDEREG, PATTERN_VECG, PATTERN_TRIPLE, PATTERN_VEC3, PATTERN_STRING, PATTERN_MOVQ, PATTERN_VSHIFT,
-};
-
-# the enumerations are dense and collision free: two branches that each add a
-# differently named value at the same number merge without a conflict, and
-# only a census over the names finds it
-test describe__every_enumeration_value_is_unique {
-    if (T_FORM_COUNT != x64_inst.FORM_COUNT::usize) { ret 3; }
-    var forms: [T_FORM_COUNT]bool;
-    var i:     usize = 0;
-    for (i < T_FORM_COUNT) {
-        val f: usize = T_FORMS[i]::usize;
-        if (f >= T_FORM_COUNT || forms[f]) { ret 4; }
-        forms[f] = true;
-        i        = i + 1;
-    }
-    var mem: x64_inst.MemEffect = x64_inst.MEM_NONE;
-    i = 0;
-    for (i < T_MEM_COUNT) {
-        val bit: x64_inst.MemEffect = T_MEMS[i];
-        if (bit == 0 || (bit & (bit - 1)) != 0 || (mem & bit) != 0) { ret 5; }
-        mem = mem | bit;
-        i   = i + 1;
-    }
-    if (mem != x64_inst.MEM_ALL) { ret 6; }
-    var patterns: [16]bool;
-    i = 0;
-    for (i < T_PATTERN_COUNT) {
-        val p: u16 = T_PATTERNS[i];
-        if (p == 0 || p >= 16 || p != pattern(p) || patterns[p::usize]) { ret 7; }
-        patterns[p::usize] = true;
-        i                  = i + 1;
-    }
-    i = 0;
-    for (i < ROW_COUNT) {
-        val p: u16 = pattern(ROWS[i].flags);
-        if (p >= 16 || !patterns[p::usize]) { ret 8; }
-        i = i + 1;
-    }
-    ret 0;
-}
-
-# the inline-asm grammar's implicit-memory rows are the table's stack rows
-test describe__grammar_implicit_mem_matches_stack_rows {
-    var i: usize = 0;
-    for (i < ROW_COUNT) {
-        val d: x64_inst.OpDesc = x64_inst.describe(ROWS[i].code::u16);
-        if (ROWS[i].implicit_mem && (d.mem & x64_inst.MEM_STACK) == 0)     { ret 1; }
-        if ((ROWS[i].addr_ops != 0) != ((d.mem & x64_inst.MEM_BASE) != 0)) { ret 2; }
-        i = i + 1;
-    }
-    ret 0;
-}

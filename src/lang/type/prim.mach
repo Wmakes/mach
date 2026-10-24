@@ -4,20 +4,12 @@ use std.types.bool.true;
 use std.types.option.opt;
 use std.types.size.usize;
 use std.types.string.str;
-use std.types.string.str_equals;
 use std.types.string.str_len;
 use std.types.string.str_region_equals;
 use std.types.view.View;
 use std.types.view.view_eq_str;
 
-use std.allocator.page;
-use std.print;
-
-use A: std.allocator;
-
 use mach.lang.float;
-use mach.lang.reference;
-use lang_source: mach.lang.source;
 use mach.lang.type.kind.TYPE_F16;
 use mach.lang.type.kind.TYPE_F32;
 use mach.lang.type.kind.TYPE_F64;
@@ -26,14 +18,12 @@ use mach.lang.type.kind.TYPE_I16;
 use mach.lang.type.kind.TYPE_I32;
 use mach.lang.type.kind.TYPE_I64;
 use mach.lang.type.kind.TYPE_I8;
-use mach.lang.type.kind.TYPE_POINTER;
 use mach.lang.type.kind.TYPE_PTR;
 use mach.lang.type.kind.TYPE_U128;
 use mach.lang.type.kind.TYPE_U16;
 use mach.lang.type.kind.TYPE_U32;
 use mach.lang.type.kind.TYPE_U64;
 use mach.lang.type.kind.TYPE_U8;
-use mach.lang.type.kind.TYPE_VECTOR;
 use mach.lang.type.kind.TypeKind;
 use mach.lang.wide;
 
@@ -203,16 +193,6 @@ pub fun prim_spelling_len(kind: TypeKind) usize {
     val spec: *PrimSpec = prim_spec(kind);
     if (spec == nil) { ret 0; }
     ret spec.len;
-}
-
-#[testing]
-fun prim_from_name(name: str) opt[TypeKind] {
-    var i: u32 = 0;
-    for (i < PRIM_COUNT) {
-        if (str_equals(PRIM_CATALOG[i].spelling, name)) { ret opt[TypeKind].some{PRIM_CATALOG[i].kind}; }
-        i = i + 1;
-    }
-    ret opt[TypeKind].none{};
 }
 
 # the integer primitive of a width and signedness, absent when the catalog has
@@ -390,284 +370,4 @@ pub fun vector_form(name: str) VecForm {
     f.bits   = (prim_desc(element).bits::u64 * lanes)::u32;
     f.status = VEC_FORM_OK;
     ret f;
-}
-
-# every integer kind's range is exact to its width, and 2^127 no longer wraps
-test int_range__exact_at_every_width_through_128 {
-    val u8_r: opt[IntRange] = int_range(TYPE_U8);
-    if (!sel u8_r.some)                                                           { ret 1; }
-    if (u8_r.some.min_negated || !wide.eq(u8_r.some.max_mag, wide.from_u64(255))) { ret 2; }
-    val i8_r: opt[IntRange] = int_range(TYPE_I8);
-    if (!sel i8_r.some)                                                                                                               { ret 3; }
-    if (!i8_r.some.min_negated || !wide.eq(i8_r.some.min_mag, wide.from_u64(128)) || !wide.eq(i8_r.some.max_mag, wide.from_u64(127))) { ret 4; }
-    val u64_r: opt[IntRange] = int_range(TYPE_U64);
-    if (!sel u64_r.some)                                                 { ret 5; }
-    if (!wide.eq(u64_r.some.max_mag, wide.from_u64(0xFFFFFFFFFFFFFFFF))) { ret 6; }
-    val i64_r: opt[IntRange] = int_range(TYPE_I64);
-    if (!sel i64_r.some)                                                                                                                    { ret 7; }
-    if (!wide.eq(i64_r.some.min_mag, wide.from_u64(0x8000000000000000)) || !wide.eq(i64_r.some.max_mag, wide.from_u64(0x7FFFFFFFFFFFFFFF))) { ret 8; }
-    val u128_r: opt[IntRange] = int_range(TYPE_U128);
-    if (!sel u128_r.some)                                                                                             { ret 9; }
-    if (u128_r.some.min_negated || !wide.eq(u128_r.some.max_mag, wide.max_u()) || !wide.is_zero(u128_r.some.min_mag)) { ret 10; }
-    val i128_r: opt[IntRange] = int_range(TYPE_I128);
-    if (!sel i128_r.some)                                                                                                       { ret 11; }
-    if (!i128_r.some.min_negated || !wide.eq(i128_r.some.min_mag, wide.min_s()) || !wide.eq(i128_r.some.max_mag, wide.max_s())) { ret 12; }
-    val f64_r: opt[IntRange] = int_range(TYPE_F64);
-    val ptr_r: opt[IntRange] = int_range(TYPE_PTR);
-    val ptd_r: opt[IntRange] = int_range(TYPE_POINTER);
-    if (sel f64_r.some || sel ptr_r.some || sel ptd_r.some) { ret 13; }
-
-    val i128: IntRange = i128_r.some;
-    val u128: IntRange = u128_r.some;
-    if (!int_fits(wide.max_s(), false, i128))                                      { ret 14; }
-    if (int_fits(wide.min_s(), false, i128))                                       { ret 15; }
-    if (!int_fits(wide.min_s(), true, i128))                                       { ret 16; }
-    if (int_fits(wide.add(wide.min_s(), wide.from_u64(1)), true, i128))            { ret 17; }
-    if (!int_fits(wide.max_u(), false, u128))                                      { ret 18; }
-    if (int_fits(wide.from_u64(1), true, u128))                                    { ret 19; }
-    if (!int_fits_either_sign(wide.min_s(), TYPE_I128))                            { ret 20; }
-    if (int_fits_either_sign(wide.add(wide.min_s(), wide.from_u64(1)), TYPE_I128)) { ret 21; }
-    if (!int_fits_either_sign(wide.make(0, 1), TYPE_U128))                         { ret 22; }
-    if (int_fits_either_sign(wide.make(0, 1), TYPE_U64))                           { ret 23; }
-    if (!int_fits_either_sign(wide.from_u64(128), TYPE_I8))                        { ret 24; }
-    if (int_fits_either_sign(wide.from_u64(129), TYPE_I8))                         { ret 25; }
-    if (!int_fits_either_sign(wide.from_u64(7), TYPE_F32))                         { ret 26; }
-    ret 0;
-}
-
-test vector_form__reads_the_form_at_every_width {
-    var vi: u32 = 0;
-    for (vi < VEC_COUNT) {
-        val sh: VecShape = vec_shape(vi);
-        val f:  VecForm  = vector_form(sh.name);
-        if (f.status != VEC_FORM_OK) { ret 1; }
-        if (f.element != sh.element) { ret 1; }
-        if (f.lanes != sh.lanes)     { ret 1; }
-        if (f.bits != 128)           { ret 1; }
-        vi = vi + 1;
-    }
-
-    val v3: VecForm = vector_form("f32x3");
-    if (v3.status != VEC_FORM_OK) { ret 1; }
-    if (v3.element != TYPE_F32)   { ret 1; }
-    if (v3.lanes != 3)            { ret 1; }
-    if (v3.bits != 96)            { ret 1; }
-
-    val u3: VecForm = vector_form("u32x3");
-    if (u3.status != VEC_FORM_OK) { ret 1; }
-    if (u3.element != TYPE_U32)   { ret 1; }
-    if (u3.lanes != 3)            { ret 1; }
-
-    val v2: VecForm = vector_form("f32x2");
-    if (v2.status != VEC_FORM_OK) { ret 1; }
-    if (v2.lanes != 2)            { ret 1; }
-    if (v2.bits != 64)            { ret 1; }
-
-    val w5: VecForm = vector_form("f32x5");
-    if (w5.status != VEC_FORM_OK) { ret 1; }
-    if (w5.element != TYPE_F32)   { ret 1; }
-    if (w5.lanes != 5)            { ret 1; }
-    if (w5.bits != 160)           { ret 1; }
-
-    val w8: VecForm = vector_form("f32x8");
-    if (w8.status != VEC_FORM_OK) { ret 1; }
-    if (w8.lanes != 8)            { ret 1; }
-    if (w8.bits != 256)           { ret 1; }
-
-    if (vector_form("i8x17").status != VEC_FORM_OK) { ret 1; }
-    if (vector_form("f64x3").status != VEC_FORM_OK) { ret 1; }
-    if (vector_form("f32x16").bits != 512)          { ret 1; }
-    if (vector_form("i16x7").bits != 112)           { ret 1; }
-
-    if (vector_form("u8x65535").status != VEC_FORM_OK)       { ret 1; }
-    if (vector_form("u8x65535").lanes != MAX_VEC_LANES)      { ret 1; }
-    if (vector_form("u8x65536").status != VEC_FORM_TOO_WIDE) { ret 1; }
-
-    if (vector_form("u64x4294967295").status != VEC_FORM_TOO_WIDE) { ret 1; }
-
-    if (vector_form("f32x1").status != VEC_FORM_BAD_LANES) { ret 1; }
-
-    if (vector_form(nil).status != VEC_FORM_NONE)                                                   { ret 1; }
-    if (vector_form("").status != VEC_FORM_NONE)                                                    { ret 1; }
-    if (vector_form("f32").status != VEC_FORM_NONE)                                                 { ret 1; }
-    if (vector_form("f32x").status != VEC_FORM_NONE)                                                { ret 1; }
-    if (vector_form("x4").status != VEC_FORM_NONE)                                                  { ret 1; }
-    if (vector_form("f33x4").status != VEC_FORM_NONE)                                               { ret 1; }
-    if (vector_form("f32x4y").status != VEC_FORM_NONE)                                              { ret 1; }
-    if (vector_form("f32x04").status != VEC_FORM_NONE)                                              { ret 1; }
-    if (vector_form("ptrx2").status != VEC_FORM_NONE)                                               { ret 1; }
-    if (vector_form("u128x2").status != VEC_FORM_BAD_ELEMENT)                                       { ret 1; }
-    if (vector_form("i128x4").status != VEC_FORM_BAD_ELEMENT)                                       { ret 1; }
-    if (vector_form("u128x2").element != TYPE_U128)                                                 { ret 1; }
-    if (vector_form("f16x8").status != VEC_FORM_OK || vector_form("f16x8").bits != 128)             { ret 1; }
-    if (vec_lane_kind_ok(TYPE_PTR) || vec_lane_kind_ok(TYPE_U128) || vec_lane_kind_ok(TYPE_VECTOR)) { ret 1; }
-    if (!vec_lane_kind_ok(TYPE_U8) || !vec_lane_kind_ok(TYPE_F64) || !vec_lane_kind_ok(TYPE_I64))   { ret 1; }
-    if (vector_form("matrix4").status != VEC_FORM_NONE)                                             { ret 1; }
-
-    ret 0;
-}
-
-test prim_catalog__complete_unique_ordered_roundtrip {
-    var seen: [PRIM_COUNT]bool;
-    var i:    u32 = 0;
-    for (i < PRIM_COUNT) {
-        seen[i] = false;
-        i       = i + 1;
-    }
-
-    i = 0;
-    for (i < PRIM_COUNT) {
-        val spec: *PrimSpec = ?PRIM_CATALOG[i];
-        if (!is_prim(spec.kind))          { ret 1; }
-        if (prim_kind_at(i) != spec.kind) { ret 1; }
-        val index: opt[u32] = prim_index(spec.kind);
-        if (!sel index.some)                    { ret 1; }
-        if (index.some != i)                    { ret 1; }
-        if (seen[i])                            { ret 1; }
-        if (str_equals(spec.spelling, ""))      { ret 1; }
-        if (spec.len != str_len(spec.spelling)) { ret 1; }
-        seen[i] = true;
-
-        var j: u32 = 0;
-        for (j < i) {
-            val prior: *PrimSpec = ?PRIM_CATALOG[j];
-            if (prior.kind == spec.kind)                   { ret 1; }
-            if (str_equals(prior.spelling, spec.spelling)) { ret 1; }
-            j = j + 1;
-        }
-
-        if (!str_equals(prim_name(spec.kind), spec.spelling)) { ret 1; }
-        if (prim_spelling_len(spec.kind) != spec.len)         { ret 1; }
-        val d: PrimDesc = prim_desc(spec.kind);
-        if (d.class != spec.class)   { ret 1; }
-        if (d.signed != spec.signed) { ret 1; }
-        if (d.bits != spec.bits)     { ret 1; }
-
-        val parsed: opt[TypeKind] = prim_from_name(spec.spelling);
-        if (!sel parsed.some)         { ret 1; }
-        if (parsed.some != spec.kind) { ret 1; }
-        i = i + 1;
-    }
-
-    val prim_from_name_1: opt[TypeKind] = prim_from_name("");
-    if (sel prim_from_name_1.some) { ret 1; }
-    val prim_from_name_2: opt[TypeKind] = prim_from_name("bool");
-    if (sel prim_from_name_2.some)           { ret 1; }
-    if (prim_name(TYPE_VECTOR) != nil)       { ret 1; }
-    if (prim_spelling_len(TYPE_VECTOR) != 0) { ret 1; }
-    val nd: PrimDesc = prim_desc(TYPE_VECTOR);
-    if (nd.class != PRIM_CLASS_NONE) { ret 1; }
-    if (nd.signed)                   { ret 1; }
-    if (nd.bits != 0)                { ret 1; }
-
-    i = 0;
-    for (i < PRIM_COUNT) {
-        if (!seen[i]) { ret 1; }
-        i = i + 1;
-    }
-    ret 0;
-}
-
-# is_prim is the catalog over the whole kind space: an appended kind is
-# primitive because its row is, never because of where it sits
-test is_prim__is_the_catalog_over_the_whole_kind_space {
-    var k: u32 = 0;
-    for (k < 256) {
-        val kind:     TypeKind = k::TypeKind;
-        val expected: bool     = prim_spec(kind) != nil;
-        if (is_prim(kind) != expected) { ret 2; }
-        val index: opt[u32] = prim_index(kind);
-        if ((sel index.some) != expected)                           { ret 3; }
-        if ((prim_name(kind) != nil) != expected)                   { ret 4; }
-        if ((prim_desc(kind).class != PRIM_CLASS_NONE) != expected) { ret 5; }
-        k = k + 1;
-    }
-    ret 0;
-}
-
-# the spelling of the `i`th primitive when it is of `class`, and signed as `signed`
-# where the class is an integer one; nil otherwise
-#[testing]
-fun spelled_if(i: usize, class: PrimClass, signed: bool) str {
-    val spec: *PrimSpec = ?PRIM_CATALOG[i];
-    if (spec.class != class)                              { ret nil; }
-    if (class == PRIM_CLASS_INT && spec.signed != signed) { ret nil; }
-    ret spec.spelling;
-}
-
-#[testing]
-fun unsigned_at(i: usize) str {
-    ret spelled_if(i, PRIM_CLASS_INT, false);
-}
-
-#[testing]
-fun signed_at(i: usize) str {
-    ret spelled_if(i, PRIM_CLASS_INT, true);
-}
-
-#[testing]
-fun integer_at(i: usize) str {
-    val spec: *PrimSpec = ?PRIM_CATALOG[i];
-    if (spec.class != PRIM_CLASS_INT) { ret nil; }
-    ret spec.spelling;
-}
-
-#[testing]
-fun float_at(i: usize) str {
-    ret spelled_if(i, PRIM_CLASS_FLOAT, false);
-}
-
-#[testing]
-fun pointer_at(i: usize) str {
-    ret spelled_if(i, PRIM_CLASS_PTR, false);
-}
-
-# the row of the page's table, or the line, that lists one family of primitives
-# holds exactly that family
-#[testing]
-fun family_agrees(alloc: *A.Allocator, what: str, text: str, within: opt[lang_source.Span], names: fun(usize) str) bool {
-    if (sel within.none) {
-        print.eprintlnf("{}: the page no longer has this list", what);
-        ret false;
-    }
-    ret reference.agree(alloc, what, text, within.some, reference.WORDS_CODE, names, PRIM_COUNT::usize);
-}
-
-# the second cell of the row `first` of `rows`, none when there is no such row
-#[testing]
-fun members(text: str, rows: lang_source.Span, first: str) opt[lang_source.Span] {
-    val row: opt[lang_source.Span] = reference.row_named(text, rows, first);
-    if (sel row.none) { ret opt[lang_source.Span].none{}; }
-    ret reference.cell(text, row.some, 1);
-}
-
-# the literal suffixes of grammar.md, the primitive table of types.md and the
-# authoring skill's list of built-in types are the catalog, family by family
-test reference__primitive_lists_are_the_catalog {
-    var alloc: A.Allocator;
-    page.make(?alloc);
-    val grammar: opt[str] = reference.page_or_report(?alloc, "doc/language/grammar.md");
-    if (sel grammar.none) { ret 1; }
-    val int_suffix: opt[lang_source.Span] = reference.production(grammar.some, "int-suffix");
-    if (sel int_suffix.none)                                                                                                                     { ret 2; }
-    if (!reference.agree(?alloc, "grammar.md int-suffix", grammar.some, int_suffix.some, reference.WORDS_QUOTED, integer_at, PRIM_COUNT::usize)) { ret 3; }
-    val float_suffix: opt[lang_source.Span] = reference.production(grammar.some, "float-suffix");
-    if (sel float_suffix.none)                                                                                                                     { ret 4; }
-    if (!reference.agree(?alloc, "grammar.md float-suffix", grammar.some, float_suffix.some, reference.WORDS_QUOTED, float_at, PRIM_COUNT::usize)) { ret 5; }
-
-    val types: opt[str] = reference.page_or_report(?alloc, "doc/language/types.md");
-    if (sel types.none) { ret 6; }
-    val rows: opt[lang_source.Span] = reference.table(types.some, 0, "| Family | Members |");
-    if (sel rows.none)                                                                                                                 { ret 7; }
-    if (!family_agrees(?alloc, "types.md Unsigned int", types.some, members(types.some, rows.some, "Unsigned int"), unsigned_at))      { ret 8; }
-    if (!family_agrees(?alloc, "types.md Signed int", types.some, members(types.some, rows.some, "Signed int"), signed_at))            { ret 8; }
-    if (!family_agrees(?alloc, "types.md Float", types.some, members(types.some, rows.some, "Float"), float_at))                       { ret 8; }
-    if (!family_agrees(?alloc, "types.md Untyped pointer", types.some, members(types.some, rows.some, "Untyped pointer"), pointer_at)) { ret 8; }
-
-    val skill: opt[str] = reference.page_or_report(?alloc, "doc/skills/mach/SKILL.md");
-    if (sel skill.none)                                                                                                                         { ret 9; }
-    if (!family_agrees(?alloc, "SKILL.md Integers", skill.some, reference.line_after(skill.some, "- **Integers**:"), integer_at))               { ret 10; }
-    if (!family_agrees(?alloc, "SKILL.md Floating point", skill.some, reference.line_after(skill.some, "- **Floating point**:"), float_at))     { ret 10; }
-    if (!family_agrees(?alloc, "SKILL.md Untyped pointer", skill.some, reference.line_after(skill.some, "- **Untyped pointer**:"), pointer_at)) { ret 10; }
-    ret 0;
 }

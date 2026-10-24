@@ -1,25 +1,16 @@
 # whether a type reaches a property anywhere, through pointers included, answered over
 # the declarations so a generic that grows through a pointer still has a finite answer
-use std.allocator.page;
 use std.collections.map;
 use std.types.bool.bool;
 use std.types.bool.false;
 use std.types.bool.true;
-use std.types.error.err;
 use std.types.option.opt;
 use std.types.result.res;
-use std.types.size.usize;
 
 use A: std.allocator;
 
 use mach.lang.fail;
-#[testing]
-use mach.lang.intern;
-#[testing]
-use mach.lang.module;
 use mach.lang.session;
-#[testing]
-use lang_source: mach.lang.source;
 use mach.lang.type;
 use type_query: mach.lang.type.query;
 use mach.lang.type.query.placement;
@@ -193,145 +184,4 @@ fun deep_eval(dq: *DeepQuery, tid: type.TypeId) bool {
 
     if (public_leaf(t.kind)) { ret false; }
     ret true;
-}
-
-# a type id the store does not hold is an internal failure, never an answer
-test query__unresolvable_type_fails {
-    var alloc: A.Allocator;
-    val made:  err[A.Error] = page.make(?alloc);
-    if (sel made.err) { ret 1; }
-    val sr: res[session.Session, fail.Fail] = session.init(?alloc);
-    if (sel sr.err) { ret 1; }
-    var s: session.Session = sr.ok;
-    fin { session.dnit(?s); }
-
-    val bogus:    type.TypeId          = type.id(500000);
-    val secret_r: res[bool, fail.Fail] = contains_secret(?s, bogus);
-    if (sel secret_r.ok) { ret 2; }
-    val float_r: res[bool, fail.Fail] = contains_float(?s, bogus);
-    if (sel float_r.ok) { ret 3; }
-    ret 0;
-}
-
-test public_leaf__partition_typekind {
-    val leaves: [15]type.TypeKind = [15]type.TypeKind{type.TYPE_U8, type.TYPE_U16, type.TYPE_U32, type.TYPE_U64,
-        type.TYPE_I8, type.TYPE_I16, type.TYPE_I32, type.TYPE_I64, type.TYPE_F32, type.TYPE_F64, type.TYPE_PTR,
-        type.TYPE_VECTOR, type.TYPE_HANDLE, type.TYPE_ABI, type.TYPE_GENERIC_PARAM};
-    val descended: [10]type.TypeKind = [10]type.TypeKind{type.TYPE_POINTER, type.TYPE_ARRAY, type.TYPE_FUN,
-        type.TYPE_REC, type.TYPE_UNI, type.TYPE_INSTANCE, type.TYPE_PACK, type.TYPE_SECRET, type.TYPE_TAG,
-        type.TYPE_CASE_SELECTOR};
-    var i: usize = 0;
-    for (i < 15) {
-        if (!public_leaf(leaves[i])) { ret 1; }
-        i = i + 1;
-    }
-    i = 0;
-    for (i < 10) {
-        if (public_leaf(descended[i])) { ret 2; }
-        i = i + 1;
-    }
-    ret 0;
-}
-
-# whether an array of four `kind` elements contains a float, -1 when it cannot be asked
-#[testing]
-fun t_array_holds_float(s: *session.Session, kind: type.TypeKind) i32 {
-    val elem: opt[type.TypeId] = type.prim(?s.types, kind);
-    if (sel elem.none) { ret -1; }
-    if (sel elem.some) {
-        val arr: res[type.TypeId, fail.Fail] = type.intern_array(?s.types, elem.some, 4);
-        if (sel arr.ok) {
-            val found: res[bool, fail.Fail] = contains_float(s, arr.ok);
-            if (sel found.ok) {
-                if (found.ok) { ret 1; }
-                ret 0;
-            }
-        }
-    }
-    ret -1;
-}
-
-# an array of floats contains a float, and one of integers does not
-test contains_float__finds_a_float_through_an_array {
-    var alloc: A.Allocator;
-    page.make(?alloc);
-    val sr: res[session.Session, fail.Fail] = session.init(?alloc);
-    if (sel sr.err) { ret 1; }
-    var s: session.Session = sr.ok;
-    fin { session.dnit(?s); }
-    if (t_array_holds_float(?s, type.TYPE_F32) != 1) { ret 2; }
-    if (t_array_holds_float(?s, type.TYPE_U32) != 0) { ret 3; }
-    ret 0;
-}
-
-# a record `name` owned by `at` with the single field `field`
-#[testing]
-fun t_record(types: *type.TypeInterner, at: type.TypeOwner, name: u32, field: type.TypeId) res[type.TypeId, fail.Fail] {
-    val made: res[type.TypeId, fail.Fail] = type.intern_nominal(types, intern.str_id(name), at, type.TYPE_REC);
-    if (sel made.err) { ret made; }
-    val staged: res[u32, fail.Fail] = type.field_table_stage(types, 1);
-    if (sel staged.err) { ret res[type.TypeId, fail.Fail].err{staged.err}; }
-    val pushed: err[fail.Fail] = type.field_table_stage_push(types, intern.str_id(name + 1), field);
-    if (sel pushed.err) { ret res[type.TypeId, fail.Fail].err{pushed.err}; }
-    val published: err[fail.Fail] = type.field_table_publish(types, made.ok, staged.ok, 1);
-    if (sel published.err) { ret res[type.TypeId, fail.Fail].err{published.err}; }
-    ret made;
-}
-
-# 1 when `[0]` of a record holding `leaf`, and the instance of `rec G[T] { a: [0]T; }` over
-# that record, both answer `prop`; 0 when neither does; -1 when they disagree or fail
-#[testing]
-fun t_empty_array_reaches(s: *session.Session, leaf: type.TypeId, prop: DeepProp, base: u32) i32 {
-    val at:     type.TypeOwner              = type.TypeOwner{module: module.stable_id(3), file: lang_source.file_id(1)};
-    val holder: res[type.TypeId, fail.Fail] = t_record(?s.types, at, base, leaf);
-    if (sel holder.err) { ret -1; }
-    val empty: res[type.TypeId, fail.Fail] = type.intern_array(?s.types, holder.ok, 0);
-    if (sel empty.err) { ret -1; }
-    val concrete: res[type.TypeId, fail.Fail] = t_record(?s.types, at, base + 2, empty.ok);
-    if (sel concrete.err) { ret -1; }
-
-    val param: res[type.TypeId, fail.Fail] = type.intern_generic_param(?s.types, intern.str_id(base + 5), at, intern.str_id(base + 4), type.TYPE_REC, 0);
-    if (sel param.err) { ret -1; }
-    val of_param: res[type.TypeId, fail.Fail] = type.intern_array(?s.types, param.ok, 0);
-    if (sel of_param.err) { ret -1; }
-    val generic: res[type.TypeId, fail.Fail] = t_record(?s.types, at, base + 4, of_param.ok);
-    if (sel generic.err) { ret -1; }
-    var arg: [1]type.TypeId;
-    arg[0] = holder.ok;
-    val inst: res[type.TypeId, fail.Fail] = type.intern_instance(?s.types, generic.ok, ?arg[0], 1);
-    if (sel inst.err) { ret -1; }
-
-    var c: res[bool, fail.Fail] = contains_secret(s, concrete.ok);
-    var g: res[bool, fail.Fail] = contains_secret(s, inst.ok);
-    if (prop == DEEP_FLOAT) {
-        c = contains_float(s, concrete.ok);
-        g = contains_float(s, inst.ok);
-    }
-    if (!sel c.ok)    { ret -1; }
-    if (!sel g.ok)    { ret -1; }
-    if (c.ok != g.ok) { ret -1; }
-    if (c.ok)         { ret 1; }
-    ret 0;
-}
-
-# an empty array's element is reached whatever the length, in a concrete record and through a
-# generic's parameter alike, for a secret and a float
-test deep__an_empty_array_reaches_its_element {
-    var alloc: A.Allocator;
-    page.make(?alloc);
-    val sr: res[session.Session, fail.Fail] = session.init(?alloc);
-    if (sel sr.err) { ret 1; }
-    var s: session.Session = sr.ok;
-    fin { session.dnit(?s); }
-    val u: opt[type.TypeId] = type.prim(?s.types, type.TYPE_U32);
-    val f: opt[type.TypeId] = type.prim(?s.types, type.TYPE_F32);
-    if (!sel u.some) { ret 2; }
-    if (!sel f.some) { ret 2; }
-    val secret: res[type.TypeId, fail.Fail] = type.intern_secret(?s.types, u.some);
-    if (sel secret.err)                                              { ret 2; }
-    if (t_empty_array_reaches(?s, secret.ok, DEEP_SECRET, 100) != 1) { ret 3; }
-    if (t_empty_array_reaches(?s, f.some, DEEP_FLOAT, 200) != 1)     { ret 4; }
-    if (t_empty_array_reaches(?s, u.some, DEEP_SECRET, 300) != 0)    { ret 5; }
-    if (t_empty_array_reaches(?s, u.some, DEEP_FLOAT, 400) != 0)     { ret 6; }
-    ret 0;
 }

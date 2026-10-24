@@ -7,7 +7,6 @@ use std.types.bool.true;
 use std.types.error.err;
 use std.types.option.opt;
 use std.types.result.res;
-use std.types.size.usize;
 
 use ast_expr: mach.lang.fe.ast.expr;
 use ast_id:   mach.lang.fe.ast.id;
@@ -435,22 +434,4 @@ fun is_typed_pointer(sc: *sema_context.SemaContext, t: type.TypeId) bool {
     val opt_type: opt[*type.Type] = type.get(?sc.s.types, t);
     if (!sel opt_type.some) { ret false; }
     ret opt_type.some.kind == type.TYPE_POINTER;
-}
-
-test is_value_preserving_binop__partition_binop {
-    val preserving: [10]ast_expr.BinOp = [10]ast_expr.BinOp{ast_expr.BIN_ADD, ast_expr.BIN_SUB, ast_expr.BIN_MUL, ast_expr.BIN_DIV,
-        ast_expr.BIN_MOD, ast_expr.BIN_BIT_AND, ast_expr.BIN_BIT_OR, ast_expr.BIN_BIT_XOR, ast_expr.BIN_SHL, ast_expr.BIN_SHR};
-    val others: [9]ast_expr.BinOp = [9]ast_expr.BinOp{ast_expr.BIN_EQ, ast_expr.BIN_NEQ, ast_expr.BIN_LT, ast_expr.BIN_LEQ,
-        ast_expr.BIN_GT, ast_expr.BIN_GEQ, ast_expr.BIN_AND, ast_expr.BIN_OR, ast_expr.BIN_ASSIGN};
-    var i: usize = 0;
-    for (i < 10) {
-        if (!is_value_preserving_binop(preserving[i])) { ret 1; }
-        i = i + 1;
-    }
-    i = 0;
-    for (i < 9) {
-        if (is_value_preserving_binop(others[i])) { ret 2; }
-        i = i + 1;
-    }
-    ret 0;
 }

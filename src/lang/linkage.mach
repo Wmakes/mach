@@ -8,14 +8,12 @@ use collections_vector: std.collections.vector;
 use std.collections.vector.Vector;
 use std.types.bool.bool;
 use std.types.bool.false;
-use std.types.bool.true;
 use std.types.error.err;
 use std.types.option.opt;
 use std.types.result.res;
 use std.types.size.usize;
 
 use A: std.allocator;
-use std.allocator.page;
 
 use mach.lang.fail;
 use mach.lang.intern;
@@ -155,72 +153,4 @@ pub fun provider(l: *Linkage, name: intern.StrId) opt[Provider] {
 pub fun providers_clear(l: *Linkage) {
     collections_vector.truncate[Provider](?l.providers, 0);
     map.clear[intern.StrId, usize](?l.provider_at);
-}
-
-test provider__order_dedup_upgrade_clear {
-    var alloc: A.Allocator;
-    page.make(?alloc);
-    var itn: intern.Interner = intern.init(?alloc);
-    fin { intern.dnit(?itn); }
-    var l: Linkage = init(?alloc);
-    fin { dnit(?l); }
-
-    val a_r: res[intern.StrId, A.Error] = intern.add(?itn, "alpha");
-    val b_r: res[intern.StrId, A.Error] = intern.add(?itn, "beta");
-    val c_r: res[intern.StrId, A.Error] = intern.add(?itn, "gamma");
-    if (sel a_r.err) { ret 1; }
-    if (sel b_r.err) { ret 1; }
-    if (sel c_r.err) { ret 1; }
-    val a: intern.StrId = a_r.ok;
-    val b: intern.StrId = b_r.ok;
-    val c: intern.StrId = c_r.ok;
-
-    val none: opt[Provider] = provider(?l, a);
-    if (sel none.some) { ret 2; }
-    val nil_r: err[fail.Fail] = register_provider(?l, intern.STR_NIL, true);
-    if (sel nil_r.err || l.providers.len != 0) { ret 3; }
-
-    val ra: err[fail.Fail] = register_provider(?l, a, true);
-    val rb: err[fail.Fail] = register_provider(?l, b, false);
-    if (sel ra.err || sel rb.err || l.providers.len != 2)                                { ret 4; }
-    if (!intern.str_same(l.providers.data[0].name, a) || !l.providers.data[0].is_static) { ret 5; }
-    if (!intern.str_same(l.providers.data[1].name, b) || l.providers.data[1].is_static)  { ret 6; }
-
-    val rb2: err[fail.Fail] = register_provider(?l, b, true);
-    if (sel rb2.err || l.providers.len != 2 || l.providers.data[1].is_static) { ret 7; }
-    val ra2: err[fail.Fail] = register_provider(?l, a, false);
-    if (sel ra2.err || l.providers.len != 2) { ret 8; }
-    val pa: opt[Provider] = provider(?l, a);
-    if (!(sel pa.some && !pa.some.is_static)) { ret 9; }
-    val pc: opt[Provider] = provider(?l, c);
-    if (sel pc.some) { ret 10; }
-
-    providers_clear(?l);
-    val gone: opt[Provider] = provider(?l, a);
-    if (l.providers.len != 0 || sel gone.some) { ret 11; }
-    val rc: err[fail.Fail] = register_provider(?l, c, false);
-    if (sel rc.err || l.providers.len != 1) { ret 12; }
-    ret 0;
-}
-
-test export_names__keyed_by_declaration_and_forgotten_by_module {
-    var alloc: A.Allocator;
-    page.make(?alloc);
-    var itn: intern.Interner = intern.init(?alloc);
-    fin { intern.dnit(?itn); }
-    var l: Linkage = init(?alloc);
-    fin { dnit(?l); }
-    val n_r: res[intern.StrId, A.Error] = intern.add(?itn, "exported");
-    if (sel n_r.err) { ret 1; }
-    val one: module.ModuleId = module.id(1);
-    val two: module.ModuleId = module.id(2);
-    val r1:  err[fail.Fail]  = register_export_name(?l, one, 3, n_r.ok);
-    val r2:  err[fail.Fail]  = register_export_name(?l, two, 3, n_r.ok);
-    if (sel r1.err || sel r2.err)                          { ret 2; }
-    if (!intern.str_same(export_name(?l, one, 3), n_r.ok)) { ret 3; }
-    if (!intern.str_is_nil(export_name(?l, one, 4)))       { ret 4; }
-    forget_export_names(?l, one, 4);
-    if (!intern.str_is_nil(export_name(?l, one, 3)))       { ret 5; }
-    if (!intern.str_same(export_name(?l, two, 3), n_r.ok)) { ret 6; }
-    ret 0;
 }

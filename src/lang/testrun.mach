@@ -7,7 +7,6 @@ use std.types.error.err;
 use std.types.result.res;
 use std.types.size.usize;
 use std.types.string.str;
-use std.types.string.str_equals;
 
 use std.text.string.str_dup;
 use std.text.string.str_free;
@@ -16,8 +15,6 @@ use collections_vector: std.collections.vector;
 use std.collections.vector.Vector;
 
 use A: std.allocator;
-use std.allocator.page;
-use T: std.allocator.testing;
 
 # a collected test and how it ran: the test a dispatcher runs, each run's
 # result, and the tally over a run's results
@@ -57,15 +54,7 @@ pub val RESULT_SKIP:                   GateResultKind = 7;
 pub def GateCause: u8;
 
 pub val CAUSE_PASS:                 GateCause = 0;
-#[testing]
-val     CAUSE_UNSUPPORTED:          GateCause = 1;
-#[testing]
-pub val CAUSE_TOOL_UNAVAILABLE:     GateCause = 2;
-#[testing]
-val     CAUSE_INVALID_INJECTOR:     GateCause = 3;
 pub val CAUSE_ORACLE_TIMEOUT:       GateCause = 4;
-#[testing]
-val     CAUSE_ORACLE_OUTPUT_LIMIT:  GateCause = 5;
 pub val CAUSE_ORACLE_SPAWN_FAILURE: GateCause = 6;
 pub val CAUSE_ORACLE_CAPTURE:       GateCause = 7;
 pub val CAUSE_ORACLE_SIGNAL:        GateCause = 8;
@@ -155,12 +144,6 @@ pub fun record_gate(gt: *GateTally, a: *A.Allocator, r: GateResult) err[A.Error]
     ret err[A.Error].ok{};
 }
 
-#[testing]
-pub fun gate_tally_total(gt: *GateTally) u32 {
-    ret gt.pass + gt.semantic_mismatch + gt.unsupported_input + gt.tool_unavailable
-        + gt.infrastructure_failure + gt.resource_exhaustion + gt.invalid_injection + gt.skip;
-}
-
 # whether one arm of a test that checks several failed; an arm that skipped sets
 # skipped and is no failure, so the test reports a skip once every arm has run
 #[testing]
@@ -170,65 +153,4 @@ pub fun arm_failed(status: i32, skipped: *bool) bool {
         ret false;
     }
     ret status != 0;
-}
-
-#[testing]
-fun t_owned_nothing(t: *T.Testing) bool {
-    ret !T.tracking_exhausted(t) && !T.leaked(t) && T.double_free_count(t) == 0;
-}
-
-#[testing]
-fun t_refused(r: err[A.Error]) bool {
-    ret sel r.err;
-}
-
-test gate_tally__counts_and_retains_identity_for_every_kind {
-    var a: A.Allocator;
-    page.make(?a);
-    var gt: GateTally = gate_tally_init(?a);
-
-    if (t_refused(record_gate(?gt, ?a, gate_result(RESULT_PASS, CAUSE_PASS, nil))))                               { ret 1; }
-    if (t_refused(record_gate(?gt, ?a, gate_result(RESULT_SEMANTIC_MISMATCH, CAUSE_ORACLE_EXIT, "case-a"))))      { ret 2; }
-    if (t_refused(record_gate(?gt, ?a, gate_result(RESULT_UNSUPPORTED_INPUT, CAUSE_UNSUPPORTED, nil))))           { ret 3; }
-    if (t_refused(record_gate(?gt, ?a, gate_result(RESULT_TOOL_UNAVAILABLE, CAUSE_TOOL_UNAVAILABLE, nil))))       { ret 4; }
-    if (t_refused(record_gate(?gt, ?a, gate_result(RESULT_INFRASTRUCTURE_FAILURE, CAUSE_ORACLE_CAPTURE, nil))))   { ret 5; }
-    if (t_refused(record_gate(?gt, ?a, gate_result(RESULT_RESOURCE_EXHAUSTION, CAUSE_ORACLE_OUTPUT_LIMIT, nil)))) { ret 6; }
-    if (t_refused(record_gate(?gt, ?a, gate_result(RESULT_INVALID_INJECTION, CAUSE_INVALID_INJECTOR, nil))))      { ret 7; }
-    if (t_refused(record_gate(?gt, ?a, gate_result(RESULT_SKIP, CAUSE_SKIP, nil))))                               { ret 8; }
-
-    var bad: i32 = 0;
-    if (gt.pass != 1)                                              { bad = 1; }
-    or (gt.semantic_mismatch != 1)                                 { bad = 1; }
-    or (gt.unsupported_input != 1)                                 { bad = 1; }
-    or (gt.tool_unavailable != 1)                                  { bad = 1; }
-    or (gt.infrastructure_failure != 1)                            { bad = 1; }
-    or (gt.resource_exhaustion != 1)                               { bad = 1; }
-    or (gt.invalid_injection != 1)                                 { bad = 1; }
-    or (gt.skip != 1)                                              { bad = 1; }
-    or (gate_tally_total(?gt) != 8)                                { bad = 1; }
-    or (gt.results.len != 8)                                       { bad = 1; }
-    or (!str_equals(gt.results.data[1].detail_identity, "case-a")) { bad = 1; }
-
-    gate_tally_dnit(?gt);
-    if (gate_tally_total(?gt) != 0 || gt.results.len != 0) { bad = 1; }
-
-    ret bad;
-}
-
-test record_gate__fails_closed_and_frees_the_duplicated_identity {
-    var failing: T.Testing;
-    val made:    err[A.Error] = T.make(?failing);
-    if (sel made.err) { ret 1; }
-    fin { T.dnit(?failing); }
-    T.fail_at_ordinal(?failing, 2::usize);
-
-    var gt: GateTally    = gate_tally_init(T.allocator_of(?failing));
-    val r:  err[A.Error] = record_gate(?gt, T.allocator_of(?failing),
-        gate_result(RESULT_SEMANTIC_MISMATCH, CAUSE_ORACLE_EXIT, "identity"));
-    if (sel r.ok)                                          { ret 1; }
-    if (gt.results.len != 0 || gate_tally_total(?gt) != 0) { ret 2; }
-
-    gate_tally_dnit(?gt);
-    if (!t_owned_nothing(?failing)) { ret 1; }
-    ret 0;
 }

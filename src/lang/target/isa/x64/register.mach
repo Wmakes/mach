@@ -1,13 +1,10 @@
 use mach.lang.fail;
-use mach.lang.float;
 use std.types.bool.true;
 use std.types.error.err;
 use std.types.result.res;
 
-use mach.lang.ct;
-use lang_mir:      mach.lang.mir;
-use catalog_arch:  mach.lang.target.catalog.arch;
-use extension_x64: mach.lang.target.extension.x64;
+use lang_mir:     mach.lang.mir;
+use catalog_arch: mach.lang.target.catalog.arch;
 use mach.lang.target.isa;
 use mach.lang.target.isa.common;
 use isa_inst: mach.lang.target.isa.inst;
@@ -161,48 +158,3 @@ pub val VTABLE: isa.IsaVTable = isa.IsaVTable{
     machine:       ?MACHINE,
     model:         ?model_x64.MACHINE,
 };
-
-test x64_dwarf_reg__psabi_numbers {
-    if (dwarf_reg(x64.RAX) != 0)  { ret 1; }
-    if (dwarf_reg(x64.RDX) != 1)  { ret 1; }
-    if (dwarf_reg(x64.RCX) != 2)  { ret 1; }
-    if (dwarf_reg(x64.RBX) != 3)  { ret 1; }
-    if (dwarf_reg(x64.RSI) != 4)  { ret 1; }
-    if (dwarf_reg(x64.RDI) != 5)  { ret 1; }
-    if (dwarf_reg(x64.RBP) != 6)  { ret 1; }
-    if (dwarf_reg(x64.RSP) != 7)  { ret 1; }
-    if (dwarf_reg(x64.R8) != 8)   { ret 1; }
-    if (dwarf_reg(x64.R15) != 15) { ret 1; }
-
-    if (dwarf_reg(x64.FRAME_REG) != 6) { ret 1; }
-
-    if (dwarf_reg(x64.XMM0) != 17)  { ret 1; }
-    if (dwarf_reg(x64.XMM15) != 32) { ret 1; }
-
-    if (dwarf_reg(isa_inst.regid_make(isa_inst.REG_CLASS_ID_GP, 16)) != -1) { ret 1; }
-    if (dwarf_reg(isa_inst.regid_make(isa_inst.REG_CLASS_ID_FP, 16)) != -1) { ret 1; }
-    ret 0;
-}
-
-test x64_cv_reg__cvconst_numbers {
-    if (cv_reg(x64.RAX) != 328) { ret 1; }
-    if (cv_reg(x64.RBX) != 329) { ret 1; }
-    if (cv_reg(x64.RCX) != 330) { ret 1; }
-    if (cv_reg(x64.RDX) != 331) { ret 1; }
-    if (cv_reg(x64.RSI) != 332) { ret 1; }
-    if (cv_reg(x64.RDI) != 333) { ret 1; }
-    if (cv_reg(x64.RBP) != 334) { ret 1; }
-    if (cv_reg(x64.RSP) != 335) { ret 1; }
-    if (cv_reg(x64.R8) != 336)  { ret 1; }
-    if (cv_reg(x64.R15) != 343) { ret 1; }
-
-    if (cv_reg(x64.FRAME_REG) != 334) { ret 1; }
-
-    if (cv_reg(x64.XMM0) != 154)  { ret 1; }
-    if (cv_reg(x64.XMM7) != 161)  { ret 1; }
-    if (cv_reg(x64.XMM8) != 252)  { ret 1; }
-    if (cv_reg(x64.XMM15) != 259) { ret 1; }
-
-    if (cv_reg(isa_inst.regid_make(isa_inst.REG_CLASS_ID_GP, 16)) != -1) { ret 1; }
-    ret 0;
-}

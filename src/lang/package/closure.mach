@@ -782,17 +782,3 @@ fun copied(a: *A.Allocator, s: str) res[str, fail.Fail] {
     if (sel res_dup.err) { ret res[str, fail.Fail].err{fail.refused(res_dup.err)}; }
     ret res[str, fail.Fail].ok{res_dup.ok};
 }
-
-#[testing]
-pub fun own(a: *A.Allocator, s: str) str {
-    val res_dup: res[str, A.Error] = str_dup(a, s);
-    if (sel res_dup.err) { ret nil; }
-    ret res_dup.ok;
-}
-
-#[testing]
-pub fun concat3(a: *A.Allocator, s1: str, s2: str, s3: str) str {
-    val r: res[str, std_format.FormatError] = std_format.sprint(a, "{}{}{}", s1, s2, s3);
-    if (sel r.err) { ret s2; }
-    ret r.ok;
-}

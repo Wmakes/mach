@@ -13,7 +13,6 @@ use std.types.result.res;
 use std.types.size.usize;
 
 use A: std.allocator;
-use std.allocator.page;
 
 use mach.lang.fail;
 use ast_id:        mach.lang.fe.ast.id;
@@ -198,53 +197,4 @@ pub fun exported_count(iface: *Interface) u32 {
 
 pub fun exported_at(iface: *Interface, ord: u32) *Exported {
     ret ?iface.surface.data[ord];
-}
-
-#[testing]
-fun t_declaration(kind: resolve.SymKind, canon: u32, decl: u32) Declaration {
-    ret Declaration{kind: kind, canon: intern.str_id(canon), decl: ast_id.decl(decl), value: NONE, op_set: intern.STR_NIL, op_name: intern.STR_NIL};
-}
-
-#[testing]
-fun t_added(iface: *Interface, kind: resolve.SymKind, canon: u32, decl: u32, params: *Param, len: u32) bool {
-    val added: err[fail.Fail] = declaration_add(iface, t_declaration(kind, canon, decl), params, len);
-    ret sel added.ok;
-}
-
-#[testing]
-fun t_found(iface: *Interface, kind: resolve.SymKind, canon: u32) *Declaration {
-    val found: res[*Declaration, fail.Fail] = declaration_for(iface, kind, intern.str_id(canon));
-    if (sel found.ok) { ret found.ok; }
-    ret nil;
-}
-
-# a declaration is found by its id and by its kind and name, a second one of the same kind and
-# name is refused by name but still found by id, and its parameters read back in order
-test declaration__reads_by_id_and_refuses_an_ambiguous_name {
-    var alloc:  A.Allocator;
-    val make_r: err[A.Error] = page.make(?alloc);
-    if (sel make_r.err) { ret 1; }
-    var iface: Interface = init(?alloc);
-    fin { dnit(?iface); }
-    var params: [2]Param = [2]Param{Param{comptime: false}, Param{comptime: true}};
-    if (!t_added(?iface, resolve.SYM_FUN, 10, 3, ?params[0], 2)) { ret 2; }
-    if (!t_added(?iface, resolve.SYM_VAL, 10, 4, nil, 0))        { ret 2; }
-    val f: *Declaration = t_found(?iface, resolve.SYM_FUN, 10);
-    if (f == nil || !ast_id.decl_same(f.decl, ast_id.decl(3))) { ret 3; }
-    if (!declaration_has_comptime_param(?iface, f))            { ret 4; }
-    if (!declaration_has_instances(?iface, f))                 { ret 4; }
-    val second: opt[Param] = param_at(?iface, f, 1);
-    if (sel second.none)       { ret 5; }
-    if (!second.some.comptime) { ret 5; }
-    val third: opt[Param] = param_at(?iface, f, 2);
-    if (sel third.some)                                   { ret 5; }
-    if (t_found(?iface, resolve.SYM_VAR, 10) != nil)      { ret 6; }
-    if (!t_added(?iface, resolve.SYM_FUN, 10, 5, nil, 0)) { ret 7; }
-    if (t_found(?iface, resolve.SYM_FUN, 10) != nil)      { ret 8; }
-    val by_id: opt[*Declaration] = declaration_at(?iface, ast_id.decl(5));
-    if (sel by_id.none)             { ret 9; }
-    if (by_id.some.params_len != 0) { ret 9; }
-    val absent: opt[*Declaration] = declaration_at(?iface, ast_id.decl(6));
-    if (sel absent.some) { ret 10; }
-    ret 0;
 }

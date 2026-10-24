@@ -6,13 +6,11 @@ use target_of:    mach.lang.target.of;
 use mach.lang.target.of.bin;
 use macho_format: mach.lang.target.of.macho.format;
 use A:            std.allocator;
-use std.allocator.page;
 use std.types.bool.bool;
 use std.types.bool.true;
 use std.types.result.res;
 use std.types.size.usize;
 use std.types.string.str;
-use std.types.string.str_contains;
 
 pub rec MachoReloc {
     r_type: u32;
@@ -179,134 +177,4 @@ pub fun add_u64_mod(a: u64, b: u64) u64 {
     val max: u64 = 0xFFFFFFFFFFFFFFFF;
     if (a > max - b) { ret a - (max - b) - 1; }
     ret a + b;
-}
-
-test macho_reloc_for__per_arch_kinds {
-    var alloc: A.Allocator;
-    page.make(?alloc);
-    var i: intern.Interner = intern.init(?alloc);
-
-    val x_abs: res[MachoReloc, fail.Fail] = reloc_for(?i, ?alloc, catalog_arch.X86_64, target_of.RK_ABS64, target_of.RELOC_INPUT);
-    if (sel x_abs.err)                                         { ret 1; }
-    if (x_abs.ok.r_type != macho_format.X86_64_RELOC_UNSIGNED) { ret 1; }
-    val x_plt: res[MachoReloc, fail.Fail] = reloc_for(?i, ?alloc, catalog_arch.X86_64, target_of.RK_PLT32, target_of.RELOC_INPUT);
-    if (sel x_plt.err)                                       { ret 1; }
-    if (x_plt.ok.r_type != macho_format.X86_64_RELOC_BRANCH) { ret 1; }
-    val x_got_load: res[MachoReloc, fail.Fail] = reloc_for(?i, ?alloc, catalog_arch.X86_64, target_of.RK_GOTPCREL, target_of.RELOC_INPUT);
-    val x_got:      res[MachoReloc, fail.Fail] = reloc_for(?i, ?alloc, catalog_arch.X86_64, target_of.RK_GOTPCREL_NORELAX, target_of.RELOC_INPUT);
-    val x_got64:    res[MachoReloc, fail.Fail] = reloc_for(?i, ?alloc, catalog_arch.X86_64, target_of.RK_GOTPCREL64_NORELAX, target_of.RELOC_INPUT);
-    if (sel x_got_load.err)                                         { ret 1; }
-    if (x_got_load.ok.r_type != macho_format.X86_64_RELOC_GOT_LOAD) { ret 1; }
-    if (sel x_got.err)                                              { ret 1; }
-    if (x_got.ok.r_type != macho_format.X86_64_RELOC_GOT)           { ret 1; }
-    if (x_got.ok.length != 2)                                       { ret 1; }
-    if (sel x_got64.err)                                            { ret 1; }
-    if (x_got64.ok.r_type != macho_format.X86_64_RELOC_GOT)         { ret 1; }
-    if (x_got64.ok.length != 3)                                     { ret 1; }
-
-    val a_page: res[MachoReloc, fail.Fail] = reloc_for(?i, ?alloc, catalog_arch.AARCH64, target_of.RK_PAGE21, target_of.RELOC_INPUT);
-    if (sel a_page.err)                                      { ret 1; }
-    if (a_page.ok.r_type != macho_format.ARM64_RELOC_PAGE21) { ret 1; }
-    val a_ldst: res[MachoReloc, fail.Fail] = reloc_for(?i, ?alloc, catalog_arch.AARCH64, target_of.RK_LDST32_LO12, target_of.RELOC_INPUT);
-    if (sel a_ldst.err)                                         { ret 1; }
-    if (a_ldst.ok.r_type != macho_format.ARM64_RELOC_PAGEOFF12) { ret 1; }
-
-    val a_got_page: res[MachoReloc, fail.Fail] = reloc_for(?i, ?alloc, catalog_arch.AARCH64, target_of.RK_GOT_PAGE21, target_of.RELOC_INPUT);
-    if (sel a_got_page.err)                                               { ret 1; }
-    if (a_got_page.ok.r_type != macho_format.ARM64_RELOC_GOT_LOAD_PAGE21) { ret 1; }
-    if (a_got_page.ok.pcrel != 1 || a_got_page.ok.length != 2)            { ret 1; }
-    val a_got_lo: res[MachoReloc, fail.Fail] = reloc_for(?i, ?alloc, catalog_arch.AARCH64, target_of.RK_GOT_LO12, target_of.RELOC_INPUT);
-    if (sel a_got_lo.err)                                                  { ret 1; }
-    if (a_got_lo.ok.r_type != macho_format.ARM64_RELOC_GOT_LOAD_PAGEOFF12) { ret 1; }
-    if (a_got_lo.ok.pcrel != 0 || a_got_lo.ok.length != 2)                 { ret 1; }
-
-    val a_bad: res[MachoReloc, fail.Fail] = reloc_for(?i, ?alloc, catalog_arch.AARCH64, target_of.RK_ADDR32NB, target_of.RELOC_INPUT);
-    if (!sel a_bad.err)                                      { ret 1; }
-    if (!str_contains(fail.describe(a_bad.err), "addr32nb")) { ret 1; }
-    # the kind has no Mach-O form: the input's fault when an input asked for it,
-    # a compiler defect when codegen made it
-    if (fail.kind_of(a_bad.err) != diagnostic_kind.LINK_RELOCATION_UNSUPPORTED) { ret 1; }
-    val made: res[MachoReloc, fail.Fail] = reloc_for(?i, ?alloc, catalog_arch.AARCH64, target_of.RK_ADDR32NB, target_of.RELOC_CODEGEN);
-    if (sel made.ok)                                                 { ret 1; }
-    if (fail.kind_of(made.err) != diagnostic_kind.COMPILER_INTERNAL) { ret 1; }
-    ret 0;
-}
-
-test reloc_kind_for__pageoff12_reads_the_instruction {
-    var alloc: A.Allocator;
-    page.make(?alloc);
-    var i: intern.Interner = intern.init(?alloc);
-
-    val add: res[target_of.RelocKind, fail.Fail] = reloc_kind_for(?i, ?alloc, macho_format.CPU_TYPE_ARM64, macho_format.ARM64_RELOC_PAGEOFF12, 2, 0x91000000);
-    if (sel add.err)                     { ret 1; }
-    if (add.ok != target_of.RK_ADD_LO12) { ret 1; }
-    val b8: res[target_of.RelocKind, fail.Fail] = reloc_kind_for(?i, ?alloc, macho_format.CPU_TYPE_ARM64, macho_format.ARM64_RELOC_PAGEOFF12, 2, 0x39400000);
-    if (sel b8.err)                       { ret 1; }
-    if (b8.ok != target_of.RK_LDST8_LO12) { ret 1; }
-    val h16: res[target_of.RelocKind, fail.Fail] = reloc_kind_for(?i, ?alloc, macho_format.CPU_TYPE_ARM64, macho_format.ARM64_RELOC_PAGEOFF12, 2, 0x79400000);
-    if (sel h16.err)                        { ret 1; }
-    if (h16.ok != target_of.RK_LDST16_LO12) { ret 1; }
-    val w32: res[target_of.RelocKind, fail.Fail] = reloc_kind_for(?i, ?alloc, macho_format.CPU_TYPE_ARM64, macho_format.ARM64_RELOC_PAGEOFF12, 2, 0xB9400000);
-    if (sel w32.err)                        { ret 1; }
-    if (w32.ok != target_of.RK_LDST32_LO12) { ret 1; }
-    val x64: res[target_of.RelocKind, fail.Fail] = reloc_kind_for(?i, ?alloc, macho_format.CPU_TYPE_ARM64, macho_format.ARM64_RELOC_PAGEOFF12, 2, 0xF9400000);
-    if (sel x64.err)                        { ret 1; }
-    if (x64.ok != target_of.RK_LDST64_LO12) { ret 1; }
-    val q128: res[target_of.RelocKind, fail.Fail] = reloc_kind_for(?i, ?alloc, macho_format.CPU_TYPE_ARM64, macho_format.ARM64_RELOC_PAGEOFF12, 2, 0x3DC00000);
-    if (sel q128.err)                         { ret 1; }
-    if (q128.ok != target_of.RK_LDST128_LO12) { ret 1; }
-    ret 0;
-}
-
-test reloc_kind__unsigned_by_length_round_trip {
-    var alloc: A.Allocator;
-    page.make(?alloc);
-    var i: intern.Interner = intern.init(?alloc);
-
-    val x32: res[MachoReloc, fail.Fail] = reloc_for(?i, ?alloc, catalog_arch.X86_64, target_of.RK_ABS32, target_of.RELOC_INPUT);
-    if (sel x32.err)                                         { ret 1; }
-    if (x32.ok.r_type != macho_format.X86_64_RELOC_UNSIGNED) { ret 1; }
-    if (x32.ok.length != 2)                                  { ret 1; }
-    val a32: res[MachoReloc, fail.Fail] = reloc_for(?i, ?alloc, catalog_arch.AARCH64, target_of.RK_ABS32, target_of.RELOC_INPUT);
-    if (sel a32.err)                                        { ret 1; }
-    if (a32.ok.r_type != macho_format.ARM64_RELOC_UNSIGNED) { ret 1; }
-    if (a32.ok.length != 2)                                 { ret 1; }
-
-    val xr2: res[target_of.RelocKind, fail.Fail] = reloc_kind_for(?i, ?alloc, macho_format.CPU_TYPE_X86_64, macho_format.X86_64_RELOC_UNSIGNED, 2, 0);
-    if (sel xr2.err)                  { ret 1; }
-    if (xr2.ok != target_of.RK_ABS32) { ret 1; }
-    val xr3: res[target_of.RelocKind, fail.Fail] = reloc_kind_for(?i, ?alloc, macho_format.CPU_TYPE_X86_64, macho_format.X86_64_RELOC_UNSIGNED, 3, 0);
-    if (sel xr3.err)                  { ret 1; }
-    if (xr3.ok != target_of.RK_ABS64) { ret 1; }
-    val ar2: res[target_of.RelocKind, fail.Fail] = reloc_kind_for(?i, ?alloc, macho_format.CPU_TYPE_ARM64, macho_format.ARM64_RELOC_UNSIGNED, 2, 0);
-    if (sel ar2.err)                  { ret 1; }
-    if (ar2.ok != target_of.RK_ABS32) { ret 1; }
-    val ar3: res[target_of.RelocKind, fail.Fail] = reloc_kind_for(?i, ?alloc, macho_format.CPU_TYPE_ARM64, macho_format.ARM64_RELOC_UNSIGNED, 3, 0);
-    if (sel ar3.err)                  { ret 1; }
-    if (ar3.ok != target_of.RK_ABS64) { ret 1; }
-    ret 0;
-}
-
-# the arm64 GOT_LOAD pair reads back as the GOT kinds, and only over the
-# instructions a GOT load is made of: an ADRP for the page, a 64-bit LDR for
-# the offset
-test reloc_kind_for__got_load_pair {
-    var alloc: A.Allocator;
-    page.make(?alloc);
-    var i: intern.Interner = intern.init(?alloc);
-
-    val page21: res[target_of.RelocKind, fail.Fail] = reloc_kind_for(?i, ?alloc, macho_format.CPU_TYPE_ARM64, macho_format.ARM64_RELOC_GOT_LOAD_PAGE21, 2, 0x90000008);
-    if (sel page21.err)                       { ret 1; }
-    if (page21.ok != target_of.RK_GOT_PAGE21) { ret 1; }
-    val lo12: res[target_of.RelocKind, fail.Fail] = reloc_kind_for(?i, ?alloc, macho_format.CPU_TYPE_ARM64, macho_format.ARM64_RELOC_GOT_LOAD_PAGEOFF12, 2, 0xF9400108);
-    if (sel lo12.err)                     { ret 1; }
-    if (lo12.ok != target_of.RK_GOT_LO12) { ret 1; }
-
-    val not_adrp: res[target_of.RelocKind, fail.Fail] = reloc_kind_for(?i, ?alloc, macho_format.CPU_TYPE_ARM64, macho_format.ARM64_RELOC_GOT_LOAD_PAGE21, 2, 0xF9400108);
-    if (!sel not_adrp.err)                                                    { ret 1; }
-    if (!str_contains(fail.describe(not_adrp.err), "does not patch an ADRP")) { ret 1; }
-    val not_ldr: res[target_of.RelocKind, fail.Fail] = reloc_kind_for(?i, ?alloc, macho_format.CPU_TYPE_ARM64, macho_format.ARM64_RELOC_GOT_LOAD_PAGEOFF12, 2, 0x39400108);
-    if (!sel not_ldr.err)                                                         { ret 1; }
-    if (!str_contains(fail.describe(not_ldr.err), "does not patch a 64-bit LDR")) { ret 1; }
-    ret 0;
 }

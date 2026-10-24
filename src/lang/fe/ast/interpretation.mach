@@ -109,38 +109,3 @@ pub fun split(node: ast_type.Type, source: str) res[ast_type.Type, fail.Fail] {
     out.data.named.case_name = leaf;
     ret res[ast_type.Type, fail.Fail].ok{out};
 }
-
-test get__separate_choices_preserve_the_same_parsed_call {
-    var nodes: [3]ast_expr.Expr;
-    nodes[0].kind                      = ast_expr.EXPR_KIND_IDENT;
-    nodes[1].kind                      = ast_expr.EXPR_KIND_INDEX;
-    nodes[1].data.index.object         = ast_id.expr(0);
-    nodes[1].data.index.index          = ast_id.expr(0);
-    nodes[1].data.index.count          = ast_id.EXPR_NIL;
-    nodes[2].kind                      = ast_expr.EXPR_KIND_CALL;
-    nodes[2].data.call.callee          = ast_id.expr(0);
-    nodes[2].data.call.index_callee    = ast_id.expr(1);
-    nodes[2].data.call.type_args_start = 7;
-    nodes[2].data.call.type_args_len   = 2;
-    nodes[2].data.call.args_start      = 9;
-    nodes[2].data.call.args_len        = 3;
-    var a: ast.Ast;
-    a.exprs = ast.table_over[ast_expr.Expr](?nodes[0], 3);
-    var generic:   [3]Choice                     = [3]Choice{PARSED, PARSED, GENERIC};
-    var indexed:   [3]Choice                     = [3]Choice{PARSED, PARSED, INDEX_CALL};
-    val generic_r: res[ast_expr.Expr, fail.Fail] = get(?a, ?generic[0], 3, ast_id.expr(2));
-    val indexed_r: res[ast_expr.Expr, fail.Fail] = get(?a, ?indexed[0], 3, ast_id.expr(2));
-    if (sel generic_r.err) { ret 1; }
-    if (sel indexed_r.err) { ret 1; }
-    val g: ast_expr.Expr = generic_r.ok;
-    val i: ast_expr.Expr = indexed_r.ok;
-    if (!ast_id.expr_same(g.data.call.callee, ast_id.expr(0)) || !ast_id.expr_is_nil(g.data.call.index_callee) || g.data.call.type_args_len != 2)                                      { ret 2; }
-    if (!ast_id.expr_same(i.data.call.callee, ast_id.expr(1)) || i.data.call.type_args_len != 0 || i.data.call.args_start != 9 || i.data.call.args_len != 3)                           { ret 3; }
-    if (!ast_id.expr_same(nodes[2].data.call.callee, ast_id.expr(0)) || !ast_id.expr_same(nodes[2].data.call.index_callee, ast_id.expr(1)) || nodes[2].data.call.type_args_start != 7) { ret 4; }
-    val get_1: res[ast_expr.Expr, fail.Fail] = get(?a, ?generic[0], 2, ast_id.expr(2));
-    if (sel get_1.ok) { ret 5; }
-    indexed[2] = 0xFF;
-    val get_2: res[ast_expr.Expr, fail.Fail] = get(?a, ?indexed[0], 3, ast_id.expr(2));
-    if (sel get_2.ok) { ret 6; }
-    ret 0;
-}

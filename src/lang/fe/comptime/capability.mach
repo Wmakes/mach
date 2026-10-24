@@ -304,13 +304,6 @@ pub fun capabilities_cast[T](ctx: *T, caps: PhaseCapabilities[T]) bool {
     ret capabilities_have_types[T](ctx, caps) || caps.kind == PHASE_CAP_LOADING;
 }
 
-#[testing]
-pub rec TCapabilityNested {
-    inner:       PhaseCapabilities[u32];
-    outer_calls: u32;
-    inner_calls: u32;
-}
-
 # what a field descriptor answers about field `index` of `owner`, `pick` naming the member
 # asked; every answer but the offset reads the type store, and the offset is the phase's
 pub fun field_of[T](ctx: *T, caps: PhaseCapabilities[T], owner: u32, index: u32, pick: u8) res[opt[comptime_value.CTValue], comptime_failure.EvalFail] {

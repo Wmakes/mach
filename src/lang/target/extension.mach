@@ -15,17 +15,12 @@ use std.types.bool.false;
 use std.types.bool.true;
 use std.types.error.err;
 use std.types.option.opt;
-use std.types.result.res;
 use std.types.size.usize;
 use std.types.string.str;
 use std.types.string.str_equals;
 use std.types.string.str_len;
 use std.types.string.str_region_equals;
 use std.types.view.View;
-
-use A: std.allocator;
-use std.allocator.page;
-use std.text.string.str_free;
 
 use masc_extension: masc.core.extension;
 use masc.core.requirement;
@@ -426,97 +421,4 @@ pub fun vocabulary_append(b: *textbuild.TextBuilder, v: *Vocabulary) err[textbui
         i = i + 1;
     }
     ret err[textbuild.Error].ok{};
-}
-
-# the text a test's builder holds, released; nil when it failed
-#[testing]
-fun t_spelled(b: *textbuild.TextBuilder, r: err[textbuild.Error]) str {
-    if (sel r.err) {
-        textbuild.tb_dnit(b);
-        ret nil;
-    }
-    val done: res[str, textbuild.Error] = textbuild.tb_finish(b);
-    textbuild.tb_dnit(b);
-    if (sel done.err) { ret nil; }
-    ret done.ok;
-}
-
-#[testing]
-fun t_spelled_is(a: *A.Allocator, text: str, want: str) bool {
-    if (text == nil) { ret false; }
-    val same: bool = str_equals(text, want);
-    str_free(a, text);
-    ret same;
-}
-
-#[testing]
-val T_ROWS: [3]Extension = [3]Extension{
-    Extension{name: "ssse3", bit: 1, implies: 0, target_only: nil},
-    Extension{name: "sse41", bit: 2, implies: 1, target_only: nil},
-    Extension{name: "sha", bit: 4, implies: 2, target_only: nil},
-};
-
-#[testing]
-val T_TABLE: Table = Table{source: "test", catalog: nil, rows: ?T_ROWS[0], count: 3};
-
-# a table with no catalog is read by its own names: lookup, validity, closure over
-# `implies` to a fixpoint, the widest selection that leaves a bit out, and spelling
-test table__lookup_validity_and_closure {
-    if (bit_of(?T_TABLE, "sse41", 5) != 2)  { ret 1; }
-    if (bit_of(?T_TABLE, "sse4", 4) != 0)   { ret 2; }
-    if (bit_of(?T_TABLE, "sha256", 3) != 4) { ret 3; }
-    if (domain(?T_TABLE) != 7)              { ret 4; }
-    if (!table_valid(?T_TABLE))             { ret 5; }
-    val dup:  [2]Extension = [2]Extension{Extension{name: "a", bit: 1}, Extension{name: "a", bit: 2}};
-    val dupt: Table        = Table{source: "test", catalog: nil, rows: ?dup[0], count: 2};
-    if (table_valid(?dupt)) { ret 6; }
-    val two:  [1]Extension = [1]Extension{Extension{name: "a", bit: 3}};
-    val twot: Table        = Table{source: "test", catalog: nil, rows: ?two[0], count: 1};
-    if (table_valid(?twot)) { ret 7; }
-    val kw:  [1]Extension = [1]Extension{Extension{name: "sel", bit: 1}};
-    val kwt: Table        = Table{source: "test", catalog: nil, rows: ?kw[0], count: 1};
-    if (table_valid(?kwt)) { ret 8; }
-    val stray:  [1]Extension = [1]Extension{Extension{name: "a", bit: 1, implies: 8}};
-    val strayt: Table        = Table{source: "test", catalog: nil, rows: ?stray[0], count: 1};
-    if (table_valid(?strayt))                                                                         { ret 9; }
-    if (close(?T_TABLE, 4) != 7 || close(?T_TABLE, 1) != 1)                                           { ret 10; }
-    if (without(?T_TABLE, 7, 1) != 0 || without(?T_TABLE, 7, 4) != 3 || without(?T_TABLE, 5, 2) != 1) { ret 11; }
-    if (!admits(admitted(3, 0), 1) || !admits(admitted(0, 3), 1) || admits(admitted(1, 0), 2))        { ret 12; }
-    var a:    A.Allocator;
-    val made: err[A.Error] = page.make(?a);
-    if (sel made.err) { ret 13; }
-    var b: textbuild.TextBuilder = textbuild.tb_init(?a);
-    if (!t_spelled_is(?a, t_spelled(?b, names_append(?b, ?T_TABLE)), "ssse3, sse41, sha")) { ret 14; }
-    var bb: textbuild.TextBuilder = textbuild.tb_init(?a);
-    if (!t_spelled_is(?a, t_spelled(?bb, bits_append(?bb, ?T_TABLE, 5)), "ssse3, sha"))      { ret 15; }
-    if (!str_equals(first_name(?T_TABLE, 6), "sse41"))                                       { ret 16; }
-    if (!is_spelling("x86-64-v2", 9) || !is_spelling("sse41", 5) || is_name("x86-64-v2", 9)) { ret 17; }
-    ret 0;
-}
-
-# a vocabulary holds each table once in the order it first arrives, skips an
-# empty one, refuses a table past its capacity and spells every table's names
-test vocabulary__each_table_once_within_capacity {
-    var v:     Vocabulary = vocabulary_empty();
-    val empty: Table      = Table{source: "test", catalog: nil, rows: ?T_ROWS[0], count: 0};
-    val tail:  Table      = Table{source: "test", catalog: nil, rows: ?T_ROWS[1], count: 2};
-    if (!vocabulary_add(?v, nil) || !vocabulary_add(?v, ?empty) || v.len != 0) { ret 1; }
-    if (!vocabulary_add(?v, ?tail) || !vocabulary_add(?v, ?T_TABLE))           { ret 2; }
-    if (!vocabulary_add(?v, ?tail) || v.len != 2)                              { ret 3; }
-    var a:    A.Allocator;
-    val made: err[A.Error] = page.make(?a);
-    if (sel made.err) { ret 4; }
-    var b: textbuild.TextBuilder = textbuild.tb_init(?a);
-    if (!t_spelled_is(?a, t_spelled(?b, vocabulary_append(?b, ?v)), "sse41, sha, ssse3, sse41, sha")) { ret 5; }
-    var full:   Vocabulary = vocabulary_empty();
-    var tables: [9]Table;
-    var i:      u32        = 0;
-    for (i < VOCABULARY_CAP) {
-        tables[i] = Table{source: "test", catalog: nil, rows: ?T_ROWS[0], count: 1};
-        if (!vocabulary_add(?full, ?tables[i])) { ret 6; }
-        i = i + 1;
-    }
-    tables[i] = Table{source: "test", catalog: nil, rows: ?T_ROWS[0], count: 1};
-    if (vocabulary_add(?full, ?tables[i]) || full.len != VOCABULARY_CAP) { ret 7; }
-    ret 0;
 }

@@ -1,6 +1,5 @@
 use std.types.string.str;
 
-use mach.lang.target.abi;
 use isa_inst:     mach.lang.target.isa.inst;
 use target_model: mach.lang.target.model;
 
@@ -38,18 +37,6 @@ pub val R14: i32 = isa_inst.REG_GP_BASE | 14;
 pub val R15: i32 = isa_inst.REG_GP_BASE | 15;
 
 pub val XMM0: i32 = isa_inst.REG_FP_BASE | 0;
-
-#[testing]
-pub val XMM1: i32 = isa_inst.REG_FP_BASE | 1;
-
-#[testing]
-pub val XMM2: i32 = isa_inst.REG_FP_BASE | 2;
-
-#[testing]
-pub val XMM3: i32 = isa_inst.REG_FP_BASE | 3;
-
-#[testing]
-pub val XMM5: i32 = isa_inst.REG_FP_BASE | 5;
 
 pub val XMM7: i32 = isa_inst.REG_FP_BASE | 7;
 
@@ -731,11 +718,6 @@ pub fun fp_reg_name(cid: i32) str {
     val id: i32 = isa_inst.regid_index(cid);
     if (id < 0 || id >= 16) { ret "???"; }
     ret XMM_NAMES[id];
-}
-
-#[testing]
-pub fun callee_saved_gp_list(abi_vt: *abi.AbiVTable, out: *i32) i32 {
-    ret callee_saved_gp_list_from(abi_vt.callee_saved, out);
 }
 
 pub fun callee_saved_gp_list_from(file: target_model.RegFile, out: *i32) i32 {

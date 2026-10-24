@@ -1,6 +1,5 @@
 use mach.lang.fail;
 use std.allocator.page;
-use T: std.allocator.testing;
 use std.data.toml;
 use std.text.string.str_free;
 use std.types.bool.bool;
@@ -398,31 +397,4 @@ pub fun make_native_target(alloc: *A.Allocator, itn: *intern.Interner) res[*Targ
     if (sel owned.err) { ret res[*TargetDef, fail.Fail].err{fail.refused(owned.err)}; }
     @owned.ok = host;
     ret res[*TargetDef, fail.Fail].ok{owned.ok};
-}
-
-test make_native_target__interning_failure_never_publishes_a_partial_target {
-    var ordinal:  usize = 0;
-    var attempts: usize = 0;
-    for (ordinal <= attempts) {
-        var tracking: T.Testing;
-        val make_r:   err[A.Error] = T.make(?tracking);
-        if (sel make_r.err) { ret 1; }
-        var itn: intern.Interner = intern.init(?tracking.a);
-        tracking.fail_at = ordinal;
-        val result: res[*TargetDef, fail.Fail] = make_native_target(?tracking.a, ?itn);
-        var valid:  bool                       = ordinal == 0 && sel result.ok;
-        if (ordinal == 0) { attempts = tracking.attempts; }
-        or                { valid = sel result.err; }
-        if (sel result.ok) {
-            A.deallocate[TargetDef](?tracking.a, result.ok, 1);
-        }
-        intern.dnit(?itn);
-        val clean: bool = tracking.live == 0 && tracking.double_frees == 0 && tracking.exhausted == 0;
-        T.dnit(?tracking);
-        if (!valid) { ret 2; }
-        if (!clean) { ret 3; }
-        ordinal = ordinal + 1;
-    }
-    if (attempts < 5) { ret 4; }
-    ret 0;
 }

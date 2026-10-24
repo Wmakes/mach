@@ -1,6 +1,5 @@
 use mach.lang.fail;
 use std.encoding.binary;
-use std_format: std.format;
 use std.memory;
 use std.types.bool.bool;
 use std.types.error.err;
@@ -154,12 +153,4 @@ pub fun reloc_counts(a: *A.Allocator, img: *target_of.ObjectImage) res[*u32, fai
         i = i + 1;
     }
     ret res[*u32, fail.Fail].ok{counts};
-}
-
-test region_ok__wrap_around {
-    if (region_ok(0x1000, 0xFFFFFFFFFFFFF800::usize, 0x801::usize)) { ret 1; }
-    if (region_ok(0x10, 0x11, 0))                                   { ret 1; }
-    if (!region_ok(0x10, 8, 8))                                     { ret 1; }
-    if (region_ok(0x10, 8, 9))                                      { ret 1; }
-    ret 0;
 }

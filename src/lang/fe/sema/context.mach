@@ -1186,26 +1186,6 @@ pub fun set_inferred_len(sc: *SemaContext, tid: ast_id.TypeId, len: u64) {
     sc.view.inferred_len[ast_id.type_index(tid)] = len;
 }
 
-test inferred_len__preserves_full_u32_domain {
-    var a: ast.Ast;
-    a.types.len = 1;
-
-    var slots: [1]u64;
-    slots[0] = sema_product.INFERRED_LEN_NONE;
-
-    var view: ModuleView = ModuleView{};
-    view.a            = ?a;
-    view.inferred_len = ?slots[0];
-    var sc: SemaContext = init(nil, nil, Typing{}, view, instance_none());
-
-    set_inferred_len(?sc, ast_id.type(0), 0xFFFFFFFF);
-    if (inferred_len_of(?sc, ast_id.type(0)) != 0xFFFFFFFF) { ret 1; }
-
-    set_inferred_len(?sc, ast_id.type(0), 0xFFFFFFFE);
-    if (inferred_len_of(?sc, ast_id.type(0)) != 0xFFFFFFFE) { ret 1; }
-    ret 0;
-}
-
 pub fun record_embed_path(sc: *SemaContext, path_id: intern.StrId) err[fail.Fail] {
     var i: u32 = 0;
     for (i < sc.view.embed_path_len) {

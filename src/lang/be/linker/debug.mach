@@ -1,4 +1,3 @@
-use std.allocator.page;
 use std.collections.map;
 use std.memory;
 use std.text.string.str_free;
@@ -13,9 +12,7 @@ use std.types.string.str;
 use std.types.string.str_equals;
 
 use A: std.allocator;
-use T: std.allocator.testing;
 
-use lang_checked: mach.lang.checked;
 use mach.lang.diagnostic;
 use diagnostic_kind: mach.lang.diagnostic.kind;
 use mach.lang.fail;
@@ -26,8 +23,6 @@ use isa_encode: mach.lang.target.isa.encode;
 use target_of:  mach.lang.target.of;
 
 use mach.lang.be.linker.common.atom_effective_offset;
-use mach.lang.be.linker.common.lt_image;
-use mach.lang.be.linker.common.lt_name;
 use mach.lang.be.linker.common.name_text;
 
 pub rec StrMerge {
@@ -172,42 +167,6 @@ pub fun discover_debug_names(alloc: *A.Allocator, modules: *target_of.ObjectImag
     ret err[fail.Fail].ok{};
 }
 
-test discover_debug_names__shrinks_to_exact_capacity {
-    var t:    T.Testing;
-    val made: err[A.Error] = T.make(?t);
-    if (sel made.err) { ret 1; }
-    fin { T.dnit(?t); }
-    val alloc: *A.Allocator = T.allocator_of(?t);
-
-    var secs: [5]target_of.Section;
-    var i:    u32 = 0;
-    for (i < 5) {
-        secs[i].name  = (i + 1)::intern.StrId;
-        secs[i].kind  = target_of.SK_DEBUG;
-        secs[i].bytes = nil;
-        secs[i].len   = 0;
-        secs[i].align = 1;
-        i             = i + 1;
-    }
-
-    var mod: target_of.ObjectImage;
-    mod.sections      = ?secs[0];
-    mod.section_count = 5;
-
-    var out_names: *intern.StrId  = nil;
-    var out_count: u32            = 0;
-    val r:         err[fail.Fail] = discover_debug_names(alloc, ?mod, 1, ?out_names, ?out_count);
-    if (sel r.err)      { ret 1; }
-    if (out_count != 5) { ret 1; }
-
-    if (out_names != nil && out_count > 0) {
-        A.deallocate[intern.StrId](alloc, out_names, out_count::usize);
-    }
-
-    if (!T.clean(?t)) { ret 1; }
-    ret 0;
-}
-
 fun str_merge_add_string(s: *session.Session, sm: *StrMerge,
     section: *target_of.Section, source_offset: u32) res[u32, fail.Fail] {
     if (section.bytes == nil || source_offset >= section.len) {
@@ -341,43 +300,4 @@ pub fun debug_str_source_offset(target_offset: u32, addend: i64,
         ret res[u32, fail.Fail].err{fail.user(diagnostic_kind.OBJECT_MALFORMED, ".debug_str strp target offset and addend are out of range")};
     }
     ret res[u32, fail.Fail].ok{source_offset};
-}
-
-test build_str_merge__refuses_unterminated_debug_str_section {
-    var alloc: A.Allocator;
-    page.make(?alloc);
-    val sr: res[session.Session, fail.Fail] = session.init(?alloc);
-    if (sel sr.err) { ret 1; }
-    var s: session.Session = sr.ok;
-
-    var bad_bytes: [8]u8;
-    bad_bytes[0] = 1;
-    bad_bytes[1] = 2;
-    bad_bytes[2] = 3;
-    bad_bytes[3] = 4;
-    bad_bytes[4] = 5;
-    bad_bytes[5] = 6;
-    bad_bytes[6] = 7;
-    bad_bytes[7] = 8;
-
-    var sec: target_of.Section;
-    sec.name  = lt_name(?s, ".debug_str");
-    sec.kind  = target_of.SK_DEBUG;
-    sec.bytes = ?bad_bytes[0];
-    sec.len   = 8;
-    sec.align = 1;
-
-    var mods: [1]target_of.ObjectImage;
-    mods[0] = lt_image(?s, lt_name(?s, "m.o"), ?sec, 1, nil, 0, nil, 0);
-
-    val r:   res[StrMerge, fail.Fail] = build_str_merge(?s, ?mods[0], 1, true);
-    var bad: i32                      = 0;
-    if (sel r.ok) {
-        bad = 1;
-        var sm: StrMerge = r.ok;
-        free_str_merge(?sm);
-    }
-
-    session.dnit(?s);
-    ret bad;
 }

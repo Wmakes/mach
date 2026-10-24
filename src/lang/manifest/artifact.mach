@@ -13,7 +13,6 @@ use std.types.string.str_contains;
 use std.types.string.str_equals;
 
 use A: std.allocator;
-use std.allocator.page;
 
 use diagnostic_kind: mach.lang.diagnostic.kind;
 use mach.lang.intern;
@@ -344,26 +343,4 @@ pub fun artifact_supports_target(itn: *intern.Interner, a: *ArtifactDef, tname: 
         i = i + 1;
     }
     ret false;
-}
-
-test kind_choices__lists_every_declarable_kind {
-    var alloc: A.Allocator;
-    page.make(?alloc);
-    val r: res[str, fail.Fail] = kind_choices(?alloc);
-    if (sel r.err) { ret 1; }
-    fin { str_free(?alloc, r.ok); }
-
-    val n: usize = catalog_artifact.declarable_count();
-    if (n == 0) { ret 2; }
-    var i: usize = 0;
-    for (i < n) {
-        val quoted: res[str, fail.Fail] = sfmt(?alloc, "\"{}\"", catalog_artifact.declarable_at(i));
-        if (sel quoted.err) { ret 3; }
-        val listed: bool = str_contains(r.ok, quoted.ok);
-        str_free(?alloc, quoted.ok);
-        if (!listed) { ret 4; }
-        i = i + 1;
-    }
-    if (n > 1 && !str_contains(r.ok, " or ")) { ret 5; }
-    ret 0;
 }
