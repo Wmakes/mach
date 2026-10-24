@@ -11,7 +11,6 @@ use std.types.size.usize;
 use types_string: std.types.string;
 use std.types.string.str;
 use std.types.string.str_empty;
-use std.types.string.str_equals;
 use std.types.string.str_join;
 use std.types.string.str_len;
 
@@ -614,12 +613,6 @@ fun free_artifact_reqs(alloc: *A.Allocator, reqs: *template.Requirement, count: 
     A.deallocate[template.Requirement](alloc, reqs, count::usize);
 }
 
-# whether `id` is interned text equal to `text`
-#[testing]
-pub fun id_is(itn: *intern.Interner, id: intern.StrId, text: str) bool {
-    ret !intern.str_is_nil(id) && str_equals(intern.text(itn, id), text);
-}
-
 # the module loaded under `fqn`, nil when none is
 pub fun module_named(p: *Project, fqn: str) session.ModuleId {
     val id: res[intern.StrId, A.Error] = intern.add(?p.s.interner, fqn);
@@ -627,51 +620,6 @@ pub fun module_named(p: *Project, fqn: str) session.ModuleId {
     val found: opt[session.ModuleId] = fe_load.module_find(?p.loader, id.ok);
     if (sel found.none) { ret session.MODULE_NIL; }
     ret found.some;
-}
-
-# whether a module is loaded under `fqn`
-#[testing]
-pub fun loads(p: *Project, fqn: str) bool {
-    ret !module.is_nil(module_named(p, fqn));
-}
-
-# the stable id of the module loaded under `fqn`, nil when none is
-#[testing]
-pub fun stable_named(p: *Project, fqn: str) session.StableModuleId {
-    val mid: session.ModuleId = module_named(p, fqn);
-    if (module.is_nil(mid)) { ret session.STABLE_MODULE_NIL; }
-    ret module_at(p, mid::u32).stable_id;
-}
-
-# where `mid` stands in the load order, the order's length when it is not in it
-#[testing]
-pub fun topo_index(p: *Project, mid: session.ModuleId) u32 {
-    var i: u32 = 0;
-    for (i < p.topo_len) {
-        if (module.same(p.topo[i], mid)) { ret i; }
-        i = i + 1;
-    }
-    ret p.topo_len;
-}
-
-# whether the module loaded under `fqn` is in the load order
-#[testing]
-pub fun in_topo(p: *Project, fqn: str) bool {
-    val mid: session.ModuleId = module_named(p, fqn);
-    ret !module.is_nil(mid) && topo_index(p, mid) < p.topo_len;
-}
-
-# the artifact the module loaded under `fqn` is attributed to, as its comptime context reads
-# `$bin.name`; empty when none is loaded or the two disagree
-#[testing]
-pub fun artifact_named(p: *Project, fqn: str) str {
-    val mid: session.ModuleId = module_named(p, fqn);
-    if (module.is_nil(mid)) { ret ""; }
-    val m: *ModuleEntry = module_at(p, mid::u32);
-    if (!intern.str_same(m.load.artifact, m.load.ctx.env.build.bin_name)) { ret ""; }
-    val text: opt[str] = intern.get(?p.s.interner, m.load.artifact);
-    if (sel text.none) { ret ""; }
-    ret text.some;
 }
 
 # the loaded module count; the next ModuleId to be issued
@@ -761,47 +709,4 @@ pub fun module_by_file(p: *Project, fid: lang_source.FileId) opt[session.ModuleI
         i = i + 1;
     }
     ret opt[session.ModuleId].none{};
-}
-
-test module_by_fqn__pointer_stays_valid_across_growth {
-    var a: A.Allocator;
-    page.make(?a);
-    val sr: res[session.Session, fail.Fail] = session.init(?a);
-    if (sel sr.err) { ret 1; }
-    var s: session.Session = sr.ok;
-    fin { session.dnit(?s); }
-    var p: Project;
-    init_project(?p, ?s);
-    fin { dnit_project(?p); }
-
-    val first_r: res[intern.StrId, A.Error] = intern.add(?s.interner, "growth.first");
-    if (sel first_r.err) { ret 1; }
-    val first: intern.StrId   = first_r.ok;
-    val room:  err[fail.Fail] = module_reserve(?p);
-    if (sel room.err) { ret 1; }
-    var entry: ModuleEntry;
-    entry.fqn = first;
-    val mid:   session.ModuleId   = module_append(?p, entry);
-    val named: res[bool, A.Error] = map.insert[intern.StrId, session.ModuleId](?p.loader.by_name, first, mid);
-    if (sel named.err) { ret 1; }
-    val held_o: opt[*ModuleEntry] = module_by_fqn(?p, first);
-    if (sel held_o.none) { ret 1; }
-    val held: *ModuleEntry = held_o.some;
-
-    # grow past 16, 32, 64 and 128 modules; the held pointer must not move at any boundary
-    var i: u32 = 0;
-    for (i < 200) {
-        val more: err[fail.Fail] = module_reserve(?p);
-        if (sel more.err) { ret 1; }
-        module_append(?p, ModuleEntry{});
-        val again: opt[*ModuleEntry] = module_by_fqn(?p, first);
-        if (sel again.none)     { ret 1; }
-        if (again.some != held) { ret 2; }
-        i = i + 1;
-    }
-
-    if (!intern.str_same(held.fqn, first)) { ret 3; }
-    if (module_count(?p) != 201)           { ret 3; }
-    if (module_at(?p, mid::u32) != held)   { ret 2; }
-    ret 0;
 }

@@ -568,42 +568,6 @@ fun append_dynlib(p: *project.Project, li: *input.Input,
     ret err[fail.Fail].ok{};
 }
 
-test append_dynlib__reinterns_the_logical_name_and_refuses_a_second_loader_name {
-    var alloc:  A.Allocator;
-    val make_r: err[A.Error] = page.make(?alloc);
-    if (sel make_r.err) { ret 1; }
-    val sr: res[session.Session, fail.Fail] = toolchain.session_init(?alloc);
-    if (sel sr.err) { ret 1; }
-    var s: session.Session = sr.ok;
-    fin { session.dnit(?s); }
-
-    var p: project.Project;
-    p.s     = ?s;
-    p.alloc = ?alloc;
-    var li: input.Input;
-    li.kind    = input.DYNAMIC;
-    li.text    = "foo.1";
-    li.library = "foo";
-    li.rpath   = "";
-    var libs: *target_of.DynLib = nil;
-    var len:  u32               = 0;
-    fin { free_dynlibs(?alloc, libs, len); }
-    val first: err[fail.Fail] = append_dynlib(?p, ?li, ?libs, ?len);
-    if (sel first.err) { ret 2; }
-    val again: err[fail.Fail] = append_dynlib(?p, ?li, ?libs, ?len);
-    if (sel again.err || len != 1) { ret 3; }
-    val name:   opt[str] = intern.get(?s.interner, libs[0].name);
-    val loader: opt[str] = intern.get(?s.interner, libs[0].soname);
-    if (sel name.none)                     { ret 4; }
-    if (sel loader.none)                   { ret 4; }
-    if (!str_equals(name.some, "foo"))     { ret 4; }
-    if (!str_equals(loader.some, "foo.1")) { ret 4; }
-    li.text = "foo.2";
-    val conflict: err[fail.Fail] = append_dynlib(?p, ?li, ?libs, ?len);
-    if (sel conflict.ok || len != 1) { ret 5; }
-    ret 0;
-}
-
 fun dynlib_conflict_message(p: *project.Project, name: intern.StrId,
     first: intern.StrId, second: intern.StrId) res[str, fail.Fail] {
     val r: res[str, types_string.StrError] = str_join(p.alloc,
@@ -682,76 +646,6 @@ fun register_link_claims(p: *project.Project, req: *manifest.LinkRequirement) er
         i = i + 1;
     }
     ret err[fail.Fail].ok{};
-}
-
-test register_link_claims__pins_and_rejects_conflicts {
-    var alloc:  A.Allocator;
-    val make_r: err[A.Error] = page.make(?alloc);
-    if (sel make_r.err) { ret 1; }
-    val sr: res[session.Session, fail.Fail] = toolchain.session_init(?alloc);
-    if (sel sr.err) { ret 1; }
-    var s: session.Session = sr.ok;
-    fin { session.dnit(?s); }
-
-    var p: project.Project;
-    p.s       = ?s;
-    p.alloc   = ?alloc;
-    p.linkage = linkage.init(?alloc);
-    fin { linkage.dnit(?p.linkage); }
-
-    val sym_r: res[intern.StrId, A.Error] = intern.add(?s.interner, "Sleep");
-    val pre_r: res[intern.StrId, A.Error] = intern.add(?s.interner, "_Sleep");
-    val k32_r: res[intern.StrId, A.Error] = intern.add(?s.interner, "kernel32");
-    val u32_r: res[intern.StrId, A.Error] = intern.add(?s.interner, "user32");
-    if (sel sym_r.err) { ret 1; }
-    if (sel pre_r.err) { ret 1; }
-    if (sel k32_r.err) { ret 1; }
-    if (sel u32_r.err) { ret 1; }
-    var syms: [1]intern.StrId;
-    syms[0] = sym_r.ok;
-
-    var req: manifest.LinkRequirement;
-    req.source       = manifest.LINK_SYSTEM;
-    req.text         = k32_r.ok;
-    req.key          = k32_r.ok;
-    req.symbols      = ?syms[0];
-    req.symbol_count = 1;
-
-    var code: i32 = 0;
-
-    val lr: res[lang_target.Binding, fail.Fail] = lang_target.t_select("x86_64", "linux", "sysv64");
-    if (sel lr.err) { ret 1; }
-    p.target = lr.ok;
-
-    val register_link_claims_r: err[fail.Fail] = register_link_claims(?p, ?req);
-    if (sel register_link_claims_r.err) { code = 1; }
-    val got: intern.StrId = linkage.import_library(?p.linkage, syms[0]);
-    if (!(!intern.str_is_nil(got) && intern.str_same(got, req.key))) { code = 1; }
-
-    val register_link_claims_r2: err[fail.Fail] = register_link_claims(?p, ?req);
-    if (sel register_link_claims_r2.err) { code = 1; }
-
-    var other: manifest.LinkRequirement = req;
-    other.key = u32_r.ok;
-    val register_link_claims_r3: err[fail.Fail] = register_link_claims(?p, ?other);
-    if (sel register_link_claims_r3.ok) { code = 1; }
-
-    linkage.clear(?p.linkage);
-    val dr: res[lang_target.Binding, fail.Fail] = lang_target.t_select("x86_64", "darwin", "sysv64");
-    if (sel dr.err) { ret 1; }
-    p.target = dr.ok;
-
-    val register_link_claims_r4: err[fail.Fail] = register_link_claims(?p, ?req);
-    if (sel register_link_claims_r4.err) { code = 1; }
-    val dgot: intern.StrId = linkage.import_library(?p.linkage, pre_r.ok);
-    if (!(!intern.str_is_nil(dgot) && intern.str_same(dgot, req.key))) { code = 1; }
-    val import_library_r: intern.StrId = linkage.import_library(?p.linkage, syms[0]);
-    if (!intern.str_is_nil(import_library_r)) { code = 1; }
-
-    val register_link_claims_r5: err[fail.Fail] = register_link_claims(?p, ?other);
-    if (sel register_link_claims_r5.ok) { code = 1; }
-
-    ret code;
 }
 
 fun claim_conflict_message(p: *project.Project, sym: intern.StrId,

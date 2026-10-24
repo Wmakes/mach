@@ -30,8 +30,8 @@ use mach.lang.fe.comptime;
 use mach.lang.fe.decorator;
 use mach.lang.fe.resolve;
 use mach.lang.intern;
-use lower_context: mach.lang.me.lower.context;
-use lang_source:   mach.lang.source;
+use lower_context:     mach.lang.me.lower.context;
+use lang_source:       mach.lang.source;
 use target_definition: mach.lang.target.definition;
 
 use mo: masc.core.operand;

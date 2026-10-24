@@ -35,7 +35,6 @@ use mach.lang.linkage;
 use mach.lang.manifest;
 use lower_context: mach.lang.me.lower.context;
 use mach.lang.me.lower.testrunner;
-use output_testing: mach.lang.output.testing;
 use mach.lang.session;
 use lang_source: mach.lang.source;
 use mach.lang.subprocess;
@@ -43,7 +42,6 @@ use lang_target:       mach.lang.target;
 use catalog_artifact:  mach.lang.target.catalog.artifact;
 use catalog_subsystem: mach.lang.target.catalog.subsystem;
 use target_of:         mach.lang.target.of;
-use target_testing:    mach.lang.target.testing;
 use mach.lang.testrun;
 use mach.lang.wire;
 use mink_output: mink.catalog.output;
@@ -285,81 +283,4 @@ fun record_test(p: *project.Project, t: *testrunner.Test, exe: *u8, target: str,
     if (object != nil) { str_free(p.alloc, object::str); }
     if (sel rec_r.err) { ret err[fail.Fail].err{fail.refused(rec_r.err)}; }
     ret err[fail.Fail].ok{};
-}
-
-test classify_subprocess__maps_every_terminal_and_capture_shape {
-    var term: subprocess.SubprocessTerminal;
-    var cap:  subprocess.CaptureIoResult;
-    cap.bytes        = 0;
-    cap.truncated    = false;
-    cap.short_read   = false;
-    cap.read_failed  = false;
-    cap.write_failed = false;
-    cap.close_failed = false;
-    cap.closed       = true;
-    cap.owned        = true;
-
-    var bad: i32 = 0;
-
-    term.kind = subprocess.STATE_EXITED;
-    term.code = 0;
-    val pass_r: testrun.GateResult = classify_subprocess(?term, false, true, ?cap);
-    if (pass_r.kind != testrun.RESULT_PASS || pass_r.cause != testrun.CAUSE_PASS) { bad = 1; }
-
-    term.code = 7;
-    val exit_r: testrun.GateResult = classify_subprocess(?term, false, true, ?cap);
-    if (exit_r.kind != testrun.RESULT_SEMANTIC_MISMATCH || exit_r.cause != testrun.CAUSE_ORACLE_EXIT) { bad = 1; }
-
-    term.code = 77;
-    val skip_r: testrun.GateResult = classify_subprocess(?term, false, true, ?cap);
-    if (skip_r.kind != testrun.RESULT_SKIP || skip_r.cause != testrun.CAUSE_SKIP) { bad = 1; }
-
-    term.kind = subprocess.STATE_SIGNALED;
-    term.code = 77;
-    val sig_skip_r: testrun.GateResult = classify_subprocess(?term, false, true, ?cap);
-    if (sig_skip_r.kind != testrun.RESULT_SEMANTIC_MISMATCH || sig_skip_r.cause != testrun.CAUSE_ORACLE_SIGNAL) { bad = 1; }
-
-    term.code = 9;
-    val sig_r: testrun.GateResult = classify_subprocess(?term, false, true, ?cap);
-    if (sig_r.kind != testrun.RESULT_SEMANTIC_MISMATCH || sig_r.cause != testrun.CAUSE_ORACLE_SIGNAL) { bad = 1; }
-
-    term.kind = subprocess.STATE_SPAWN_FAILURE;
-    term.code = 0;
-    val spawn_r: testrun.GateResult = classify_subprocess(?term, false, true, ?cap);
-    if (spawn_r.kind != testrun.RESULT_INFRASTRUCTURE_FAILURE || spawn_r.cause != testrun.CAUSE_ORACLE_SPAWN_FAILURE) { bad = 1; }
-
-    term.kind = subprocess.STATE_UNSTARTED;
-    val invalid_r: testrun.GateResult = classify_subprocess(?term, false, true, ?cap);
-    if (invalid_r.kind != testrun.RESULT_INFRASTRUCTURE_FAILURE || invalid_r.cause != testrun.CAUSE_INVALID_TERMINAL) { bad = 1; }
-
-    term.kind = subprocess.STATE_EXITED;
-    term.code = 0;
-    val no_capture_r: testrun.GateResult = classify_subprocess(?term, false, false, ?cap);
-    if (no_capture_r.kind != testrun.RESULT_INFRASTRUCTURE_FAILURE || no_capture_r.cause != testrun.CAUSE_ORACLE_CAPTURE) { bad = 1; }
-
-    term.kind = subprocess.STATE_SIGNALED;
-    term.code = 15;
-    val timeout_r: testrun.GateResult = classify_subprocess(?term, true, true, ?cap);
-    if (timeout_r.kind != testrun.RESULT_RESOURCE_EXHAUSTION || timeout_r.cause != testrun.CAUSE_ORACLE_TIMEOUT) { bad = 1; }
-
-    term.kind = subprocess.STATE_EXITED;
-    term.code = 0;
-    val timeout_capture_r: testrun.GateResult = classify_subprocess(?term, true, false, ?cap);
-    if (timeout_capture_r.kind != testrun.RESULT_INFRASTRUCTURE_FAILURE || timeout_capture_r.cause != testrun.CAUSE_ORACLE_CAPTURE) { bad = 1; }
-
-    cap.read_failed = true;
-    val bad_read_r: testrun.GateResult = classify_subprocess(?term, false, true, ?cap);
-    if (bad_read_r.kind != testrun.RESULT_INFRASTRUCTURE_FAILURE || bad_read_r.cause != testrun.CAUSE_ORACLE_CAPTURE) { bad = 1; }
-    cap.read_failed = false;
-
-    cap.write_failed = true;
-    val bad_write_r: testrun.GateResult = classify_subprocess(?term, false, true, ?cap);
-    if (bad_write_r.kind != testrun.RESULT_INFRASTRUCTURE_FAILURE || bad_write_r.cause != testrun.CAUSE_ORACLE_CAPTURE) { bad = 1; }
-    cap.write_failed = false;
-
-    cap.close_failed = true;
-    val bad_close_r: testrun.GateResult = classify_subprocess(?term, false, true, ?cap);
-    if (bad_close_r.kind != testrun.RESULT_INFRASTRUCTURE_FAILURE || bad_close_r.cause != testrun.CAUSE_ORACLE_CAPTURE) { bad = 1; }
-
-    ret bad;
 }

@@ -1,11 +1,7 @@
 use std.allocator.arena;
 use std.allocator.page;
 use chrono_duration: std.chrono.duration;
-use std.system.panic.panic;
 use std.types.bool.bool;
-use std.types.bool.false;
-use std.types.bool.true;
-use std.types.error.err;
 use std.types.option.opt;
 use std.types.result.res;
 use std.types.size.usize;
@@ -518,25 +514,4 @@ pub fun id_of(itn: *intern.Interner, text: str) res[intern.StrId, fail.Fail] {
 pub fun optional_id_of(itn: *intern.Interner, text: str) res[intern.StrId, fail.Fail] {
     if (str_empty(text)) { ret res[intern.StrId, fail.Fail].ok{intern.STR_NIL}; }
     ret id_of(itn, text);
-}
-
-# the id of `text` for a test's fixture; a refusal ends the test
-#[testing]
-pub fun t_id(itn: *intern.Interner, text: str) intern.StrId {
-    val r: res[intern.StrId, A.Error] = intern.add(itn, text);
-    if (sel r.ok) { ret r.ok; }
-    panic("a test fixture could not be interned\n");
-    ret intern.STR_NIL;
-}
-
-#[testing]
-pub fun tinit(backing: *A.Allocator, ar: *arena.Arena, alloc: *A.Allocator, itn: *intern.Interner) bool {
-    val make_r: err[A.Error] = page.make(backing);
-    if (sel make_r.err) { ret false; }
-    val init_r: err[A.Error] = arena.init(ar, backing, 0);
-    if (sel init_r.err) { ret false; }
-    val make_r2: err[A.Error] = arena.make(alloc, ar);
-    if (sel make_r2.err) { ret false; }
-    @itn = intern.init(alloc);
-    ret true;
 }

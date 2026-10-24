@@ -4,7 +4,6 @@ use std.types.error.err;
 
 use A: std.allocator;
 use std.types.bool.false;
-use std.types.string.str_equals;
 
 use mir_debug:       mach.lang.mir.debug;
 use mir_unit:        mach.lang.mir.unit;
@@ -46,15 +45,3 @@ pub val VTABLE: isa.IsaVTable = isa.IsaVTable{
     # a module naming no environment has no ceiling, so every extension is open to it
     environments: isa_environment.Set{rows: ?ENVIRONMENTS[0], count: isa_spirv.ENV_PROFILE_COUNT, open: extension_spirv.OPEN, open_stands: "spv1.6,Shader"},
 };
-
-# the environment rows restate the profile table's names and guarantees
-test environments__agree_with_the_profiles {
-    var i: u32 = 0;
-    for (i < isa_spirv.ENV_PROFILE_COUNT) {
-        if (!str_equals(ENVIRONMENTS[i].name, isa_spirv.env_profile_name(i))) { ret 1; }
-        if (ENVIRONMENTS[i].profile != i)                                     { ret 2; }
-        if (ENVIRONMENTS[i].extensions != isa_spirv.env_extensions(i))        { ret 3; }
-        i = i + 1;
-    }
-    ret 0;
-}

@@ -34,9 +34,9 @@ use mirl_instruction: mirl.ir.instruction;
 use mirl.ir.instruction.Branch;
 use mirl.ir.instruction.Request;
 use mirl_metadata: mirl.ir.metadata;
-use mirl.ir.native;
 use mirl.ir.metadata.Flags;
 use mirl.ir.module;
+use mirl.ir.native;
 use mirl.ir.opcode;
 use mirl.ir.opcode.Immediate;
 use mirl.ir.opcode.Opcode;
@@ -1330,9 +1330,9 @@ pub fun emit_target_op(b: *Builder, op: *native.Op, values: *value.Value, n: u32
     }
     var code: Opcode = opcode.TARGET_OP;
     if (native.touches(op)) { code = opcode.TARGET_OP_MEMORY; }
-    var imm: [1]Immediate = [1]Immediate{Immediate.op{op}};
+    var imm:  [1]Immediate   = [1]Immediate{Immediate.op{op}};
     val made: id.Instruction = mbuild.emit(?b.mb, request(code, ops.data, ops.len::u32, ?imm[0], 1));
-    if (mbuild.failed(?b.mb))  { ret after(b, value.none()); }
+    if (mbuild.failed(?b.mb)) { ret after(b, value.none()); }
     if (op.results.size == 0) { ret ok(value.none()); }
     val r: id.Value = mbuild.result(?b.mb, made, 0);
     ret after(b, value.ssa(r, op.results.data[0], secret_of(b, r)));
