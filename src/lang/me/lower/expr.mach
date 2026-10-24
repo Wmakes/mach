@@ -367,6 +367,10 @@ fun symbol_reference(ctx: *lower_context.LowerContext, eid: ast_id.ExprId, sid: 
     if (sel res_ir.err) { ret res[value.Value, fail.Fail].err{res_ir.err}; }
     val vty: Type = res_ir.ok;
 
+    val spec: res[opt[lower_shader.SpecVar], fail.Fail] = lower_shader.spec_var(ctx, sym);
+    if (sel spec.err)     { ret res[value.Value, fail.Fail].err{spec.err}; }
+    if (sel spec.ok.some) { ret spec_reference(ctx, spec.ok.some, vty); }
+
     val res_cv: res[opt[comptime.CTValue], fail.Fail] = module_const_value(ctx, sym);
     if (sel res_cv.err) {
         ret res[value.Value, fail.Fail].err{res_cv.err};
@@ -386,6 +390,17 @@ fun symbol_reference(ctx: *lower_context.LowerContext, eid: ast_id.ExprId, sid: 
     val shaded: err[fail.Fail] = lower_shader.extern_global_attributes(ctx, sym, res_xg.ok);
     if (sel shaded.err) { ret res[value.Value, fail.Fail].err{shaded.err}; }
     ret emit_global_rvalue(ctx, eid, res_xg.ok, vty);
+}
+
+# a read of a `#[spec]` var: its specialization constant, of the var's type `vty`
+fun spec_reference(ctx: *lower_context.LowerContext, spec: lower_shader.SpecVar, vty: Type) res[value.Value, fail.Fail] {
+    var default: value.Value = value.none();
+    if (spec.default.kind == comptime.CT_KIND_FLOAT) { default = float_constant(ctx, spec.default.data.f, vty); }
+    or                                               { default = value.const_int_wide(spec.default.data.w, vty); }
+    val stated: value.Value    = builder.spec_constant(?ctx.builder, spec.id, default);
+    val built:  err[fail.Fail] = lower_context.builder_state(ctx);
+    if (sel built.err) { ret res[value.Value, fail.Fail].err{built.err}; }
+    ret res[value.Value, fail.Fail].ok{stated};
 }
 
 fun module_const_value(ctx: *lower_context.LowerContext, sym: *resolve.Symbol) res[opt[comptime.CTValue], fail.Fail] {

@@ -27,6 +27,7 @@ use mirl.ir.body;
 use mirl.ir.constant.Address;
 use mirl.ir.constant.Bits;
 use mirl.ir.constant.ConstantData;
+use mirl.ir.constant.Spec;
 use mirl.ir.debug;
 use mirl_global: mirl.ir.global;
 use mirl.ir.id;
@@ -534,34 +535,60 @@ fun words_of(bits: wide.Wide, width: u32, out: *u64) usize {
 }
 
 # the module constant a constant value stands for
-pub fun constant_of(b: *Builder, v: value.Value) id.Constant {
+# the bits of the integer or float constant `v`, written into `words`, which holds two; none,
+# with the builder faulted, for any other value
+fun scalar_bits(b: *Builder, v: value.Value, words: *u64) opt[Bits] {
     if (v.kind == value.VAL_INT) {
         val w: u32 = irt.int_width(?b.m.types, v.ty);
         if (w == 0) {
-            if (irt.is_ptr(?b.m.types, v.ty) && wide.is_zero(v.bits)) { ret mbuild.constant(?b.mb, ConstantData.zero{v.ty}); }
             fault(b, fail.message("lower: an integer constant of a type that is not an integer"));
-            ret id.Constant{index: 0xFFFFFFFF};
+            ret opt[Bits].none{};
         }
         if (w > 128) {
             fault(b, fail.message("lower: an integer constant wider than 128 bits"));
-            ret id.Constant{index: 0xFFFFFFFF};
+            ret opt[Bits].none{};
         }
-        var words: [2]u64;
-        val n:     usize = words_of(v.bits, w, ?words[0]);
-        ret mbuild.constant(?b.mb, ConstantData.integer{Bits{type: v.ty, words: Slice[u64]{data: ?words[0], size: n}}});
+        val n: usize = words_of(v.bits, w, words);
+        ret opt[Bits].some{Bits{type: v.ty, words: Slice[u64]{data: words, size: n}}};
     }
     if (v.kind == value.VAL_FLOAT) {
-        val w:    u32 = irt.float_width(?b.m.types, v.ty);
-        val f:    f64 = value.float_lit(v);
-        var word: [1]u64;
-        if (w == 64) { word[0] = float.f64_bits(f); }
-        or (w == 32) { word[0] = float.f64_to_f32_bits(float.f64_bits(f))::u64; }
-        or (w == 16) { word[0] = float.bits_at(f, float.FLOAT_W_16); }
+        val w: u32 = irt.float_width(?b.m.types, v.ty);
+        val f: f64 = value.float_lit(v);
+        if (w == 64) { words[0] = float.f64_bits(f); }
+        or (w == 32) { words[0] = float.f64_to_f32_bits(float.f64_bits(f))::u64; }
+        or (w == 16) { words[0] = float.bits_at(f, float.FLOAT_W_16); }
         or {
             fault(b, fail.message("lower: a float constant of a type that is not a float"));
-            ret id.Constant{index: 0xFFFFFFFF};
+            ret opt[Bits].none{};
         }
-        ret mbuild.constant(?b.mb, ConstantData.float{Bits{type: v.ty, words: Slice[u64]{data: ?word[0], size: 1}}});
+        ret opt[Bits].some{Bits{type: v.ty, words: Slice[u64]{data: words, size: 1}}};
+    }
+    fault(b, fail.message("lower: a scalar constant asked of a value that is none"));
+    ret opt[Bits].none{};
+}
+
+# the specialization constant `spec_id`, whose default is the integer or float constant `default`
+pub fun spec_constant(b: *Builder, spec_id: u32, default: value.Value) value.Value {
+    var words: [2]u64;
+    val bits:  opt[Bits] = scalar_bits(b, default, ?words[0]);
+    if (sel bits.none) { ret value.none(); }
+    val c: id.Constant = mbuild.constant(?b.mb, ConstantData.spec{Spec{id: spec_id, default: bits.some}});
+    ret value.constant(c, default.ty);
+}
+
+pub fun constant_of(b: *Builder, v: value.Value) id.Constant {
+    if (v.kind == value.VAL_INT) {
+        if (irt.int_width(?b.m.types, v.ty) == 0 && irt.is_ptr(?b.m.types, v.ty) && wide.is_zero(v.bits)) { ret mbuild.constant(?b.mb, ConstantData.zero{v.ty}); }
+        var words: [2]u64;
+        val bits:  opt[Bits] = scalar_bits(b, v, ?words[0]);
+        if (sel bits.none) { ret id.Constant{index: 0xFFFFFFFF}; }
+        ret mbuild.constant(?b.mb, ConstantData.integer{bits.some});
+    }
+    if (v.kind == value.VAL_FLOAT) {
+        var words: [2]u64;
+        val bits:  opt[Bits] = scalar_bits(b, v, ?words[0]);
+        if (sel bits.none) { ret id.Constant{index: 0xFFFFFFFF}; }
+        ret mbuild.constant(?b.mb, ConstantData.float{bits.some});
     }
     if (v.kind == value.VAL_NULL)  { ret mbuild.constant(?b.mb, ConstantData.zero{v.ty}); }
     if (v.kind == value.VAL_CONST) { ret id.Constant{index: v.index}; }

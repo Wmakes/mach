@@ -427,8 +427,8 @@ fun lower_global(ctx: *lower_context.LowerContext, did: ast_id.DeclId, d: *ast_d
         ret err[fail.Fail].ok{};
     }
 
-    val spec: err[fail.Fail] = lower_shader.refuse_spec(ctx, d);
-    if (sel spec.err) { ret spec; }
+    # a `#[spec]` var is a specialization constant wherever it is read
+    if (lower_shader.specialized(ctx, d)) { ret err[fail.Fail].ok{}; }
 
     var init_val: value.Value = value.const_null(gty);
     if (decorator.has(ctx.scope.a, d, decorator.EMBED)) {
