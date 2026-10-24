@@ -209,6 +209,20 @@ pub rec ScopeMark {
     parent:     u64;
 }
 
+# a copy of a function whose pointer parameters take the classes its call sites pass,
+# lowered into this module once the module's own declarations are
+# ---
+# origin: the module that declares the function
+# decl:   its declaration there
+# name:   the copy's linkage name, the function's own with the classes it takes
+# sig:    the copy's signature
+pub rec ClassCopy {
+    origin: session.ModuleId;
+    decl:   ast_id.DeclId;
+    name:   intern.StrId;
+    sig:    Type;
+}
+
 pub rec LowerRequest {
     # the declarations' export names, the project's
     linkage:    *linkage.Linkage;
@@ -260,6 +274,9 @@ pub rec LowerContext {
     fn_index:   u32;
     ret_type:   Type;
     fn_ret_sem: type.TypeId;
+    # the signature of the function being built, whose pointer parameters a copy of a
+    # function takes in the classes its call sites pass
+    fn_sig: Type;
     # the source name of the function being built, which diagnostics name it by
     fn_shown: lang_source.Span;
 
@@ -283,6 +300,8 @@ pub rec LowerContext {
     instances: *fe_sema.instance.Set;
     # the `$each` elements the statements being lowered bind, innermost last
     elements: collections_vector.Vector[EachElement];
+    # the class copies the module's calls asked for, in the order they asked
+    copies: collections_vector.Vector[ClassCopy];
     # the scratch store of the zeros an element literal's omitted fields hold, one tree per type
     # for the context's life
     zeros: comptime_deep.Store;
@@ -542,6 +561,7 @@ pub fun init_context(lc: *LowerContext, req: *LowerRequest, unit: *Unit) err[fai
     lc.fn_index   = 0;
     lc.ret_type   = irt.NONE;
     lc.fn_ret_sem = type.TYPE_NIL;
+    lc.fn_sig     = irt.NONE;
 
     val res_loops: res[*LoopFrame, A.Error] = A.allocate[LoopFrame](s.alloc, INITIAL_STACK_CAP::usize);
     if (sel res_loops.err) { ret err[fail.Fail].err{fail.refused(res_loops.err)}; }
@@ -565,6 +585,7 @@ pub fun init_context(lc: *LowerContext, req: *LowerRequest, unit: *Unit) err[fai
 
     lc.instances = req.instances;
     lc.elements  = collections_vector.init[EachElement](s.alloc);
+    lc.copies    = collections_vector.init[ClassCopy](s.alloc);
     lc.zeros     = comptime_deep.init(s.alloc);
 
     lc.pack_slots    = nil;
@@ -622,6 +643,7 @@ pub fun dnit_context(lc: *LowerContext) {
 
     lc.instances = nil;
     collections_vector.dnit[EachElement](?lc.elements);
+    collections_vector.dnit[ClassCopy](?lc.copies);
     comptime_deep.dnit(?lc.zeros);
 
     lc.pack_slots    = nil;
@@ -1022,6 +1044,7 @@ pub fun begin_function(lc: *LowerContext, fn_index: u32, ret_type: Type) {
     lc.fn_index   = fn_index;
     lc.ret_type   = ret_type;
     lc.fn_ret_sem = type.TYPE_NIL;
+    lc.fn_sig     = irt.NONE;
     lc.fn_shown   = lang_source.Span{offset: 0, len: 0};
 
     lc.pack_slots    = nil;
@@ -1111,7 +1134,7 @@ pub fun int_type(lc: *LowerContext, bits: u32) res[Type, fail.Fail] {
 }
 
 pub fun ptr_type(lc: *LowerContext) res[Type, fail.Fail] {
-    ret irt.ptr(?lc.m.types);
+    ret res[Type, fail.Fail].ok{builder.ptr_type(?lc.builder)};
 }
 
 # the mirl type a value of the source type `tid` is held in
@@ -1135,9 +1158,9 @@ pub fun lower_type(lc: *LowerContext, tid: type.TypeId) res[Type, fail.Fail] {
     val d: type.PrimDesc = type.prim_desc(k);
     if (d.class == type.PRIM_CLASS_INT)   { ret irt.int(?lc.m.types, d.bits); }
     if (d.class == type.PRIM_CLASS_FLOAT) { ret irt.float(?lc.m.types, d.bits); }
-    if (d.class == type.PRIM_CLASS_PTR)   { ret irt.ptr(?lc.m.types); }
-    if (k == type.TYPE_POINTER)           { ret irt.ptr(?lc.m.types); }
-    if (k == type.TYPE_FUN)               { ret irt.ptr(?lc.m.types); }
+    if (d.class == type.PRIM_CLASS_PTR)   { ret ptr_type(lc); }
+    if (k == type.TYPE_POINTER)           { ret ptr_type(lc); }
+    if (k == type.TYPE_FUN)               { ret ptr_type(lc); }
 
     if (k == type.TYPE_ARRAY) {
         val res_base: res[Type, fail.Fail] = lower_type(lc, t.data.array.base);
@@ -1165,7 +1188,7 @@ pub fun lower_type(lc: *LowerContext, tid: type.TypeId) res[Type, fail.Fail] {
         ret lower_nominal(lc, rtid, type.is_union(?lc.s.types, rtid));
     }
 
-    ret irt.ptr(?lc.m.types);
+    ret ptr_type(lc);
 }
 
 # an opaque abi type: its size in elements as wide as its alignment, so the target lays it
@@ -1995,6 +2018,75 @@ pub fun ensure_extern_function(lc: *LowerContext, name: intern.StrId, sig: FnSig
         FnInfo{name: name, line: 0, test: false, noreturn: false, defined: false});
 }
 
+# the copy of the function `decl` of `origin`, linked as `base`, whose pointer parameters
+# take the classes `sig` states, declared here and lowered once the module's own
+# declarations are. one name is one copy, so a copy asked for twice is asked for once
+pub fun class_copy(lc: *LowerContext, origin: session.ModuleId, decl: ast_id.DeclId, base: intern.StrId, sig: Type) res[u32, fail.Fail] {
+    val named: res[intern.StrId, fail.Fail] = class_copy_name(lc, base, sig);
+    if (sel named.err) { ret res[u32, fail.Fail].err{named.err}; }
+    val existing: opt[u32] = function_named(lc, named.ok);
+    if (sel existing.some) { ret res[u32, fail.Fail].ok{existing.some}; }
+    val declared: res[u32, fail.Fail] = ensure_extern_function(lc, named.ok, FnSig{sig: sig});
+    if (sel declared.err) { ret declared; }
+    val queued: res[usize, A.Error] = collections_vector.push[ClassCopy](?lc.copies, ClassCopy{origin: origin, decl: decl, name: named.ok, sig: sig});
+    if (sel queued.err) { ret res[u32, fail.Fail].err{fail.refused(queued.err)}; }
+    ret declared;
+}
+
+# a class copy's linkage name: the function's, then the class of each parameter
+fun class_copy_name(lc: *LowerContext, base: intern.StrId, sig: Type) res[intern.StrId, fail.Fail] {
+    var text: collections_vector.Vector[u8] = collections_vector.init[u8](lc.s.alloc);
+    fin { collections_vector.dnit[u8](?text); }
+    val put: err[A.Error] = class_copy_spell(?text, intern.text(?lc.s.interner, base), ".classes");
+    if (sel put.err) { ret res[intern.StrId, fail.Fail].err{fail.refused(put.err)}; }
+    val t: *types.Table = ?lc.m.types;
+    var i: u32          = 0;
+    for (i < irt.param_count(t, sig)) {
+        val p:      Type  = irt.param_of(t, sig, i);
+        var digits: [11]u8;
+        var n:      usize = 0;
+        var space:  u32   = irt.space_of(t, p);
+        if (!irt.is_ptr(t, p)) {
+            digits[0] = '_';
+            n         = 1;
+        }
+        or {
+            for (n == 0 || space != 0) {
+                digits[n] = ('0'::u32 + space % 10)::u8;
+                space     = space / 10;
+                n         = n + 1;
+            }
+        }
+        val dot: res[usize, A.Error] = collections_vector.push[u8](?text, '.');
+        if (sel dot.err) { ret res[intern.StrId, fail.Fail].err{fail.refused(dot.err)}; }
+        for (n > 0) {
+            n = n - 1;
+            val d: res[usize, A.Error] = collections_vector.push[u8](?text, digits[n]);
+            if (sel d.err) { ret res[intern.StrId, fail.Fail].err{fail.refused(d.err)}; }
+        }
+        i = i + 1;
+    }
+    val added: res[intern.StrId, A.Error] = intern.range_add(?lc.s.interner, text.data::str, 0, text.len);
+    if (sel added.err) { ret res[intern.StrId, fail.Fail].err{fail.refused(added.err)}; }
+    ret res[intern.StrId, fail.Fail].ok{added.ok};
+}
+
+fun class_copy_spell(out: *collections_vector.Vector[u8], a: str, b: str) err[A.Error] {
+    var i: usize = 0;
+    for (i < str_len(a)) {
+        val p: res[usize, A.Error] = collections_vector.push[u8](out, a[i]);
+        if (sel p.err) { ret err[A.Error].err{p.err}; }
+        i = i + 1;
+    }
+    i = 0;
+    for (i < str_len(b)) {
+        val p: res[usize, A.Error] = collections_vector.push[u8](out, b[i]);
+        if (sel p.err) { ret err[A.Error].err{p.err}; }
+        i = i + 1;
+    }
+    ret err[A.Error].ok{};
+}
+
 # the module's global `name` of `ty`, declared here when another module defines it
 pub fun ensure_extern_global(lc: *LowerContext, name: intern.StrId, ty: Type) res[u32, fail.Fail] {
     val existing: opt[u32] = global_named(lc, name);
@@ -2038,7 +2130,8 @@ pub fun constant_global(lc: *LowerContext, v: value.Value) res[value.Value, fail
     g.constant  = true;
     val added: res[u32, fail.Fail] = add_global(lc, g);
     if (sel added.err) { ret res[value.Value, fail.Fail].err{added.err}; }
-    ret res[value.Value, fail.Fail].ok{value.global(added.ok, builder.ptr_type(?lc.builder))};
+    val space: u32 = builder.global_space(?lc.builder, added.ok);
+    ret res[value.Value, fail.Fail].ok{value.global(added.ok, builder.ptr_in(?lc.builder, space), space)};
 }
 
 fun anon_global_name(lc: *LowerContext, n: u32) res[intern.StrId, fail.Fail] {

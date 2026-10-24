@@ -329,7 +329,17 @@ fun lower_decl_stmt(ctx: *lower_context.LowerContext, s: *ast_stmt.Stmt) err[fai
         ret err[fail.Fail].err{res_slot_ty.err};
     }
     val slot_ty:    Type = res_slot_ty.ok;
-    val storage_ty: Type = slot_ty;
+    var storage_ty: Type = slot_ty;
+
+    # a pointer is held at the class of the storage its initializer points into
+    var early: opt[value.Value] = opt[value.Value].none{};
+    if (irt.is_ptr(?ctx.m.types, slot_ty) && !ast_id.expr_is_nil(d.data.bind.init)) {
+        var borrowed_ptr: bool                        = false;
+        val res_first:    res[value.Value, fail.Fail] = lower_expr.lower_stored_rvalue(ctx, d.data.bind.init, true, ?borrowed_ptr);
+        if (sel res_first.err) { ret err[fail.Fail].err{res_first.err}; }
+        early = opt[value.Value].some{res_first.ok};
+        if (irt.is_ptr(?ctx.m.types, res_first.ok.ty)) { storage_ty = res_first.ok.ty; }
+    }
 
     val res_slot: res[value.Value, fail.Fail] = lower_context.slot_for(ctx, lower_context.decl_type_of(ctx, did), storage_ty);
     if (sel res_slot.err) {
@@ -346,12 +356,16 @@ fun lower_decl_stmt(ctx: *lower_context.LowerContext, s: *ast_stmt.Stmt) err[fai
     if (!ast_id.expr_is_nil(d.data.bind.init)) {
         # the slot is fresh storage and the store follows the read directly, so an aggregate
         # initializer is copied from its source with no snapshot
-        var borrowed: bool                        = false;
-        val res_init: res[value.Value, fail.Fail] = lower_expr.lower_stored_rvalue(ctx, d.data.bind.init, true, ?borrowed);
-        if (sel res_init.err) {
-            ret err[fail.Fail].err{res_init.err};
+        var init: value.Value = value.none();
+        if (sel early.some) { init = early.some; }
+        or {
+            var borrowed: bool                        = false;
+            val res_init: res[value.Value, fail.Fail] = lower_expr.lower_stored_rvalue(ctx, d.data.bind.init, true, ?borrowed);
+            if (sel res_init.err) {
+                ret err[fail.Fail].err{res_init.err};
+            }
+            init = res_init.ok;
         }
-        val init:      value.Value    = res_init.ok;
         val res_store: err[fail.Fail] = builder.emit_store_marked(?ctx.builder, init, slot, lower_expr.type_is_volatile_record(ctx, lower_context.decl_type_of(ctx, did)));
         if (sel res_store.err) { ret res_store; }
         birth_val = init;

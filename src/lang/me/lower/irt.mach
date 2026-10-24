@@ -104,6 +104,22 @@ pub fun signature(t: *types.Table, params: *Type, param_ext: *types.Extension, p
     ret interned(t, types.Shape.function{f});
 }
 
+# the signature `sig` with its `n` parameters of the types at `params`, its results,
+# extensions and convention kept
+pub fun restated(t: *types.Table, sig: Type, params: *Type, n: u32) res[Type, fail.Fail] {
+    val s: opt[types.Shape] = shape(t, sig);
+    if (sel s.some) {
+        val k: types.Shape = s.some;
+        if (sel k.function) {
+            var f: types.Function = k.function;
+            if (f.params.size != n::usize) { ret res[Type, fail.Fail].err{fail.message("lower: a signature restated at another parameter count")}; }
+            f.params = Slice[Type]{data: params, size: n::usize};
+            ret interned(t, types.Shape.function{f});
+        }
+    }
+    ret res[Type, fail.Fail].err{fail.message("lower: a signature restated of a type that is no function")};
+}
+
 pub fun shape(t: *types.Table, ty: Type) opt[types.Shape] {
     if (is_none(ty)) { ret opt[types.Shape].none{}; }
     val s: res[types.Shape, types.Error] = types.shape(t, ty);
@@ -140,6 +156,16 @@ pub fun float_width(t: *types.Table, ty: Type) u32 {
         }
     }
     ret 0;
+}
+
+# the address space a pointer type points into, the default space for any other type
+pub fun space_of(t: *types.Table, ty: Type) u32 {
+    val s: opt[types.Shape] = shape(t, ty);
+    if (sel s.some) {
+        val k: types.Shape = s.some;
+        if (sel k.pointer) { ret k.pointer.space; }
+    }
+    ret types.DEFAULT_SPACE;
 }
 
 pub fun is_ptr(t: *types.Table, ty: Type) bool {
@@ -273,6 +299,16 @@ pub fun param_count(t: *types.Table, sig: Type) u32 {
         if (sel s.some.function) { ret s.some.function.params.size::u32; }
     }
     ret 0;
+}
+
+# whether a signature takes a pointer
+pub fun takes_pointer(t: *types.Table, sig: Type) bool {
+    var i: u32 = 0;
+    for (i < param_count(t, sig)) {
+        if (is_ptr(t, param_of(t, sig, i))) { ret true; }
+        i = i + 1;
+    }
+    ret false;
 }
 
 # parameter `i` of a signature, NONE past them

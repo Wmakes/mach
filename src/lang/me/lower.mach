@@ -143,6 +143,10 @@ pub fun lower_module(req: *lower_context.LowerRequest) res[lower_context.Unit, f
     if (sel res_emit.err) {
         ret lower_module_fail(?lc, ?u, res_emit.err);
     }
+    val res_copies: err[fail.Fail] = emit_class_copies(?lc);
+    if (sel res_copies.err) {
+        ret lower_module_fail(?lc, ?u, res_copies.err);
+    }
     val described: err[fail.Fail] = lower_context.debug_types_finish(?lc);
     if (sel described.err) {
         ret lower_module_fail(?lc, ?u, described.err);
@@ -196,6 +200,33 @@ fun emit_instances(lc: *lower_context.LowerContext, s: *session.Session) err[fai
         i = i + 1;
     }
     ret err[fail.Fail].ok{};
+}
+
+# emits every class copy the module's calls asked for, and those the copies ask for in turn
+fun emit_class_copies(lc: *lower_context.LowerContext) err[fail.Fail] {
+    var k: usize = 0;
+    for (k < lc.copies.len) {
+        val c:       lower_context.ClassCopy = lc.copies.data[k];
+        val emitted: err[fail.Fail]          = emit_class_copy(lc, c);
+        if (sel emitted.err) { ret emitted; }
+        k = k + 1;
+    }
+    ret err[fail.Fail].ok{};
+}
+
+fun emit_class_copy(lc: *lower_context.LowerContext, c: lower_context.ClassCopy) err[fail.Fail] {
+    val acquired: res[lower_context.ModuleScope, fail.Fail] = lower_context.origin_scope(lc, c.origin);
+    if (sel acquired.err) { ret err[fail.Fail].err{acquired.err}; }
+    val mark_r: res[lower_context.ScopeMark, fail.Fail] = lower_context.scope_enter(lc, acquired.ok);
+    if (sel mark_r.err) { ret err[fail.Fail].err{mark_r.err}; }
+    var lowered: err[fail.Fail]      = err[fail.Fail].err{fail.message("lower: a class copy's declaration is not a function")};
+    val d:       opt[*ast_decl.Decl] = ast.get_decl(lc.scope.a, c.decl);
+    if (sel d.some) {
+        if (d.some.kind == ast_decl.DECL_KIND_FUN) { lowered = lower_decl.lower_class_copy(lc, c.decl, d.some, c.name, c.sig); }
+    }
+    val leave: err[fail.Fail] = lower_context.scope_leave(lc, mark_r.ok);
+    if (sel lowered.err) { ret lowered; }
+    ret leave;
 }
 
 fun emit_instance(lc: *lower_context.LowerContext, s: *session.Session, id: u32) err[fail.Fail] {

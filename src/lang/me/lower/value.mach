@@ -5,6 +5,7 @@ use std.types.bool.bool;
 use std.types.bool.false;
 
 use mirl.ir.id;
+use types: mirl.ir.type;
 use mirl.ir.type.Type;
 
 use mach.lang.float;
@@ -30,6 +31,9 @@ pub val VAL_FN:     ValueKind = 5;
 pub val VAL_GLOBAL: ValueKind = 6;
 pub val VAL_CONST:  ValueKind = 7;
 
+# space: the address space of the storage an address points into, which a value retyped
+#        as its aggregate keeps
+# held:  what a stack slot was made to hold, none for any other value
 pub rec Value {
     kind:   ValueKind;
     ty:     Type;
@@ -38,7 +42,9 @@ pub rec Value {
     bits:   wide.Wide;
     index:  u32;
     # the signature a function is called through
-    sig: Type;
+    sig:   Type;
+    space: u32;
+    held:  Type;
 }
 
 pub fun none() Value {
@@ -50,6 +56,8 @@ pub fun none() Value {
     v.bits   = wide.zero();
     v.index  = 0;
     v.sig    = irt.NONE;
+    v.space  = types.DEFAULT_SPACE;
+    v.held   = irt.NONE;
     ret v;
 }
 
@@ -100,11 +108,13 @@ pub fun fn(index: u32, ptr: Type, sig: Type) Value {
     ret v;
 }
 
-pub fun global(index: u32, ty: Type) Value {
+# the address of global `index`, of `ty`, into storage of `space`
+pub fun global(index: u32, ty: Type, space: u32) Value {
     var v: Value = none();
     v.kind  = VAL_GLOBAL;
     v.ty    = ty;
     v.index = index;
+    v.space = space;
     ret v;
 }
 

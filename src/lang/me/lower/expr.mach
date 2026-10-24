@@ -31,12 +31,14 @@ use mach.lang.me.lower.constnode;
 use lower_context: mach.lang.me.lower.context;
 use mach.lang.me.lower.irt;
 use mach.lang.me.lower.mangle;
+use lower_shader: mach.lang.me.lower.shader;
 use mach.lang.me.lower.value;
 use mach.lang.module;
 use mach.lang.session;
 use lang_source: mach.lang.source;
 use mach.lang.stack;
 use mach.lang.type;
+use mach.lang.wide;
 
 use mirl.ir.id;
 use mirl.ir.opcode;
@@ -377,6 +379,8 @@ fun symbol_reference(ctx: *lower_context.LowerContext, eid: ast_id.ExprId, sid: 
 
     val res_xg: res[u32, fail.Fail] = lower_context.ensure_extern_global(ctx, link, vty);
     if (sel res_xg.err) { ret res[value.Value, fail.Fail].err{res_xg.err}; }
+    val shaded: err[fail.Fail] = lower_shader.extern_global_attributes(ctx, sym, res_xg.ok);
+    if (sel shaded.err) { ret res[value.Value, fail.Fail].err{shaded.err}; }
     ret emit_global_rvalue(ctx, eid, res_xg.ok, vty);
 }
 
@@ -429,6 +433,8 @@ fun symbol_lvalue(ctx: *lower_context.LowerContext, eid: ast_id.ExprId, sid: res
     if (sel res_ir.err) { ret res[value.Value, fail.Fail].err{res_ir.err}; }
     val res_xg: res[u32, fail.Fail] = lower_context.ensure_extern_global(ctx, link, res_ir.ok);
     if (sel res_xg.err) { ret res[value.Value, fail.Fail].err{res_xg.err}; }
+    val shaded: err[fail.Fail] = lower_shader.extern_global_attributes(ctx, sym, res_xg.ok);
+    if (sel shaded.err) { ret res[value.Value, fail.Fail].err{shaded.err}; }
     ret global_pointer(ctx, res_xg.ok);
 }
 
@@ -954,14 +960,26 @@ fun lower_call(ctx: *lower_context.LowerContext, eid: ast_id.ExprId, e: *ast_exp
     val opt_intr: opt[res[value.Value, fail.Fail]] = try_lower_comptime_intrinsic(ctx, eid, e);
     if (sel opt_intr.some) { ret opt_intr.some; }
 
-    val res_callee: res[value.Value, fail.Fail] = lower_callee(ctx, eid, e);
-    if (sel res_callee.err) { ret res_callee; }
-    val callee: value.Value = res_callee.ok;
+    # on a target whose pointers name a storage class, a direct call of a plain function is
+    # resolved once its arguments are, since the classes they point into choose the copy
+    val opt_plain: opt[lower_context.Declared] = classed_callee(ctx, e);
+    var callee:    value.Value                 = value.none();
+    var sig:       Type                        = irt.NONE;
+    if (sel opt_plain.some) {
+        val res_plain: res[lower_context.FnSig, fail.Fail] = lower_context.fn_sig_of_type(ctx, lower_context.expr_type_of(ctx, e.data.call.callee));
+        if (sel res_plain.err) { ret res[value.Value, fail.Fail].err{res_plain.err}; }
+        sig = res_plain.ok.sig;
+    }
+    or {
+        val res_callee: res[value.Value, fail.Fail] = lower_callee(ctx, eid, e);
+        if (sel res_callee.err) { ret res_callee; }
+        callee = res_callee.ok;
+        sig    = callee.sig;
+    }
 
     # a direct call is made through its callee's signature, an indirect one through the
     # function type it calls
-    var sig: Type = callee.sig;
-    if (callee.kind != value.VAL_FN) {
+    if (sel opt_plain.none && callee.kind != value.VAL_FN) {
         val res_sig: res[lower_context.FnSig, fail.Fail] = lower_context.fn_sig_of_type(ctx, lower_context.expr_type_of(ctx, e.data.call.callee));
         if (sel res_sig.err) { ret res[value.Value, fail.Fail].err{res_sig.err}; }
         sig = res_sig.ok.sig;
@@ -1032,11 +1050,66 @@ fun lower_call(ctx: *lower_context.LowerContext, eid: ast_id.ExprId, e: *ast_exp
         }
     }
 
+    if (sel opt_plain.some) {
+        val chosen: res[value.Value, fail.Fail] = classed_reference(ctx, e.data.call.callee, opt_plain.some, sig, args, rtc);
+        if (sel chosen.err) { ret chosen; }
+        callee = chosen.ok;
+        sig    = callee.sig;
+    }
+
     # a call whose result holds a secret gives a secret result
     builder.set_secret(?ctx.builder, lower_context.type_contains_secret(ctx, lower_context.expr_type_of(ctx, eid)));
     val res_call: res[value.Value, fail.Fail] = builder.emit_call(?ctx.builder, callee, sig, args, rtc);
     builder.set_secret(?ctx.builder, false);
     ret res_call;
+}
+
+# the function a direct call names, when it is a plain one called on a target whose pointers
+# name a storage class: no comptime, pack or generic parameter, and no spread argument
+fun classed_callee(ctx: *lower_context.LowerContext, e: *ast_expr.Expr) opt[lower_context.Declared] {
+    if (!builder.classes(?ctx.builder) || e.data.call.type_args_len != 0 || call_has_spread(ctx, e)) { ret opt[lower_context.Declared].none{}; }
+    val opt_cf: opt[lower_context.Declared] = callee_declared(ctx, e.data.call.callee);
+    if (sel opt_cf.none) { ret opt_cf; }
+    val d: *fe_sema.interface.Declaration = opt_cf.some.declaration;
+    if (fe_sema.interface.declaration_has_comptime_param(opt_cf.some.iface, d)) { ret opt[lower_context.Declared].none{}; }
+    if ((d.flags & fe_sema.interface.DECLARATION_PACK) != 0 || d.generics > 0)  { ret opt[lower_context.Declared].none{}; }
+    ret opt_cf;
+}
+
+# the function a plain direct call calls: the function itself where it takes no pointer,
+# else the copy of it this module lowers taking its pointers in the classes the `n`
+# arguments at `args` point into, one copy for each tuple of classes
+fun classed_reference(ctx: *lower_context.LowerContext, callee_eid: ast_id.ExprId, cf: lower_context.Declared, sig: Type,
+    args: *value.Value, n: u32) res[value.Value, fail.Fail] {
+    val t:   *types.Table         = ?ctx.m.types;
+    val sym: opt[*resolve.Symbol] = lower_context.symbol_of(ctx, lower_context.expr_symbol_of(ctx, callee_eid));
+    if (sel sym.none) { ret res[value.Value, fail.Fail].err{fail.message("lower: a callee names no symbol")}; }
+    val res_ln: res[intern.StrId, fail.Fail] = reference_linkage_name(ctx, sym.some);
+    if (sel res_ln.err) { ret res[value.Value, fail.Fail].err{res_ln.err}; }
+    val origin: session.ModuleId = resolve.origin_of(ctx.s, sym.some);
+
+    var params: collections_vector.Vector[Type] = collections_vector.init[Type](ctx.s.alloc);
+    fin { collections_vector.dnit[Type](?params); }
+    var pointers: bool = false;
+    var i:        u32  = 0;
+    for (i < irt.param_count(t, sig)) {
+        var p: Type = irt.param_of(t, sig, i);
+        if (irt.is_ptr(t, p) && i < n) {
+            pointers = true;
+            val a:         value.Value = args[i];
+            val addressed: bool        = a.kind == value.VAL_GLOBAL || (a.kind == value.VAL_SSA && irt.is_ptr(t, a.ty));
+            if (addressed) { p = builder.ptr_in(?ctx.builder, a.space); }
+        }
+        val pushed: res[usize, A.Error] = collections_vector.push[Type](?params, p);
+        if (sel pushed.err) { ret res[value.Value, fail.Fail].err{fail.refused(pushed.err)}; }
+        i = i + 1;
+    }
+    if (!pointers) { ret fn_reference(ctx, res_ln.ok, lower_context.FnSig{sig: sig}); }
+    val copied: res[Type, fail.Fail] = irt.restated(t, sig, params.data, params.len::u32);
+    if (sel copied.err) { ret res[value.Value, fail.Fail].err{copied.err}; }
+    val made: res[u32, fail.Fail] = lower_context.class_copy(ctx, origin, cf.declaration.decl, res_ln.ok, copied.ok);
+    if (sel made.err) { ret res[value.Value, fail.Fail].err{made.err}; }
+    ret res[value.Value, fail.Fail].ok{value.fn(made.ok, builder.ptr_type(?ctx.builder), copied.ok)};
 }
 
 # whether call argument `ord` may be read in place: an aggregate place with no secret, read
@@ -2179,7 +2252,8 @@ fun rvalue_at(ctx: *lower_context.LowerContext, ptr: value.Value, ity: Type, sem
 }
 
 fun global_pointer(ctx: *lower_context.LowerContext, global_ix: u32) res[value.Value, fail.Fail] {
-    ret res[value.Value, fail.Fail].ok{value.global(global_ix, builder.ptr_type(?ctx.builder))};
+    val space: u32 = builder.global_space(?ctx.builder, global_ix);
+    ret res[value.Value, fail.Fail].ok{value.global(global_ix, builder.ptr_in(?ctx.builder, space), space)};
 }
 
 fun emit_global_rvalue(ctx: *lower_context.LowerContext, eid: ast_id.ExprId, global_ix: u32, vty: Type) res[value.Value, fail.Fail] {
@@ -2281,6 +2355,14 @@ fun ir_type_of_expr(ctx: *lower_context.LowerContext, eid: ast_id.ExprId) res[Ty
 }
 
 fun widen_index(ctx: *lower_context.LowerContext, v: value.Value, sem_ty: type.TypeId) res[value.Value, fail.Fail] {
+    # an index into what a logical pointer points to is read at its own width, and a
+    # constant one in the word spir-v writes a constant index in where it fits there
+    if (builder.classes(?ctx.builder)) {
+        if (v.kind == value.VAL_INT && wide.lt_u(v.bits, wide.from_u64(0x80000000))) {
+            ret res[value.Value, fail.Fail].ok{value.const_int_wide(v.bits, builder.index_type(?ctx.builder))};
+        }
+        ret res[value.Value, fail.Fail].ok{v};
+    }
     val xty: Type = builder.index_type(?ctx.builder);
     if (scalar_bits(ctx, sem_ty) >= irt.int_width(?ctx.m.types, xty)) { ret res[value.Value, fail.Fail].ok{v}; }
     if (is_signed_type(ctx, sem_ty))                                  { ret builder.emit_sext(?ctx.builder, v, xty); }

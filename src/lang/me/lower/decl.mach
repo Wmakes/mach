@@ -35,6 +35,7 @@ use lower_expr:    mach.lang.me.lower.expr;
 use mach.lang.me.lower.irt;
 use mach.lang.me.lower.mangle;
 use lower_oblivious: mach.lang.me.lower.oblivious;
+use lower_shader:    mach.lang.me.lower.shader;
 use lower_stmt:      mach.lang.me.lower.stmt;
 use mach.lang.me.lower.value;
 use mach.lang.module;
@@ -283,6 +284,8 @@ fun lower_fun(ctx: *lower_context.LowerContext, did: ast_id.DeclId, d: *ast_decl
     var op_code: u32 = 0;
     val op_set:  u32 = lower_context.declared_op(ctx, lower_context.Declared{iface: ctx.scope.iface, declaration: own.some}, ?op_code);
 
+    if (op_set != target_definition.NO_OP_SET) { ret lower_shader.refuse_op(ctx, d); }
+
     # an instruction on the selected target has no body there, and a body the normal object
     # defines is declared in the test object
     var declared_only: bool = (d.flags & ast_decl.DECL_FLAG_EXT) != 0 || ast_id.stmt_is_nil(d.data.fun_.body) || op_set != target_definition.NO_OP_SET;
@@ -296,8 +299,14 @@ fun lower_fun(ctx: *lower_context.LowerContext, did: ast_id.DeclId, d: *ast_decl
     val refused: err[fail.Fail] = refuse_unplaced_function(ctx, d);
     if (sel refused.err) { ret refused; }
 
+    # where pointers name a storage class, a function taking one is lowered only as the
+    # copies its callers' classes ask for
+    if (builder.classes(?ctx.builder) && irt.takes_pointer(?ctx.m.types, sig.sig)) { ret err[fail.Fail].ok{}; }
+
     val res_idx: res[u32, fail.Fail] = define_function(ctx, name, sig, defined_linkage(ctx, (d.flags & ast_decl.DECL_FLAG_PUB) != 0), oblivious(ctx, d));
     if (sel res_idx.err) { ret err[fail.Fail].err{res_idx.err}; }
+    val staged: err[fail.Fail] = lower_shader.function_attributes(ctx, d, res_idx.ok, bare);
+    if (sel staged.err) { ret staged; }
     ret emit_function_body(ctx, did, d, res_idx.ok, sig, lower_context.decl_ret_sem(ctx, did), lang_source.location(ctx.scope.a.file_id, d.data.fun_.name));
 }
 
@@ -413,6 +422,9 @@ fun lower_global(ctx: *lower_context.LowerContext, did: ast_id.DeclId, d: *ast_d
         ret err[fail.Fail].ok{};
     }
 
+    val spec: err[fail.Fail] = lower_shader.refuse_spec(ctx, d);
+    if (sel spec.err) { ret spec; }
+
     var init_val: value.Value = value.const_null(gty);
     if (decorator.has(ctx.scope.a, d, decorator.EMBED)) {
         val er: res[*session_embed.EmbedFile, fail.Fail] = embed_file_of(ctx, d);
@@ -437,9 +449,10 @@ fun lower_global(ctx: *lower_context.LowerContext, did: ast_id.DeclId, d: *ast_d
     if (sel built.err) { ret built; }
 
     var g: GlobalData;
-    g.name      = View{data: intern.text(?ctx.s.interner, name), len: str_len(intern.text(?ctx.s.interner, name))};
-    g.type      = init_val.ty;
-    g.initial   = opt[id.Constant].some{initial};
+    g.name    = View{data: intern.text(?ctx.s.interner, name), len: str_len(intern.text(?ctx.s.interner, name))};
+    g.type    = init_val.ty;
+    g.initial = opt[id.Constant].some{initial};
+    if (!lower_shader.initialized(ctx, d)) { g.initial = opt[id.Constant].none{}; }
     g.alignment = opt[u64].some{align};
     g.section   = global_section(ctx, d, is_mut);
     g.tls       = opt[mirl_global.Tls].none{};
@@ -447,7 +460,7 @@ fun lower_global(ctx: *lower_context.LowerContext, did: ast_id.DeclId, d: *ast_d
     g.constant  = !is_mut;
     val res_idx: res[u32, fail.Fail] = lower_context.define_global(ctx, g);
     if (sel res_idx.err) { ret err[fail.Fail].err{res_idx.err}; }
-    ret err[fail.Fail].ok{};
+    ret lower_shader.global_attributes(ctx, d, res_idx.ok);
 }
 
 fun lower_weak_instance(ctx: *lower_context.LowerContext, did: ast_id.DeclId, d: *ast_decl.Decl, name: intern.StrId, ret_sem: type.TypeId) err[fail.Fail] {
@@ -466,6 +479,16 @@ fun lower_weak_instance(ctx: *lower_context.LowerContext, did: ast_id.DeclId, d:
     val res_idx: res[u32, fail.Fail] = define_function(ctx, name, sig, weak_linkage(), oblivious(ctx, d));
     if (sel res_idx.err) { ret err[fail.Fail].err{res_idx.err}; }
     ret emit_function_body(ctx, did, d, res_idx.ok, sig, ret_sem, lang_source.location(ctx.scope.a.file_id, d.data.fun_.name));
+}
+
+# a copy of the function `did` whose pointer parameters take the classes `sig` states,
+# local to the module whose call asked for it
+pub fun lower_class_copy(ctx: *lower_context.LowerContext, did: ast_id.DeclId, d: *ast_decl.Decl, name: intern.StrId, sig: Type) err[fail.Fail] {
+    if (ast_id.stmt_is_nil(d.data.fun_.body)) { ret err[fail.Fail].ok{}; }
+    val copied:  lower_context.FnSig = lower_context.FnSig{sig: sig};
+    val res_idx: res[u32, fail.Fail] = define_function(ctx, name, copied, Linkage{binding: ?symbol.LOCAL, visibility: ?symbol.DEFAULT}, oblivious(ctx, d));
+    if (sel res_idx.err) { ret err[fail.Fail].err{res_idx.err}; }
+    ret emit_function_body(ctx, did, d, res_idx.ok, copied, lower_context.decl_ret_sem(ctx, did), lang_source.location(ctx.scope.a.file_id, d.data.fun_.name));
 }
 
 # an instance the normal object already defines is declared in the test object, never lowered
@@ -510,6 +533,7 @@ fun enter_function(ctx: *lower_context.LowerContext, fn_index: u32, sig: lower_c
     }
     lower_context.begin_function(ctx, fn_index, irt.result_of(t, sig.sig));
     ctx.fn_ret_sem = ret_sem;
+    ctx.fn_sig     = sig.sig;
     ctx.fn_shown   = at.span;
     builder.enter(?ctx.builder, id.Function{index: fn_index}, params.data, secrets.data, n);
     builder.set_loc(?ctx.builder, at);
@@ -597,7 +621,9 @@ rec Home {
 fun param_home(ctx: *lower_context.LowerContext, w: u32, p_sem: type.TypeId) res[Home, fail.Fail] {
     val res_p_ir: res[Type, fail.Fail] = lower_context.lower_type(ctx, p_sem);
     if (sel res_p_ir.err) { ret res[Home, fail.Fail].err{res_p_ir.err}; }
-    val p_ir: Type = res_p_ir.ok;
+    var p_ir: Type = res_p_ir.ok;
+    # a pointer parameter is of the class the signature states, which a copy's call sites chose
+    if (irt.is_ptr(?ctx.m.types, p_ir)) { p_ir = irt.param_of(?ctx.m.types, ctx.fn_sig, w); }
 
     val got: res[value.Value, fail.Fail] = builder.param(?ctx.builder, w, p_ir);
     if (sel got.err) { ret res[Home, fail.Fail].err{got.err}; }
