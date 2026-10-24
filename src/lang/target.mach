@@ -726,11 +726,10 @@ fun no_page_size(a: *A.Allocator, os_vt: *lang_target_os.OsVTable, arch_vt: *isa
     ret fail.formatted(a, "object format '{}' is mapped by page, but neither '{}' nor '{}' declares a page size", of_vt.name, os_vt.name, arch_vt.name);
 }
 
+# the isa's own environment named by `env`, NONE where the isa defines none and the
+# value is the system's alone, which mink's host rows and mirl's record check
 fun resolve_environment(a: *A.Allocator, arch_vt: *isa.IsaVTable, req: *TargetRequest) res[u32, fail.Fail] {
-    if (str_empty(req.env_name)) { ret res[u32, fail.Fail].ok{isa_environment.NONE}; }
-    if (arch_vt.environments.count == 0) {
-        ret res[u32, fail.Fail].err{environment_refusal(a, req, arch_vt, "defines no environments; remove `env`")};
-    }
+    if (str_empty(req.env_name) || arch_vt.environments.count == 0) { ret res[u32, fail.Fail].ok{isa_environment.NONE}; }
     val id: u32 = isa_environment.lookup(?arch_vt.environments, req.env_name);
     if (id == isa_environment.NONE) {
         ret res[u32, fail.Fail].err{environment_refusal(a, req, arch_vt, "does not define it")};
@@ -751,9 +750,8 @@ fun environment_refusal(a: *A.Allocator, req: *TargetRequest, arch_vt: *isa.IsaV
     ret fail.formatted(a, "{}: isa '{}' {} (known: {})", req.env_origin, arch_vt.name, why, known);
 }
 
-# the isa's environment names, `, `-separated, or `none`, appended to `b`
+# the isa's environment names, `, `-separated, appended to `b`
 fun environment_names_append(b: *textbuild.TextBuilder, arch_vt: *isa.IsaVTable) err[textbuild.Error] {
-    if (arch_vt.environments.count == 0) { ret textbuild.tb_append(b, "none"); }
     var i: u32 = 0;
     for (i < arch_vt.environments.count) {
         if (i > 0) {

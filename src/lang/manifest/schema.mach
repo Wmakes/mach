@@ -163,7 +163,7 @@ val TARGET_KEYS:      [13]KeyRow = [13]KeyRow{
     KeyRow{key: "baseline", shape: SHAPE_STRING, rule: RULE_OPTIONAL, note: "the isa's default baseline"},
     KeyRow{key: "os", shape: SHAPE_STRING, rule: RULE_REQUIRED, note: ""},
     KeyRow{key: "abi", shape: SHAPE_STRING, rule: RULE_REQUIRED, note: ""},
-    KeyRow{key: "env", shape: SHAPE_STRING, rule: RULE_OPTIONAL, note: "the isa's default environment"},
+    KeyRow{key: "env", shape: SHAPE_STRING, rule: RULE_OPTIONAL, note: "no environment"},
     KeyRow{key: "of", shape: SHAPE_STRING, rule: RULE_OPTIONAL, note: "the os's object format"},
     KeyRow{key: "platform", shape: SHAPE_STRING, rule: RULE_OPTIONAL, note: "no platform"},
     KeyRow{key: "base", shape: SHAPE_INTEGER, rule: RULE_OPTIONAL, note: "the object format's load address"},

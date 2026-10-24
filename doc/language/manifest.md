@@ -279,7 +279,7 @@ to whichever *declared* target matches the host.
 | `default` | removed | Refused as a removed key. A target has no default: with no `-t` a command takes the declared target matching the host. See [`native` target resolution](build.md#native-target-resolution). |
 | `extensions` | absent: none selected | Array of instruction-set extension names the target may assume, such as `["sha", "ssse3"]`. Each name must be in the isa's vocabulary. See [Instruction-set extensions](#instruction-set-extensions). |
 | `runner` | absent: the host runs its own programs, and no other target's | Array of argv templates the target's programs are launched through by `mach run` and `mach test`, whether or not the target is the host. See [Execution command](#execution-command). |
-| `env` | absent: the isa's default | Consumer environment (string). The values are owned by the target's isa: an `env` the isa does not define is a manifest error naming the target and the known values, and an isa that defines none refuses the key outright. Today only `spirv` defines any; see [Finished-module targets](#finished-module-targets). |
+| `env` | absent: none | The environment the target's system runs it under (string), such as `macos` on `darwin`, `msvc` on `windows` or `vulkan1.2` on `vulkan`. Any target may state it. The values are the system's, owned by mink's host rows and mirl's target record, and an `env` the system does not list is a manifest error. It is required where the system has no host without an environment, as on `darwin` and `windows`. An isa that defines its own environments, today only `spirv`, also checks the value against them; see [Finished-module targets](#finished-module-targets). |
 
 ### Execution command
 
