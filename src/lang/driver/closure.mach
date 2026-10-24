@@ -784,19 +784,8 @@ pub fun build_dep_root(alloc: *A.Allocator, project_root: str, dir_dep: str, ali
 }
 
 pub fun cell_tmpl_vars(p: *project.Project) template.Values {
-    var v: template.Values;
-    v.target  = intern.text(?p.s.interner, p.target_entry.name);
-    v.isa     = intern.text(?p.s.interner, p.target_entry.isa_name);
-    v.os      = intern.text(?p.s.interner, p.target_entry.os_name);
-    v.abi     = intern.text(?p.s.interner, p.target_entry.abi_name);
-    v.profile = intern.text(?p.s.interner, p.config.profile);
-    v.format  = "";
-    val format: opt[str] = intern.get(?p.s.interner, p.target_entry.of_name);
-    if (sel format.some) { v.format = format.some; }
-    v.artifact_suffix = nil;
-    v.reqs            = p.config.art_reqs;
-    v.req_count       = p.config.art_req_count;
-    ret v;
+    ret template.values_with(?p.s.interner, ?p.target_entry.declared, intern.text(?p.s.interner, p.config.profile),
+        p.config.art_reqs, p.config.art_req_count);
 }
 
 # `cell_tmpl_vars` whose `{artifact.<id>.out}` resolves in the requirement scope
