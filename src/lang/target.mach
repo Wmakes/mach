@@ -370,7 +370,7 @@ pub fun resolve(reg: *TargetRegistry, req: *TargetRequest) res[binding.Binding, 
     if (!lang_target_os.supports_isa(os_vt, arch_vt.id)) {
         ret res[binding.Binding, fail.Fail].err{tuple.refusal(?reg.alloc, tuple.OS_NO_ISA, os_vt, arch_vt, abi_vt, of_vt)};
     }
-    val spelled_r: res[opt[str], fail.Fail] = baseline_spelling(?reg.alloc, os_vt, arch_vt, abi_vt, req.baseline_name);
+    val spelled_r: res[opt[str], fail.Fail] = baseline_spelling(?reg.alloc, os_vt, arch_vt, abi_vt, req.baseline_name, req.env_name);
     if (sel spelled_r.err) { ret res[binding.Binding, fail.Fail].err{spelled_r.err}; }
     val base_r: res[u64, fail.Fail] = baseline_bits(?reg.alloc, arch_vt, spelled_r.ok);
     if (sel base_r.err) { ret res[binding.Binding, fail.Fail].err{base_r.err}; }
@@ -452,7 +452,7 @@ pub fun resolve(reg: *TargetRegistry, req: *TargetRequest) res[binding.Binding, 
     t.abi_id  = abi_vt.id;
     t.of_id   = of_vt.id;
 
-    val caps_r: res[mink_os.Caps, fail.Fail] = target_host.caps(?reg.alloc, os_vt.id, arch_vt.id, abi_vt.id);
+    val caps_r: res[mink_os.Caps, fail.Fail] = target_host.caps(?reg.alloc, os_vt.id, arch_vt.id, abi_vt.id, req.env_name);
     if (sel caps_r.err) { ret res[binding.Binding, fail.Fail].err{caps_r.err}; }
     t.timing_mode_provable = (caps_r.ok & mink_os.TIMING_MODE_PROVABLE) != 0;
     t.pie_default          = (caps_r.ok & mink_os.PIE_DEFAULT) != 0;
@@ -508,7 +508,7 @@ pub fun resolve(reg: *TargetRegistry, req: *TargetRequest) res[binding.Binding, 
     t.stands  = stands;
     t.scalars = layout.scalars_none();
     t.nans    = resolved.nans_of_rule(selected_model.nan_rule);
-    val owned_r: res[opt[target_owner.Owned], fail.Fail] = target_owner.owned_for(?reg.alloc, os_vt.id, arch_vt.id, abi_vt.id, stands, selected_model.extension_table, selected_model.extensions);
+    val owned_r: res[opt[target_owner.Owned], fail.Fail] = target_owner.owned_for(?reg.alloc, os_vt.id, arch_vt.id, abi_vt.id, req.env_name, stands, selected_model.extension_table, selected_model.extensions);
     if (sel owned_r.err) { ret res[binding.Binding, fail.Fail].err{owned_r.err}; }
     if (sel owned_r.ok.some) {
         val held: layout.Scalars = owned_r.ok.some.scalars;
@@ -530,7 +530,7 @@ pub fun resolve(reg: *TargetRegistry, req: *TargetRequest) res[binding.Binding, 
 # floor, as every freestanding one, names its baseline, since the chip decides it
 # and no default is right. none for an instruction set whose catalog spells no
 # selection, which takes no baseline and stands on its model's own extensions
-fun baseline_spelling(a: *A.Allocator, os_vt: *lang_target_os.OsVTable, arch_vt: *isa.IsaVTable, abi_vt: *abi.AbiVTable, named: str) res[opt[str], fail.Fail] {
+fun baseline_spelling(a: *A.Allocator, os_vt: *lang_target_os.OsVTable, arch_vt: *isa.IsaVTable, abi_vt: *abi.AbiVTable, named: str, env: str) res[opt[str], fail.Fail] {
     if (!target_baseline.takes_baseline(catalog_arch.owner_of(arch_vt.id), arch_vt.model.extension_table)) {
         if (!str_empty(named)) {
             ret res[opt[str], fail.Fail].err{fail.formatted(a,
@@ -539,7 +539,7 @@ fun baseline_spelling(a: *A.Allocator, os_vt: *lang_target_os.OsVTable, arch_vt:
         ret res[opt[str], fail.Fail].ok{opt[str].none{}};
     }
     if (!str_empty(named)) { ret res[opt[str], fail.Fail].ok{opt[str].some{named}}; }
-    val floor: res[opt[str], fail.Fail] = target_host.floor(a, os_vt.id, arch_vt.id, abi_vt.id);
+    val floor: res[opt[str], fail.Fail] = target_host.floor(a, os_vt.id, arch_vt.id, abi_vt.id, env);
     if (sel floor.err) { ret res[opt[str], fail.Fail].err{floor.err}; }
     if (sel floor.ok.none) {
         ret res[opt[str], fail.Fail].err{fail.formatted_user(a, diagnostic_kind.TARGET_BASELINE_REQUIRED,
@@ -626,7 +626,7 @@ pub fun registered_selection(os_vt: *lang_target_os.OsVTable, arch_vt: *isa.IsaV
     var a: A.Allocator;
     page.make(?a);
     var base:    u64                      = arch_vt.model.extensions;
-    val spelled: res[opt[str], fail.Fail] = baseline_spelling(?a, os_vt, arch_vt, abi_vt, "");
+    val spelled: res[opt[str], fail.Fail] = baseline_spelling(?a, os_vt, arch_vt, abi_vt, "", "");
     if (sel spelled.ok) {
         val bits: res[u64, fail.Fail] = baseline_bits(?a, arch_vt, spelled.ok);
         if (sel bits.ok) { base = bits.ok; }
