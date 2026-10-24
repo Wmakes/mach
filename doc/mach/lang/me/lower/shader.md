@@ -25,14 +25,32 @@ pub fun initialized(lc: *lower_context.LowerContext, d: *ast_decl.Decl) bool;
 whether a global of the declaration `d` holds the initial value it is written with: the
 host, the pipeline or the previous stage supplies an interface variable's
 
-## fun refuse_spec
+## fun specialized
 
 ```mach
-pub fun refuse_spec(lc: *lower_context.LowerContext, d: *ast_decl.Decl) err[fail.Fail];
+pub fun specialized(lc: *lower_context.LowerContext, d: *ast_decl.Decl) bool;
 ```
 
-a `#[spec]` var is refused where its decorator is written, since mirl states no
-specialization constant yet
+whether the declaration `d` is a `#[spec]` var on a target that states specialization
+constants, which defines no global there: each read of it is the constant
+
+## rec SpecVar
+
+```mach
+pub rec SpecVar;
+```
+
+a `#[spec]` var as its specialization constant: the id the host sets it by and the
+default its initializer gives
+
+## fun spec_var
+
+```mach
+pub fun spec_var(lc: *lower_context.LowerContext, sym: *resolve.Symbol) res[opt[SpecVar], fail.Fail];
+```
+
+the `#[spec]` var `sym` names on a target that states specialization constants, read in
+the scope it is written in, none for any other binding or target
 
 ## fun refuse_core_op
 

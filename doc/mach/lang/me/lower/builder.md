@@ -327,13 +327,19 @@ pub fun set_kept(b: *Builder, k: bool);
 
 whether the next writes are kept: a wipe of memory that held a secret
 
+## fun spec_constant
+
+```mach
+pub fun spec_constant(b: *Builder, spec_id: u32, default: value.Value) value.Value;
+```
+
+the specialization constant `spec_id`, whose default is the integer or float constant `default`
+
 ## fun constant_of
 
 ```mach
 pub fun constant_of(b: *Builder, v: value.Value) id.Constant;
 ```
-
-the module constant a constant value stands for
 
 ## fun use
 
