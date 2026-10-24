@@ -96,13 +96,11 @@ fun append_backend_roots(p: *project.Project, roots: *Vector[query.QueryKey],
     if (sel frontend.err) { ret frontend; }
     val surface: err[fail.Fail] = append_phase_roots(p, roots, ?passes.LOWERED_SURFACE, p.emit_len);
     if (sel surface.err) { ret surface; }
-    val lowered: err[fail.Fail] = append_phase_roots(p, roots, ?passes.LOWER, p.emit_len);
-    if (sel lowered.err) { ret lowered; }
     if (codegen)         { ret append_phase_roots(p, roots, ?passes.CODEGEN, p.emit_len); }
     ret err[fail.Fail].ok{};
 }
 
-# the backend's roots and each test object's lowering and codegen
+# the backend's roots and each test object's codegen
 pub fun append_test_roots(p: *project.Project, roots: *Vector[query.QueryKey]) err[fail.Fail] {
     val backend: err[fail.Fail] = append_backend_roots(p, roots, true);
     if (sel backend.err) { ret backend; }
@@ -110,8 +108,6 @@ pub fun append_test_roots(p: *project.Project, roots: *Vector[query.QueryKey]) e
     for (i < p.emit_len) {
         val m: *project.ModuleEntry = project.module_at(p, p.topo[i]::u32);
         if (passes.has_test_object(p, m)) {
-            val lowered: res[usize, A.Error] = collections_vector.push[query.QueryKey](roots, query.QueryKey{kind: ?passes.LOWER, key: passes.test_key_for(m)});
-            if (sel lowered.err) { ret err[fail.Fail].err{fail.refused(lowered.err)}; }
             val emitted: res[usize, A.Error] = collections_vector.push[query.QueryKey](roots, query.QueryKey{kind: ?passes.CODEGEN, key: passes.test_key_for(m)});
             if (sel emitted.err) { ret err[fail.Fail].err{fail.refused(emitted.err)}; }
         }

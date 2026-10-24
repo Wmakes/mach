@@ -1,8 +1,7 @@
 use std.allocator.page;
 use collections_vector: std.collections.vector;
 use std.collections.vector.Vector;
-use fs:        std.filesystem;
-use io_writer: std.io.writer;
+use fs: std.filesystem;
 use std.text.string.str_dup;
 use std.text.string.str_free;
 use std.types.bool.bool;
@@ -35,7 +34,6 @@ use mach.lang.growth;
 use mach.lang.intern;
 use mach.lang.linkage;
 use mach.lang.manifest;
-use lower_context: mach.lang.me.lower.context;
 use mach.lang.output;
 use mach.lang.readout;
 use mach.lang.session;
@@ -56,25 +54,12 @@ use mink.format.contract;
 use mink.link.input.Given;
 use mink.link.input.Source;
 use mink.model.object.Object;
-use text_item:    mirl.ir.text.item;
-use text_printer: mirl.ir.text.printer;
 use std.types.view.View;
 
 # assembly listings come from masc's listing of the object mirl compiled, which masc
 # does not offer yet (masc#484)
-pub fun emit_asm(p: *project.Project, destination: str, u: *lower_context.Unit) err[fail.Fail] {
+pub fun emit_asm() err[fail.Fail] {
     ret err[fail.Fail].err{fail.user(diagnostic_kind.CLI_FLAG_VALUE, "--emit-asm waits for masc to list the objects mirl compiles")};
-}
-
-fun write_unit_text(u: *lower_context.Unit, out: *io_writer.Writer) err[io_writer.WriteError] {
-    val written: err[text_printer.Error] = text_item.print(out, ?u.m);
-    if (sel written.err) { ret err[io_writer.WriteError].err{io_writer.WriteError.stalled{0}}; }
-    ret err[io_writer.WriteError].ok{};
-}
-
-# mirl's text of the module `u` holds, as the schedule left it compiling the module
-pub fun emit_ir(p: *project.Project, destination: str, u: *lower_context.Unit) err[fail.Fail] {
-    ret output.writer[lower_context.Unit](nil, p.alloc, destination, u, write_unit_text, 0o644, "write");
 }
 
 pub fun artifact_product_name(p: *project.Project) *u8 {

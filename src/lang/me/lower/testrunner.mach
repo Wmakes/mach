@@ -121,23 +121,20 @@ val TEST_STATUS_WIDE: u64 = 255;
 # machine: the target the dispatcher is built for
 # tests:   the collected tests in dispatch order, indexed by argv[1]
 # count:   how many tests there are, at least one
-# ret:     the dispatcher unit, owned by the caller, or why it could not be built
-pub fun synthesize_dispatcher(s: *session.Session, machine: *lower_context.Machine, tests: *Test, count: u32) res[lower_context.Unit, fail.Fail] {
-    if (count == 0) { ret res[lower_context.Unit, fail.Fail].err{fail.message("test dispatcher: no tests to dispatch")}; }
+# ret:     the dispatcher's mirl module, owned by the caller, or why it could not be built
+pub fun synthesize_dispatcher(s: *session.Session, machine: *lower_context.Machine, tests: *Test, count: u32) res[mirl_module.Module, fail.Fail] {
+    if (count == 0) { ret res[mirl_module.Module, fail.Fail].err{fail.message("test dispatcher: no tests to dispatch")}; }
 
-    val res_name: res[intern.StrId, A.Error] = intern.add(?s.interner, "__mach_test_dispatch");
-    if (sel res_name.err) { ret res[lower_context.Unit, fail.Fail].err{fail.refused(res_name.err)}; }
-
-    val made: res[lower_context.Unit, fail.Fail] = lower_context.unit_init(s.alloc, machine, res_name.ok, true);
+    val made: res[mirl_module.Module, fail.Fail] = lower_context.module_init(s.alloc, machine);
     if (sel made.err) { ret made; }
-    var u: lower_context.Unit = made.ok;
+    var m: mirl_module.Module = made.ok;
 
-    val res_build: err[fail.Fail] = build_dispatcher(s, machine, ?u, tests, count);
+    val res_build: err[fail.Fail] = build_dispatcher(s, machine, ?m, tests, count);
     if (sel res_build.err) {
-        lower_context.unit_dnit(?u);
-        ret res[lower_context.Unit, fail.Fail].err{res_build.err};
+        mirl_module.dnit(?m);
+        ret res[mirl_module.Module, fail.Fail].err{res_build.err};
     }
-    ret res[lower_context.Unit, fail.Fail].ok{u};
+    ret res[mirl_module.Module, fail.Fail].ok{m};
 }
 
 pub fun push(s: *session.Session, c: *Collected, t: Test) err[fail.Fail] {
@@ -157,9 +154,9 @@ fun view_of(s: *session.Session, name: intern.StrId) View {
     ret View{data: text, len: str_len(text)};
 }
 
-fun build_dispatcher(s: *session.Session, machine: *lower_context.Machine, u: *lower_context.Unit, tests: *Test, count: u32) err[fail.Fail] {
-    val t: *types.Table    = ?u.m.types;
-    var b: builder.Builder = builder.init(?u.m, s.alloc, machine.target, machine.ctx, machine.slots, ?s.sources, false);
+fun build_dispatcher(s: *session.Session, machine: *lower_context.Machine, m: *mirl_module.Module, tests: *Test, count: u32) err[fail.Fail] {
+    val t: *types.Table    = ?m.types;
+    var b: builder.Builder = builder.init(m, s.alloc, machine.target, machine.ctx, machine.slots, ?s.sources, false);
     fin { builder.dnit(?b); }
 
     val i8t:  Type = builder.int_type(?b, 8);
@@ -186,7 +183,7 @@ fun build_dispatcher(s: *session.Session, machine: *lower_context.Machine, u: *l
     fin { collections_vector.dnit[value.Value](?callees); }
     var k: u32 = 0;
     for (k < count) {
-        val f: res[id.Function, fail.Fail] = add(u, FunctionData{name: view_of(s, tests[k].name), signature: tsig, linkage: global, constant_time: false}, tests[k].name, false);
+        val f: res[id.Function, fail.Fail] = add(m, FunctionData{name: view_of(s, tests[k].name), signature: tsig, linkage: global, constant_time: false});
         if (sel f.err) { ret err[fail.Fail].err{f.err}; }
         val pushed: res[usize, A.Error] = collections_vector.push[value.Value](?callees, value.fn(f.ok.index, ptrt, tsig));
         if (sel pushed.err) { ret err[fail.Fail].err{fail.refused(pushed.err)}; }
@@ -195,7 +192,7 @@ fun build_dispatcher(s: *session.Session, machine: *lower_context.Machine, u: *l
 
     val res_main: res[intern.StrId, A.Error] = intern.add(?s.interner, MAIN_LINKAGE);
     if (sel res_main.err) { ret err[fail.Fail].err{fail.refused(res_main.err)}; }
-    val main_f: res[id.Function, fail.Fail] = add(u, FunctionData{name: view_of(s, res_main.ok), signature: msig, linkage: global, constant_time: false}, res_main.ok, true);
+    val main_f: res[id.Function, fail.Fail] = add(m, FunctionData{name: view_of(s, res_main.ok), signature: msig, linkage: global, constant_time: false});
     if (sel main_f.err) { ret err[fail.Fail].err{main_f.err}; }
 
     val b_entry: id.Block    = builder.enter(?b, main_f.ok, ?main_params[0], nil, 2);
@@ -284,12 +281,9 @@ fun build_dispatcher(s: *session.Session, machine: *lower_context.Machine, u: *l
     ret builder.done(?b);
 }
 
-# add a function to the dispatcher's unit with what mach knows of it
-fun add(u: *lower_context.Unit, data: FunctionData, name: intern.StrId, defined: bool) res[id.Function, fail.Fail] {
-    val made: res[id.Function, mirl_module.Error] = mirl_module.add_function(?u.m, data);
+# add a function to the dispatcher's module
+fun add(m: *mirl_module.Module, data: FunctionData) res[id.Function, fail.Fail] {
+    val made: res[id.Function, mirl_module.Error] = mirl_module.add_function(m, data);
     if (sel made.err) { ret res[id.Function, fail.Fail].err{fail.message("test dispatcher: mirl refused a function")}; }
-    val pushed: res[usize, A.Error] = collections_vector.push[lower_context.FnInfo](?u.fns,
-        lower_context.FnInfo{name: name, line: 0, test: false, noreturn: false, defined: defined});
-    if (sel pushed.err) { ret res[id.Function, fail.Fail].err{fail.refused(pushed.err)}; }
     ret res[id.Function, fail.Fail].ok{made.ok};
 }

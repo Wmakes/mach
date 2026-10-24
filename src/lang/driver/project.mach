@@ -194,10 +194,12 @@ pub rec ArtifactEntry {
 # staging of its objects. its front-end products are the query engine's, keyed by its file and
 # its stable id, and read through mach.lang.driver.frontend
 pub rec ModuleEntry {
-    fqn:           intern.StrId;
-    file_id:       lang_source.FileId;
-    unit:          *lower_context.Unit;
-    object:        *Object;
+    fqn:     intern.StrId;
+    file_id: lang_source.FileId;
+    unit:    *lower_context.Unit;
+    object:  *Object;
+    # where its step writes mirl's text of the module, "" for nowhere
+    ir_output:     str;
     staged:        *Object;
     staged_facts:  cache_record.Facts;
     record:        Record;

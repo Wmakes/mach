@@ -20,8 +20,6 @@ use std.types.string.str_equals;
 
 use A: std.allocator;
 use T: std.allocator.testing;
-use std.sync.atomic;
-use sync_thread: std.sync.thread;
 
 use build_emit: mach.lang.build.emit;
 use mach.lang.build.outcome;
@@ -31,7 +29,6 @@ use build_testing: mach.lang.build.testing;
 use mach.lang.diagnostic;
 use diagnostic_kind: mach.lang.diagnostic.kind;
 use mach.lang.driver;
-use mach.lang.driver.backend;
 use mach.lang.driver.cache;
 use mach.lang.driver.codec;
 use mach.lang.driver.passes;
@@ -42,7 +39,6 @@ use mach.lang.fail;
 use lang_fingerprint: mach.lang.fingerprint;
 use mach.lang.intern;
 use mach.lang.manifest;
-use lower_context: mach.lang.me.lower.context;
 use mach.lang.me.lower.testrunner;
 use mach.lang.output;
 use mach.lang.query;
@@ -58,7 +54,6 @@ use mach.lang.testrun;
 use mach.lang.wire;
 use mink_output: mink.catalog.output;
 use mink.model.object.Object;
-use std.system.panic.panic;
 
 rec UnitState {
     inputs:     *target_of.ObjectInput;
@@ -337,7 +332,7 @@ pub fun execute_warm(bp: *build_plan.BuildPlan, unit_index: usize, s: *session.S
 
     readout.diagnostics(sink, ?s.sources, ?s.diags);
     build_testing.free_scope(?p, ?st.scope);
-    pcg_sweep_staged(?p);
+    project.release_all_staged(?p);
 
     if (sel result.err) {
         var f: fail.Fail = result.err;
@@ -363,10 +358,6 @@ fun plan_held(bp: *build_plan.BuildPlan, s: *session.Session) err[fail.Fail] {
         ret err[fail.Fail].err{fail.user(diagnostic_kind.MANIFEST_CHANGED, "the manifest changed after this build was planned; re-run the build")};
     }
     ret err[fail.Fail].ok{};
-}
-
-fun pcg_sweep_staged(p: *project.Project) {
-    project.release_all_staged(p);
 }
 
 fun warm_fail(bo: *outcome.BuildOutcome, sink: *readout.Sink, f: fail.Fail) res[outcome.BuildOutcome, fail.Fail] {
@@ -533,7 +524,7 @@ fun run_phase(ph: build_plan.PhaseKind, p: *project.Project, unit: *build_plan.B
     if (ph == build_plan.PH_CODEGEN) {
         result = plan_outputs(p, unit, st);
         val planned: bool = sel result.ok;
-        if (planned) { result = emit_unit_texts(p, st); }
+        if (planned) { result = plan_unit_texts(p, st); }
         val result_ok: bool = sel result.ok;
         if (result_ok) { result = codegen_phase(p, st); }
     }
@@ -575,39 +566,21 @@ fun collect_test_scope(p: *project.Project, st: *UnitState) err[fail.Fail] {
     ret build_testing.collect_scope(p, col, ?st.scope);
 }
 
-# the ir and asm emitters read each module's unit before codegen compiles it in place
-fun emit_unit_texts(p: *project.Project, st: *UnitState) err[fail.Fail] {
-    if (!p.req.emit_ir && !p.req.emit_asm) { ret err[fail.Fail].ok{}; }
+# each emitted module's step writes mirl's text of its module before compiling it
+fun plan_unit_texts(p: *project.Project, st: *UnitState) err[fail.Fail] {
+    if (p.req.emit_asm) { ret build_emit.emit_asm(); }
+    if (!p.req.emit_ir) { ret err[fail.Fail].ok{}; }
     var i: u32 = 0;
     for (i < p.emit_len) {
-        val m: *project.ModuleEntry = project.module_at(p, p.topo[i]::u32);
-        if (m.unit == nil) { ret err[fail.Fail].err{fail.message("ir and asm emission require a current lowered module")}; }
-        if (p.req.emit_ir) {
-            val res_ir: err[fail.Fail] = build_emit.emit_ir(p, st.ir_outputs[i], m.unit);
-            if (sel res_ir.err) { ret res_ir; }
-        }
-        if (p.req.emit_asm) {
-            val res_asm: err[fail.Fail] = build_emit.emit_asm(p, st.asm_outputs[i], m.unit);
-            if (sel res_asm.err) { ret res_asm; }
-        }
-        i = i + 1;
+        project.module_at(p, p.topo[i]::u32).ir_output = st.ir_outputs[i];
+        i                                              = i + 1;
     }
     ret err[fail.Fail].ok{};
 }
 
-# the lower and optimize rows count the modules that lowered: a module whose
-# object the load restored does not
+# the lowering's inputs; each module is lowered by its codegen step
 fun lower_phase(p: *project.Project, st: *UnitState, bo: *outcome.BuildOutcome) err[fail.Fail] {
-    readout.phase_begin(p.progress, readout.LOWER);
-    readout.phase_begin(p.progress, readout.OPTIMIZE);
-    readout.phase_carved(p.progress, readout.OPTIMIZE);
-
-    val res_lower: err[fail.Fail] = driver.run_lower_pass(p);
-    if (sel res_lower.err) { ret res_lower; }
-    val lowered: u32 = cache.lowered_count(p);
-    readout.phase_end(p.progress, readout.LOWER, lowered, "module", "modules");
-    readout.phase_end(p.progress, readout.OPTIMIZE, lowered, "module", "modules");
-    ret err[fail.Fail].ok{};
+    ret driver.run_lower_pass(p);
 }
 
 # a test build's test objects: each lowered against its module's normal object and
@@ -627,32 +600,29 @@ fun test_phase(p: *project.Project, st: *UnitState) err[fail.Fail] {
         if (passes.has_test_object(p, project.module_at(p, p.topo[i]::u32))) { objects = objects + 1; }
         i = i + 1;
     }
+    readout.phase_begin(p.progress, readout.TEST_CODEGEN);
     val started: res[query.Operation, fail.Fail] = driver.begin_query_phase(p);
     if (sel started.err) { ret err[fail.Fail].err{started.err}; }
-    val operation:  query.Operation = started.ok;
-    var result:     err[fail.Fail]  = passes.acquire_test_inputs(p);
-    val lowered_ok: bool            = sel result.ok;
-    if (lowered_ok) {
-        readout.phase_end(p.progress, readout.TEST_LOWER, objects, "object", "objects");
-        readout.phase_begin(p.progress, readout.TEST_CODEGEN);
-    }
-    val parallel_ok: bool = sel result.ok && pcg_enabled(p);
-    if (parallel_ok) {
-        val parallel: err[fail.Fail] = run_codegen_parallel(p, true);
-        if (sel parallel.err) { result = err[fail.Fail].err{parallel.err}; }
-    }
-    val result_ok: bool = sel result.ok;
+    val operation: query.Operation = started.ok;
+    var result:    err[fail.Fail]  = passes.acquire_test_inputs(p);
+    val result_ok: bool            = sel result.ok;
     if (result_ok) { result = passes.run_test_object_pass(p); }
     val finished: err[fail.Fail] = driver.finish_query_phase(p, operation, roots.data, roots.len, result);
     if (sel finished.err) { ret finished; }
 
     val collected: err[fail.Fail] = collect_test_scope(p, st);
     if (sel collected.err) { ret collected; }
+    readout.phase_end(p.progress, readout.TEST_LOWER, objects, "object", "objects");
     readout.phase_end(p.progress, readout.TEST_CODEGEN, objects, "object", "objects");
     ret err[fail.Fail].ok{};
 }
 
+# the lower and optimize rows count the modules that lowered: a module whose
+# object the load restored does not
 fun codegen_phase(p: *project.Project, st: *UnitState) err[fail.Fail] {
+    readout.phase_begin(p.progress, readout.LOWER);
+    readout.phase_begin(p.progress, readout.OPTIMIZE);
+    readout.phase_carved(p.progress, readout.OPTIMIZE);
     readout.phase_begin(p.progress, readout.CODEGEN);
     project.set_origin(p, diagnostic.ORIGIN_CODEGEN);
     var roots: Vector[query.QueryKey] = collections_vector.init[query.QueryKey](p.alloc);
@@ -663,12 +633,7 @@ fun codegen_phase(p: *project.Project, st: *UnitState) err[fail.Fail] {
     for (i < p.emit_len) {
         val m:       *project.ModuleEntry = project.module_at(p, p.topo[i]::u32);
         val key:     u64                  = passes.back_half_key_for(p, m);
-        val lowered: res[usize, A.Error]  = collections_vector.push[query.QueryKey](?roots,
-            query.QueryKey{kind: ?passes.LOWER, key: key});
-        if (sel lowered.err) {
-            ret err[fail.Fail].err{fail.refused(lowered.err)};
-        }
-        val emitted: res[usize, A.Error] = collections_vector.push[query.QueryKey](?roots,
+        val emitted: res[usize, A.Error]  = collections_vector.push[query.QueryKey](?roots,
             query.QueryKey{kind: ?passes.CODEGEN, key: key});
         if (sel emitted.err) {
             ret err[fail.Fail].err{fail.refused(emitted.err)};
@@ -679,20 +644,14 @@ fun codegen_phase(p: *project.Project, st: *UnitState) err[fail.Fail] {
     if (sel started.err) {
         ret err[fail.Fail].err{started.err};
     }
-    val operation:  query.Operation = started.ok;
-    var result:     err[fail.Fail]  = passes.acquire_codegen_inputs(p);
-    val result_ok3: bool            = sel result.ok && pcg_enabled(p);
-    if (result_ok3) {
-        val parallel: err[fail.Fail] = run_codegen_parallel(p, false);
-        if (sel parallel.err) {
-            result = err[fail.Fail].err{parallel.err};
-        }
-    }
-    val result_ok2: bool = sel result.ok;
-    if (result_ok2) { result = passes.run_codegen_pass(p); }
-    val result2: err[fail.Fail] = driver.finish_query_phase(p, operation, roots.data, roots.len, result);
+    val operation: query.Operation = started.ok;
+    val result:    err[fail.Fail]  = passes.run_codegen_pass(p);
+    val result2:   err[fail.Fail]  = driver.finish_query_phase(p, operation, roots.data, roots.len, result);
     if (sel result2.err) { ret result2; }
 
+    val lowered: u32 = cache.lowered_count(p);
+    readout.phase_end(p.progress, readout.LOWER, lowered, "module", "modules");
+    readout.phase_end(p.progress, readout.OPTIMIZE, lowered, "module", "modules");
     readout.phase_end(p.progress, readout.CODEGEN, cache.generated_count(p), "module", "modules");
     ret err[fail.Fail].ok{};
 }
@@ -1047,10 +1006,6 @@ fun emit_unit_summary(p: *project.Project, st: *UnitState) {
     readout.summary(p.progress, out_str, p.emit_len, 0, false);
 }
 
-fun pcg_enabled(p: *project.Project) bool {
-    ret p.req.jobs >= 1 && p.emit_len > 0;
-}
-
 # publish the link configuration of a project as the Q_LINK_CONFIG query input: the
 # output path, product name, link kind, external inputs, dynamic libraries with their
 # provider policy, and the loaded-image options, fingerprinted so an unchanged
@@ -1122,193 +1077,4 @@ fun write_link_config(fb: *wire.Sink, p: *project.Project, out_path: *u8, produc
         wire.put_u8(fb, referenced);
         j = j + 1;
     }
-}
-
-rec PcgSlot {
-    object: Object;
-    made:   bool;
-    failed: bool;
-    fail:   fail.Fail;
-}
-
-rec ParallelCodegen {
-    p:          *project.Project;
-    next:       i64;
-    worker_seq: i64;
-    stop:       i64;
-    nworkers:   u32;
-    slots:      *PcgSlot;
-    stale:      *u32;
-    stale_len:  u32;
-    # compiling the modules' test objects rather than their normal objects
-    test: bool;
-    # the readout row the compiled objects are items of
-    phase: readout.Phase;
-}
-
-# the unit a codegen worker compiles for module m
-fun pcg_unit(m: *project.ModuleEntry, test: bool) *lower_context.Unit {
-    if (test) { ret m.test.unit; }
-    ret m.unit;
-}
-
-# each worker compiles its units with the session's backing allocator, which every thread
-# shares, and the objects it makes are handed to the module as they are
-fun pcg_worker_main(arg: *u8) {
-    val pc: *ParallelCodegen = arg::*ParallelCodegen;
-    if (pc == nil) { panic("a codegen worker started with no section"); }
-    val wid_raw: i64 = atomic.fetch_add(?pc.worker_seq, 1::i64);
-    if (wid_raw < 0 || wid_raw >= pc.nworkers::i64) { ret; }
-
-    for (true) {
-        if (atomic.load(?pc.stop) != 0) { ret; }
-        val idx_raw: i64 = atomic.fetch_add(?pc.next, 1::i64);
-        if (idx_raw >= pc.stale_len::i64) { ret; }
-        val idx: u32 = idx_raw::u32;
-
-        val mid:  session.ModuleId     = pc.p.topo[pc.stale[idx::usize]];
-        val m:    *project.ModuleEntry = project.module_at(pc.p, mid::u32);
-        val slot: *PcgSlot             = ?pc.slots[idx::usize];
-
-        val t0:   readout.Instant        = readout.item_begin(pc.p.progress);
-        val made: res[Object, fail.Fail] = passes.compile_object(pc.p, pcg_unit(m, pc.test));
-        readout.item_post(pc.p.progress, pc.phase, intern.text(?pc.p.s.interner, m.fqn), readout.elapsed(t0));
-        if (sel made.err) {
-            # a refusal of the source stops nothing, so the one reported is the first in
-            # module order, as a threadless build reports it
-            val refused: fail.Fail = made.err;
-            slot.fail   = refused;
-            slot.failed = true;
-            if (!sel refused.user) {
-                atomic.store(?pc.stop, 1::i64);
-                ret;
-            }
-            cnt;
-        }
-        slot.object = made.ok;
-        slot.made   = true;
-    }
-}
-
-# compile the stale units on worker threads and stage the objects for the codegen queries
-# to publish: the modules' normal objects, or with `test` their test objects
-fun run_codegen_parallel(p: *project.Project, test: bool) err[fail.Fail] {
-    val emit_len: u32 = p.emit_len;
-    if (emit_len == 0) { ret err[fail.Fail].ok{}; }
-
-    val rstale: res[*u32, A.Error] = A.allocate[u32](p.alloc, emit_len::usize);
-    if (sel rstale.err) { ret err[fail.Fail].err{fail.refused(rstale.err)}; }
-    val stale: *u32 = rstale.ok;
-    fin { A.deallocate[u32](p.alloc, stale, emit_len::usize); }
-    var stale_len: u32 = 0;
-    var ti:        u32 = 0;
-    for (ti < emit_len) {
-        val m:        *project.ModuleEntry = project.module_at(p, p.topo[ti]::u32);
-        var reusable: res[bool, fail.Fail] = res[bool, fail.Fail].ok{true};
-        if (!test)                        { reusable = passes.codegen_reusable(p, p.topo[ti]); }
-        or (passes.has_test_object(p, m)) { reusable = passes.test_codegen_reusable(p, p.topo[ti]); }
-        if (sel reusable.err)             { ret err[fail.Fail].err{reusable.err}; }
-        if (!reusable.ok && pcg_unit(m, test) != nil) {
-            stale[stale_len] = ti;
-            stale_len        = stale_len + 1;
-        }
-        ti = ti + 1;
-    }
-    if (stale_len <= 1) { ret err[fail.Fail].ok{}; }
-
-    var nworkers: u32 = p.req.jobs;
-    if (nworkers == 0)        { nworkers = 1; }
-    if (nworkers > stale_len) { nworkers = stale_len; }
-    if (nworkers <= 1)        { ret err[fail.Fail].ok{}; }
-
-    val rslots: res[*PcgSlot, A.Error] = A.zallocate[PcgSlot](p.alloc, stale_len::usize);
-    if (sel rslots.err) { ret err[fail.Fail].err{fail.refused(rslots.err)}; }
-    val slots:  *PcgSlot = rslots.ok;
-    var handed: bool     = false;
-    fin {
-        if (!handed) { pcg_release_slots(slots, stale_len); }
-        A.deallocate[PcgSlot](p.alloc, slots, stale_len::usize);
-    }
-
-    var ctx: ParallelCodegen;
-    ctx.p          = p;
-    ctx.next       = 0;
-    ctx.worker_seq = 0;
-    ctx.stop       = 0;
-    ctx.nworkers   = nworkers;
-    ctx.slots      = slots;
-    ctx.stale      = stale;
-    ctx.stale_len  = stale_len;
-    ctx.test       = test;
-    ctx.phase      = readout.CODEGEN;
-    if (test) { ctx.phase = readout.TEST_CODEGEN; }
-    val queued: err[fail.Fail] = readout.workers_begin(p.progress, p.alloc, stale_len::usize);
-    if (sel queued.err) { ret queued; }
-
-    var threads: *sync_thread.Thread               = nil;
-    val extra:   u32                               = nworkers - 1;
-    val rt:      res[*sync_thread.Thread, A.Error] = A.allocate[sync_thread.Thread](p.alloc, extra::usize);
-    if (sel rt.err) {
-        readout.workers_end(p.progress, p.alloc, ctx.phase, 1);
-        ret err[fail.Fail].err{fail.refused(rt.err)};
-    }
-    threads = rt.ok;
-    var k: u32 = 0;
-    for (k < extra) {
-        sync_thread.spawn_with(pcg_worker_main, (?ctx)::*u8, ?threads[k]);
-        k = k + 1;
-    }
-
-    pcg_worker_main((?ctx)::*u8);
-
-    k = 0;
-    for (k < extra) {
-        if (threads[k].tid >= 0) { sync_thread.join(?threads[k]); }
-        k = k + 1;
-    }
-    A.deallocate[sync_thread.Thread](p.alloc, threads, extra::usize);
-    readout.workers_end(p.progress, p.alloc, ctx.phase, nworkers);
-
-    var ei: u32 = 0;
-    for (ei < stale_len) {
-        if (slots[ei].failed) { ret err[fail.Fail].err{slots[ei].fail}; }
-        ei = ei + 1;
-    }
-    handed = true;
-    ret pcg_collect(p, ?ctx);
-}
-
-fun pcg_release_slots(slots: *PcgSlot, n: u32) {
-    var i: u32 = 0;
-    for (i < n) {
-        if (slots[i].made) {
-            backend.release_object(?slots[i].object);
-            slots[i].made = false;
-        }
-        i = i + 1;
-    }
-}
-
-# box each compiled object and stage it on its module; an object that cannot be boxed is
-# released with the rest
-fun pcg_collect(p: *project.Project, ctx: *ParallelCodegen) err[fail.Fail] {
-    var i: u32 = 0;
-    fin { pcg_release_slots(ctx.slots, ctx.stale_len); }
-    for (i < ctx.stale_len) {
-        val slot: *PcgSlot = ?ctx.slots[i::usize];
-        if (!slot.made) {
-            i = i + 1;
-            cnt;
-        }
-        val rbox: res[*Object, A.Error] = A.allocate[Object](p.s.alloc, 1::usize);
-        if (sel rbox.err) { ret err[fail.Fail].err{fail.refused(rbox.err)}; }
-        @rbox.ok  = slot.object;
-        slot.made = false;
-        val mid: session.ModuleId     = p.topo[ctx.stale[i::usize]];
-        val m:   *project.ModuleEntry = project.module_at(p, mid::u32);
-        if (ctx.test) { m.test.staged = rbox.ok; }
-        or            { m.staged = rbox.ok; }
-        i = i + 1;
-    }
-    ret err[fail.Fail].ok{};
 }

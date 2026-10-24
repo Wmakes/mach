@@ -46,6 +46,7 @@ use mach.lang.target.isa;
 use mach.lang.type;
 use mach.lang.wire;
 use mink.model.object.Object;
+use mirl.ir.module.Module;
 
 use mach.lang.driver.backend;
 use mach.lang.driver.cache;
@@ -58,6 +59,7 @@ use driver_load: mach.lang.driver.load;
 use mach.lang.driver.project;
 use mach.lang.driver.surface;
 use mach.lang.driver.toolchain;
+use driver_unit: mach.lang.driver.unit;
 use mach.lang.fail;
 use mach.lang.growth;
 use mach.lang.module;
@@ -68,12 +70,8 @@ pub val LOWERED_SURFACE: query.Kind = query.Kind{
     name:   "lowered surface", role: query.DERIVED, owner: query.KEY_MODULE, origin: diagnostic.ORIGIN_LOWER, compute: lowered_surface_compute,
     replay: true
 };
-# a module's lowered unit, keyed by its back-half key; the codegen product spends it
-pub val LOWER: query.Kind = query.Kind{
-    name:   "lower", role: query.DERIVED, owner: query.KEY_MODULE, origin: diagnostic.ORIGIN_LOWER, compute: lower_compute, finalize: lower_finalize,
-    replay: true
-};
-# a module's object, mink's, keyed by its back-half key
+# a module's object, mink's, and the facts its lowering kept, keyed by its back-half key. one
+# step lowers and compiles the module, so no mirl module outlives its own codegen
 pub val CODEGEN: query.Kind = query.Kind{
     name:     "codegen", role: query.DERIVED, owner: query.KEY_MODULE, origin: diagnostic.ORIGIN_CODEGEN, compute: codegen_compute,
     finalize: codegen_finalize, replay: true
@@ -208,11 +206,6 @@ pub fun has_test_object(p: *project.Project, m: *project.ModuleEntry) bool {
     ret cache.has_test_object(p, m);
 }
 
-# the load restored the module's test object and nothing needs its lowered ir
-fun test_skips_lowering(p: *project.Project, m: *project.ModuleEntry) bool {
-    ret cache.test_restored(p, m) && cache.early_restore_enabled(p);
-}
-
 pub fun codegen_reusable(p: *project.Project, mid: session.ModuleId) res[bool, fail.Fail] {
     val m:        *project.ModuleEntry = project.module_at(p, mid::u32);
     val reusable: res[bool, fail.Fail] = query.reusable[project.Project](?p.queries, p, ?CODEGEN, back_half_key_for(p, m));
@@ -233,21 +226,10 @@ fun shared_artifact_build(p: *project.Project) bool {
     ret p.target_entry.kind == catalog_artifact.SHARED;
 }
 
+# the lowering's inputs, acquired before any module is lowered: each module's typed
+# definition and its lowered surface. the codegen pass lowers each module in its step
 pub fun run_lower_pass(p: *project.Project) err[fail.Fail] {
-    val prepared: err[fail.Fail] = acquire_lower_inputs(p);
-    if (sel prepared.err) { ret prepared; }
-    var i: u32 = 0;
-    for (i < p.emit_len) {
-        val mid: session.ModuleId = p.topo[i];
-        if (cache.skips_lowering(p, project.module_at(p, mid::u32))) {
-            i = i + 1;
-            cnt;
-        }
-        val r: err[fail.Fail] = run_lower_one(p, mid);
-        if (sel r.err) { ret r; }
-        i = i + 1;
-    }
-    ret err[fail.Fail].ok{};
+    ret acquire_lower_inputs(p);
 }
 
 pub fun prepare_lower_pass(p: *project.Project) err[fail.Fail] {
@@ -291,15 +273,6 @@ fun acquire_lower_inputs(p: *project.Project) err[fail.Fail] {
     ret err[fail.Fail].ok{};
 }
 
-fun run_lower_one(p: *project.Project, mid: session.ModuleId) err[fail.Fail] {
-    val m:   *project.ModuleEntry            = project.module_at(p, mid::u32);
-    val e_r: res[query.QueryView, fail.Fail] = query.get[project.Project](?p.queries, p, ?LOWER, back_half_key_for(p, m));
-    if (sel e_r.err) { ret err[fail.Fail].err{e_r.err}; }
-    m.unit = unit_handle_decode(e_r.ok);
-    if (m.unit == nil) { ret err[fail.Fail].err{fail.message("the lower query produced no result handle")}; }
-    ret err[fail.Fail].ok{};
-}
-
 fun lowered_surface_compute(raw: ptr, kind: *query.Kind, key: u64, alloc: *A.Allocator, diags: *diagnostic.DiagnosticStore) res[query.QueryOutput, fail.Fail] {
     val p:  *project.Project = raw::*project.Project;
     val db: *query.QueryDb   = ?p.s.queries;
@@ -327,38 +300,6 @@ fun lowered_surface_compute(raw: ptr, kind: *query.Kind, key: u64, alloc: *A.All
     ret codec.output(?fb);
 }
 
-# a module's lowering: its unit, verified, lowered against its normal object when it is the
-# module's test object
-fun lower_compute(raw: ptr, kind: *query.Kind, key: u64, alloc: *A.Allocator, diags: *diagnostic.DiagnosticStore) res[query.QueryOutput, fail.Fail] {
-    val p:      *project.Project                 = raw::*project.Project;
-    val inputs: res[session.ModuleId, fail.Fail] = lower_inputs(p, key);
-    if (sel inputs.err) { ret res[query.QueryOutput, fail.Fail].err{inputs.err}; }
-    val mid: session.ModuleId     = inputs.ok;
-    val m:   *project.ModuleEntry = project.module_at(p, mid::u32);
-
-    # a test object declares what its normal object defines, so it lowers against that object
-    var normal:      me_lower.NormalObject;
-    var normal_from: *me_lower.NormalObject = nil;
-    val test_object: bool                   = back_half_key_is_test(key);
-    if (test_object) {
-        val defined: res[me_lower.NormalObject, fail.Fail] = normal_object_of(p, m);
-        if (sel defined.err) { ret res[query.QueryOutput, fail.Fail].err{defined.err}; }
-        normal      = defined.ok;
-        normal_from = ?normal;
-    }
-    fin {
-        if (normal_from != nil) { map.dnit[intern.StrId, bool](?normal.defined); }
-    }
-
-    var phase: readout.Phase = readout.LOWER;
-    if (test_object) { phase = readout.TEST_LOWER; }
-    val t_low:   readout.Instant               = readout.item_begin(p.progress);
-    val lowered: res[me_lower.Unit, fail.Fail] = lower_unit(p, mid, normal_from, diags);
-    if (sel lowered.err) { ret res[query.QueryOutput, fail.Fail].err{lower_stable_fail(p, lowered.err)}; }
-    readout.item(p.progress, phase, intern.text(?p.s.interner, m.fqn), t_low);
-    ret unit_handle_encode(alloc, lowered.ok);
-}
-
 # the inputs a module's lowering reads: its typed definition and the target
 fun lower_inputs(p: *project.Project, key: u64) res[session.ModuleId, fail.Fail] {
     val stable: session.StableModuleId = key::u32::session.StableModuleId;
@@ -376,8 +317,9 @@ fun lower_inputs(p: *project.Project, key: u64) res[session.ModuleId, fail.Fail]
 fun normal_object_of(p: *project.Project, m: *project.ModuleEntry) res[me_lower.NormalObject, fail.Fail] {
     val got: res[query.QueryView, fail.Fail] = query.get[project.Project](?p.queries, p, ?CODEGEN, back_half_key_for(p, m));
     if (sel got.err) { ret res[me_lower.NormalObject, fail.Fail].err{got.err}; }
-    val o: *Object = object_handle_decode(got.ok);
-    if (o == nil) { ret res[me_lower.NormalObject, fail.Fail].err{fail.message("a test object requires its normal object")}; }
+    val made: *Product = product_decode(got.ok);
+    if (made == nil) { ret res[me_lower.NormalObject, fail.Fail].err{fail.message("a test object requires its normal object")}; }
+    val o:      *Object               = ?made.object;
     var normal: me_lower.NormalObject = me_lower.NormalObject{defined: map.init[intern.StrId, bool](p.s.alloc)};
     var i:      usize                 = 0;
     for (i < backend.symbol_count(o)) {
@@ -397,21 +339,31 @@ fun normal_object_of(p: *project.Project, m: *project.ModuleEntry) res[me_lower.
     ret res[me_lower.NormalObject, fail.Fail].ok{normal};
 }
 
-fun lower_unit(p: *project.Project, mid: session.ModuleId, normal: *me_lower.NormalObject, diags: *diagnostic.DiagnosticStore) res[me_lower.Unit, fail.Fail] {
+# the object of the module `mid` and the facts kept of its lowering, made by its own step,
+# against its normal object when it is the module's test object
+fun made_for(p: *project.Project, mid: session.ModuleId, normal: *me_lower.NormalObject, diags: *diagnostic.DiagnosticStore) res[driver_unit.Made, fail.Fail] {
     val s:       *session.Session                  = p.s;
     val m:       *project.ModuleEntry              = project.module_at(p, mid::u32);
     val machine: res[*me_lower.Machine, fail.Fail] = backend.machine(?p.back);
-    if (sel machine.err) { ret res[me_lower.Unit, fail.Fail].err{machine.err}; }
+    if (sel machine.err) { ret res[driver_unit.Made, fail.Fail].err{machine.err}; }
 
     val definition: res[fe_sema.Definition, fail.Fail] = frontend.read_definition(p::ptr, mid, fe_sema.DEFINITION_TYPED);
-    if (sel definition.err) { ret res[me_lower.Unit, fail.Fail].err{definition.err}; }
+    if (sel definition.err) { ret res[driver_unit.Made, fail.Fail].err{definition.err}; }
     val d:     fe_sema.Definition                    = definition.ok;
     val req_r: res[me_lower.LowerRequest, fail.Fail] = me_lower.request(s, ?p.linkage, ?p.target.target, machine.ok, s.backing, d.parsed.a, m.fqn, mid,
         d.sr, d.rr, d.ctx, normal, shared_artifact_build(p), p.req.debug, p.req.opt != request.OPT_RELEASE, diags,
         fe_sema.interface.Reader{ctx: p::ptr, read: read_interface});
-    if (sel req_r.err) { ret res[me_lower.Unit, fail.Fail].err{req_r.err}; }
-    var req: me_lower.LowerRequest = req_r.ok;
-    ret me_lower.lower_module(?req);
+    if (sel req_r.err) { ret res[driver_unit.Made, fail.Fail].err{req_r.err}; }
+    var req:     me_lower.LowerRequest = req_r.ok;
+    var ir_path: str                   = "";
+    if (normal == nil) { ir_path = m.ir_output; }
+    var job: driver_unit.Job = driver_unit.Job{lower: ?req, back: ?p.back, codegen: codegen_of(p), out: s.backing, ir_path: ir_path, name: intern.text(?s.interner, m.fqn)};
+    ret driver_unit.make(?job);
+}
+
+# how this build's request has mirl compile each module
+fun codegen_of(p: *project.Project) driver_unit.Codegen {
+    ret driver_unit.Codegen{level: p.req.opt, checked: p.req.opt != request.OPT_RELEASE, relax: p.req.linker_relax, floats: p.req.floats};
 }
 
 # the interface the module `mid` published, which is all an importer's lowering reads of it
@@ -432,31 +384,6 @@ fun lower_stable_err(p: *project.Project, msg: str) str {
     val kept: res[str, fail.Fail] = fail.text_retain(?p.s.interner, msg);
     if (sel kept.ok) { ret kept.ok; }
     ret "lowering failed, and re-homing its diagnostic off the module arena failed in turn (allocation failure)";
-}
-
-fun unit_handle_encode(alloc: *A.Allocator, u: me_lower.Unit) res[query.QueryOutput, fail.Fail] {
-    var held:  me_lower.Unit                = u;
-    val boxed: res[*me_lower.Unit, A.Error] = A.allocate[me_lower.Unit](alloc, 1);
-    if (sel boxed.err) {
-        me_lower.unit_dnit(?held);
-        ret res[query.QueryOutput, fail.Fail].err{fail.refused(boxed.err)};
-    }
-    @boxed.ok = held;
-    ret handle_encode(alloc, boxed.ok::ptr, unit_release, alloc);
-}
-
-fun unit_handle_decode(e: query.QueryView) *me_lower.Unit {
-    ret handle_decode(e)::*me_lower.Unit;
-}
-
-fun unit_release(raw: ptr, alloc: *A.Allocator) {
-    val u: *me_lower.Unit = raw::*me_lower.Unit;
-    me_lower.unit_dnit(u);
-    A.deallocate[me_lower.Unit](alloc, u, 1);
-}
-
-fun lower_finalize(value: *u8, value_len: u32, alloc: *A.Allocator) {
-    unit_release(handle_decode(query.QueryView{value: value, value_len: value_len}), alloc);
 }
 
 # a product handle: the one pointer it owns
@@ -480,51 +407,25 @@ fun handle_decode(e: query.QueryView) ptr {
     ret slot[0];
 }
 
-# the modules that still lower here are those without a product restored under this
-# operation's snapshot
+# the codegen operation's inputs: the typed definitions every step reads. the facts a
+# module's step keeps are read from its product as the pass takes it
 pub fun acquire_codegen_inputs(p: *project.Project) err[fail.Fail] {
     var clear: u32 = 0;
     for (clear < project.module_count(p)) {
         project.module_at(p, clear).unit = nil;
         clear                            = clear + 1;
     }
-    val frontend: err[fail.Fail] = acquire_frontend_inputs(p);
-    if (sel frontend.err) { ret frontend; }
-    var i: u32 = 0;
-    for (i < p.emit_len) {
-        val mid: session.ModuleId = p.topo[i];
-        if (cache.skips_lowering(p, project.module_at(p, mid::u32))) {
-            i = i + 1;
-            cnt;
-        }
-        val acquired: err[fail.Fail] = run_lower_one(p, mid);
-        if (sel acquired.err) { ret acquired; }
-        i = i + 1;
-    }
-    ret err[fail.Fail].ok{};
+    ret acquire_frontend_inputs(p);
 }
 
-# the test operation's inputs: the typed definitions and each test object's lowered unit,
-# unless the load restored its object from `obj/`
+# the test operation's inputs: the typed definitions every test object's step reads
 pub fun acquire_test_inputs(p: *project.Project) err[fail.Fail] {
     var clear: u32 = 0;
     for (clear < project.module_count(p)) {
         project.module_at(p, clear).test.unit = nil;
         clear                                 = clear + 1;
     }
-    val frontend: err[fail.Fail] = acquire_frontend_inputs(p);
-    if (sel frontend.err) { ret frontend; }
-    var i: u32 = 0;
-    for (i < p.emit_len) {
-        val mid: session.ModuleId     = p.topo[i];
-        val m:   *project.ModuleEntry = project.module_at(p, mid::u32);
-        if (has_test_object(p, m) && !test_skips_lowering(p, m)) {
-            val lowered: err[fail.Fail] = run_test_lower_one(p, mid);
-            if (sel lowered.err) { ret lowered; }
-        }
-        i = i + 1;
-    }
-    ret err[fail.Fail].ok{};
+    ret acquire_frontend_inputs(p);
 }
 
 pub fun run_test_object_pass(p: *project.Project) err[fail.Fail] {
@@ -556,9 +457,11 @@ fun run_codegen_one(p: *project.Project, mid: session.ModuleId) err[fail.Fail] {
     val m:   *project.ModuleEntry            = project.module_at(p, mid::u32);
     val e_r: res[query.QueryView, fail.Fail] = query.get[project.Project](?p.queries, p, ?CODEGEN, back_half_key_for(p, m));
     if (sel e_r.err) { ret err[fail.Fail].err{e_r.err}; }
-    val o: *Object = object_handle_decode(e_r.ok);
-    if (o == nil) { ret err[fail.Fail].err{fail.message("the codegen query produced no result handle")}; }
-    m.object = o;
+    val made: *Product = product_decode(e_r.ok);
+    if (made == nil) { ret err[fail.Fail].err{fail.message("the codegen query produced no result handle")}; }
+    m.object = ?made.object;
+    m.unit   = product_facts(made);
+    val o: *Object = m.object;
     # a generated object, or one this session held, carries the key of the current snapshot
     # into `obj/`
     ret cache.publish(p, m, o, query.QueryKey{kind: ?CODEGEN, key: back_half_key_for(p, m)});
@@ -569,20 +472,12 @@ fun run_test_object_one(p: *project.Project, mid: session.ModuleId) err[fail.Fai
     val m:   *project.ModuleEntry            = project.module_at(p, mid::u32);
     val e_r: res[query.QueryView, fail.Fail] = query.get[project.Project](?p.queries, p, ?CODEGEN, test_key_for(m));
     if (sel e_r.err) { ret err[fail.Fail].err{e_r.err}; }
-    val o: *Object = object_handle_decode(e_r.ok);
-    if (o == nil) { ret err[fail.Fail].err{fail.message("the codegen query produced no test object handle")}; }
-    m.test.object = o;
+    val made: *Product = product_decode(e_r.ok);
+    if (made == nil) { ret err[fail.Fail].err{fail.message("the codegen query produced no test object handle")}; }
+    m.test.object = ?made.object;
+    m.test.unit   = product_facts(made);
+    val o: *Object = m.test.object;
     ret cache.publish_test(p, m, o, query.QueryKey{kind: ?CODEGEN, key: test_key_for(m)});
-}
-
-# the module's test unit, which test codegen workers compile before the query publishes the object
-fun run_test_lower_one(p: *project.Project, mid: session.ModuleId) err[fail.Fail] {
-    val m:   *project.ModuleEntry            = project.module_at(p, mid::u32);
-    val e_r: res[query.QueryView, fail.Fail] = query.get[project.Project](?p.queries, p, ?LOWER, test_key_for(m));
-    if (sel e_r.err) { ret err[fail.Fail].err{e_r.err}; }
-    m.test.unit = unit_handle_decode(e_r.ok);
-    if (m.test.unit == nil) { ret err[fail.Fail].err{fail.message("the lower query produced no test object handle")}; }
-    ret err[fail.Fail].ok{};
 }
 
 # the test object's codegen product is current or cached, so no worker generates it
@@ -594,8 +489,8 @@ pub fun test_codegen_reusable(p: *project.Project, mid: session.ModuleId) res[bo
     ret res[bool, fail.Fail].ok{cache.test_restored(p, m)};
 }
 
-# a module's object: its lowered unit compiled by mirl, or the object a codegen worker or the
-# object cache staged for it. compiling spends the unit, whose facts the cache reads first
+# a module's object: made by its step from the module's typed definition, or the object the
+# object cache staged for it
 fun codegen_compute(raw: ptr, kind: *query.Kind, key: u64, alloc: *A.Allocator, diags: *diagnostic.DiagnosticStore) res[query.QueryOutput, fail.Fail] {
     val p: *project.Project = raw::*project.Project;
     val s: *session.Session = p.s;
@@ -607,50 +502,36 @@ fun codegen_compute(raw: ptr, kind: *query.Kind, key: u64, alloc: *A.Allocator, 
     val test_object: bool                 = back_half_key_is_test(key);
     if (!test_object && cache.staged_restored(p, m))     { ret q_codegen_restored(p, mid, false, alloc); }
     if (test_object && cache.test_staged_restored(p, m)) { ret q_codegen_restored(p, mid, true, alloc); }
-    val lower_owner: res[query.QueryView, fail.Fail] = query.get[project.Project](?p.queries, p, ?LOWER, key);
-    if (sel lower_owner.err) { ret res[query.QueryOutput, fail.Fail].err{lower_owner.err}; }
-    val u: *me_lower.Unit = unit_handle_decode(lower_owner.ok);
-    if (u == nil)    { ret res[query.QueryOutput, fail.Fail].err{fail.message("codegen: module has no lowered unit")}; }
-    if (test_object) { m.test.unit = u; }
-    or               { m.unit = u; }
-    val rt: err[fail.Fail] = query.depend[project.Project](?p.queries, p, ?context.TARGET, 0);
-    if (sel rt.err) { ret res[query.QueryOutput, fail.Fail].err{rt.err}; }
+    val inputs: res[session.ModuleId, fail.Fail] = lower_inputs(p, key);
+    if (sel inputs.err) { ret res[query.QueryOutput, fail.Fail].err{inputs.err}; }
 
-    # a parallel codegen worker staged this object
-    var staged: *Object = nil;
-    if (test_object)   { staged = cache.take_staged_test(p, m); }
-    or                 { staged = cache.take_staged(p, m); }
-    if (staged != nil) { ret object_handle_encode(alloc, staged, p.s.alloc); }
+    # a test object declares what its normal object defines, so it lowers against that object
+    var normal:      me_lower.NormalObject;
+    var normal_from: *me_lower.NormalObject = nil;
+    if (test_object) {
+        val defined: res[me_lower.NormalObject, fail.Fail] = normal_object_of(p, m);
+        if (sel defined.err) { ret res[query.QueryOutput, fail.Fail].err{defined.err}; }
+        normal      = defined.ok;
+        normal_from = ?normal;
+    }
+    fin {
+        if (normal_from != nil) { map.dnit[intern.StrId, bool](?normal.defined); }
+    }
 
     var phase: readout.Phase = readout.CODEGEN;
     if (test_object) { phase = readout.TEST_CODEGEN; }
-    val t_cg:     readout.Instant         = readout.item_begin(p.progress);
-    val compiled: res[*Object, fail.Fail] = compile_unit(p, u, p.s.alloc);
-    if (sel compiled.err) { ret res[query.QueryOutput, fail.Fail].err{compiled.err}; }
+    val t_cg: readout.Instant                  = readout.item_begin(p.progress);
+    val made: res[driver_unit.Made, fail.Fail] = made_for(p, mid, normal_from, diags);
+    if (sel made.err) { ret res[query.QueryOutput, fail.Fail].err{lower_stable_fail(p, made.err)}; }
     readout.item(p.progress, phase, intern.text(?p.s.interner, m.fqn), t_cg);
-    ret object_handle_encode(alloc, compiled.ok, p.s.alloc);
+    ret product_encode(alloc, made.ok.object, opt[me_lower.Unit].some{made.ok.facts}, p.s.alloc);
 }
 
-# the unit `u` compiled into an object, which owns its storage in the session's backing
-# allocator. compiling spends the unit's module, so a unit compiles once
-pub fun compile_object(p: *project.Project, u: *me_lower.Unit) res[Object, fail.Fail] {
-    if (u.compiled) { ret res[Object, fail.Fail].err{fail.message("codegen: a lowered unit was compiled twice")}; }
-    u.compiled = true;
-    ret backend.compile(?p.back, p.s.backing, u, p.req.opt, p.req.opt != request.OPT_RELEASE, p.req.linker_relax, p.req.floats, intern.text(?p.s.interner, u.name));
-}
-
-# the unit `u` compiled into an object boxed in `a`
-fun compile_unit(p: *project.Project, u: *me_lower.Unit, a: *A.Allocator) res[*Object, fail.Fail] {
-    val made: res[Object, fail.Fail] = compile_object(p, u);
-    if (sel made.err) { ret res[*Object, fail.Fail].err{made.err}; }
-    var o:     Object                = made.ok;
-    val boxed: res[*Object, A.Error] = A.allocate[Object](a, 1);
-    if (sel boxed.err) {
-        backend.release_object(?o);
-        ret res[*Object, fail.Fail].err{fail.refused(boxed.err)};
-    }
-    @boxed.ok = o;
-    ret res[*Object, fail.Fail].ok{boxed.ok};
+# the mirl module `m` compiled into an object, which owns its storage in the session's backing
+# allocator. compiling spends the module
+pub fun compile_module(p: *project.Project, m: *Module, name: str) res[Object, fail.Fail] {
+    val c: driver_unit.Codegen = codegen_of(p);
+    ret backend.compile(?p.back, p.s.backing, m, c.level, c.checked, c.relax, c.floats, name);
 }
 
 # a product restored from `obj/` becomes the module's codegen product with the
@@ -670,25 +551,55 @@ fun q_codegen_restored(p: *project.Project, mid: session.ModuleId, test_object: 
     if (test_object)   { staged = cache.take_staged_test(p, m); }
     or                 { staged = cache.take_staged(p, m); }
     if (staged == nil) { ret res[query.QueryOutput, fail.Fail].err{fail.message("codegen: restored product left the module")}; }
-    ret object_handle_encode(alloc, staged, p.s.alloc);
+    val o: Object = @staged;
+    A.deallocate[Object](p.s.alloc, staged, 1);
+    ret product_encode(alloc, o, opt[me_lower.Unit].none{}, p.s.alloc);
 }
 
-fun object_release(raw: ptr, alloc: *A.Allocator) {
-    val o: *Object = raw::*Object;
-    backend.release_object(o);
-    A.deallocate[Object](alloc, o, 1);
+# a codegen product: the module's object, and the facts its step kept, none for an object
+# the cache restored
+rec Product {
+    object:  Object;
+    facts:   me_lower.Unit;
+    lowered: bool;
 }
 
-fun object_handle_encode(alloc: *A.Allocator, o: *Object, owner: *A.Allocator) res[query.QueryOutput, fail.Fail] {
-    ret handle_encode(alloc, o::ptr, object_release, owner);
+fun product_release(raw: ptr, alloc: *A.Allocator) {
+    val made: *Product = raw::*Product;
+    backend.release_object(?made.object);
+    if (made.lowered) { me_lower.unit_dnit(?made.facts); }
+    A.deallocate[Product](alloc, made, 1);
 }
 
-pub fun object_handle_decode(e: query.QueryView) *Object {
-    ret handle_decode(e)::*Object;
+fun product_encode(alloc: *A.Allocator, o: Object, facts: opt[me_lower.Unit], owner: *A.Allocator) res[query.QueryOutput, fail.Fail] {
+    var held:  Object                 = o;
+    val boxed: res[*Product, A.Error] = A.allocate[Product](owner, 1);
+    if (sel boxed.err) {
+        backend.release_object(?held);
+        if (sel facts.some) {
+            var kept: me_lower.Unit = facts.some;
+            me_lower.unit_dnit(?kept);
+        }
+        ret res[query.QueryOutput, fail.Fail].err{fail.refused(boxed.err)};
+    }
+    boxed.ok.object  = held;
+    boxed.ok.lowered = sel facts.some;
+    if (sel facts.some) { boxed.ok.facts = facts.some; }
+    ret handle_encode(alloc, boxed.ok::ptr, product_release, owner);
+}
+
+fun product_decode(e: query.QueryView) *Product {
+    ret handle_decode(e)::*Product;
+}
+
+# the facts a product's step kept, nil for a restored object
+fun product_facts(made: *Product) *me_lower.Unit {
+    if (!made.lowered) { ret nil; }
+    ret ?made.facts;
 }
 
 fun codegen_finalize(value: *u8, value_len: u32, alloc: *A.Allocator) {
-    object_release(handle_decode(query.QueryView{value: value, value_len: value_len}), alloc);
+    product_release(handle_decode(query.QueryView{value: value, value_len: value_len}), alloc);
 }
 
 pub fun run_link_pass(p: *project.Project) res[bool, fail.Fail] {

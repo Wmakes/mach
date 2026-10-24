@@ -46,6 +46,8 @@ use mach.lang.testrun;
 use mach.lang.wire;
 use mink_output: mink.catalog.output;
 use mink.model.object.Object;
+use mirl_module: mirl.ir.module;
+use mirl.ir.module.Module;
 
 pub fun classify_subprocess(term: *subprocess.SubprocessTerminal, expired: bool, cap_ok: bool, cap: *subprocess.CaptureIoResult) testrun.GateResult {
     if (cap_ok && (cap.read_failed || cap.write_failed || cap.close_failed)) {
@@ -219,13 +221,13 @@ fun build_dispatch_executable(p: *project.Project, dispatcher: str, artifact: st
     val machine: res[*lower_context.Machine, fail.Fail] = backend.machine(?p.back);
     if (sel machine.err) { ret err[fail.Fail].err{machine.err}; }
     project.set_origin(p, diagnostic.ORIGIN_LOWER);
-    val res_synth: res[lower_context.Unit, fail.Fail] = testrunner.synthesize_dispatcher(p.s, machine.ok, pick, sel_len);
+    val res_synth: res[Module, fail.Fail] = testrunner.synthesize_dispatcher(p.s, machine.ok, pick, sel_len);
     if (sel res_synth.err) { ret err[fail.Fail].err{res_synth.err}; }
-    var entry: lower_context.Unit = res_synth.ok;
-    fin { lower_context.unit_dnit(?entry); }
+    var entry: Module = res_synth.ok;
+    fin { mirl_module.dnit(?entry); }
 
     project.set_origin(p, diagnostic.ORIGIN_CODEGEN);
-    val compiled: res[Object, fail.Fail] = passes.compile_object(p, ?entry);
+    val compiled: res[Object, fail.Fail] = passes.compile_module(p, ?entry, "__mach_test_dispatch");
     if (sel compiled.err) { ret err[fail.Fail].err{compiled.err}; }
     var entry_object: Object = compiled.ok;
     fin { backend.release_object(?entry_object); }

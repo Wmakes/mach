@@ -22,6 +22,7 @@ use lower_decl:    mach.lang.me.lower.decl;
 use mach.lang.session;
 use lang_source: mach.lang.source;
 use mach.lang.type;
+use mirl_module: mirl.ir.module;
 use mirl_verify: mirl.verify;
 
 fwd lower_context.LoopFrame;
@@ -57,18 +58,17 @@ fwd lower_context.decl_type_of;
 fwd lower_context.expr_symbol_of;
 fwd lower_context.symbol_of;
 
-# the unit of the module `req` names, lowered into mirl and held to mirl's verifier
-pub fun lower_module(req: *lower_context.LowerRequest) res[lower_context.Unit, fail.Fail] {
+# the module `req` names lowered into the mirl module `m` and held to mirl's verifier, and the
+# unit of facts kept of it
+pub fun lower_module(req: *lower_context.LowerRequest, m: *mirl_module.Module) res[lower_context.Unit, fail.Fail] {
     if (req == nil) { ret res[lower_context.Unit, fail.Fail].err{fail.message("lower: lower_module requires a lowering request")}; }
     val s: *session.Session = req.s;
     val a: *ast.Ast         = req.module.a;
 
-    val made: res[lower_context.Unit, fail.Fail] = lower_context.unit_init(req.malloc, req.machine, req.module.fqn, false);
-    if (sel made.err) { ret made; }
-    var u: lower_context.Unit = made.ok;
+    var u: lower_context.Unit = lower_context.unit_init(req.malloc, req.module.fqn, false);
 
     var lc:       lower_context.LowerContext;
-    val res_init: err[fail.Fail] = lower_context.init_context(?lc, req, ?u);
+    val res_init: err[fail.Fail] = lower_context.init_context(?lc, req, m, ?u);
     if (sel res_init.err) {
         lower_context.unit_dnit(?u);
         ret res[lower_context.Unit, fail.Fail].err{res_init.err};
@@ -118,7 +118,7 @@ pub fun lower_module(req: *lower_context.LowerRequest) res[lower_context.Unit, f
 
     if (!sel lc.status.kind.accepted) { ret lower_module_fail(?lc, ?u, fail.phase_failure(lc.status)); }
     lower_context.dnit_context(?lc);
-    val verified: err[fail.Fail] = verified_unit(req, ?u);
+    val verified: err[fail.Fail] = verified_module(req, m);
     if (sel verified.err) {
         lower_context.unit_dnit(?u);
         ret res[lower_context.Unit, fail.Fail].err{verified.err};
@@ -127,8 +127,8 @@ pub fun lower_module(req: *lower_context.LowerRequest) res[lower_context.Unit, f
 }
 
 # a module mirl's verifier refuses is the lowering's own fault, never the source's
-fun verified_unit(req: *lower_context.LowerRequest, u: *lower_context.Unit) err[fail.Fail] {
-    val checked: err[mirl_verify.Error] = mirl_verify.against(?u.m, req.machine.target, req.machine.ctx, mirl_verify.Stage.open{});
+fun verified_module(req: *lower_context.LowerRequest, m: *mirl_module.Module) err[fail.Fail] {
+    val checked: err[mirl_verify.Error] = mirl_verify.against(m, req.machine.target, req.machine.ctx, mirl_verify.Stage.open{});
     if (sel checked.ok) { ret err[fail.Fail].ok{}; }
     val e: mirl_verify.Error = checked.err;
     if (sel e.alloc) { ret err[fail.Fail].err{fail.refused(e.alloc)}; }

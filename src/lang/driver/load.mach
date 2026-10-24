@@ -137,6 +137,7 @@ fun host_add(ctx: ptr, fqn: intern.StrId, sid: session.StableModuleId) res[sessi
     m.stable_id        = sid;
     m.unit             = nil;
     m.object           = nil;
+    m.ir_output        = "";
     m.staged           = nil;
     m.record           = project.Record{};
     m.staged_facts     = cache_record.Facts{};
@@ -220,6 +221,7 @@ pub fun module_reload(p: *project.Project, mid: session.ModuleId) res[bool, fail
     project.lower_scope_drop(m);
     m.unit               = nil;
     m.object             = nil;
+    m.ir_output          = "";
     m.staged             = nil;
     m.cache_checked      = false;
     m.cache_hit          = false;
