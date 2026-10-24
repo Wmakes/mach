@@ -277,13 +277,20 @@ fun place_record(ctx: *lower_context.LowerContext, store: *comptime_deep.Store, 
     ret err[fail.Fail].ok{};
 }
 
+# the bytes from one element of the array or vector `ity` to the next: the array's stride as
+# the layout states it, a vector's lane size
+fun element_stride(ctx: *lower_context.LowerContext, ity: Type) res[u64, fail.Fail] {
+    if (irt.is_vector(?ctx.m.types, ity)) { ret size_of(ctx, irt.element(?ctx.m.types, ity)); }
+    ret irt.stride(?ctx.builder.layout, ity);
+}
+
 # an array's or a vector's elements at the element stride; an element the literal leaves out
 # stays zero
 fun place_elements(ctx: *lower_context.LowerContext, store: *comptime_deep.Store, n: *comptime_deep.Node, ity: Type, base: u64, image: *Image) err[fail.Fail] {
     val ety:   Type = irt.element(?ctx.m.types, ity);
     var count: u64  = irt.count(?ctx.m.types, ity);
     if (irt.is_vector(?ctx.m.types, ity)) { count = irt.lanes(?ctx.m.types, ity)::u64; }
-    val stride: res[u64, fail.Fail] = irt.stride(?ctx.builder.layout, ety);
+    val stride: res[u64, fail.Fail] = element_stride(ctx, ity);
     if (sel stride.err) { ret err[fail.Fail].err{stride.err}; }
     var i: u32 = 0;
     for (i::u64 < count && i < n.len) {
@@ -369,7 +376,7 @@ fun place_address(ctx: *lower_context.LowerContext, store: *comptime_deep.Store,
             addend = addend + off.ok::i64;
         }
         or {
-            val stride: res[u64, fail.Fail] = irt.stride(?ctx.builder.layout, irt.element(?ctx.m.types, owner.ok));
+            val stride: res[u64, fail.Fail] = element_stride(ctx, owner.ok);
             if (sel stride.err) { ret err[fail.Fail].err{stride.err}; }
             addend = addend + ordinal.some::i64 * stride.ok::i64;
         }

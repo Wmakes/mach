@@ -325,15 +325,6 @@ pub fun offset_of(b: *Builder, ty: Type, member: u32) u64 {
     ret r.ok;
 }
 
-pub fun stride_of(b: *Builder, ty: Type) u64 {
-    val r: res[u64, fail.Fail] = irt.stride(?b.layout, ty);
-    if (sel r.err) {
-        fault(b, r.err);
-        ret 0;
-    }
-    ret r.ok;
-}
-
 # build in function `f`, whose entry block takes `params`, each secret as `secrets` says
 pub fun enter(b: *Builder, f: id.Function, params: *Type, secrets: *bool, n: u32) id.Block {
     b.fn      = opt[id.Function].some{f};
