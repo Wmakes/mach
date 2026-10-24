@@ -24,6 +24,10 @@ use lower_context: mach.lang.me.lower.context;
 use target_owner:  mach.lang.target.owner;
 use mach.lang.target.resolved;
 
+use masc_ct: masc.core.ct;
+use mct:     mirl.ct;
+use mirl.ir.id.Function;
+use mirl.ir.module.Module;
 use mirl_machine: mirl.machine.compile;
 use mirl_inline:  mirl.machine.inline;
 use mirl_engine:  mirl.machine.select.engine;
@@ -33,10 +37,6 @@ use mirl_compile: mirl.target.compile;
 use mirl_family:  mirl.target.family;
 use mirl_record:  mirl.target.record;
 use mirl_spirv:   mirl.target.spirv.error;
-use mct:          mirl.ct;
-use mirl.ir.id.Function;
-use mirl.ir.module.Module;
-use masc_ct:      masc.core.ct;
 
 use mink.base.diag;
 use mink_fail: mink.base.fail;
@@ -287,8 +287,8 @@ fun untimed(a: *A.Allocator, m: *Module, name: str, r: mct.Refused, by: str) fai
 # the name a function of `m` is declared by, copied
 fun function_name(a: *A.Allocator, m: *Module, f: Function) res[str, fail.Fail] {
     if (f.index::usize >= m.functions.len) { ret res[str, fail.Fail].err{fail.message("mirl refused a function its module does not hold")}; }
-    val v:      View                    = m.functions.data[f.index::usize].data.name;
-    val copied: res[str, StrError]      = str_copy_slice(a, v.data, 0, v.len);
+    val v:      View               = m.functions.data[f.index::usize].data.name;
+    val copied: res[str, StrError] = str_copy_slice(a, v.data, 0, v.len);
     if (sel copied.err) { ret res[str, fail.Fail].err{fail.str_refused(copied.err)}; }
     ret res[str, fail.Fail].ok{copied.ok};
 }
