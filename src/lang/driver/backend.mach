@@ -93,7 +93,12 @@ pub fun open(a: *A.Allocator, t: *resolved.Target) res[Back, fail.Fail] {
     }
     if (sel made.ok.none) { ret res[Back, fail.Fail].ok{b}; }
     b.assembled = made.ok.some;
-    b.machine   = lower_context.machine_of(b.assembled);
+    val machine: res[lower_context.Machine, fail.Fail] = lower_context.machine_of(b.assembled);
+    if (sel machine.err) {
+        close(a, ?b);
+        ret res[Back, fail.Fail].err{machine.err};
+    }
+    b.machine = machine.ok;
     val f: res[*Format, mirl_record.Error] = mirl_record.format(?b.assembled.target);
     if (sel f.ok) { b.format = f.ok; }
     ret res[Back, fail.Fail].ok{b};

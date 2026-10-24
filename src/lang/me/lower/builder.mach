@@ -63,6 +63,7 @@ pub rec Builder {
     mb:       mbuild.Builder;
     target:   *mirl_target.Target;
     layout:   mirl_target.Layout;
+    slots:    u32;
     fn:       opt[id.Function];
     entry:    id.Block;
     block:    id.Block;
@@ -90,14 +91,16 @@ pub rec Computed {
 val NO_BLOCK: id.Block = id.Block{index: 0xFFFFFFFF};
 val NO_FILE:  u32      = 0xFFFFFFFF;
 
-# a builder over `m`, whose types the target's layout lays out under the build's context
-pub fun init(m: *module.Module, a: *A.Allocator, target: *mirl_target.Target, ctx: opt[*core_state.Context], sources: *lang_source.SourceMap, debug_info: bool) Builder {
+# a builder over `m`, whose types the target's layout lays out under the build's context,
+# with its stack slots in the address space `slots`
+pub fun init(m: *module.Module, a: *A.Allocator, target: *mirl_target.Target, ctx: opt[*core_state.Context], slots: u32, sources: *lang_source.SourceMap, debug_info: bool) Builder {
     var b: Builder;
     b.m         = m;
     b.a         = a;
     b.mb        = mbuild.init(m);
     b.target    = target;
     b.layout    = mirl_target.of(target, ?m.types, ctx);
+    b.slots     = slots;
     b.fn        = opt[id.Function].none{};
     b.entry     = NO_BLOCK;
     b.block     = NO_BLOCK;
@@ -249,10 +252,9 @@ pub fun ptr_in(b: *Builder, space: u32) Type {
     ret take_type(b, irt.ptr_in(?b.m.types, space));
 }
 
-# the address space a stack slot lives in, the default space until mirl's target states
-# one (mirl#423)
+# the address space a stack slot lives in, as mirl's target states it
 pub fun slot_space(b: *Builder) u32 {
-    ret types.DEFAULT_SPACE;
+    ret b.slots;
 }
 
 # the address space global `ix` lives in: its storage class where the target's pointers

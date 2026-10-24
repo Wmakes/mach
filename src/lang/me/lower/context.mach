@@ -84,17 +84,21 @@ pub rec LoopFrame {
 # the target lowering builds for: the tuple its modules are named for, the target mirl
 # assembled from it, and the context the build's selection opened, none for a target with
 # no baseline
+# slots: the address space the target's frame slots live in
 pub rec Machine {
     tuple:  mirl_module.Tuple;
     target: *mirl_target.Target;
     ctx:    opt[*core_state.Context];
+    slots:  u32;
 }
 
 # the machine of a target the owners assembled, borrowing it
-pub fun machine_of(x: *target_owner.Assembled) Machine {
+pub fun machine_of(x: *target_owner.Assembled) res[Machine, fail.Fail] {
     var ctx: opt[*core_state.Context] = opt[*core_state.Context].none{};
     if (x.based) { ctx = opt[*core_state.Context].some{?x.basis.context}; }
-    ret Machine{tuple: x.tuple, target: ?x.target, ctx: ctx};
+    val slots: res[u32, mirl_record.Error] = mirl_record.slot_space(?x.target);
+    if (sel slots.err) { ret res[Machine, fail.Fail].err{fail.message("mirl's target states no address space for its frame slots")}; }
+    ret res[Machine, fail.Fail].ok{Machine{tuple: x.tuple, target: ?x.target, ctx: ctx, slots: slots.ok}};
 }
 
 # what the driver reads of a lowered module beside its mirl module: its name and, for
@@ -534,7 +538,7 @@ pub fun init_context(lc: *LowerContext, req: *LowerRequest, unit: *Unit) err[fai
     lc.unit             = unit;
     lc.m                = ?unit.m;
     unit.root_project   = session.module_is_root_project(s, req.module.own_module);
-    lc.builder          = builder.init(?unit.m, s.alloc, req.machine.target, req.machine.ctx, ?s.sources, req.debug);
+    lc.builder          = builder.init(?unit.m, s.alloc, req.machine.target, req.machine.ctx, req.machine.slots, ?s.sources, req.debug);
 
     val caps_r: res[comptime.PhaseCapabilities[LowerContext], fail.Fail] = comptime.lowering_capabilities[LowerContext](
         resolve_module_member_const, constant_store_capability,
