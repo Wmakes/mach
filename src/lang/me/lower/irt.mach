@@ -322,7 +322,16 @@ pub fun param_of(t: *types.Table, sig: Type, i: u32) Type {
     ret NONE;
 }
 
+# why the target's data layout gave no extent to a type lowering built, by mirl's refusal
 fun laid(e: mirl_target.Error) fail.Fail {
+    if (sel e.space)      { ret fail.message("lower: the target's data layout has no row for the address space of a pointer lowering built"); }
+    if (sel e.unsized)    { ret fail.message("lower: the target's data layout gives a type lowering built no representation in memory"); }
+    if (sel e.unmodelled) { ret fail.message("lower: the build's addressing model gives a pointer lowering built no representation in memory"); }
+    if (sel e.ruled)      { ret fail.message("lower: the rules of the address space a type lowering built is asked in do not lay it out"); }
+    if (sel e.stride)     { ret fail.message("lower: an array lowering built states a stride its alignment does not divide"); }
+    if (sel e.overflow)   { ret fail.message("lower: a type lowering built is larger than 64 bits of bytes"); }
+    if (sel e.unstated)   { ret fail.message("lower: the target leaves a fact of its data layout unstated"); }
+    if (sel e.types)      { ret fail.message("lower: the type table refused a read of a type lowering built"); }
     ret fail.message("lower: the target's data layout gives no extent to a type lowering built");
 }
 
@@ -347,7 +356,7 @@ pub fun offset(l: *mirl_target.Layout, ty: Type, i: u32) res[u64, fail.Fail] {
     ret res[u64, fail.Fail].ok{r.ok};
 }
 
-# the bytes from one element of an array to the next
+# the bytes from one element of the array `ty` to the next
 pub fun stride(l: *mirl_target.Layout, ty: Type) res[u64, fail.Fail] {
     val r: res[u64, mirl_target.Error] = mirl_target.stride(l, ty, types.DEFAULT_SPACE);
     if (sel r.err) { ret res[u64, fail.Fail].err{laid(r.err)}; }
