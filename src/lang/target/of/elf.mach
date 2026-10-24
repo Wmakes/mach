@@ -4610,6 +4610,3 @@ fun decode_export_requests(alloc: *A.Allocator, itn: *intern.Interner, out: *tar
     if (sel found.none) { ret err[fail.Fail].ok{}; }
     ret exports.decode(alloc, itn, out, found.some);
 }
-
-# the four refusal classes, each constructed as the offending input and
-# asserted as a typed error that leaves the destination untouched

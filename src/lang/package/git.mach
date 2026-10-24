@@ -821,7 +821,3 @@ pub fun is_work_tree(alloc: *A.Allocator, gi: *Inspector, dir: str) res[bool, fa
     }
     ret res[bool, fail.Fail].ok{str_equals(answer.data::str, "true")};
 }
-
-# git runs while this process holds a variable with no UTF-8 spelling, and the
-# child receives it unit for unit. the test runs itself again in git's place,
-# which a marker variable tells apart

@@ -4179,6 +4179,3 @@ pub val VTABLE: target_of.OfVTable = target_of.OfVTable{
     covers_isa_count:            1,
     inputs:                      ?INPUT_NAMING,
 };
-
-# refusal classes: the offending input is constructed and the typed error
-# must leave the destination untouched
