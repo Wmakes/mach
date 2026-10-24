@@ -1,8 +1,9 @@
 name: CI
 
-# every pull request, and every merge queue entry, builds the compiler on the
-# linux runners. the windows and darwin lanes run when a dispatch names one.
-# `lane=all` on dev is the release gate.
+# the build, nothing else. every pull request and every merge queue entry
+# builds the compiler on the linux runners. the windows, darwin and release
+# lanes run only when a dispatch names one, and `lane=all` on dev is the
+# release gate. the checks are local commands (CONTRIBUTING.md, "Local checks").
 
 on:
   pull_request:
@@ -27,7 +28,7 @@ defaults:
     shell: bash
 
 jobs:
-  # the bootstrap chain builds the compiler, which builds itself to the fixpoint
+  # the compiler built through the bootstrap chain, on each native runner
   host:
     name: host ${{ matrix.target }}
     runs-on: ${{ matrix.runs-on }}
@@ -40,9 +41,11 @@ jobs:
           - { target: aarch64-linux, runs-on: ubuntu-24.04-arm }
     steps:
       - uses: actions/checkout@v6
-      - run: bash .github/scripts/bootstrap.sh --fixpoint
-      - name: formatter
-        run: '"$MACH" fmt --check .'
+      - uses: actions/cache@v6
+        with:
+          path: ${{ runner.temp }}/chain
+          key: chain-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.github/bootstrap-chain') }}
+      - run: bash .github/scripts/bootstrap.sh
 
   host-windows:
     name: host x86_64-windows
@@ -51,7 +54,11 @@ jobs:
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v6
-      - run: bash .github/scripts/bootstrap.sh --fixpoint
+      - uses: actions/cache@v6
+        with:
+          path: ${{ runner.temp }}/chain
+          key: chain-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.github/bootstrap-chain') }}
+      - run: bash .github/scripts/bootstrap.sh
 
   host-darwin:
     name: host ${{ matrix.target }}
@@ -66,22 +73,11 @@ jobs:
           - { target: x86_64-darwin,  runs-on: macos-15-intel }
     steps:
       - uses: actions/checkout@v6
-      - run: bash .github/scripts/bootstrap.sh --fixpoint
-
-  # the compiler cross-built for the targets no native runner here covers
-  cross:
-    name: cross ${{ matrix.target }}
-    runs-on: ubuntu-24.04-arm
-    timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      matrix:
-        target: [darwin-x86_64, darwin-aarch64, linux-riscv64]
-    steps:
-      - uses: actions/checkout@v6
+      - uses: actions/cache@v6
+        with:
+          path: ${{ runner.temp }}/chain
+          key: chain-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.github/bootstrap-chain') }}
       - run: bash .github/scripts/bootstrap.sh
-      - name: cross-build the compiler
-        run: '"$MACH" build . --target "${{ matrix.target }}" --profile release -o "out/cross-${{ matrix.target }}"'
 
   release:
     name: release ${{ matrix.target }}
@@ -99,12 +95,16 @@ jobs:
           - { target: x86_64-darwin,  runs-on: macos-15-intel }
     steps:
       - uses: actions/checkout@v6
-      - run: bash .github/scripts/bootstrap.sh --fixpoint --profile release
+      - uses: actions/cache@v6
+        with:
+          path: ${{ runner.temp }}/chain
+          key: chain-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.github/bootstrap-chain') }}
+      - run: bash .github/scripts/bootstrap.sh --profile release
 
   gate:
     name: gate
     if: always()
-    needs: [host, host-windows, host-darwin, cross, release]
+    needs: [host, host-windows, host-darwin, release]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
