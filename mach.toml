@@ -58,6 +58,15 @@ targets = ["*"]
 link = []
 need = []
 
+# mach.lang.editor, which only mach-lsp reaches: built so the compiler's own checks cover it
+[artifact.editor]
+kind = "static"
+entry = "lib/editor.mach"
+out = "{project.work}/lib/editor"
+targets = ["*"]
+link = []
+need = []
+
 [dep.std]
 git = "https://github.com/briar-systems/mach-std"
 ref = "branch/dev"
