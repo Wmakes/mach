@@ -423,7 +423,7 @@ fun no_names(a: *A.Allocator, itn: *intern.Interner, profile: intern.StrId, name
 fun no_relaxation(a: *A.Allocator, itn: *intern.Interner, profile: intern.StrId, names: *manifest.NameList) err[fail.Fail] {
     if (names.count == 0) { ret err[fail.Fail].ok{}; }
     val refused: fail.Fail = fail.formatted_user(a, diagnostic_kind.MANIFEST_INVALID_VALUE,
-        "mach.toml: [profile.{}].relax names \"{}\", which is not accepted yet: mirl has no build option that permits it", intern.text(itn, profile), intern.text(itn, names.items[0]));
+        "mach.toml: [profile.{}].relax names \"{}\", which is not accepted yet: mirl has no build option that permits it (mirl#424)", intern.text(itn, profile), intern.text(itn, names.items[0]));
     ret err[fail.Fail].err{fail.at(a, refused, names.sites[0])};
 }
 
