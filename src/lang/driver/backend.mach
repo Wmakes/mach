@@ -8,7 +8,9 @@ use std.types.error.err;
 use std.types.option.opt;
 use std.types.result.res;
 use std.types.size.usize;
+use std.types.string.StrError;
 use std.types.string.str;
+use std.types.string.str_copy_slice;
 use std.types.view.View;
 use std.types.view.view_eq_str;
 
@@ -31,6 +33,10 @@ use mirl_compile: mirl.target.compile;
 use mirl_family:  mirl.target.family;
 use mirl_record:  mirl.target.record;
 use mirl_spirv:   mirl.target.spirv.error;
+use mct:          mirl.ct;
+use mirl.ir.id.Function;
+use mirl.ir.module.Module;
+use masc_ct:      masc.core.ct;
 
 use mink.base.diag;
 use mink_fail: mink.base.fail;
@@ -153,15 +159,13 @@ pub fun compile(b: *Back, a: *A.Allocator, u: *lower_context.Unit, level: u8, ch
     };
     val made: res[Object, mirl_compile.Error] = mirl_compile.compile(a, ?u.m, ?b.assembled.target, o);
     if (sel made.ok) { ret res[Object, fail.Fail].ok{made.ok}; }
-    ret res[Object, fail.Fail].err{uncompiled(a, name, made.err)};
+    ret res[Object, fail.Fail].err{uncompiled(a, ?u.m, name, made.err)};
 }
 
 # why mirl did not compile the module `name`: a constant-time function the target cannot
 # time is the source's to change, and every other refusal is the compiler's
-fun uncompiled(a: *A.Allocator, name: str, e: mirl_compile.Error) fail.Fail {
-    if (sel e.timing) {
-        ret fail.user_of(diagnostic_kind.SECRET_TARGET_UNVERIFIABLE, fail.join(a, "'", name, "' requires constant time, which mirl cannot hold on this target: its instruction set classifies no timing for the operations the function performs"));
-    }
+fun uncompiled(a: *A.Allocator, m: *Module, name: str, e: mirl_compile.Error) fail.Fail {
+    if (sel e.timing) { ret untimed(a, m, name, e.timing); }
     val block: opt[fail.Fail] = assembly_refused(a, name, e);
     if (sel block.some) { ret block.some; }
     var why: str = "its back end refused it";
@@ -205,6 +209,31 @@ fun spirv_refusal(e: mirl_spirv.Error) str {
     if (sel e.builder)       { ret "masc's builder refused the module"; }
     if (sel e.container)     { ret "mink's object refused the module"; }
     ret "the spir-v back end refused it";
+}
+
+# a function of the module `name` that requires constant time, refused as mirl words it: a
+# set that classifies no timing is the target's, and a secret where the code may hold none is
+# the source's
+fun untimed(a: *A.Allocator, m: *Module, name: str, r: mct.Refused) fail.Fail {
+    val fname: res[str, fail.Fail] = function_name(a, m, r.function);
+    if (sel fname.err) { ret fname.err; }
+    var kind: diagnostic_kind.Kind = diagnostic_kind.SECRET_UNVERIFIABLE;
+    if (r.refusal.reason == masc_ct.UNCLASSIFIED) { kind = diagnostic_kind.SECRET_TARGET_UNVERIFIABLE; }
+    if (sel r.callee.some) {
+        val callee: res[str, fail.Fail] = function_name(a, m, r.callee.some);
+        if (sel callee.err) { ret callee.err; }
+        ret fail.user_of(kind, fail.join(a, "'", fname.ok, "' of '", name, "' requires constant time, which mirl refused: ", masc_ct.message(?r.refusal), ", '", callee.ok, "'"));
+    }
+    ret fail.user_of(kind, fail.join(a, "'", fname.ok, "' of '", name, "' requires constant time, which mirl refused: ", masc_ct.message(?r.refusal)));
+}
+
+# the name a function of `m` is declared by, copied
+fun function_name(a: *A.Allocator, m: *Module, f: Function) res[str, fail.Fail] {
+    if (f.index::usize >= m.functions.len) { ret res[str, fail.Fail].err{fail.message("mirl refused a function its module does not hold")}; }
+    val v:      View                    = m.functions.data[f.index::usize].data.name;
+    val copied: res[str, StrError]      = str_copy_slice(a, v.data, 0, v.len);
+    if (sel copied.err) { ret res[str, fail.Fail].err{fail.str_refused(copied.err)}; }
+    ret res[str, fail.Fail].ok{copied.ok};
 }
 
 # an asm block of the module `name` that selection refused, which the source states,
