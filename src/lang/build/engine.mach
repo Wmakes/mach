@@ -661,6 +661,8 @@ fun run_phase(ph: build_plan.PhaseKind, p: *project.Project, unit: *build_plan.B
     if (ph == build_plan.PH_LOWER) { result = lower_phase(p, st, bo); }
     if (ph == build_plan.PH_CODEGEN) {
         result = plan_outputs(p, unit, st);
+        val planned: bool = sel result.ok;
+        if (planned) { result = emit_unit_texts(p, st); }
         val result_ok: bool = sel result.ok;
         if (result_ok) { result = codegen_phase(p, st); }
     }
@@ -750,9 +752,6 @@ fun lower_phase(p: *project.Project, st: *UnitState, bo: *outcome.BuildOutcome) 
 
     val res_lower: err[fail.Fail] = driver.run_lower_pass(p);
     if (sel res_lower.err) { ret res_lower; }
-    val texts: err[fail.Fail] = emit_unit_texts(p, st);
-    if (sel texts.err) { ret texts; }
-
     val lowered: u32 = cache.lowered_count(p);
     readout.phase_end(p.progress, readout.LOWER, lowered, "module", "modules");
     readout.phase_end(p.progress, readout.OPTIMIZE, lowered, "module", "modules");
