@@ -975,6 +975,11 @@ fun lower_call(ctx: *lower_context.LowerContext, eid: ast_id.ExprId, e: *ast_exp
         if (sel res_callee.err) { ret res_callee; }
         callee = res_callee.ok;
         sig    = callee.sig;
+        # an instance is emitted once at its own signature, never per tuple of classes
+        if (builder.classes(?ctx.builder) && callee.kind == value.VAL_FN && irt.takes_pointer(?ctx.m.types, sig)) {
+            ret res[value.Value, fail.Fail].err{lower_context.report_gate(ctx, diagnostic_kind.SPIRV_UNSUPPORTED, e.span,
+                "a generic, comptime-parameter or pack function taking a pointer is not yet called where pointers name a storage class: its instance is lowered once, not once per class its callers pass")};
+        }
     }
 
     # a direct call is made through its callee's signature, an indirect one through the
