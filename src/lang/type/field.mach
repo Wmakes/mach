@@ -92,11 +92,6 @@ pub fun epoch(p: *Projection) u32 {
     ret p.epoch;
 }
 
-#[testing]
-pub fun epoch_bump(p: *Projection) {
-    p.epoch = p.epoch + 1;
-}
-
 # reserves room for `additional` entries and answers where the next staged run starts
 pub fun stage(p: *Projection, additional: u32) res[u32, fail.Fail] {
     val ce_r: res[handle.ChunkEditor[Entry], handle.Error] = handle.chunk_editor[Entry](?p.pool);

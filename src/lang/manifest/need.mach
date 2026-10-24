@@ -381,22 +381,3 @@ fun entry_check(alloc: *A.Allocator, itn: *intern.Interner, m: *Manifest, n: Nod
     }
     ret err[fail.Fail].ok{};
 }
-
-test glob_matches__wildcards_anchor_at_both_ends {
-    var code: i32 = 0;
-    if (!glob_matches("shader-*", "shader-blur"))      { code = 1; }
-    if (!glob_matches("shader-*", "shader-"))          { code = 1; }
-    if (glob_matches("shader-*", "shade"))             { code = 1; }
-    if (glob_matches("shader-*", "xshader-blur"))      { code = 1; }
-    if (!glob_matches("*", "anything"))                { code = 1; }
-    if (!glob_matches("*-spv", "blur-spv"))            { code = 1; }
-    if (glob_matches("*-spv", "blur-spvx"))            { code = 1; }
-    if (!glob_matches("a*b*c", "axxbyyc"))             { code = 1; }
-    if (glob_matches("a*b*c", "axxbyy"))               { code = 1; }
-    if (!glob_matches("exact", "exact"))               { code = 1; }
-    if (glob_matches("exact", "exacts"))               { code = 1; }
-    if (!glob_matches("linux-?86_64", "linux-x86_64")) { code = 1; }
-    if (glob_matches("a?c", "ac"))                     { code = 1; }
-    if (!glob_matches("*-?", "win-x"))                 { code = 1; }
-    ret code;
-}

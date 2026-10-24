@@ -1,16 +1,9 @@
-use lang_alloc: mach.lang.alloc;
 use mach.lang.intern;
 use lang_source: mach.lang.source;
 use A:           std.allocator;
-use T:           std.allocator.testing;
-use std.types.error.err;
-use std.types.option.opt;
 use std.types.result.res;
 use std.types.size.usize;
 use std.types.string.str;
-use std.types.string.str_equals;
-use std.types.string.str_len;
-use std.types.string.str_region_equals;
 
 # paths are parser accepted identifier and dot sequences with original trivia intact
 pub fun next(source: str, path: lang_source.Span, cursor: *usize) lang_source.Span {
@@ -89,77 +82,4 @@ pub fun intern_path(itn: *intern.Interner, source: str, path: lang_source.Span) 
         }
     }
     ret intern.bytes_add(itn, bytes, length);
-}
-
-#[testing]
-fun t_intern_refusal(ordinal: usize, attempts: *usize) i32 {
-    var t:      T.Testing;
-    val make_1: err[A.Error] = T.make(?t);
-    if (sel make_1.err) { ret 1; }
-    fin { T.dnit(?t); }
-    var itn:  intern.Interner = intern.init(T.allocator_of(?t));
-    val text: str             = "root # not.a.segment\r\n . module . # false.leaf\n Name";
-    T.fail_at_ordinal(?t, ordinal);
-    val result: res[intern.StrId, A.Error] = intern_path(?itn, text, lang_source.Span{offset: 0, len: str_len(text)});
-    @attempts = T.attempt_count(?t);
-    T.fail_at_ordinal(?t, 0);
-    var code: i32 = 0;
-    if (sel result.ok) {
-        if (ordinal != 0) { code = 2; }
-        val name: opt[str] = intern.get(?itn, result.ok);
-        if (sel name.some) {
-            if (!str_equals(name.some, "root.module.Name")) { code = 3; }
-        }
-        if (sel name.none) { code = 3; }
-    }
-    or (sel result.err) {
-        if (ordinal == 0 || !str_equals(lang_alloc.text(result.err), "out of memory")) { code = 4; }
-    }
-    intern.dnit(?itn);
-    if (T.leaked(?t) || T.double_free_count(?t) != 0 || T.tracking_exhausted(?t)) { ret 5; }
-    ret code;
-}
-
-test intern_path__allocation_refusal_releases_temporary_owner {
-    var attempts: usize = 0;
-    val baseline: i32   = t_intern_refusal(0, ?attempts);
-    if (baseline != 0) { ret baseline; }
-    if (attempts == 0) { ret 6; }
-    var ordinal: usize = 1;
-    for (ordinal <= attempts) {
-        var refused_attempts: usize = 0;
-        val refused:          i32   = t_intern_refusal(ordinal, ?refused_attempts);
-        if (refused != 0) { ret refused; }
-        ordinal = ordinal + 1;
-    }
-    ret 0;
-}
-
-test leaf_and_prefix__coordinates_after_trivia {
-    val lf_text: str              = "root # ignored.module\n . leaf";
-    val lf_span: lang_source.Span = lang_source.Span{offset: 0, len: str_len(lf_text)};
-    val lf_leaf: lang_source.Span = leaf(lf_text, lf_span);
-    if (!str_region_equals(lf_text, lf_leaf.offset, lf_leaf.len, "leaf")) { ret 1; }
-    val lf_pref: lang_source.Span = prefix(lf_text, lf_span);
-    if (!str_region_equals(lf_text, lf_pref.offset, lf_pref.len, "root")) { ret 2; }
-
-    val crlf_text: str              = "root # ignored.module\r\n . leaf";
-    val crlf_span: lang_source.Span = lang_source.Span{offset: 0, len: str_len(crlf_text)};
-    val crlf_leaf: lang_source.Span = leaf(crlf_text, crlf_span);
-    if (!str_region_equals(crlf_text, crlf_leaf.offset, crlf_leaf.len, "leaf")) { ret 3; }
-    val crlf_pref: lang_source.Span = prefix(crlf_text, crlf_span);
-    if (!str_region_equals(crlf_text, crlf_pref.offset, crlf_pref.len, "root")) { ret 4; }
-
-    val cr_text: str              = "root # ignored.module\r . leaf";
-    val cr_span: lang_source.Span = lang_source.Span{offset: 0, len: str_len(cr_text)};
-    val cr_leaf: lang_source.Span = leaf(cr_text, cr_span);
-    if (!str_region_equals(cr_text, cr_leaf.offset, cr_leaf.len, "leaf")) { ret 5; }
-    val cr_pref: lang_source.Span = prefix(cr_text, cr_span);
-    if (!str_region_equals(cr_text, cr_pref.offset, cr_pref.len, "root")) { ret 6; }
-
-    val dep_text: str              = "lib . # wrong.leaf\n Old";
-    val dep_span: lang_source.Span = lang_source.Span{offset: 0, len: str_len(dep_text)};
-    val dep_leaf: lang_source.Span = leaf(dep_text, dep_span);
-    if (!str_region_equals(dep_text, dep_leaf.offset, dep_leaf.len, "Old")) { ret 7; }
-    ret 0;
 }

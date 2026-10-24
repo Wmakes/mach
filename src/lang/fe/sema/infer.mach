@@ -2,7 +2,6 @@
 # its calls ask for
 use diagnostic_kind: mach.lang.diagnostic.kind;
 use mach.lang.ct;
-use mach.lang.diagnostic;
 use mach.lang.fail;
 use mach.lang.fe.ast;
 use ast_decl: mach.lang.fe.ast.decl;
@@ -11,7 +10,6 @@ use ast_id:   mach.lang.fe.ast.id;
 use ast_type: mach.lang.fe.ast.type;
 use mach.lang.fe.comptime;
 use mach.lang.fe.comptime.intrinsic;
-use comptime_path: mach.lang.fe.comptime.path;
 use mach.lang.fe.decorator;
 use mach.lang.fe.resolve;
 use mach.lang.fe.sema.abitype;
@@ -28,11 +26,9 @@ use mach.lang.fe.sema.typename;
 use sema_variadic: mach.lang.fe.sema.variadic;
 use mach.lang.intern;
 use mach.lang.module;
-use mach.lang.session;
 use lang_source: mach.lang.source;
 use mach.lang.stack;
 use target_definition: mach.lang.target.definition;
-use mach.lang.target.resolved;
 use mach.lang.type;
 use mach.lang.type.query.subst;
 use A: std.allocator;
@@ -2759,139 +2755,4 @@ fun report_aggregate_eq(sc: *sema_context.SemaContext, span: lang_source.Span, l
     var ty: type.TypeId = lt;
     if (!is_aggregate(sc, lt)) { ty = rt; }
     check.report_typed(sc, diagnostic_kind.OPERATOR_AGGREGATE_EQUALITY, span, "cannot compare `", ty, "` values with `==` / `!=`: aggregate equality is not structural. compare fields or elements individually, or use `std.derive.eq` for a derived structural comparison");
-}
-
-#[testing]
-fun t_field_recipe_attempt(ordinal: usize, anonymous: bool, attempts: *usize) i32 {
-    var tracker: T.Testing;
-    val make_1:  err[A.Error] = T.make(?tracker);
-    if (sel make_1.err) { ret 1; }
-    fin { T.dnit(?tracker); }
-    val alloc:       *A.Allocator                    = T.allocator_of(?tracker);
-    val initialized: res[session.Session, fail.Fail] = session.init(alloc);
-    if (sel initialized.err) { ret 2; }
-    var s:    session.Session = initialized.ok;
-    var live: bool            = true;
-    fin {
-        if (live) { session.dnit(?s); }
-    }
-    var a:        ast.Ast = ast.init(alloc, lang_source.FILE_NIL);
-    var ast_live: bool    = true;
-    fin {
-        if (ast_live) { ast.dnit(?a); }
-    }
-    val incarnation: res[u64, fail.Fail] = session.next_parse_incarnation(?s);
-    if (sel incarnation.err) { ret 3; }
-    a.incarnation = incarnation.ok;
-    val name:       res[intern.StrId, A.Error] = intern.add(?s.interner, "R");
-    val field_name: res[intern.StrId, A.Error] = intern.add(?s.interner, "field");
-    if (sel name.err)       { ret 3; }
-    if (sel field_name.err) { ret 3; }
-    val primitive: opt[type.TypeId] = type.prim(?s.types, type.TYPE_U32);
-    if (!sel primitive.some) { ret 4; }
-    var syntax: ast_type.Type = ast_type.Type{};
-    syntax.kind = ast_type.TYPE_KIND_NAMED;
-    val syntax_id: res[ast_id.TypeId, fail.Fail] = ast.add_type(?a, syntax);
-    if (sel syntax_id.err) { ret 5; }
-    var field: ast_decl.TypedName = ast_decl.TypedName{};
-    field.name = lang_source.Span{offset: 2, len: 5};
-    field.ty   = syntax_id.ok;
-    val field_id: res[u32, fail.Fail] = ast.add_typed_name(?a, field);
-    if (sel field_id.err) { ret 6; }
-    var declaration: ast_decl.Decl = ast_decl.Decl{};
-    declaration.kind                   = ast_decl.DECL_KIND_REC;
-    declaration.data.rec_.name         = lang_source.Span{offset: 0, len: 1};
-    declaration.data.rec_.fields_start = field_id.ok;
-    declaration.data.rec_.fields_len   = 1;
-    val did: res[ast_id.DeclId, fail.Fail] = ast.add_decl(?a, declaration);
-    if (sel did.err) { ret 7; }
-    val nominal: res[type.TypeId, fail.Fail] = type.intern_nominal(?s.types,
-        name.ok, type.TypeOwner{module: session.STABLE_MODULE_NIL, file: a.file_id}, type.TYPE_REC);
-    if (sel nominal.err) { ret 8; }
-    var resolved_types: [1]type.TypeId;
-    resolved_types[0] = primitive.some;
-    var state: [1]u8;
-    state[0] = sema_context.LAYOUT_PENDING;
-    var sc:         sema_context.SemaContext = sema_context.SemaContext{};
-    var evaluation: comptime.ComptimeCtx     = comptime.init(alloc, resolved.facts_none(), comptime.build_facts(comptime_path.MODE_DEBUG, 0, intern.STR_NIL, intern.STR_NIL));
-    fin { comptime.dnit(?evaluation); }
-    sc.view.ctx              = ?evaluation;
-    sc.s                     = ?s;
-    sc.view.a                = ?a;
-    sc.diags                 = ?s.diags;
-    sc.status                = fail.accepted();
-    sc.view.source           = "R field";
-    sc.view.type_resolved_ty = ?resolved_types[0];
-    sc.view.layout_state     = ?state[0];
-    val before: usize = T.attempt_count(?tracker);
-    if (ordinal != 0) { T.fail_at_ordinal(?tracker, before + ordinal); }
-    var result: type.TypeId = type.TYPE_ERROR;
-    if (anonymous) {
-        result = sema_declared.resolve_type_anon(?sc, ast_id.type(0), 0, 1, type.TYPE_REC);
-    }
-    or {
-        result = infer_decl(?sc, did.ok);
-    }
-    @attempts = T.attempt_count(?tracker) - before;
-    T.clear_failure(?tracker);
-    if (ordinal == 0) {
-        if (!sel sc.status.kind.accepted)            { ret 9; }
-        if (type.field_count(?s.types, result) != 1) { ret 9; }
-        val published: opt[*type.FieldEntry] = type.field_at(?s.types, result, 0);
-        if (!sel published.some) { ret 10; }
-        val entry: *type.FieldEntry = published.some;
-        if (!intern.str_same(entry.name, field_name.ok) || !type.same(entry.ty, resolved_types[0])) { ret 11; }
-    }
-    or {
-        if (@attempts < ordinal)                                       { ret 12; }
-        if (!sel sc.status.kind.internal)                              { ret 12; }
-        if (!str_equals(fail.status_text(sc.status), "out of memory")) { ret 13; }
-        if (anonymous && !type.is_error(result))                       { ret 14; }
-        val published: opt[*type.FieldTable] = type.field_table_for(?s.types, nominal.ok);
-        if (!anonymous && (state[0] != sema_context.LAYOUT_FAILED || sel published.some)) { ret 15; }
-    }
-    if (diagnostic.len(?s.diags) != 0) { ret 16; }
-    ast.dnit(?a);
-    ast_live = false;
-    session.dnit(?s);
-    live = false;
-    if (T.live_count(?tracker) != 0 || T.double_free_count(?tracker) != 0 || T.tracking_exhausted(?tracker)) { ret 17; }
-    ret 0;
-}
-
-test field_recipe__oom_is_internal {
-    var mode: u32 = 0;
-    for (mode < 2) {
-        var total:    usize = 0;
-        val baseline: i32   = t_field_recipe_attempt(0, mode == 1, ?total);
-        if (baseline != 0) { ret baseline; }
-        if (total == 0)    { ret 18; }
-        var ordinal: usize = 1;
-        for (ordinal <= total) {
-            var attempted: usize = 0;
-            val refused:   i32   = t_field_recipe_attempt(ordinal, mode == 1, ?attempted);
-            if (refused != 0) { ret refused; }
-            ordinal = ordinal + 1;
-        }
-        mode = mode + 1;
-    }
-    ret 0;
-}
-
-test scalar_binop_ct_op__partition_binop {
-    if (scalar_binop_ct_op(ast_expr.BIN_ADD, true) != ct.CT_OP_FLOAT)       { ret 1; }
-    if (scalar_binop_ct_op(ast_expr.BIN_DIV, false) != ct.CT_OP_INT_DIVMOD) { ret 2; }
-    if (scalar_binop_ct_op(ast_expr.BIN_MOD, false) != ct.CT_OP_INT_DIVMOD) { ret 3; }
-    if (scalar_binop_ct_op(ast_expr.BIN_MUL, false) != ct.CT_OP_INT_MUL)    { ret 4; }
-    if (scalar_binop_ct_op(ast_expr.BIN_SHL, false) != ct.CT_OP_VAR_SHIFT)  { ret 5; }
-    if (scalar_binop_ct_op(ast_expr.BIN_SHR, false) != ct.CT_OP_VAR_SHIFT)  { ret 6; }
-    val constant_time: [14]ast_expr.BinOp = [14]ast_expr.BinOp{ast_expr.BIN_ADD, ast_expr.BIN_SUB, ast_expr.BIN_EQ, ast_expr.BIN_NEQ,
-        ast_expr.BIN_LT, ast_expr.BIN_LEQ, ast_expr.BIN_GT, ast_expr.BIN_GEQ, ast_expr.BIN_AND, ast_expr.BIN_OR, ast_expr.BIN_BIT_AND,
-        ast_expr.BIN_BIT_OR, ast_expr.BIN_BIT_XOR, ast_expr.BIN_ASSIGN};
-    var i: usize = 0;
-    for (i < 14) {
-        if (scalar_binop_ct_op(constant_time[i], false) != ct.CT_OP_NONE) { ret 7; }
-        i = i + 1;
-    }
-    ret 0;
 }

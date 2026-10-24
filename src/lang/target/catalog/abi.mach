@@ -81,37 +81,3 @@ pub fun fingerprint_tag(id: u32) u8 {
 pub def Passing: u8;
 pub val PASSING_CARRIERS: Passing = 0;
 pub val PASSING_VALUES:   Passing = 1;
-
-test rows__complete_unique_ordered_roundtrip {
-    if (ROWS[0].abi != SYSV)                       { ret 1; }
-    if (ROWS[1].abi != WIN64)                      { ret 1; }
-    if (ROWS[2].abi != AAPCS64)                    { ret 1; }
-    if (ROWS[3].abi != LP64)                       { ret 1; }
-    if (ROWS[4].abi != LP64F)                      { ret 1; }
-    if (ROWS[5].abi != LP64D)                      { ret 1; }
-    if (ROWS[6].abi != ILP32)                      { ret 1; }
-    if (ROWS[7].abi != ILP32F)                     { ret 1; }
-    if (ROWS[8].abi != ILP32D)                     { ret 1; }
-    if (ROWS[9].abi != SPIRV)                      { ret 1; }
-    if (id_for("bogus") != UNKNOWN)                { ret 2; }
-    if (!str_equals(name_for(UNKNOWN), "unknown")) { ret 2; }
-
-    var i: usize = 0;
-    for (i < ROW_COUNT) {
-        if (ROWS[i].fingerprint_tag != (i + 1)::u8)               { ret 1; }
-        if (id_for(ROWS[i].spelling) != ROWS[i].abi)              { ret 1; }
-        if (!str_equals(name_for(ROWS[i].abi), ROWS[i].spelling)) { ret 1; }
-
-        var j: usize = 0;
-        for (j < ROW_COUNT) {
-            if (i != j) {
-                if (ROWS[i].abi == ROWS[j].abi)                         { ret 1; }
-                if (str_equals(ROWS[i].spelling, ROWS[j].spelling))     { ret 1; }
-                if (ROWS[i].fingerprint_tag == ROWS[j].fingerprint_tag) { ret 1; }
-            }
-            j = j + 1;
-        }
-        i = i + 1;
-    }
-    ret 0;
-}

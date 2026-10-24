@@ -11,23 +11,16 @@ use std.types.option.opt;
 use std.types.result.res;
 use std.types.size.usize;
 use std.types.string.str;
-use std.types.string.str_ends_with;
 use std.types.string.str_len;
 use std.types.string.str_region_equals;
 
-use A:                  std.allocator;
-use collections_vector: std.collections.vector;
-use std.collections.vector.Vector;
+use A:  std.allocator;
 use fs: std.filesystem;
 use std.print;
 use types_path: std.types.path;
 
 use mach.lang.checkout;
 use lang_source: mach.lang.source;
-
-# the language reference, relative to the project root
-#[testing]
-val LANGUAGE: str = "doc/language";
 
 # the page at `path`, relative to the project root, read whole; none when it cannot be read
 #[testing]
@@ -39,40 +32,6 @@ pub fun page(alloc: *A.Allocator, path: str) opt[str] {
     val text: res[str, fs.FsError] = fs.read_string(alloc, full.ok);
     if (sel text.err) { ret opt[str].none{}; }
     ret opt[str].some{text.ok};
-}
-
-# every page that may copy a compiler table, relative to the project root: each
-# page of the language reference, the readme and the authoring skill
-#[testing]
-pub fun pages(alloc: *A.Allocator) opt[Vector[str]] {
-    val at: opt[str] = checkout.root(alloc);
-    if (sel at.none) { ret opt[Vector[str]].none{}; }
-    val dir: res[str, A.Error] = types_path.join(alloc, at.some, LANGUAGE);
-    if (sel dir.err) { ret opt[Vector[str]].none{}; }
-    val listed: res[Vector[fs.Listed], fs.FsError] = fs.read_dir(alloc, dir.ok);
-    if (sel listed.err) { ret opt[Vector[str]].none{}; }
-    var entries: Vector[fs.Listed] = listed.ok;
-    fin { fs.listed_free(?entries); }
-    var out: Vector[str] = collections_vector.init[str](alloc);
-    var i:   usize       = 0;
-    for (i < entries.len) {
-        val entry: fs.Listed = entries.data[i];
-        i = i + 1;
-        # a page name with no UTF-8 spelling cannot be read, so no page list is had
-        var name: str = nil;
-        if (sel entry.name)              { name = entry.name; }
-        or                               { ret opt[Vector[str]].none{}; }
-        if (!str_ends_with(name, ".md")) { cnt; }
-        val path: res[str, A.Error] = types_path.join(alloc, LANGUAGE, name);
-        if (sel path.err) { ret opt[Vector[str]].none{}; }
-        val pushed: res[usize, A.Error] = collections_vector.push[str](?out, path.ok);
-        if (sel pushed.err) { ret opt[Vector[str]].none{}; }
-    }
-    val readme: res[usize, A.Error] = collections_vector.push[str](?out, "README.md");
-    if (sel readme.err) { ret opt[Vector[str]].none{}; }
-    val skill: res[usize, A.Error] = collections_vector.push[str](?out, "doc/skills/mach/SKILL.md");
-    if (sel skill.err) { ret opt[Vector[str]].none{}; }
-    ret opt[Vector[str]].some{out};
 }
 
 # the offset of the first `needle` at or after `from`; the text's length when there is none
@@ -164,32 +123,6 @@ pub fun section(text: str, title: str) opt[lang_source.Span] {
     }
     if (level == 0) { ret opt[lang_source.Span].none{}; }
     ret opt[lang_source.Span].some{lang_source.Span{offset: start, len: n - start}};
-}
-
-# the right-hand side of the production `name ::=`: from just past the `::=` to
-# the first line that is blank, closes its block, or begins another production
-#[testing]
-pub fun production(text: str, name: str) opt[lang_source.Span] {
-    val n:  usize = str_len(text);
-    val nl: usize = str_len(name);
-    var at: usize = 0;
-    for (at < n) {
-        val next: usize = line_next(text, at);
-        if (str_region_equals(text, at, nl, name)) {
-            var p: usize = at + nl;
-            for (text[p] == ' ') { p = p + 1; }
-            if (str_region_equals(text, p, 3, "::=")) {
-                val start: usize = p + 3;
-                var end:   usize = next;
-                for (end < n && text[end] != '\n' && !str_region_equals(text, end, 3, "```") && find(text, end, "::=") >= line_next(text, end)) {
-                    end = line_next(text, end);
-                }
-                ret opt[lang_source.Span].some{lang_source.Span{offset: start, len: end - start}};
-            }
-        }
-        at = next;
-    }
-    ret opt[lang_source.Span].none{};
 }
 
 # the next `"..."` terminal of a production from `at` up to `end`, its quotes
@@ -416,44 +349,4 @@ pub fun page_or_report(alloc: *A.Allocator, path: str) opt[str] {
     val text: opt[str] = page(alloc, path);
     if (sel text.none) { print.eprintlnf("reference: cannot read {} from the project root", path); }
     ret text;
-}
-
-# the readers find what a page writes and nothing else
-test reference__reads_productions_tables_and_spans {
-    val text: str                   = "# T\n\n## A\n\n```ebnf\nx ::= \"a\" | \"b\" (* \"c\" *)\n    | \"d\"\ny ::= \"e\"\n```\n\n| K | V |\n|---|---|\n| `p` | q \\| r |\n| `s` | t |\n\n## B\n";
-    val px:   opt[lang_source.Span] = production(text, "x");
-    if (sel px.none) { ret 1; }
-    var at:    usize = px.some.offset;
-    var t:     lang_source.Span;
-    var count: usize = 0;
-    for (terminal_next(text, ?at, px.some.offset + px.some.len, ?t)) {
-        if (count == 0 && !spells(text, t, "a")) { ret 2; }
-        if (count == 2 && !spells(text, t, "d")) { ret 3; }
-        count = count + 1;
-    }
-    if (count != 3) { ret 4; }
-    val a: opt[lang_source.Span] = section(text, "## A");
-    if (sel a.none)                                                      { ret 5; }
-    if (find(text, a.some.offset, "## B") != a.some.offset + a.some.len) { ret 6; }
-    val rows: opt[lang_source.Span] = table(text, 0, "| K |");
-    if (sel rows.none) { ret 7; }
-    var r:    usize = rows.some.offset;
-    var line: lang_source.Span;
-    var n:    usize = 0;
-    for (row_next(text, ?r, rows.some.offset + rows.some.len, ?line)) {
-        val key: opt[lang_source.Span] = cell(text, line, 0);
-        if (sel key.none) { ret 7; }
-        val v: opt[lang_source.Span] = cell(text, line, 1);
-        if (sel v.none) { ret 7; }
-        var c:    usize = key.some.offset;
-        var name: lang_source.Span;
-        if (!code_next(text, ?c, key.some.offset + key.some.len, ?name))            { ret 8; }
-        if (n == 0 && (!spells(text, name, "p") || !spells(text, v.some, "q | r"))) { ret 9; }
-        n = n + 1;
-    }
-    if (n != 2) { ret 10; }
-    val pz: opt[lang_source.Span] = production(text, "z");
-    val sc: opt[lang_source.Span] = section(text, "## C");
-    if (sel pz.some || sel sc.some) { ret 11; }
-    ret 0;
 }

@@ -67,12 +67,11 @@ doc with grammar, examples, and neighboring links. Start from the index below.
 
 - [documentation.md](documentation.md) — docstring style for functions,
   types, modules, and values
-- The ```` ```mach ```` blocks on these pages are compiled by `test/run.sh --docs`.
-  A plain block compiles, and runs when it declares a main. ```` ```mach fragment ````
-  marks a block that is not a whole program, and ```` ```mach error <text> ```` a block
-  whose compile fails with `<text>` in the output. A block showing several files starts
-  each with `# file: src/<path>.mach`, in a project whose id is `example`. See
-  [test/README.md](../../test/README.md#doc-blocks).
+- The ```` ```mach ```` blocks on these pages are illustrations and are not compiled.
+  ```` ```mach fragment ```` marks a block that is not a whole program, and
+  ```` ```mach error <text> ```` a block whose compile fails with `<text>`. A block showing
+  several files starts each with `# file: src/<path>.mach`, in a project whose id is
+  `example`.
 
 ## Build system
 

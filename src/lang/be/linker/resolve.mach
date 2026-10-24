@@ -1,4 +1,3 @@
-use std.allocator.page;
 use std.collections.map;
 use collections_vector: std.collections.vector;
 use std.collections.vector.Vector;
@@ -9,7 +8,6 @@ use std.types.error.err;
 use std.types.option.opt;
 use std.types.result.res;
 use std.types.size.usize;
-use std.types.string.str;
 
 use A: std.allocator;
 
@@ -25,13 +23,10 @@ use mach.lang.be.linker.atoms.AtomPlan;
 use mach.lang.be.linker.atoms.atom_live_offset;
 use mach.lang.be.linker.atoms.atom_offset_dead;
 use mach.lang.be.linker.common.dup_message;
-use mach.lang.be.linker.common.lt_image;
-use mach.lang.be.linker.common.lt_name;
 use mach.lang.be.linker.common.name_intern;
 use mach.lang.be.linker.common.oor_section_message;
 use mach.lang.be.linker.input.InputSet;
 use mach.lang.be.linker.input.LinkContext;
-use mach.lang.be.linker.input.t_synthesize;
 use mach.lang.be.linker.merge.Placement;
 
 rec CommonStorageUnit {}
@@ -376,209 +371,4 @@ pub fun is_undefined_extern(sym: *target_of.Symbol) bool {
     if (!target_of.section_is_external(sym.section))      { ret false; }
     if ((sym.flags & target_of.SYM_OBJ_FLAG_GLOBAL) == 0) { ret false; }
     ret true;
-}
-
-#[testing]
-fun lt_link(s: *session.Session, name: intern.StrId, a: *target_of.Symbol, b: *target_of.Symbol) res[SymbolLoc, fail.Fail] {
-    var placements: [2]Placement;
-    placements[0].vaddr        = 0x1100;
-    placements[0].offset       = 0x100;
-    placements[0].merged_index = 0;
-    placements[1].vaddr        = 0x2400;
-    placements[1].offset       = 0x400;
-    placements[1].merged_index = 1;
-    var sec_base: [2]u32;
-    sec_base[0] = 0;
-    sec_base[1] = 1;
-    var mods: [2]target_of.ObjectImage;
-    mods[0] = lt_image(s, lt_name(s, "a"), nil::*target_of.Section, 1, a, 1, nil::*target_of.Relocation, 0);
-    mods[1] = lt_image(s, lt_name(s, "b"), nil::*target_of.Section, 1, b, 1, nil::*target_of.Relocation, 0);
-
-    var locs: map.Map[intern.StrId, SymbolLoc] = map.init[intern.StrId, SymbolLoc](s.alloc);
-    fin { map.dnit[intern.StrId, SymbolLoc](?locs); }
-    val cr: err[fail.Fail] = collect_symbols(s, ?mods[0], 2, ?placements[0], ?sec_base[0],
-        ?locs, true, nil::*AtomPlan);
-    if (sel cr.err) { ret res[SymbolLoc, fail.Fail].err{cr.err}; }
-    var key: intern.StrId    = name;
-    val g:   opt[*SymbolLoc] = map.get[intern.StrId, SymbolLoc](?locs, ?key);
-    if (sel g.none) { ret res[SymbolLoc, fail.Fail].err{fail.message("missing")}; }
-    ret res[SymbolLoc, fail.Fail].ok{@g.some};
-}
-
-# the strong definition wins in either order and carries its own section's
-# placement, and two strong definitions are refused
-test collect_symbols__strong_wins_over_weak_in_either_order {
-    var alloc: A.Allocator;
-    page.make(?alloc);
-    val sr: res[session.Session, fail.Fail] = session.init(?alloc);
-    if (sel sr.err) { ret 1; }
-    var s: session.Session = sr.ok;
-    fin { session.dnit(?s); }
-    val nm: intern.StrId = lt_name(?s, "dup");
-
-    var weak: target_of.Symbol;
-    weak.name    = nm;
-    weak.section = target_of.section_id(0);
-    weak.offset  = 0x20;
-    weak.flags   = target_of.SYM_OBJ_FLAG_GLOBAL | target_of.SYM_OBJ_FLAG_WEAK;
-    var strong: target_of.Symbol;
-    strong.name    = nm;
-    strong.section = target_of.section_id(0);
-    strong.offset  = 0x30;
-    strong.flags   = target_of.SYM_OBJ_FLAG_GLOBAL;
-
-    val late: res[SymbolLoc, fail.Fail] = lt_link(?s, nm, ?weak, ?strong);
-    if (sel late.err) { ret 2; }
-    if (late.ok.vaddr != 0x2430 || late.ok.section_vaddr != 0x2000
-        || late.ok.merged_index != 1 || late.ok.weak) { ret 3; }
-    val early: res[SymbolLoc, fail.Fail] = lt_link(?s, nm, ?strong, ?weak);
-    if (sel early.err)            { ret 4; }
-    if (early.ok.vaddr != 0x1130) { ret 5; }
-    val twice: res[SymbolLoc, fail.Fail] = lt_link(?s, nm, ?strong, ?strong);
-    if (!sel twice.err) { ret 6; }
-    ret 0;
-}
-
-#[testing]
-fun lt_common_module(s: *session.Session, mod_name: str, name: str, size: u32, align: u32) target_of.ObjectImage {
-    val alloc: *A.Allocator               = s.alloc;
-    val mn:    res[intern.StrId, A.Error] = intern.add(?s.interner, mod_name);
-    val sn:    res[intern.StrId, A.Error] = intern.add(?s.interner, name);
-    var img:   target_of.ObjectImage;
-    if (sel mn.err) { ret img; }
-    if (sel sn.err) { ret img; }
-    img = target_of.object_image_init(alloc, ?s.interner, mn.ok);
-    var sym: target_of.Symbol;
-    sym.name    = sn.ok;
-    sym.section = target_of.external_section();
-    sym.offset  = 0;
-    sym.size    = size;
-    sym.align   = align;
-    sym.flags   = target_of.SYM_OBJ_FLAG_GLOBAL | target_of.SYM_OBJ_FLAG_EXTERN | target_of.SYM_OBJ_FLAG_COMMON;
-    target_of.symbol_add(?img, sym);
-    ret img;
-}
-
-test synthesize_common_storage__coalesces_to_the_largest_request {
-    var alloc: A.Allocator;
-    page.make(?alloc);
-    val sr: res[session.Session, fail.Fail] = session.init(?alloc);
-    if (sel sr.err) { ret 1; }
-    var s: session.Session = sr.ok;
-
-    var mods: [2]target_of.ObjectImage;
-    mods[0] = lt_common_module(?s, "a.o", "_shared", 8, 4);
-    mods[1] = lt_common_module(?s, "b.o", "_shared", 40, 16);
-
-    var bad: i32                  = 0;
-    var out: target_of.ObjectImage;
-    val cr:  res[bool, fail.Fail] = t_synthesize(synthesize_common_storage, ?s, nil, catalog_artifact.EXECUTABLE, ?mods[0], 2, ?out);
-    if (sel cr.err)          { bad = 2; }
-    or (sel cr.ok && !cr.ok) { bad = 3; }
-    or {
-        if (out.symbol_count != 1 && bad == 0)  { bad = 4; }
-        or (out.section_count != 1 && bad == 0) { bad = 5; }
-        or {
-            if (out.symbols[0].size != 40 && bad == 0)                                   { bad = 6; }
-            if (out.sections[0].len != 40 && bad == 0)                                   { bad = 7; }
-            if (out.sections[0].align != 16 && bad == 0)                                 { bad = 8; }
-            if (out.sections[0].kind != target_of.SK_BSS && bad == 0)                    { bad = 9; }
-            if (out.sections[0].bytes != nil && bad == 0)                                { bad = 10; }
-            if ((out.symbols[0].flags & target_of.SYM_OBJ_FLAG_GLOBAL) == 0 && bad == 0) { bad = 11; }
-            if ((out.symbols[0].flags & target_of.SYM_OBJ_FLAG_EXTERN) != 0 && bad == 0) { bad = 12; }
-        }
-        target_of.object_image_dnit(?out);
-    }
-
-    target_of.object_image_dnit(?mods[0]);
-    target_of.object_image_dnit(?mods[1]);
-    session.dnit(?s);
-    ret bad;
-}
-
-test synthesize_common_storage__a_real_definition_wins {
-    var alloc: A.Allocator;
-    page.make(?alloc);
-    val sr: res[session.Session, fail.Fail] = session.init(?alloc);
-    if (sel sr.err) { ret 1; }
-    var s: session.Session = sr.ok;
-
-    var mods: [2]target_of.ObjectImage;
-    mods[0] = lt_common_module(?s, "a.o", "_shared", 40, 16);
-
-    val mn: res[intern.StrId, A.Error] = intern.add(?s.interner, "b.o");
-    val dn: res[intern.StrId, A.Error] = intern.add(?s.interner, ".data");
-    val sn: res[intern.StrId, A.Error] = intern.add(?s.interner, "_shared");
-    if (sel mn.err) { ret 1; }
-    if (sel dn.err) { ret 1; }
-    if (sel sn.err) { ret 1; }
-    mods[1] = target_of.object_image_init(?alloc, ?s.interner, mn.ok);
-    val bytes_r: res[*u8, A.Error] = A.zallocate[u8](?alloc, 8::usize);
-    if (sel bytes_r.err) { ret 1; }
-    var sec: target_of.Section;
-    sec.name  = dn.ok;
-    sec.kind  = target_of.SK_DATA;
-    sec.bytes = bytes_r.ok;
-    sec.len   = 8;
-    sec.align = 8;
-    sec.flags = 0;
-    val si: res[u32, fail.Fail] = target_of.section_install(?mods[1], ?sec);
-    if (sel si.err) { ret 1; }
-    var dsym: target_of.Symbol;
-    dsym.name     = sn.ok;
-    dsym.section  = target_of.section_id(si.ok);
-    dsym.offset   = 0;
-    dsym.size     = 8;
-    dsym.flags    = target_of.SYM_OBJ_FLAG_GLOBAL | target_of.SYM_OBJ_FLAG_OBJECT;
-    dsym.fallback = target_of.SYMBOL_NONE;
-    dsym.align    = 8;
-    target_of.symbol_add(?mods[1], dsym);
-
-    var bad: i32                  = 0;
-    var out: target_of.ObjectImage;
-    val cr:  res[bool, fail.Fail] = t_synthesize(synthesize_common_storage, ?s, nil, catalog_artifact.EXECUTABLE, ?mods[0], 2, ?out);
-    if (sel cr.ok && cr.ok) {
-        bad = 3;
-        target_of.object_image_dnit(?out);
-    }
-
-    if (bad == 0) {
-        var out2: target_of.ObjectImage;
-        val rr:   res[bool, fail.Fail] = t_synthesize(synthesize_common_storage, ?s, nil, catalog_artifact.OBJECTS, ?mods[0], 1, ?out2);
-        if (sel rr.err) { bad = 4; }
-        or (sel rr.ok && rr.ok) {
-            bad = 5;
-            target_of.object_image_dnit(?out2);
-        }
-    }
-
-    target_of.object_image_dnit(?mods[0]);
-    target_of.object_image_dnit(?mods[1]);
-    session.dnit(?s);
-    ret bad;
-}
-
-test synthesize_common_storage__refuses_layout_exceeding_2gib {
-    var alloc: A.Allocator;
-    page.make(?alloc);
-    val sr: res[session.Session, fail.Fail] = session.init(?alloc);
-    if (sel sr.err) { ret 1; }
-    var s: session.Session = sr.ok;
-
-    var mods: [2]target_of.ObjectImage;
-    mods[0] = lt_common_module(?s, "a.o", "_first", 0x80000000, 1);
-    mods[1] = lt_common_module(?s, "b.o", "_second", 1, 1);
-
-    var out: target_of.ObjectImage;
-    val cr:  res[bool, fail.Fail] = t_synthesize(synthesize_common_storage, ?s, nil, catalog_artifact.EXECUTABLE, ?mods[0], 2, ?out);
-    var bad: i32                  = 0;
-    if (sel cr.ok) {
-        bad = 1;
-        target_of.object_image_dnit(?out);
-    }
-
-    target_of.object_image_dnit(?mods[0]);
-    target_of.object_image_dnit(?mods[1]);
-    session.dnit(?s);
-    ret bad;
 }

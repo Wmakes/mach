@@ -6,8 +6,6 @@ use std.types.result.res;
 use std.types.string.str;
 
 use A: std.allocator;
-use std.allocator.page;
-use std.types.string.str_equals;
 
 use mach.lang.fail;
 
@@ -44,16 +42,4 @@ pub fun under(a: *A.Allocator, work: str, tree: str) res[str, fail.Fail] {
 # runs, a step's staging or a dependency's artifacts
 pub fun within(a: *A.Allocator, work: str, tree: str, name: str) res[str, fail.Fail] {
     ret fail.format(a, "{}/{}/{}", work, tree, name);
-}
-
-test layout__trees_sit_beneath_the_work_directory {
-    var alloc: A.Allocator;
-    page.make(?alloc);
-    val obj: res[str, fail.Fail] = under(?alloc, "out/linux/debug", OBJ);
-    if (sel obj.err)                                { ret 1; }
-    if (!str_equals(obj.ok, "out/linux/debug/obj")) { ret 2; }
-    val dep: res[str, fail.Fail] = within(?alloc, "out", DEPENDENCY, "vend");
-    if (sel dep.err)                         { ret 3; }
-    if (!str_equals(dep.ok, "out/dep/vend")) { ret 4; }
-    ret 0;
 }

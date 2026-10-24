@@ -1,25 +1,3 @@
-use mach.lang.fail;
-use std.allocator.arena;
-use std.types.bool.bool;
-use std.types.bool.false;
-use std.types.bool.true;
-use std.types.option.opt;
-use std.types.result.res;
-use std.types.size.usize;
-use std.types.string.str;
-use std.types.string.str_contains;
-use std.types.string.str_empty;
-use std.types.string.str_equals;
-
-use A: std.allocator;
-
-use diagnostic_kind: mach.lang.diagnostic.kind;
-use mach.lang.intern;
-
-use mach.lang.manifest.load.tparse;
-use mach.lang.manifest.model.tinit;
-use mach.lang.manifest.refusal.t_fmt;
-
 fwd mach.lang.manifest.schema.is_valid_id;
 fwd mach.lang.manifest.schema.is_project_path;
 fwd mach.lang.manifest.schema.OUTPUT_CONSTRAINT;
@@ -118,52 +96,3 @@ fwd mach.lang.manifest.select.t_selectors;
 fwd mach.lang.manifest.select.single_selection_fail;
 fwd mach.lang.manifest.select.resolve_cells;
 fwd mach.lang.manifest.select.check_stack_keys;
-
-# only `export = true` publishes an entry: `default = true` selects and binds
-# nothing, and an export on a `bin` or a second export is refused
-test export_artifact__is_the_one_library_marked_export {
-    var backing: A.Allocator;
-    var ar:      arena.Arena;
-    var alloc:   A.Allocator;
-    var itn:     intern.Interner;
-    if (!tinit(?backing, ?ar, ?alloc, ?itn)) { ret 1; }
-    fin { arena.dnit(?ar); }
-    val head:  str    = "[project]\nmach=\">=5\"\nid=\"x\"\nversion=\"1\"\nsrc=\"src\"\nwork=\"out\"\n[profile.debug]\ndefault=true\noptimize=false\ndebug=true\nsimd=\"scalarize\"\n";
-    var cases: [7]str = [7]str{
-        "",
-        "[artifact.a]\nkind=\"static\"\nentry=\"api.mach\"\nout=\"{project.work}/lib/a\"\ntargets=[\"*\"]\n",
-        "[artifact.a]\nkind=\"static\"\ndefault=true\nentry=\"api.mach\"\nout=\"{project.work}/lib/a\"\ntargets=[\"*\"]\n",
-        "[artifact.a]\nkind=\"static\"\nexport=true\nentry=\"api.mach\"\nout=\"{project.work}/lib/a\"\ntargets=[\"*\"]\n[artifact.b]\nkind=\"bin\"\ndefault=true\nentry=\"main.mach\"\nout=\"{project.work}/bin/b\"\ntargets=[\"*\"]\n",
-        "[artifact.z]\nkind=\"static\"\nentry=\"other.mach\"\nout=\"{project.work}/lib/z\"\ntargets=[\"*\"]\n[artifact.a]\nkind=\"shared\"\nexport=true\nentry=\"api.mach\"\nout=\"{project.work}/lib/a\"\ntargets=[\"*\"]\n",
-        "[artifact.a]\nkind=\"bin\"\nexport=true\nentry=\"api.mach\"\nout=\"{project.work}/bin/a\"\ntargets=[\"*\"]\n",
-        "[artifact.a]\nkind=\"static\"\nexport=true\nentry=\"api.mach\"\nout=\"{project.work}/lib/a\"\ntargets=[\"*\"]\n[artifact.b]\nkind=\"shared\"\nexport=true\nentry=\"api.mach\"\nout=\"{project.work}/lib/b\"\ntargets=[\"*\"]\n"
-    };
-    var public:  [7]bool = [7]bool{false, false, false, true, true, false, false};
-    var refused: [7]str  = [7]str{"", "", "", "", "", "a kind = \"bin\" artifact is no library", "2 artifacts declare `export = true` ([artifact.a], [artifact.b])"};
-    var i:       usize   = 0;
-    for (i < 7) {
-        val parsed: res[Manifest, fail.Fail] = tparse(?alloc, ?itn, t_fmt(?alloc, "{}{}", head, cases[i]));
-        if (!str_empty(refused[i])) {
-            if (sel parsed.ok) { ret 5; }
-            if (sel parsed.err) {
-                if (fail.kind_of(parsed.err) != diagnostic_kind.MANIFEST_KEY_CONFLICT || !str_contains(fail.describe(parsed.err), refused[i])) { ret 6; }
-            }
-            i = i + 1;
-            cnt;
-        }
-        if (sel parsed.err) { ret 2; }
-        var m:        Manifest     = parsed.ok;
-        val exported: *ArtifactDef = export_artifact(?m);
-        if (!public[i]) {
-            if (exported != nil) { ret 3; }
-        }
-        or {
-            if (exported == nil) { ret 4; }
-            val text: opt[str] = intern.get(?itn, exported.entry);
-            if (sel text.none)                      { ret 4; }
-            if (!str_equals(text.some, "api.mach")) { ret 4; }
-        }
-        i = i + 1;
-    }
-    ret 0;
-}

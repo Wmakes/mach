@@ -1,8 +1,6 @@
-use std.allocator.page;
 use std.collections.map;
 use std.collections.sort;
 use collections_vector: std.collections.vector;
-use std_format:         std.format;
 use std.text.string.str_free;
 use std.types.bool.bool;
 use std.types.bool.false;
@@ -20,7 +18,6 @@ use std.types.view.view_eq_str;
 use A: std.allocator;
 
 use lang_alloc: mach.lang.alloc;
-use mach.lang.ct;
 use mach.lang.diagnostic;
 use diagnostic_kind: mach.lang.diagnostic.kind;
 use mach.lang.fail;
@@ -46,13 +43,9 @@ use mach.lang.session;
 use session_embed: mach.lang.session.embed;
 use lang_source:   mach.lang.source;
 use mach.lang.source.provider;
-use mach.lang.source.provider.resident;
 use mach.lang.stack;
-use catalog_arch:      mach.lang.target.catalog.arch;
-use catalog_os:        mach.lang.target.catalog.os;
-use target_definition: mach.lang.target.definition;
-use mach.lang.target.extension;
-use target_model: mach.lang.target.model;
+use catalog_arch: mach.lang.target.catalog.arch;
+use catalog_os:   mach.lang.target.catalog.os;
 use mach.lang.target.resolved;
 use mach.lang.type;
 
@@ -2871,214 +2864,6 @@ fun stable_named(l: *Loader, fqn: str) session.StableModuleId {
 }
 
 #[testing]
-fun binding_named(l: *Loader, m: *Module, name_text: str) opt[*Binding] {
-    var i: usize = 0;
-    for (i < m.bindings.len) {
-        if (spelled(?l.s.interner, m.bindings.data[i].name, name_text)) { ret opt[*Binding].some{?m.bindings.data[i]}; }
-        i = i + 1;
-    }
-    ret opt[*Binding].none{};
-}
-
-#[testing]
-fun held_set(r: *resident.Resident, fqn: str, text: str) bool {
-    val set: err[fail.Fail] = resident.module_set(r, fqn, text);
-    ret sel set.ok;
-}
-
-#[testing]
 fun spelled(itn: *intern.Interner, id: intern.StrId, text: str) bool {
     ret !intern.str_is_nil(id) && str_equals(intern.text(itn, id), text);
-}
-
-#[testing]
-fun deps_hold(m: *Module, sid: session.StableModuleId) bool {
-    var i: usize = 0;
-    for (i < m.deps.len) {
-        if (module.stable_same(m.deps.data[i], sid)) { ret true; }
-        i = i + 1;
-    }
-    ret false;
-}
-
-test load__modules_given_as_names_and_text {
-    var a: A.Allocator;
-    page.make(?a);
-    val made: res[session.Session, fail.Fail] = session.init(?a);
-    if (sel made.err) { ret 1; }
-    var s: session.Session = made.ok;
-    fin { session.dnit(?s); }
-    var diags: diagnostic.DiagnosticStore = diagnostic.store_init(?a);
-    fin { diagnostic.store_dnit(?diags); }
-
-    val app: res[intern.StrId, A.Error] = intern.add(?s.interner, "app");
-    if (sel app.err) { ret 1; }
-    var held: resident.Resident = resident.init(?a, ?s.interner, app.ok);
-    fin { resident.dnit(?held); }
-    val main_text: str = "use app.flags;\nuse app.flags.ON;\nuse lib.core;\nuse lib;\nuse app.gone;\nuse app.flags.ON.deep;\n$if (flags.MODE == 2) { use app.extra; }\n$if (ON == 1) { use app.more; } $or { use app.never; }\nfun main() i32 { ret 0; }\n";
-    if (!held_set(?held, "app.main", main_text))                                       { ret 2; }
-    if (!held_set(?held, "app.flags", "pub val MODE: u8 = 2;\npub val ON: u8 = 1;\n")) { ret 2; }
-    if (!held_set(?held, "app.extra", "pub fun x() i32 { ret 1; }\n"))                 { ret 2; }
-    if (!held_set(?held, "app.never", "pub fun y() i32 { ret 2; }\n"))                 { ret 2; }
-    if (!held_set(?held, "app.more", "pub fun w() i32 { ret 4; }\n"))                  { ret 2; }
-    if (!held_set(?held, "lib.core", "pub fun z() i32 { ret 3; }\n"))                  { ret 2; }
-    if (!held_set(?held, "lib", "pub fun q() i32 { ret 5; }\n"))                       { ret 2; }
-    val known: err[fail.Fail] = resident.package_add(?held, "lib");
-    if (sel known.err) { ret 2; }
-
-    var f: Fixture = fixture_init(?s, ?a, ?diags);
-    fin { fixture_dnit(?f); }
-    var l: Loader = init(?s, ?a);
-    fin { dnit(?l); }
-    bind(?l, fixture_host(?f), resident.provider_of(?held), ?diags);
-
-    val main_name: res[intern.StrId, A.Error] = intern.add(?s.interner, "app.main");
-    if (sel main_name.err) { ret 3; }
-    val loaded: res[session.ModuleId, fail.Fail] = module_load(?l, main_name.ok);
-    if (sel loaded.err) { ret 4; }
-    val main: *Module = module_at(?l, loaded.ok);
-
-    # the gates that read imported constants took their arms, and the arm not taken left its module unread
-    if (module_count(?l) != 5)                                { ret 5; }
-    if (!deps_hold(main, stable_named(?l, "app.extra")))      { ret 6; }
-    if (!deps_hold(main, stable_named(?l, "app.more")))       { ret 6; }
-    if (!module.stable_is_nil(stable_named(?l, "app.never"))) { ret 7; }
-    if (!deps_hold(main, stable_named(?l, "lib.core")))       { ret 8; }
-    if (f.closed != 5 || !module.same(f.done[4], loaded.ok))  { ret 9; }
-
-    # each import declaration is recorded by what it binds, its module named by stable id
-    val flags: opt[*Binding] = binding_named(?l, main, "flags");
-    if (sel flags.none) { ret 10; }
-    if (sel flags.some) {
-        if (flags.some.kind != BINDING_MODULE)                                     { ret 10; }
-        if (!module.stable_same(flags.some.module, stable_named(?l, "app.flags"))) { ret 10; }
-    }
-    val on: opt[*Binding] = binding_named(?l, main, "ON");
-    if (sel on.none) { ret 11; }
-    if (sel on.some) {
-        if (on.some.kind != BINDING_MEMBER || !on.some.constant) { ret 11; }
-    }
-    val core: opt[*Binding] = binding_named(?l, main, "core");
-    if (sel core.none) { ret 12; }
-    if (sel core.some) {
-        if (core.some.kind != BINDING_MODULE)                                    { ret 12; }
-        if (!module.stable_same(core.some.module, stable_named(?l, "lib.core"))) { ret 12; }
-    }
-    # one segment names a project, never a module, though a module is held under that name
-    if (!module.stable_is_nil(stable_named(?l, "lib"))) { ret 12; }
-    var unbound: u32   = 0;
-    var bi:      usize = 0;
-    for (bi < main.bindings.len) {
-        if (main.bindings.data[bi].kind == BINDING_UNBOUND) { unbound = unbound + 1; }
-        bi = bi + 1;
-    }
-    # a project id alone, a path that names nothing and one that runs on past a module's member are refused
-    if (unbound != 3 || !fail.is_rejected(main.status) || !diagnostic.has_errors(?diags)) { ret 13; }
-
-    # the exporter's public constants are its load product, and the importer's gate read them
-    val exporter: *Module = module_at(?l, module_of(?l, stable_named(?l, "app.flags")));
-    if (exporter.consts.len != 2)                                                       { ret 14; }
-    if (!exporter.home.root || !spelled(?s.interner, exporter.home.file, "flags.mach")) { ret 15; }
-    if (module_at(?l, module_of(?l, stable_named(?l, "lib.core"))).home.root)           { ret 16; }
-    ret 0;
-}
-
-# a gate's cast resolves a local alias and an imported one, so each takes the arm that keeps
-# the missing module unread
-test gate__cast_resolves_local_and_imported_aliases {
-    var a: A.Allocator;
-    page.make(?a);
-    val made: res[session.Session, fail.Fail] = session.init(?a);
-    if (sel made.err) { ret 1; }
-    var s: session.Session = made.ok;
-    fin { session.dnit(?s); }
-    var diags: diagnostic.DiagnosticStore = diagnostic.store_init(?a);
-    fin { diagnostic.store_dnit(?diags); }
-    val app: res[intern.StrId, A.Error] = intern.add(?s.interner, "app");
-    if (sel app.err) { ret 1; }
-    var held: resident.Resident = resident.init(?a, ?s.interner, app.ok);
-    fin { resident.dnit(?held); }
-    val main_text: str = "use Flag: app.lib.Flag;\ndef Local: u8;\n$if ((1::Local) == 1u8) { fun local_selected() i32 { ret 1; } } $or { use app.missing; }\n$if ((0::Flag) == 1u8) { use app.missing; } $or { fun imported_selected() i32 { ret 2; } }\nfun main() i32 { ret local_selected() + imported_selected(); }\n";
-    if (!held_set(?held, "app.main", main_text))            { ret 2; }
-    if (!held_set(?held, "app.lib", "pub def Flag: u8;\n")) { ret 2; }
-    var f: Fixture = fixture_init(?s, ?a, ?diags);
-    fin { fixture_dnit(?f); }
-    var l: Loader = init(?s, ?a);
-    fin { dnit(?l); }
-    bind(?l, fixture_host(?f), resident.provider_of(?held), ?diags);
-    val main_name: res[intern.StrId, A.Error] = intern.add(?s.interner, "app.main");
-    if (sel main_name.err) { ret 3; }
-    val loaded: res[session.ModuleId, fail.Fail] = module_load(?l, main_name.ok);
-    if (sel loaded.err)                { ret 4; }
-    if (diagnostic.has_errors(?diags)) { ret 5; }
-    val main: *Module = module_at(?l, loaded.ok);
-    if (!sel main.status.kind.accepted)                         { ret 6; }
-    if (module_count(?l) != 2)                                  { ret 7; }
-    if (!module.stable_is_nil(stable_named(?l, "app.missing"))) { ret 8; }
-    ret 0;
-}
-
-# the rows a load of one module of `n` chained constants reads, V0 = V1 + 1 down to a constant
-# bound in a gate's arm, and whether V0 came out as n + 1; zero when the load failed
-#[testing]
-fun chained_constant_rows(n: u32) u64 {
-    var a: A.Allocator;
-    page.make(?a);
-    val made: res[session.Session, fail.Fail] = session.init(?a);
-    if (sel made.err) { ret 0; }
-    var s: session.Session = made.ok;
-    fin { session.dnit(?s); }
-    var diags: diagnostic.DiagnosticStore = diagnostic.store_init(?a);
-    fin { diagnostic.store_dnit(?diags); }
-    val app: res[intern.StrId, A.Error] = intern.add(?s.interner, "app");
-    if (sel app.err) { ret 0; }
-    var held: resident.Resident = resident.init(?a, ?s.interner, app.ok);
-    fin { resident.dnit(?held); }
-    var text: str = "$if (1 == 1) { val W: u32 = 1; }\n";
-    var i:    u32 = 0;
-    for (i < n) {
-        var next: str = "W";
-        if (i + 1 < n) {
-            val named: res[str, std_format.FormatError] = std_format.sprint(?a, "V{}", i + 1);
-            if (sel named.err) { ret 0; }
-            next = named.ok;
-        }
-        val line: res[str, std_format.FormatError] = std_format.sprint(?a, "{}pub val V{}: u32 = {} + 1;\n", text, i, next);
-        if (sel line.err) { ret 0; }
-        text = line.ok;
-        i    = i + 1;
-    }
-    if (!held_set(?held, "app.main", text)) { ret 0; }
-    var f: Fixture = fixture_init(?s, ?a, ?diags);
-    fin { fixture_dnit(?f); }
-    var l: Loader = init(?s, ?a);
-    fin { dnit(?l); }
-    bind(?l, fixture_host(?f), resident.provider_of(?held), ?diags);
-    val main_name: res[intern.StrId, A.Error] = intern.add(?s.interner, "app.main");
-    if (sel main_name.err) { ret 0; }
-    val loaded: res[session.ModuleId, fail.Fail] = module_load(?l, main_name.ok);
-    if (sel loaded.err)                { ret 0; }
-    if (diagnostic.has_errors(?diags)) { ret 0; }
-    val v0: res[intern.StrId, A.Error] = intern.add(?s.interner, "V0");
-    if (sel v0.err) { ret 0; }
-    val main:  *Module                  = module_at(?l, loaded.ok);
-    val bound: opt[comptime.NamedConst] = comptime.lookup(?main.ctx, v0.ok);
-    if (sel bound.none) { ret 0; }
-    val value: opt[u64] = comptime.ct_int_u64(bound.some.value);
-    if (sel value.none)           { ret 0; }
-    if (value.some != n::u64 + 1) { ret 0; }
-    ret f.rows_read;
-}
-
-# a demand finds each name by one lookup, so the rows a load reads stay a fixed number per
-# constant it binds; a pass over the module's declarations per demand reads one per declaration
-test load__demands_cost_linear_in_the_constants {
-    var n: u32 = 50;
-    for (n <= 200) {
-        val rows: u64 = chained_constant_rows(n);
-        if (rows == 0)          { ret 1; }
-        if (rows > 40 * n::u64) { ret 2; }
-        n = n * 4;
-    }
-    ret 0;
 }

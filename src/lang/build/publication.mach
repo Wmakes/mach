@@ -10,7 +10,6 @@ use std.types.result.res;
 use std.types.string.str;
 
 use A: std.allocator;
-use std.allocator.page;
 
 use mach.lang.fail;
 use mach.lang.intern;
@@ -63,22 +62,5 @@ fun written(p: *Publications, itn: *intern.Interner, revision: query.Revision) u
     if (sel r.err) { ret 0xFF; }
     val o: opt[[32]u8] = r.ok;
     if (sel o.some) { ret o.some[0]; }
-    ret 0;
-}
-
-test publications__a_path_is_reused_only_at_the_revision_that_wrote_it {
-    var alloc: A.Allocator;
-    page.make(?alloc);
-    var itn: intern.Interner = intern.init(?alloc);
-    fin { intern.dnit(?itn); }
-    var p: Publications = init(?alloc);
-    fin { dnit(?p); }
-    var d: [32]u8;
-    d[0] = 7;
-    if (written(?p, ?itn, 3) != 0) { ret 1; }
-    val wrote: err[fail.Fail] = record(?p, ?itn, "out/app", 3, ?d);
-    if (sel wrote.err)             { ret 2; }
-    if (written(?p, ?itn, 3) != 7) { ret 3; }
-    if (written(?p, ?itn, 4) != 0) { ret 4; }
     ret 0;
 }

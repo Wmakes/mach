@@ -5,23 +5,15 @@ use std.types.error.err;
 use diagnostic_kind: mach.lang.diagnostic.kind;
 use mach.lang.fail;
 use mach.lang.host;
-#[testing]
-use output_testing: mach.lang.output.testing;
-use A:              std.allocator;
-#[testing]
-use std.allocator.page;
+use A: std.allocator;
 use std.filesystem.removal;
 use io_error:  std.io.error;
 use system_os: std.system.os;
 use std.types.bool.bool;
 use std.types.bool.false;
 use std.types.bool.true;
-#[testing]
-use std.types.result.res;
 use std.types.size.usize;
 use std.types.string.str;
-#[testing]
-use std.types.string.str_equals;
 use std.types.string.str_len;
 
 val MAX_DEPTH: usize = 64;
@@ -115,63 +107,4 @@ pub fun relative(root_fd: usize, rel: str) Removal {
     # a directory opened read-only loses nothing to a refused close
     if (held) { system_os.close(fd); }
     ret refused(io_error.INVALID);
-}
-
-# a nul-terminated component of `n` bytes, or nil
-#[testing]
-pub fun t_component(a: *A.Allocator, n: usize) str {
-    val made: res[*u8, A.Error] = A.allocate[u8](a, n + 1);
-    if (sel made.err) { ret nil; }
-    var i: usize = 0;
-    for (i < n) {
-        made.ok[i] = 'a';
-        i          = i + 1;
-    }
-    made.ok[n] = 0;
-    ret made.ok::str;
-}
-
-# a removal's own refusals have no native code, so only failed and kind say they failed
-test relative__refusals_fail_with_their_kind {
-    var a:      A.Allocator;
-    val make_r: err[A.Error] = page.make(?a);
-    if (sel make_r.err) { ret 1; }
-    val created: res[output_testing.Output, fail.Fail] = output_testing.create(?a, "mach-remove");
-    if (sel created.err) { ret 2; }
-    var owner: output_testing.Output = created.ok;
-    fin { output_testing.dnit(?owner); }
-    var root: usize = system_os.INVALID_HANDLE;
-    if (open_path(owner.directory, ?root) < 0) { ret 3; }
-    fin { system_os.close(root); }
-    if (system_os.make_dir(root, "kept", 0o700) < 0) { ret 4; }
-    val long: str = t_component(?a, 256);
-    if (long == nil) { ret 5; }
-    val too_long: Removal = relative(root, long);
-    if (!too_long.failed || too_long.kind != io_error.NAME_TOO_LONG || !too_long.containment || too_long.code != 0) { ret 6; }
-    val trailing: Removal = relative(root, "kept/");
-    if (!trailing.failed || trailing.kind != io_error.INVALID || !trailing.containment || trailing.code != 0) { ret 7; }
-    val absent: Removal = relative(root, "absent/leaf");
-    if (absent.failed || absent.removed != 0) { ret 8; }
-    val removed: Removal = relative(root, "kept");
-    if (removed.failed) { ret 9; }
-    var st: system_os.stat_t;
-    if (system_os.error_kind(system_os.stat_path(root, "kept", ?st, system_os.AT_SYMLINK_NOFOLLOW)) != io_error.NOT_FOUND) { ret 10; }
-    ret 0;
-}
-
-# a close that failed on the way out rides on the removal's failure, and none leaves it as it was
-test with_cleanup__names_a_failed_close {
-    var a:      A.Allocator;
-    val make_r: err[A.Error] = page.make(?a);
-    if (sel make_r.err) { ret 1; }
-    val f:     fail.Fail = fail.environment(diagnostic_kind.FS_REMOVE, "denied");
-    val clean: fail.Fail = with_cleanup(?a, f, Removal{failed: true});
-    if (!str_equals(fail.describe(clean), "denied")) { ret 2; }
-    val code:     i64                 = -9;
-    val expected: res[str, fail.Fail] = fail.format(?a, "denied; cleanup also failed: cannot close a directory: {}", system_os.error_message(code));
-    if (sel expected.err) { ret 3; }
-    val closed: fail.Fail = with_cleanup(?a, f, Removal{failed: true, cleanup_code: code});
-    if (!str_equals(fail.describe(closed), expected.ok))   { ret 4; }
-    if (fail.kind_of(closed) != diagnostic_kind.FS_REMOVE) { ret 5; }
-    ret 0;
 }

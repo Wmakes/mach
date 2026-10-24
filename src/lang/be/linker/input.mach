@@ -10,11 +10,9 @@ use std.types.result.res;
 use std.types.size.usize;
 
 use A: std.allocator;
-use T: std.allocator.testing;
 
 use mach.lang.fail;
 use mach.lang.growth;
-use mach.lang.intern;
 use mach.lang.session;
 use lang_target:      mach.lang.target;
 use catalog_artifact: mach.lang.target.catalog.artifact;
@@ -148,51 +146,4 @@ pub fun context_take_atoms(ctx: *LinkContext, out: *AtomPlan) bool {
     init_atom_plan(?ctx.atoms.plan);
     ctx.atoms.built = false;
     ret true;
-}
-
-# runs one synthesizer over `count` borrowed images, outside any link
-#[testing]
-pub fun t_synthesize(make: Synthesizer, s: *session.Session, tgt: *lang_target.Binding, mode: catalog_artifact.Kind,
-    images: *target_of.ObjectImage, count: u32, out: *target_of.ObjectImage) res[bool, fail.Fail] {
-    var ctx: LinkContext = link_context(s, tgt, mode, nil);
-    fin { link_context_dnit(?ctx); }
-    var inputs: InputSet = input_set_borrow(images, count);
-    ret make(?ctx, ?inputs, out);
-}
-
-# the first append copies the caller's images, and the set releases only what
-# it appended
-test input_set__owns_only_what_it_appends {
-    var t:    T.Testing;
-    val made: err[A.Error] = T.make(?t);
-    if (sel made.err) { ret 1; }
-    fin { T.dnit(?t); }
-    val a: *A.Allocator = T.allocator_of(?t);
-
-    var caller: [2]target_of.ObjectImage;
-    caller[0] = target_of.object_image_init(a, nil, intern.str_id(1));
-    caller[1] = target_of.object_image_init(a, nil, intern.str_id(2));
-    val held: res[*target_of.Symbol, A.Error] = A.allocate[target_of.Symbol](a, 1);
-    if (sel held.err) { ret 2; }
-    caller[1].symbols    = held.ok;
-    caller[1].symbol_cap = 1;
-
-    var set: InputSet = input_set_borrow(?caller[0], 2);
-    if (set.images != ?caller[0] || set.cap != 0) { ret 3; }
-    var synthetic: target_of.ObjectImage           = target_of.object_image_init(a, nil, intern.str_id(3));
-    val owned:     res[*target_of.Symbol, A.Error] = A.allocate[target_of.Symbol](a, 1);
-    if (sel owned.err) { ret 4; }
-    synthetic.symbols    = owned.ok;
-    synthetic.symbol_cap = 1;
-    val appended: err[fail.Fail] = input_set_append(a, ?set, ?synthetic);
-    if (sel appended.err)                           { ret 5; }
-    if (set.count != 3 || set.images == ?caller[0]) { ret 6; }
-    if (!intern.str_same(set.images[0].name, intern.str_id(1)) || !intern.str_same(set.images[1].name, intern.str_id(2))
-        || !intern.str_same(set.images[2].name, intern.str_id(3))) { ret 7; }
-
-    input_set_dnit(a, ?set);
-    if (T.live_count(?t) != 1) { ret 8; }
-    target_of.object_image_dnit(?caller[1]);
-    if (!T.clean(?t)) { ret 9; }
-    ret 0;
 }

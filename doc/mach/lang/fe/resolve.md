@@ -287,6 +287,15 @@ pub fun origin_of(s: *session.Session, sym: *Symbol) session.ModuleId;
 
 the module a symbol is defined in, as the current operation numbers it
 
+## fun foreign_to
+
+```mach
+pub fun foreign_to(s: *session.Session, sym: *Symbol, own: session.ModuleId) bool;
+```
+
+whether `sym` names a binding a module other than `own` declares: an import, or a `fwd` of one,
+which carries the kind the binding is declared with there as its own
+
 ## fun use_target
 
 ```mach

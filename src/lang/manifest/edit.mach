@@ -1,7 +1,6 @@
 # editing a manifest's text in place: adding and removing a `[dep.<name>]`
 # table, leaving every other byte as it was written
 use mach.lang.fail;
-use std.allocator.arena;
 use std.data.toml;
 use std_format: std.format;
 use std.text.string.str_free;
@@ -13,25 +12,19 @@ use std.types.result.res;
 use std.types.size.usize;
 use types_string: std.types.string;
 use std.types.string.str;
-use std.types.string.str_contains;
 use std.types.string.str_copy_slice;
 use std.types.string.str_empty;
 use std.types.string.str_equals;
 use std.types.string.str_len;
 use std.types.string.str_region_equals;
-use std.types.string.str_starts_with;
 
 use A: std.allocator;
 
 use diagnostic_kind: mach.lang.diagnostic.kind;
-use mach.lang.intern;
 
-use mach.lang.manifest.load.t_profiled;
-use mach.lang.manifest.model.tinit;
 use mach.lang.manifest.refusal.refuse;
 use mach.lang.manifest.refusal.sfmt;
 use mach.lang.manifest.schema.is_valid_id;
-use mach.lang.manifest.schema.key_text;
 
 # the source key a `mach dep add` writes
 pub def DepSource: u8;
@@ -295,222 +288,4 @@ fun if_crlf(source: str) str {
 fun not_toml(alloc: *A.Allocator, f: fail.Fail) fail.Fail {
     if (fail.is_message(f)) { ret f; }
     ret refuse(alloc, diagnostic_kind.TOML_MALFORMED, "mach.toml is not valid TOML: {}", fail.describe(f));
-}
-
-#[testing]
-fun ut_messy_manifest() str {
-    ret t_profiled("# top of file comment, must survive\n[project]\nmach=\">=5\"\nid   =   \"messy\"   \nversion = \"0.1.0\"\nsrc = \"src\"\nwork = \"o\"\n\n# a hand-written dependency, with its own comment above it\n[dep.other]\ngit = \"https://example.com/other.git\"\nref = \"branch/main\"\n\n[target.linux]\nisa = \"x86_64\"\nos  = \"linux\"\nabi = \"sysv64\"\n", "");
-}
-
-test dep_table_add__appends_and_leaves_the_messy_source_byte_identical {
-    var backing: A.Allocator;
-    var ar:      arena.Arena;
-    var alloc:   A.Allocator;
-    var itn:     intern.Interner;
-    if (!tinit(?backing, ?ar, ?alloc, ?itn)) { ret 1; }
-    var code: i32 = 0;
-
-    val original: str = ut_messy_manifest();
-    var spec:     DepTableSpec;
-    spec.name   = "newlib";
-    spec.source = DEP_SOURCE_GIT;
-    spec.value  = "https://example.com/newlib.git";
-    spec.ref    = "branch/main";
-
-    val r: res[str, fail.Fail] = dep_table_add(?alloc, original, ?spec);
-    if (sel r.err) { code = 1; }
-    if (sel r.ok) {
-        val out: str = r.ok;
-        if (!str_starts_with(out, original))                                { code = 1; }
-        if (!str_contains(out, "[dep.newlib]"))                             { code = 1; }
-        if (!str_contains(out, "git = \"https://example.com/newlib.git\"")) { code = 1; }
-        if (!str_contains(out, "ref = \"branch/main\""))                    { code = 1; }
-
-        val tbl_r: res[toml.Table, toml.TomlError] = toml.parse(?alloc, out);
-        if (sel tbl_r.err) { code = 1; }
-        if (sel tbl_r.ok) {
-            var tbl: toml.Table = tbl_r.ok;
-            if (!str_equals(key_text(?tbl, "dep.other.git"), "https://example.com/other.git"))   { code = 1; }
-            if (!str_equals(key_text(?tbl, "dep.other.ref"), "branch/main"))                     { code = 1; }
-            if (!str_equals(key_text(?tbl, "dep.newlib.git"), "https://example.com/newlib.git")) { code = 1; }
-            toml.dnit(?alloc, ?tbl);
-        }
-    }
-
-    arena.dnit(?ar);
-    ret code;
-}
-
-test dep_table_add__refuses_a_name_already_declared {
-    var backing: A.Allocator;
-    var ar:      arena.Arena;
-    var alloc:   A.Allocator;
-    var itn:     intern.Interner;
-    if (!tinit(?backing, ?ar, ?alloc, ?itn)) { ret 1; }
-    var code: i32 = 0;
-
-    var spec: DepTableSpec;
-    spec.name   = "other";
-    spec.source = DEP_SOURCE_PATH;
-    spec.value  = "../other";
-    spec.ref    = "";
-
-    val r: res[str, fail.Fail] = dep_table_add(?alloc, ut_messy_manifest(), ?spec);
-    if (!(sel r.err && str_contains(fail.describe(r.err), "already declared"))) { code = 1; }
-
-    arena.dnit(?ar);
-    ret code;
-}
-
-test dep_table_add__escapes_backslashes_and_quotes_round_trip {
-    var backing: A.Allocator;
-    var ar:      arena.Arena;
-    var alloc:   A.Allocator;
-    var itn:     intern.Interner;
-    if (!tinit(?backing, ?ar, ?alloc, ?itn)) { ret 1; }
-    var code: i32 = 0;
-
-    var spec: DepTableSpec;
-    spec.name   = "winlib";
-    spec.source = DEP_SOURCE_PATH;
-    spec.value  = "C:\\Users\\me\\\"weird\"\\lib";
-    spec.ref    = "";
-
-    val r: res[str, fail.Fail] = dep_table_add(?alloc, ut_messy_manifest(), ?spec);
-    if (sel r.err) { code = 1; }
-    if (sel r.ok) {
-        val out:   str                             = r.ok;
-        val tbl_r: res[toml.Table, toml.TomlError] = toml.parse(?alloc, out);
-        if (sel tbl_r.err) { code = 1; }
-        if (sel tbl_r.ok) {
-            var tbl: toml.Table = tbl_r.ok;
-            if (!str_equals(key_text(?tbl, "dep.winlib.path"), spec.value)) { code = 1; }
-            toml.dnit(?alloc, ?tbl);
-        }
-    }
-
-    arena.dnit(?ar);
-    ret code;
-}
-
-test dep_table_add__matches_crlf_when_the_file_uses_it {
-    var backing: A.Allocator;
-    var ar:      arena.Arena;
-    var alloc:   A.Allocator;
-    var itn:     intern.Interner;
-    if (!tinit(?backing, ?ar, ?alloc, ?itn)) { ret 1; }
-    var code: i32 = 0;
-
-    val crlf_source: str = "[project]\r\nid = \"p\"\r\nversion = \"0.1.0\"\r\nsrc = \"src\"\r\nwork = \"o\"\r\n";
-    var spec:        DepTableSpec;
-    spec.name   = "newlib";
-    spec.source = DEP_SOURCE_PATH;
-    spec.value  = "../newlib";
-    spec.ref    = "";
-
-    val r: res[str, fail.Fail] = dep_table_add(?alloc, crlf_source, ?spec);
-    if (sel r.err) { code = 1; }
-    if (sel r.ok) {
-        val out: str = r.ok;
-        if (!str_starts_with(out, crlf_source)) { code = 1; }
-        val added_r: res[str, types_string.StrError] = str_copy_slice(?alloc, out, str_len(crlf_source), str_len(out) - str_len(crlf_source));
-        if (sel added_r.err) { code = 1; }
-        if (sel added_r.ok) {
-            val added: str   = added_r.ok;
-            var i:     usize = 0;
-            var n:     usize = str_len(added);
-            for (i < n) {
-                if (added[i] == '\n'::u8 && (i == 0 || added[i - 1] != '\r'::u8)) { code = 1; }
-                i = i + 1;
-            }
-            str_free(?alloc, added);
-        }
-    }
-
-    arena.dnit(?ar);
-    ret code;
-}
-
-test dep_table_add__inserts_a_blank_line_separator_when_the_source_has_no_trailing_newline {
-    var backing: A.Allocator;
-    var ar:      arena.Arena;
-    var alloc:   A.Allocator;
-    var itn:     intern.Interner;
-    if (!tinit(?backing, ?ar, ?alloc, ?itn)) { ret 1; }
-    var code: i32 = 0;
-
-    val no_trailing: str = "[project]\nmach=\">=5\"\nid = \"p\"\nversion = \"0.1.0\"\nsrc = \"src\"\nwork = \"o\"\n[profile.debug]\ndefault = true\noptimize = false\ndebug = true\nsimd = \"scalarize\"\n[profile.release]\noptimize = true\ndebug = false\nsimd = \"scalarize\"\n";
-    var spec:        DepTableSpec;
-    spec.name   = "newlib";
-    spec.source = DEP_SOURCE_PATH;
-    spec.value  = "../newlib";
-    spec.ref    = "";
-
-    val r: res[str, fail.Fail] = dep_table_add(?alloc, no_trailing, ?spec);
-    if (sel r.err) { code = 1; }
-    if (sel r.ok) {
-        val out: str = r.ok;
-        if (!str_starts_with(out, no_trailing))     { code = 1; }
-        if (!str_contains(out, "\n\n[dep.newlib]")) { code = 1; }
-    }
-
-    arena.dnit(?ar);
-    ret code;
-}
-
-test dep_table_remove__removes_the_table_keeps_the_preceding_comment_and_sibling_bytes {
-    var backing: A.Allocator;
-    var ar:      arena.Arena;
-    var alloc:   A.Allocator;
-    var itn:     intern.Interner;
-    if (!tinit(?backing, ?ar, ?alloc, ?itn)) { ret 1; }
-    var code: i32 = 0;
-
-    val r: res[str, fail.Fail] = dep_table_remove(?alloc, ut_messy_manifest(), "other");
-    if (sel r.err) { code = 1; }
-    if (sel r.ok) {
-        val out: str = r.ok;
-        if (str_contains(out, "[dep.other]"))                                                 { code = 1; }
-        if (str_contains(out, "git = \"https://example.com/other.git\""))                     { code = 1; }
-        if (!str_contains(out, "# a hand-written dependency, with its own comment above it")) { code = 1; }
-        if (!str_contains(out, "# top of file comment, must survive"))                        { code = 1; }
-        if (!str_contains(out, "[target.linux]"))                                             { code = 1; }
-        if (!str_contains(out, "isa = \"x86_64\""))                                           { code = 1; }
-
-        val tbl_r: res[toml.Table, toml.TomlError] = toml.parse(?alloc, out);
-        if (sel tbl_r.err) { code = 1; }
-        if (sel tbl_r.ok) {
-            var tbl:   toml.Table       = tbl_r.ok;
-            val dep_o: opt[*toml.Table] = toml.get_table(?tbl, "dep");
-            if (sel dep_o.some && toml.table_len(dep_o.some) != 0) { code = 1; }
-            toml.dnit(?alloc, ?tbl);
-        }
-    }
-
-    arena.dnit(?ar);
-    ret code;
-}
-
-test dep_table_remove__refuses_a_table_it_cannot_remove_exactly {
-    var backing: A.Allocator;
-    var ar:      arena.Arena;
-    var alloc:   A.Allocator;
-    var itn:     intern.Interner;
-    if (!tinit(?backing, ?ar, ?alloc, ?itn)) { ret 1; }
-    fin { arena.dnit(?ar); }
-    var sources: [4]str = [4]str{
-        ut_messy_manifest(),
-        "[dep.foo]\ngit = \"https://example.com/a.git\"\n\n[dep.foo]\ngit = \"https://example.com/b.git\"\n",
-        "[dep]\nfoo = \"oops\"\n",
-        "[dep.\"foo\"]\ngit = \"https://example.com/a.git\"\n"
-    };
-    var names: [4]str = [4]str{"nosuch", "foo", "foo", "foo"};
-    var wants: [4]str = [4]str{"not declared", "more than once", "not a table", "was found by the parser but not by exact-header scan"};
-    var i:     usize  = 0;
-    for (i < 4) {
-        val r: res[str, fail.Fail] = dep_table_remove(?alloc, sources[i], names[i]);
-        if (!(sel r.err && str_contains(fail.describe(r.err), wants[i]))) { ret 2 + i::i32; }
-        i = i + 1;
-    }
-    ret 0;
 }

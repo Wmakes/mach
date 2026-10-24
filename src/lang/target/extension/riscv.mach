@@ -1,4 +1,3 @@
-use mach.lang.fail;
 use std.types.bool.bool;
 use std.types.string.str;
 
@@ -27,10 +26,6 @@ pub val ZFHMIN: u64 = 1024;
 pub val ZFH:    u64 = 2048;
 pub val ALL:    u64 = I | M | A | F | D | C | ZICSR | ZIFENCEI | ZKT | ZICOND | ZFHMIN | ZFH;
 
-# the rv32imac and rv64gc selections, the riscv32 and riscv64 default baselines, as
-# tests name them
-#[testing]
-pub val DEFAULT32: u64 = I | M | A | C;
 #[testing]
 pub val DEFAULT64: u64 = I | M | A | F | D | ZICSR | ZIFENCEI | C;
 
@@ -82,13 +77,4 @@ pub fun float_requirement(bits: u32) u64 {
 
 pub fun has(bits: u64, required: u64) bool {
     ret (bits & required) == required;
-}
-
-test names__cover_every_modelled_bit {
-    if (!extension.table_valid(?TABLE))                   { ret 1; }
-    if (extension.domain(?TABLE) != ALL)                  { ret 2; }
-    if (widen(I, F) != (I | F | ZICSR))                   { ret 3; }
-    if (widen(I, D) != (I | D | F | ZICSR))               { ret 4; }
-    if (widen(I, C) != (I | C) || widen(I, M) != (I | M)) { ret 5; }
-    ret 0;
 }

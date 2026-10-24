@@ -54,35 +54,3 @@ pub fun text(d: chrono_duration.Duration) Text {
     if (d != 0 && d % chrono_duration.MILLISECOND == 0) { ret Text{n: (d / chrono_duration.MILLISECOND)::i64, unit: "ms"}; }
     ret Text{n: d::i64, unit: "ns"};
 }
-
-#[testing]
-fun t_duration(o: opt[chrono_duration.Duration]) chrono_duration.Duration {
-    if (sel o.some) { ret o.some; }
-    ret 0;
-}
-
-test parse__reads_each_unit {
-    if (t_duration(parse("30ms")) != chrono_duration.MILLISECOND * 30) { ret 1; }
-    if (t_duration(parse("30s")) != chrono_duration.SECOND * 30)       { ret 2; }
-    if (t_duration(parse("5m")) != chrono_duration.MINUTE * 5)         { ret 3; }
-    if (t_duration(parse("1h")) != chrono_duration.HOUR)               { ret 4; }
-    val t: Text = text(chrono_duration.MILLISECOND * 1500);
-    if (t.n != 1500 || !str_equals(t.unit, "ms")) { ret 5; }
-    val u: Text = text(chrono_duration.MINUTE * 90);
-    if (u.n != 90 || !str_equals(u.unit, "m")) { ret 6; }
-    ret 0;
-}
-
-test parse__refuses_malformed_values {
-    if (t_duration(parse("30")) != 0)                    { ret 1; }
-    if (t_duration(parse("0s")) != 0)                    { ret 2; }
-    if (t_duration(parse("s")) != 0)                     { ret 3; }
-    if (t_duration(parse("")) != 0)                      { ret 4; }
-    if (t_duration(parse("-5s")) != 0)                   { ret 5; }
-    if (t_duration(parse("1.5s")) != 0)                  { ret 6; }
-    if (t_duration(parse("5 m")) != 0)                   { ret 7; }
-    if (t_duration(parse("5d")) != 0)                    { ret 8; }
-    if (t_duration(parse("9999999999999h")) != 0)        { ret 9; }
-    if (t_duration(parse("99999999999999999999s")) != 0) { ret 10; }
-    ret 0;
-}

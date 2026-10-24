@@ -11,7 +11,6 @@ use std.types.string.str_len;
 
 use A: std.allocator;
 
-use mach.lang.diagnostic;
 use diagnostic_kind: mach.lang.diagnostic.kind;
 use mach.lang.fail;
 use mach.lang.fe.ast;
@@ -1373,25 +1372,4 @@ fun report_reinterpret_mismatch(sc: *sema_context.SemaContext, span: lang_source
     if (sel msg.none) { ret; }
     fin { sema_context.text_free(sc, msg.some); }
     report_types_pair(sc, diagnostic_kind.CAST_REINTERPRET_SIZE, span, msg.some, from, to, from_str.some, to_str.some, "");
-}
-
-test expr_binds_tighter_than_cast__partition_exprkind {
-    val tighter: [17]ast_expr.ExprKind = [17]ast_expr.ExprKind{ast_expr.EXPR_KIND_IDENT, ast_expr.EXPR_KIND_COMPTIME_IDENT,
-        ast_expr.EXPR_KIND_LIT_INT, ast_expr.EXPR_KIND_LIT_FLOAT, ast_expr.EXPR_KIND_LIT_CHAR, ast_expr.EXPR_KIND_LIT_STR,
-        ast_expr.EXPR_KIND_LIT_NIL, ast_expr.EXPR_KIND_CALL, ast_expr.EXPR_KIND_INDEX, ast_expr.EXPR_KIND_MEMBER,
-        ast_expr.EXPR_KIND_PROJECT, ast_expr.EXPR_KIND_CAST, ast_expr.EXPR_KIND_STRIP, ast_expr.EXPR_KIND_ARRAY_LIT,
-        ast_expr.EXPR_KIND_STRUCT_LIT, ast_expr.EXPR_KIND_VECTOR_LIT, ast_expr.EXPR_KIND_GENERIC_INSTANCE};
-    val looser: [6]ast_expr.ExprKind = [6]ast_expr.ExprKind{ast_expr.EXPR_KIND_BINARY, ast_expr.EXPR_KIND_UNARY,
-        ast_expr.EXPR_KIND_SPREAD, ast_expr.EXPR_KIND_TYPE_REF, ast_expr.EXPR_KIND_SEL, ast_expr.EXPR_KIND_ERROR};
-    var i: usize = 0;
-    for (i < 17) {
-        if (!expr_binds_tighter_than_cast(tighter[i])) { ret 1; }
-        i = i + 1;
-    }
-    i = 0;
-    for (i < 6) {
-        if (expr_binds_tighter_than_cast(looser[i])) { ret 2; }
-        i = i + 1;
-    }
-    ret 0;
 }

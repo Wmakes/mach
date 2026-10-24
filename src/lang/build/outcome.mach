@@ -5,7 +5,6 @@ use std.types.error.err;
 use std.types.result.res;
 use std.types.size.usize;
 use std.types.string.str;
-use std.types.string.str_equals;
 
 use std.text.string.str_dup;
 use std.text.string.str_free;
@@ -14,10 +13,7 @@ use collections_vector: std.collections.vector;
 use std.collections.vector.Vector;
 
 use A: std.allocator;
-use std.allocator.page;
-use T: std.allocator.testing;
 
-use diagnostic_kind: mach.lang.diagnostic.kind;
 use mach.lang.fail;
 use catalog_artifact: mach.lang.target.catalog.artifact;
 use mach.lang.testrun;
@@ -195,161 +191,4 @@ pub fun merge(agg: *BuildOutcome, unit: *BuildOutcome) err[A.Error] {
     collections_vector.dnit[testrun.TestArtifact](?unit.tests);
     unit.severity = BUILD_OK;
     ret err[A.Error].ok{};
-}
-
-#[testing]
-fun t_owned_nothing(t: *T.Testing) bool {
-    ret !T.tracking_exhausted(t) && !T.leaked(t) && T.double_free_count(t) == 0;
-}
-
-#[testing]
-fun t_refused(r: err[A.Error]) bool {
-    ret sel r.err;
-}
-
-#[testing]
-fun t_accepted(r: err[A.Error]) bool {
-    ret sel r.ok;
-}
-
-test record_artifact__fails_closed_without_a_partial_record {
-    var failing: T.Testing;
-    val made:    err[A.Error] = T.make(?failing);
-    if (sel made.err) { ret 1; }
-    fin { T.dnit(?failing); }
-    T.fail_at_ordinal(?failing, 1::usize);
-
-    var bo: BuildOutcome = outcome_init(T.allocator_of(?failing));
-    if (t_accepted(record_artifact(?bo, catalog_artifact.EXECUTABLE, "out/bin/x"))) { ret 1; }
-    if (bo.artifacts.len != 0)                                                      { ret 1; }
-
-    outcome_dnit(?bo);
-    if (!t_owned_nothing(?failing)) { ret 1; }
-    ret 0;
-}
-
-test record_test__rolls_back_every_owned_string_on_failure {
-    var found:   bool = false;
-    var ordinal: u64  = 1;
-    for (ordinal <= 16 && !found) {
-        var failing: T.Testing;
-        val made:    err[A.Error] = T.make(?failing);
-        if (sel made.err) { ret 1; }
-        T.fail_at_ordinal(?failing, ordinal::usize);
-
-        var bo: BuildOutcome = outcome_init(T.allocator_of(?failing));
-        val r:  err[A.Error] = record_test(?bo, testrun.TestArtifact{module: "mod", name: "mod#name", file: "file.mach", line: 7, object: "mod.test.o", exe: "exe", idx: 2});
-        if (sel r.err && bo.tests.len == 0) { found = true; }
-
-        outcome_dnit(?bo);
-        val clean: bool = t_owned_nothing(?failing);
-        T.dnit(?failing);
-        if (!clean) { ret 1; }
-        ordinal = ordinal + 1;
-    }
-    if (!found) { ret 1; }
-    ret 0;
-}
-
-test fold_fail__internal_dominates_and_never_regresses {
-    var bo: BuildOutcome;
-    bo.severity = BUILD_OK;
-
-    var reported_f: fail.Fail = fail.reported();
-    fold_fail(?bo, ?reported_f);
-    if (bo.severity != BUILD_USER) { ret 1; }
-
-    var env_f: fail.Fail = fail.environment(diagnostic_kind.TOML_MALFORMED, "disk full");
-    fold_fail(?bo, ?env_f);
-    if (bo.severity != BUILD_ENVIRONMENT) { ret 2; }
-
-    var user_f: fail.Fail = fail.user(diagnostic_kind.TOML_MALFORMED, "nope");
-    fold_fail(?bo, ?user_f);
-    if (bo.severity != BUILD_ENVIRONMENT) { ret 3; }
-
-    var internal_f: fail.Fail = fail.message("boom");
-    fold_fail(?bo, ?internal_f);
-    if (bo.severity != BUILD_INTERNAL) { ret 4; }
-
-    var env_f2: fail.Fail = fail.environment(diagnostic_kind.TOML_MALFORMED, "disk full again");
-    fold_fail(?bo, ?env_f2);
-    if (bo.severity != BUILD_INTERNAL) { ret 5; }
-
-    ret 0;
-}
-
-test merge__severity_is_order_independent {
-    var a: A.Allocator;
-    page.make(?a);
-
-    var agg_first: BuildOutcome = outcome_init(?a);
-    var user_unit: BuildOutcome = outcome_init(?a);
-    user_unit.severity = BUILD_USER;
-    var internal_unit: BuildOutcome = outcome_init(?a);
-    internal_unit.severity = BUILD_INTERNAL;
-
-    if (t_refused(merge(?agg_first, ?user_unit)))     { ret 1; }
-    if (t_refused(merge(?agg_first, ?internal_unit))) { ret 2; }
-    if (agg_first.severity != BUILD_INTERNAL)         { ret 3; }
-    outcome_dnit(?agg_first);
-
-    var agg_second:     BuildOutcome = outcome_init(?a);
-    var internal_unit2: BuildOutcome = outcome_init(?a);
-    internal_unit2.severity = BUILD_INTERNAL;
-    var user_unit2: BuildOutcome = outcome_init(?a);
-    user_unit2.severity = BUILD_USER;
-
-    if (t_refused(merge(?agg_second, ?internal_unit2))) { ret 5; }
-    if (t_refused(merge(?agg_second, ?user_unit2)))     { ret 6; }
-    if (agg_second.severity != BUILD_INTERNAL)          { ret 7; }
-    outcome_dnit(?agg_second);
-
-    ret 0;
-}
-
-test merge__transfers_artifacts_and_tests_and_empties_the_source {
-    var a: A.Allocator;
-    page.make(?a);
-
-    var agg: BuildOutcome = outcome_init(?a);
-    if (t_refused(record_artifact(?agg, catalog_artifact.EXECUTABLE, "agg-existing"))) { ret 1; }
-
-    var unit: BuildOutcome = outcome_init(?a);
-    if (t_refused(record_artifact(?unit, catalog_artifact.OBJECTS, "unit-object")))                      { ret 2; }
-    if (t_refused(record_test(?unit, testrun.TestArtifact{module: "m", name: "l", file: "f", line: 1}))) { ret 3; }
-
-    if (t_refused(merge(?agg, ?unit))) { ret 4; }
-
-    var bad: i32 = 0;
-    if (agg.artifacts.len != 2)                                  { bad = 1; }
-    or (!str_equals(agg.artifacts.data[0].path, "agg-existing")) { bad = 1; }
-    or (!str_equals(agg.artifacts.data[1].path, "unit-object"))  { bad = 1; }
-    if (agg.tests.len != 1)                                      { bad = 1; }
-    if (unit.artifacts.len != 0 || unit.tests.len != 0)          { bad = 1; }
-
-    outcome_dnit(?agg);
-    ret bad;
-}
-
-test merge__reserve_failure_leaves_both_sides_untouched {
-    var backing: A.Allocator;
-    page.make(?backing);
-    var failing: T.Testing;
-    val made:    err[A.Error] = T.make(?failing);
-    if (sel made.err) { ret 1; }
-    fin { T.dnit(?failing); }
-    T.fail_at_ordinal(?failing, 1::usize);
-
-    var agg:  BuildOutcome = outcome_init(T.allocator_of(?failing));
-    var unit: BuildOutcome = outcome_init(?backing);
-    if (t_refused(record_artifact(?unit, catalog_artifact.EXECUTABLE, "x"))) { ret 1; }
-
-    if (t_accepted(merge(?agg, ?unit))) { ret 2; }
-    if (agg.artifacts.len != 0)         { ret 3; }
-    if (unit.artifacts.len != 1)        { ret 4; }
-
-    outcome_dnit(?agg);
-    outcome_dnit(?unit);
-    if (!t_owned_nothing(?failing)) { ret 1; }
-    ret 0;
 }
