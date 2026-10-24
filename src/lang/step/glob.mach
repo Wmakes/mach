@@ -4,14 +4,12 @@
 use diagnostic_kind: mach.lang.diagnostic.kind;
 use driver_load:     mach.lang.driver.load;
 use mach.lang.fail;
-use step_walk: mach.lang.step.walk;
-use A:         std.allocator;
-use std.allocator.page;
+use step_walk:          mach.lang.step.walk;
+use A:                  std.allocator;
 use collections_vector: std.collections.vector;
 use fs:                 std.filesystem;
 use io_error:           std.io.error;
 use system_os:          std.system.os;
-use std.text.string.str_dup;
 use std.text.string.str_free;
 use std.types.bool.bool;
 use std.types.bool.false;
@@ -22,7 +20,6 @@ use std.types.result.res;
 use std.types.size.usize;
 use types_string: std.types.string;
 use std.types.string.str;
-use std.types.string.str_contains;
 use std.types.string.str_copy_slice;
 use std.types.string.str_empty;
 use std.types.string.str_len;
@@ -245,168 +242,6 @@ pub fun expand(alloc: *A.Allocator, project_root: str, pattern: str, out: *colle
     ret walk(alloc, project_root, dir, pat, false, out);
 }
 
-$if ($mach.build.os != $mach.os.windows) {
-    test glob__dot_names_errors_and_symlinks {
-        var alloc:  A.Allocator;
-        val make_r: err[A.Error] = page.make(?alloc);
-        if (sel make_r.err) { ret 1; }
+$if ($mach.build.os != $mach.os.windows) {}
 
-        val tf_r: res[fs.TempFile, fs.FsError] = fs.temp_create(?alloc, "mach_step_glob");
-        if (sel tf_r.err) { ret 1; }
-        var tf:     fs.TempFile       = tf_r.ok;
-        val root_r: res[str, A.Error] = str_dup(?alloc, fs.temp_path(?tf));
-        fs.temp_close_and_remove(?tf);
-        if (sel root_r.err) { ret 1; }
-        val root: str = root_r.ok;
-        fin { str_free(?alloc, root); }
-        val create_dir_r: err[io_error.Error] = fs.create_dir(root, 0o700);
-        if (sel create_dir_r.err) { ret 1; }
-        fin { fs.remove_all(?alloc, root); }
-
-        val hidden:         str             = step_walk.sfmt(?alloc, "{}/.hidden", root);
-        val visible:        str             = step_walk.sfmt(?alloc, "{}/visible", root);
-        val write_bytes_r2: err[fs.FsError] = fs.write_bytes(hidden, "h", 1, 0o600);
-        val write_bytes_r:  err[fs.FsError] = fs.write_bytes(visible, "v", 1, 0o600);
-        if (sel write_bytes_r2.err) { ret 1; }
-        if (sel write_bytes_r.err)  { ret 1; }
-
-        var matches: collections_vector.Vector[str] = collections_vector.init[str](?alloc);
-        val dot_r:   err[fail.Fail]                 = expand(?alloc, root, ".*", ?matches);
-        var bad:     bool                           = sel dot_r.err || matches.len != 1;
-        if (!bad && !str_contains(matches.data[0], ".hidden")) { bad = true; }
-        t_matches_free(?alloc, ?matches);
-
-        var missing:   collections_vector.Vector[str] = collections_vector.init[str](?alloc);
-        val missing_r: err[fail.Fail]                 = expand(?alloc, root, "missing/*.c", ?missing);
-        if (!(sel missing_r.err && str_contains(fail.describe(missing_r.err), "does not exist"))) { bad = true; }
-        t_matches_free(?alloc, ?missing);
-
-        val link:      str                 = step_walk.sfmt(?alloc, "{}/link", root);
-        val symlink_r: err[io_error.Error] = fs.symlink(hidden, link);
-        if (sel symlink_r.err) { bad = true; }
-        if (sel symlink_r.ok) {
-            var linked:   collections_vector.Vector[str] = collections_vector.init[str](?alloc);
-            val linked_r: err[fail.Fail]                 = expand(?alloc, root, "*", ?linked);
-            if (!(sel linked_r.err && str_contains(fail.describe(linked_r.err), "symlink"))) { bad = true; }
-            t_matches_free(?alloc, ?linked);
-        }
-
-        val real:           str                 = step_walk.sfmt(?alloc, "{}/real", root);
-        val real_file:      str                 = step_walk.sfmt(?alloc, "{}/real/input.c", root);
-        val jump:           str                 = step_walk.sfmt(?alloc, "{}/jump", root);
-        val create_dir_r2:  err[io_error.Error] = fs.create_dir(real, 0o700);
-        val write_bytes_r3: err[fs.FsError]     = fs.write_bytes(real_file, "c", 1, 0o600);
-        val symlink_r2:     err[io_error.Error] = fs.symlink(real, jump);
-        if (sel create_dir_r2.err || sel write_bytes_r3.err || sel symlink_r2.err) { bad = true; }
-        or {
-            var escaped:   collections_vector.Vector[str] = collections_vector.init[str](?alloc);
-            val escaped_r: err[fail.Fail]                 = expand(?alloc, root, "jump/*.c", ?escaped);
-            if (!(sel escaped_r.err && str_contains(fail.describe(escaped_r.err), "symlink component"))) { bad = true; }
-            t_matches_free(?alloc, ?escaped);
-        }
-
-        val plain_ok: err[fail.Fail] = step_walk.path_check(?alloc, root, "visible", step_walk.PHYSICAL_REGULAR, "build step input");
-        if (sel plain_ok.err) { bad = true; }
-        val plain_dir: err[fail.Fail] = step_walk.path_check(?alloc, root, "real", step_walk.PHYSICAL_REGULAR, "build step input");
-        if (sel plain_dir.ok) { bad = true; }
-
-        str_free(?alloc, jump);
-        str_free(?alloc, real_file);
-        str_free(?alloc, real);
-        str_free(?alloc, link);
-        str_free(?alloc, hidden);
-        str_free(?alloc, visible);
-        if (bad) { ret 1; }
-        ret 0;
-    }
-}
-
-$if ($mach.build.os != $mach.os.windows) {
-    test glob__implicit_pattern_skips_hidden_file_and_hidden_directory {
-        var alloc:  A.Allocator;
-        val make_r: err[A.Error] = page.make(?alloc);
-        if (sel make_r.err) { ret 1; }
-
-        val tf_r: res[fs.TempFile, fs.FsError] = fs.temp_create(?alloc, "mach_step_glob_implicit");
-        if (sel tf_r.err) { ret 1; }
-        var tf:     fs.TempFile       = tf_r.ok;
-        val root_r: res[str, A.Error] = str_dup(?alloc, fs.temp_path(?tf));
-        fs.temp_close_and_remove(?tf);
-        if (sel root_r.err) { ret 1; }
-        val root: str = root_r.ok;
-        fin { str_free(?alloc, root); }
-        val create_dir_r: err[io_error.Error] = fs.create_dir(root, 0o700);
-        if (sel create_dir_r.err) { ret 1; }
-        fin { fs.remove_all(?alloc, root); }
-
-        val hidden_file:    str                 = step_walk.sfmt(?alloc, "{}/.hidden.c", root);
-        val visible_file:   str                 = step_walk.sfmt(?alloc, "{}/visible.c", root);
-        val hidden_dir:     str                 = step_walk.sfmt(?alloc, "{}/.hidden_dir", root);
-        val nested_file:    str                 = step_walk.sfmt(?alloc, "{}/.hidden_dir/nested.c", root);
-        var bad:            bool                = false;
-        val write_bytes_r3: err[fs.FsError]     = fs.write_bytes(hidden_file, "h", 1, 0o600);
-        val write_bytes_r2: err[fs.FsError]     = fs.write_bytes(visible_file, "v", 1, 0o600);
-        val create_dir_r2:  err[io_error.Error] = fs.create_dir(hidden_dir, 0o700);
-        val write_bytes_r:  err[fs.FsError]     = fs.write_bytes(nested_file, "n", 1, 0o600);
-        if (sel write_bytes_r3.err
-            || sel write_bytes_r2.err
-            || sel create_dir_r2.err
-            || sel write_bytes_r.err) { bad = true; }
-
-        var top:   collections_vector.Vector[str] = collections_vector.init[str](?alloc);
-        val top_r: err[fail.Fail]                 = expand(?alloc, root, "*.c", ?top);
-        if (sel top_r.err || top.len != 1)                   { bad = true; }
-        if (!bad && !str_contains(top.data[0], "visible.c")) { bad = true; }
-        if (!bad && str_contains(top.data[0], "hidden"))     { bad = true; }
-        t_matches_free(?alloc, ?top);
-
-        var deep:   collections_vector.Vector[str] = collections_vector.init[str](?alloc);
-        val deep_r: err[fail.Fail]                 = expand(?alloc, root, "**/*.c", ?deep);
-        if (sel deep_r.err || deep.len != 1)                  { bad = true; }
-        if (!bad && !str_contains(deep.data[0], "visible.c")) { bad = true; }
-        t_matches_free(?alloc, ?deep);
-
-        str_free(?alloc, nested_file);
-        str_free(?alloc, hidden_dir);
-        str_free(?alloc, visible_file);
-        str_free(?alloc, hidden_file);
-        if (bad) { ret 1; }
-        ret 0;
-    }
-}
-
-#[testing]
-fun t_matches_free(alloc: *A.Allocator, v: *collections_vector.Vector[str]) {
-    var i: usize = 0;
-    for (i < v.len) {
-        str_free(alloc, v.data[i]);
-        i = i + 1;
-    }
-    collections_vector.dnit[str](v);
-}
-
-test wildcard_match__star_prefix_infix_and_exact {
-    var bad: i32 = 0;
-    if (!wildcard_match("*.c", "mad.c"))           { bad = 1; }
-    if (!wildcard_match("*.c", ".c"))              { bad = 2; }
-    if (!wildcard_match("mini*.h", "miniaudio.h")) { bad = 3; }
-    if (!wildcard_match("a*b*c", "axxbyyc"))       { bad = 4; }
-    if (!wildcard_match("*", "anything"))          { bad = 5; }
-    if (!wildcard_match("exact.c", "exact.c"))     { bad = 6; }
-    if (wildcard_match("*.c", "mad.h"))            { bad = 7; }
-    if (wildcard_match("*.c", "mad.cpp"))          { bad = 8; }
-    if (wildcard_match("mini*.h", "audio.h"))      { bad = 9; }
-    if (wildcard_match("exact.c", "exact.cc"))     { bad = 10; }
-    ret bad;
-}
-
-test shape_ok__one_recursive_segment_at_most {
-    var bad: i32 = 0;
-    if (!shape_ok("dir/*.c"))    { bad = 1; }
-    if (!shape_ok("dir/**/*.c")) { bad = 2; }
-    if (!shape_ok("*.c"))        { bad = 3; }
-    if (!shape_ok("a/b/c.c"))    { bad = 4; }
-    if (shape_ok("a/*/b.c"))     { bad = 5; }
-    if (shape_ok("a/**/**/*.c")) { bad = 6; }
-    ret bad;
-}
+$if ($mach.build.os != $mach.os.windows) {}

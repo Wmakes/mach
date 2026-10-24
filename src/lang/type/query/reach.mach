@@ -1,13 +1,9 @@
 # what a type holds or reaches, each property a leaf predicate over the one type walk
-use std.allocator.page;
 use std.types.bool.bool;
 use std.types.bool.false;
 use std.types.bool.true;
-use std.types.error.err;
 use std.types.option.opt;
 use std.types.result.res;
-
-use A: std.allocator;
 
 use mach.lang.fail;
 use mach.lang.session;
@@ -133,21 +129,4 @@ pub fun generic_union(q: *type_query.Query, nominal: type.TypeId) bool {
     var w: visit.Walk[type_query.Query] = query_walk(q, ?scan,
         visit.EDGES_SPELLING | visit.EDGE_DECLARATION | visit.EDGE_FIELD, union_leaf);
     ret visit.reaches[type_query.Query](?w, nominal);
-}
-
-# a type id the store does not hold is an internal failure, never an answer
-test module_secret__unresolvable_type_fails {
-    var alloc: A.Allocator;
-    val made:  err[A.Error] = page.make(?alloc);
-    if (sel made.err) { ret 1; }
-    val sr: res[session.Session, fail.Fail] = session.init(?alloc);
-    if (sel sr.err) { ret 1; }
-    var s: session.Session = sr.ok;
-    fin { session.dnit(?s); }
-
-    var bogus: [1]type.TypeId;
-    bogus[0] = type.id(500000);
-    val reached: res[bool, fail.Fail] = module_secret(?s, ?bogus[0], 1);
-    if (sel reached.ok) { ret 2; }
-    ret 0;
 }

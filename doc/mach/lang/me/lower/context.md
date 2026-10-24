@@ -153,6 +153,14 @@ pub rec Declared;
 
 a module-level declaration as the interface of its module describes it
 
+## fun foreign
+
+```mach
+pub fun foreign(lc: *LowerContext, sym: *resolve.Symbol) bool;
+```
+
+whether `sym` names a binding a module other than the one in scope declares
+
 ## fun declared
 
 ```mach

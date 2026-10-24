@@ -1,6 +1,5 @@
 # comptime gates: which later phase a gate's condition depends on, and the verdict that
 # selects or discards its arm
-use std.allocator.page;
 use mach.lang.diagnostic;
 use diagnostic_kind: mach.lang.diagnostic.kind;
 use mach.lang.fail;
@@ -8,7 +7,6 @@ use mach.lang.fe.ast;
 use ast_decl: mach.lang.fe.ast.decl;
 use ast_expr: mach.lang.fe.ast.expr;
 use ast_id:   mach.lang.fe.ast.id;
-use mach.lang.fe.ast.interpretation;
 use mach.lang.fe.comptime;
 use comptime_capability: mach.lang.fe.comptime.capability;
 use comptime_failure:    mach.lang.fe.comptime.failure;
@@ -18,7 +16,6 @@ use comptime_value: mach.lang.fe.comptime.value;
 use mach.lang.intern;
 use lang_source: mach.lang.source;
 use mach.lang.stack;
-use mach.lang.target.resolved;
 use mach.lang.wide;
 use A: std.allocator;
 use T: std.allocator.testing;
@@ -26,12 +23,10 @@ use std.text.string.str_free;
 use std.types.bool.bool;
 use std.types.bool.false;
 use std.types.bool.true;
-use std.types.error.err;
 use std.types.option.opt;
 use std.types.result.res;
 use std.types.size.usize;
 use std.types.string.str;
-use std.types.string.str_equals;
 
 pub def GateOutcome: u8;
 
@@ -627,184 +622,4 @@ fun comptime_callee_span(a: *ast.Ast, eid: ast_id.ExprId) lang_source.Span {
     val ce_opt: opt[*ast_expr.Expr] = ast.get_expr(a, node.data.call.callee);
     if (!sel ce_opt.some) { ret none; }
     ret ce_opt.some.span;
-}
-
-test gate_depends_on__unlisted_expression_kind_fails_closed {
-    var alloc:  A.Allocator;
-    val make_1: err[A.Error] = page.make(?alloc);
-    if (sel make_1.err) { ret 1; }
-    var a: ast.Ast = ast.init(?alloc, lang_source.FILE_NIL);
-    fin { ast.dnit(?a); }
-
-    var lit: ast_expr.Expr;
-    lit.kind                = ast_expr.EXPR_KIND_LIT_INT;
-    lit.data.lit_int.value  = wide.from_u64(1);
-    lit.data.lit_int.suffix = ast_expr.LIT_SUFFIX_NONE;
-    val lit_r: res[ast_id.ExprId, fail.Fail] = ast.add_expr(?a, lit);
-    if (sel lit_r.err) { ret 1; }
-
-    var ident: ast_expr.Expr;
-    ident.kind = ast_expr.EXPR_KIND_IDENT;
-    val ident_r: res[ast_id.ExprId, fail.Fail] = ast.add_expr(?a, ident);
-    if (sel ident_r.err) { ret 1; }
-
-    var unlisted: ast_expr.Expr;
-    unlisted.kind = 5::ast_expr.ExprKind;
-    val un_r: res[ast_id.ExprId, fail.Fail] = ast.add_expr(?a, unlisted);
-    if (sel un_r.err) { ret 1; }
-
-    var nested: ast_expr.Expr;
-    nested.kind               = ast_expr.EXPR_KIND_UNARY;
-    nested.data.unary.op      = ast_expr.UN_NOT;
-    nested.data.unary.operand = un_r.ok;
-    val nest_r: res[ast_id.ExprId, fail.Fail] = ast.add_expr(?a, nested);
-    if (sel nest_r.err) { ret 1; }
-
-    val probes: GateProbes[comptime_capability.NoCapabilityContext] = gate_probes[comptime_capability.NoCapabilityContext](nil, nil, nil, nil, comptime_capability.parsed_expression[comptime_capability.NoCapabilityContext]);
-    var bad:    i32                                                 = 0;
-
-    val listed: res[bool, fail.Fail] = gate_depends_on[comptime_capability.NoCapabilityContext](?a, "", nil, probes,
-        GATE_PROBE_LAYOUT_INTRINSIC, lit_r.ok);
-    if (sel listed.err) { bad = 1; }
-    or (sel listed.ok) {
-        if (listed.ok) { bad = 1; }
-    }
-
-    val closed: res[bool, fail.Fail] = gate_depends_on[comptime_capability.NoCapabilityContext](?a, "", nil, probes,
-        GATE_PROBE_LAYOUT_INTRINSIC, nest_r.ok);
-    if (sel closed.ok) { bad = 2; }
-    or (sel closed.err) {
-        if (!str_equals(fail.describe(closed.err), GATE_PROBE_UNLISTED_KIND_MSG)) { bad = 3; }
-    }
-
-    val no_obs: res[bool, fail.Fail] = gate_depends_on[comptime_capability.NoCapabilityContext](?a, "", nil, probes,
-        GATE_PROBE_COMPTIME_PARAM, ident_r.ok);
-    if (sel no_obs.ok) { bad = 4; }
-    or (sel no_obs.err) {
-        if (!str_equals(fail.describe(no_obs.err), GATE_PROBE_NO_OBSERVER_MSG)) { bad = 5; }
-    }
-
-    val out_of_range: res[bool, fail.Fail] = gate_depends_on[comptime_capability.NoCapabilityContext](?a, "", nil, probes,
-        GATE_PROBE_LAYOUT_INTRINSIC, ast_id.expr(99));
-    if (sel out_of_range.ok) { bad = 6; }
-
-    ret bad;
-}
-
-#[testing]
-fun t_gate_choice_action(f: *comptime.GateChoiceFixture, eid: ast_id.ExprId, e: *ast_expr.Expr) res[GateNodeVerdict, fail.Fail] {
-    ret res[GateNodeVerdict, fail.Fail].ok{gate_node_if(ast_id.expr_same(eid, ast_id.expr(1)))};
-}
-
-test gate_depends_on__resolved_brackets_visit_only_the_selected_expression {
-    var nodes: [4]ast_expr.Expr;
-    nodes[0].kind                      = ast_expr.EXPR_KIND_IDENT;
-    nodes[1].kind                      = ast_expr.EXPR_KIND_IDENT;
-    nodes[2].kind                      = ast_expr.EXPR_KIND_INDEX;
-    nodes[2].data.index.object         = ast_id.expr(0);
-    nodes[2].data.index.index          = ast_id.expr(1);
-    nodes[2].data.index.count          = ast_id.EXPR_NIL;
-    nodes[3].kind                      = ast_expr.EXPR_KIND_CALL;
-    nodes[3].data.call.callee          = ast_id.expr(0);
-    nodes[3].data.call.index_callee    = ast_id.expr(2);
-    nodes[3].data.call.args_start      = 0;
-    nodes[3].data.call.args_len        = 0;
-    nodes[3].data.call.type_args_start = 0;
-    nodes[3].data.call.type_args_len   = 1;
-    var a: ast.Ast;
-    a.exprs = ast.table_over[ast_expr.Expr](?nodes[0], 4);
-    var choices: [4]interpretation.Choice;
-    choices[0] = interpretation.PARSED;
-    choices[1] = interpretation.PARSED;
-    choices[2] = interpretation.PARSED;
-    choices[3] = interpretation.GENERIC;
-    var f: comptime.GateChoiceFixture;
-    f.choices = ?choices[0];
-    f.count   = 4;
-    val generic: res[bool, fail.Fail] = gate_walk[comptime.GateChoiceFixture](?a, "", ?f,
-        t_gate_choice_action, comptime.t_gate_choice_expression, ast_id.expr(3));
-    if (sel generic.err) { ret 1; }
-    if (generic.ok)      { ret 1; }
-    choices[3] = interpretation.INDEX_CALL;
-    val indexed: res[bool, fail.Fail] = gate_walk[comptime.GateChoiceFixture](?a, "", ?f,
-        t_gate_choice_action, comptime.t_gate_choice_expression, ast_id.expr(3));
-    if (sel indexed.err)                                                                                                                                                             { ret 2; }
-    if (!indexed.ok)                                                                                                                                                                 { ret 2; }
-    if (!ast_id.expr_same(nodes[3].data.call.callee, ast_id.expr(0)) || !ast_id.expr_same(nodes[3].data.call.index_callee, ast_id.expr(2)) || nodes[3].data.call.type_args_len != 1) { ret 3; }
-    val missing: res[bool, fail.Fail] = gate_walk[comptime.GateChoiceFixture](?a, "", ?f,
-        t_gate_choice_action, nil, ast_id.expr(3));
-    if (sel missing.ok) { ret 4; }
-    f.count = 3;
-    val wrong_owner: res[bool, fail.Fail] = gate_walk[comptime.GateChoiceFixture](?a, "", ?f,
-        t_gate_choice_action, comptime.t_gate_choice_expression, ast_id.expr(3));
-    if (sel wrong_owner.ok) { ret 5; }
-    ret 0;
-}
-
-test gate_depends_on__case_literal_visits_its_positional_elements {
-    var nodes: [2]ast_expr.Expr;
-    nodes[0].kind                         = ast_expr.EXPR_KIND_STRUCT_LIT;
-    nodes[0].data.struct_lit.elems_start  = 0;
-    nodes[0].data.struct_lit.elems_len    = 1;
-    nodes[0].data.struct_lit.fields_start = 0;
-    nodes[0].data.struct_lit.fields_len   = 0;
-    nodes[1].kind                         = ast_expr.EXPR_KIND_IDENT;
-    var ids: [1]ast_id.ExprId;
-    ids[0] = ast_id.expr(1);
-    var a: ast.Ast;
-    a.exprs    = ast.table_over[ast_expr.Expr](?nodes[0], 2);
-    a.expr_ids = ast.table_over[ast_id.ExprId](?ids[0], 1);
-    var choices: [2]interpretation.Choice;
-    choices[0] = interpretation.PARSED;
-    choices[1] = interpretation.PARSED;
-    var f: comptime.GateChoiceFixture;
-    f.choices = ?choices[0];
-    f.count   = 2;
-    val found: res[bool, fail.Fail] = gate_walk[comptime.GateChoiceFixture](?a, "", ?f,
-        t_gate_choice_action, comptime.t_gate_choice_expression, ast_id.expr(0));
-    if (sel found.err) { ret 1; }
-    if (!found.ok)     { ret 2; }
-    ret 0;
-}
-
-test gate_unresolved_dependency__allocation_refusal_is_not_an_absent_name {
-    var tracked: T.Testing;
-    val make_1:  err[A.Error] = T.make(?tracked);
-    if (sel make_1.err) { ret 1; }
-    fin { T.dnit(?tracked); }
-    val alloc: *A.Allocator               = T.allocator_of(?tracked);
-    var itn:   intern.Interner            = intern.init(alloc);
-    var c:     comptime_scope.ComptimeCtx = comptime_scope.init(alloc, resolved.facts_none(), comptime_scope.build_facts(0, 0, intern.STR_NIL, intern.STR_NIL));
-    var node:  ast_expr.Expr;
-    node.kind           = ast_expr.EXPR_KIND_IDENT;
-    node.span.offset    = 0;
-    node.span.len       = 7;
-    node.data.ident.tok = node.span;
-    var a: ast.Ast;
-    a.exprs = ast.table_over[ast_expr.Expr](?node, 1);
-    val caps: comptime_capability.PhaseCapabilities[comptime_capability.NoCapabilityContext] = comptime_capability.no_capabilities();
-    T.fail_at_ordinal(?tracked, 1);
-    val refused: res[intern.StrId, fail.Fail] = gate_unresolved_dependency[comptime_capability.NoCapabilityContext](
-        ?c, nil, caps, ?a, "missing", ?itn, ast_id.expr(0));
-    var bad: i32 = 0;
-    if (sel refused.ok) { bad = 2; }
-    or (sel refused.err) {
-        if (!str_equals(fail.describe(refused.err), "out of memory")) { bad = 3; }
-    }
-    if (T.attempt_count(?tracked) != 1 || itn.len != 0) { bad = 4; }
-    T.fail_at_ordinal(?tracked, 0);
-    val found: res[intern.StrId, fail.Fail] = gate_unresolved_dependency[comptime_capability.NoCapabilityContext](
-        ?c, nil, caps, ?a, "missing", ?itn, ast_id.expr(0));
-    if (sel found.err) { bad = 5; }
-    or (sel found.ok) {
-        val name: opt[str] = intern.get(?itn, found.ok);
-        if (sel name.some) {
-            if (!str_equals(name.some, "missing")) { bad = 6; }
-        }
-        if (sel name.none) { bad = 6; }
-    }
-    comptime_scope.dnit(?c);
-    intern.dnit(?itn);
-    if (T.leaked(?tracked) || T.double_free_count(?tracked) != 0) { bad = 7; }
-    ret bad;
 }

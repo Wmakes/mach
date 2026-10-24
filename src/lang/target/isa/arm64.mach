@@ -1,19 +1,10 @@
 use std.types.string.str;
 
-use mach.lang.target.extension;
-
 # hardware register numbers; a register id is regid_make of one
 pub val X0:  i32 = 0;
-#[testing]
-pub val X1:  i32 = 1;
 pub val X9:  i32 = 9;
 pub val X10: i32 = 10;
 pub val X11: i32 = 11;
-#[testing]
-pub val X29: i32 = 29;
-#[testing]
-pub val X30: i32 = 30;
-
 pub val IP0: i32 = 16;
 pub val IP1: i32 = 17;
 
@@ -22,8 +13,6 @@ pub val LR: i32 = 30;
 pub val SP: i32 = 31;
 
 pub val V0:  i32 = 0;
-#[testing]
-pub val V1:  i32 = 1;
 pub val V30: i32 = 30;
 pub val V31: i32 = 31;
 

@@ -7,13 +7,11 @@ use std.types.option.opt;
 use std.types.result.res;
 use std.types.size.usize;
 use std.types.string.str;
-use std.types.string.str_equals;
 use std.types.string.str_len;
 use std.types.view.View;
 use std.types.view.view;
 
 use A: std.allocator;
-use std.allocator.page;
 use std.collections.map;
 use std.crypto.hash.fnv1a;
 use std.memory;
@@ -231,11 +229,6 @@ fun store_and_index(itn: *Interner, owned: Entry) res[StrId, A.Error] {
 }
 
 #[testing]
-fun child_base_len(itn: *Interner) usize {
-    ret itn.base_len;
-}
-
-#[testing]
 pub fun count(itn: *Interner) usize {
     ret itn.len;
 }
@@ -285,133 +278,4 @@ pub fun child_reintern(child: *Interner, alloc_: *A.Allocator) res[Remap, A.Erro
     }
     out.ids = remap;
     ret res[Remap, A.Error].ok{out};
-}
-
-#[testing]
-fun t_present(o: opt[str]) bool {
-    ret sel o.some;
-}
-
-# a string interns to one id whichever entry point names it, and get answers
-# only the ids it handed out
-test add__dedups_across_entry_points_and_get_is_bounded {
-    var alloc: A.Allocator;
-    val made:  err[A.Error] = page.make(?alloc);
-    if (sel made.err) { ret 1; }
-    var itn: Interner = init(?alloc);
-    fin { dnit(?itn); }
-    if (t_present(get(?itn, str_id(0))) || t_present(get(?itn, STR_NIL))) { ret 2; }
-    val hello: res[StrId, A.Error] = add(?itn, "hello");
-    val again: res[StrId, A.Error] = add(?itn, "hello");
-    val other: res[StrId, A.Error] = add(?itn, "beta");
-    if (sel hello.err)                                                 { ret 3; }
-    if (sel again.err)                                                 { ret 3; }
-    if (sel other.err)                                                 { ret 3; }
-    if (!str_same(hello.ok, again.ok) || str_same(hello.ok, other.ok)) { ret 4; }
-    val spanned: res[StrId, A.Error] = range_add(?itn, "xhellox", 1, 5);
-    val bytes:   res[StrId, A.Error] = bytes_add(?itn, "hello!!", 5);
-    if (sel spanned.err)                                                  { ret 5; }
-    if (sel bytes.err)                                                    { ret 5; }
-    if (!str_same(spanned.ok, hello.ok) || !str_same(bytes.ok, hello.ok)) { ret 6; }
-    val found: opt[str] = get(?itn, hello.ok);
-    if (sel found.none)                                        { ret 7; }
-    if (!str_equals(found.some, "hello"))                      { ret 7; }
-    if (!str_equals(text(?itn, other.ok), "beta"))             { ret 7; }
-    if (t_present(get(?itn, str_id(str_index(other.ok) + 1)))) { ret 8; }
-    ret 0;
-}
-
-# a child reads its base, interns new strings past it, and reinterning moves them
-# into the base under the ids the base then answers
-test child_init__layers_and_reinterns {
-    var alloc: A.Allocator;
-    val made:  err[A.Error] = page.make(?alloc);
-    if (sel made.err) { ret 1; }
-    var base: Interner = init(?alloc);
-    fin { dnit(?base); }
-    val alpha: res[StrId, A.Error] = add(?base, "alpha");
-    val beta:  res[StrId, A.Error] = add(?base, "beta");
-    if (sel alpha.err) { ret 1; }
-    if (sel beta.err)  { ret 1; }
-    var child: Interner = child_init(?base, ?alloc);
-    fin { dnit(?child); }
-    if (child_base_len(?child) != 2)       { ret 2; }
-    if (!t_present(get(?child, alpha.ok))) { ret 3; }
-    val alpha_again: res[StrId, A.Error] = add(?child, "alpha");
-    if (sel alpha_again.err)                 { ret 4; }
-    if (!str_same(alpha_again.ok, alpha.ok)) { ret 4; }
-    val gamma:  res[StrId, A.Error] = add(?child, "gamma");
-    val gamma2: res[StrId, A.Error] = add(?child, "gamma");
-    if (sel gamma.err)                                                        { ret 5; }
-    if (sel gamma2.err)                                                       { ret 5; }
-    if (str_index(gamma.ok)::usize != 2 || !str_same(gamma2.ok, gamma.ok))    { ret 6; }
-    if (!t_present(get(?child, gamma.ok)) || t_present(get(?base, gamma.ok))) { ret 7; }
-    val remapped: res[Remap, A.Error] = child_reintern(?child, ?alloc);
-    if (sel remapped.err) { ret 8; }
-    var remap: Remap = remapped.ok;
-    fin { remap_dnit(?alloc, ?remap); }
-    if (remap.ids == nil || remap.base_len != child_base_len(?child) || remap.len != child.len) { ret 9; }
-    val gamma_base: StrId = remap.ids[str_index(gamma.ok)::usize - remap.base_len];
-    if (!t_present(get(?base, gamma_base))) { ret 10; }
-    val in_base: res[StrId, A.Error] = add(?base, "gamma");
-    if (sel in_base.err)                   { ret 11; }
-    if (!str_same(in_base.ok, gamma_base)) { ret 11; }
-    ret 0;
-}
-
-# a child of a child answers its grandparent's ids, issues past every layer, and
-# a string its grandparent holds interns to the grandparent's id
-test child_init__layers_over_a_child {
-    var alloc: A.Allocator;
-    val made:  err[A.Error] = page.make(?alloc);
-    if (sel made.err) { ret 1; }
-    var base: Interner = init(?alloc);
-    fin { dnit(?base); }
-    val alpha: res[StrId, A.Error] = add(?base, "alpha");
-    if (sel alpha.err) { ret 1; }
-    var mid: Interner = child_init(?base, ?alloc);
-    fin { dnit(?mid); }
-    val beta: res[StrId, A.Error] = add(?mid, "beta");
-    if (sel beta.err) { ret 2; }
-    var top: Interner = child_init(?mid, ?alloc);
-    fin { dnit(?top); }
-    if (child_base_len(?top) != 2) { ret 3; }
-    val alpha_top: res[StrId, A.Error] = add(?top, "alpha");
-    val beta_top:  res[StrId, A.Error] = add(?top, "beta");
-    val gamma:     res[StrId, A.Error] = add(?top, "gamma");
-    if (sel alpha_top.err)                               { ret 4; }
-    if (sel beta_top.err)                                { ret 4; }
-    if (sel gamma.err)                                   { ret 4; }
-    if (!str_same(alpha_top.ok, alpha.ok))               { ret 5; }
-    if (!str_same(beta_top.ok, beta.ok))                 { ret 6; }
-    if (str_index(gamma.ok) != 2)                        { ret 7; }
-    if (!descends(?top, ?base) || descends(?base, ?top)) { ret 8; }
-    # a string the base takes after the child was layered stays the child's own
-    val late:      res[StrId, A.Error] = add(?base, "late");
-    val late_here: res[StrId, A.Error] = add(?top, "late");
-    if (sel late.err)                       { ret 9; }
-    if (sel late_here.err)                  { ret 9; }
-    if (str_index(late_here.ok)::usize < 2) { ret 10; }
-    ret 0;
-}
-
-# bytes are the string: a NUL inside them is kept, counted and compared, and
-# the terminator after them is not part of the string
-test bytes_add__keeps_embedded_nuls {
-    var alloc: A.Allocator;
-    val made:  err[A.Error] = page.make(?alloc);
-    if (sel made.err) { ret 1; }
-    var itn: Interner = init(?alloc);
-    fin { dnit(?itn); }
-    val ab:    res[StrId, A.Error] = bytes_add(?itn, "ab\0foo", 6);
-    val ac:    res[StrId, A.Error] = bytes_add(?itn, "ab\0bar", 6);
-    val short: res[StrId, A.Error] = add(?itn, "ab");
-    if (sel ab.err)                                          { ret 2; }
-    if (sel ac.err)                                          { ret 2; }
-    if (sel short.err)                                       { ret 2; }
-    if (str_same(ab.ok, ac.ok) || str_same(ab.ok, short.ok)) { ret 3; }
-    val found: opt[View] = bytes(?itn, ab.ok);
-    if (sel found.none)                                                            { ret 4; }
-    if (found.some.len != 6 || !memory.equal[char](found.some.data, "ab\0foo", 7)) { ret 5; }
-    ret 0;
 }

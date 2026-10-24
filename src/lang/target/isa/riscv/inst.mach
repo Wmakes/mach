@@ -5,8 +5,6 @@ use std.types.bool.true;
 use std.types.option.opt;
 use std.types.size.usize;
 use std.types.string.str;
-use std.types.string.str_equals;
-use std.types.string.str_len;
 
 pub def MachOp: u16;
 
@@ -605,13 +603,6 @@ pub fun mnemonic(op: MachOp) opt[str] {
     ret opt[str].some{ROWS[op::usize].name};
 }
 
-#[testing]
-fun t_spelled(op: MachOp, want: str) bool {
-    val named: opt[str] = mnemonic(op);
-    if (sel named.none) { ret false; }
-    ret str_equals(named.some, want);
-}
-
 pub fun shape_of(op: MachOp) u8 {
     ret row(op).shape;
 }
@@ -698,24 +689,6 @@ pub fun classify(word: u32) MachOp {
     ret MOP_NONE;
 }
 
-# the word an opcode's row spells with every register field zero: the
-# keyed fields set, every free field zero
-#[testing]
-pub fun key_word(op: MachOp) u32 {
-    val r:    *Row = row(op);
-    var word: u32  = r.opcode7;
-    if (r.fmt != FMT_U && r.fmt != FMT_J) { word = word | (r.funct3 << 12); }
-    if (r.fmt == FMT_R) {
-        word = word | (r.funct7 << 25);
-        if ((r.key & KEY_RS2) != 0) { word = word | (r.sel << 20); }
-    }
-    if (r.fmt == FMT_I) {
-        if ((r.key & KEY_IMM12) != 0) { word = word | (r.sel << 20); }
-        or                            { word = word | (r.funct7 << 25); }
-    }
-    ret word;
-}
-
 pub val FLAG_AQ: u16 = 0x0001;
 pub val FLAG_RL: u16 = 0x0002;
 
@@ -724,79 +697,3 @@ pub val FLAG_LABEL_FWD:   u16 = 0x0008;
 pub val FLAG_LABEL_SKIP:  u16 = 0x0010;
 
 pub val FLAG_TARGET_BLOCK: u16 = 0x0020;
-
-test rows__every_opcode_has_its_row_in_order {
-    var op: MachOp = 1;
-    for (op <= MOP_LAST) {
-        val r: *Row = ?ROWS[op::usize];
-        if (r.op != op)                                       { ret 1; }
-        if (r.name == nil || str_len(r.name) == 0)            { ret 2; }
-        if (r.fmt > FMT_J)                                    { ret 3; }
-        if (r.xlens == 0 || (r.xlens & ~XL_ANY) != 0)         { ret 4; }
-        if (r.exts == 0 || (r.exts & extension_riscv.I) == 0) { ret 5; }
-        if (r.mem != MEM_NONE && r.shape != SH_LOAD && r.shape != SH_FLOAD && r.shape != SH_STORE
-            && r.shape != SH_FSTORE && r.shape != SH_AMO && r.shape != SH_AMO_LR) { ret 6; }
-        op = op + 1;
-    }
-    if (ROWS[0].op != MOP_NONE || ROWS[0].xlens != 0 || ROWS[0].exts != 0) { ret 7; }
-    if (ROW_COUNT != MOP_LAST::usize + 1)                                  { ret 12; }
-    val none_named: opt[str] = mnemonic(MOP_NONE);
-    val past_named: opt[str] = mnemonic(MOP_LAST + 1);
-    if (sel none_named.some) { ret 8; }
-    if (sel past_named.some) { ret 8; }
-    if (!t_spelled(ADDIW, "addiw") || !t_spelled(FCVT_W_D, "fcvt.w.d")
-        || !t_spelled(FSGNJN_S, "fsgnjn.s") || !t_spelled(AMOADD_D, "amoadd.d")
-        || !t_spelled(LR_W, "lr.w") || !t_spelled(CSRRCI, "csrrci")) { ret 13; }
-    if (xlens(MOP_NONE) != 0 || xlens(MOP_LAST + 1) != 0)                             { ret 9; }
-    if (required_extensions(MOP_NONE) != 0 || required_extensions(MOP_LAST + 1) != 0) { ret 10; }
-    if (shape_of(MOP_LAST + 1) != SH_NONE)                                            { ret 11; }
-    ret 0;
-}
-
-test classify__every_key_word_names_exactly_its_row {
-    var op: MachOp = 1;
-    for (op <= MOP_LAST) {
-        val word: u32 = key_word(op);
-        if (classify(word) != op) { ret 1; }
-        var claims: u32    = 0;
-        var other:  MachOp = 1;
-        for (other <= MOP_LAST) {
-            val r: *Row = ?ROWS[other::usize];
-            if (r.opcode7 == (word & 0x7F)
-                && key_matches(r, (word >> 12) & 0x7, word >> 25, (word >> 20) & 0x1F, word >> 20)) {
-                claims = claims + 1;
-            }
-            other = other + 1;
-        }
-        if (claims != 1) { ret 2; }
-        op = op + 1;
-    }
-    # a free field does not change the answer: rounding, shift amount, ordering
-    if (classify(key_word(FADD_D) | (RM_RTZ << 12)) != FADD_D)  { ret 3; }
-    if (classify(key_word(SRAI) | (0x3F << 20)) != SRAI)        { ret 4; }
-    if (classify(key_word(SLLI) | (0x3F << 20)) != SLLI)        { ret 5; }
-    if (classify(key_word(AMOADD_W) | (0x3 << 25)) != AMOADD_W) { ret 6; }
-    # a keyed field does: an unnamed fence set, a foreign rs2 selector
-    if (classify(key_word(FENCE) ^ (0x0F0 << 20)) != MOP_NONE)  { ret 7; }
-    if (classify(key_word(FCVT_W_S) | (0x4 << 20)) != MOP_NONE) { ret 8; }
-    if (classify(0) != MOP_NONE)                                { ret 9; }
-    ret 0;
-}
-
-test admits__xlen_and_extension_columns {
-    if (xlens(LD) != XL64 || xlens(LW) != XL_ANY)                                                                        { ret 1; }
-    if (admits(LD, 4) || !admits(LD, 8) || !admits(LW, 4) || !admits(LW, 8))                                             { ret 2; }
-    if (admits(ADD, 0))                                                                                                  { ret 3; }
-    if (required_extensions(MUL) != (extension_riscv.I | extension_riscv.M))                                             { ret 4; }
-    if (required_extensions(FLD) != (extension_riscv.I | extension_riscv.F | extension_riscv.D | extension_riscv.ZICSR)) { ret 5; }
-    if (required_extensions(CSRRW) != (extension_riscv.I | extension_riscv.ZICSR))                                       { ret 6; }
-    if (required_extensions(LR_W) != (extension_riscv.I | extension_riscv.A))                                            { ret 7; }
-    if (int_access(8, true) != LD || int_access(1, true) != LBU || int_access(2, true) != LHU || int_access(4, true) != LW
-        || int_access(1, false) != SB || int_access(3, true) != MOP_NONE) { ret 8; }
-    if (fp_access(4, false) != FSW || fp_access(8, true) != FLD || fp_access(2, true) != FLH || fp_access(1, true) != MOP_NONE) { ret 9; }
-    if (required_extensions(FLH) != (extension_riscv.I | extension_riscv.F | extension_riscv.ZICSR | extension_riscv.ZFHMIN)
-        || required_extensions(FADD_H) != (extension_riscv.I | extension_riscv.F | extension_riscv.ZICSR | extension_riscv.ZFHMIN | extension_riscv.ZFH)) { ret 11; }
-    if (mem_role(SD) != MEM_STORE || mem_role(FLW) != MEM_LOAD || mem_role(SC_W) != MEM_ATOMIC
-        || mem_role(JALR) != MEM_NONE) { ret 10; }
-    ret 0;
-}

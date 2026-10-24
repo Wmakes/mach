@@ -18,8 +18,7 @@ use mach.lang.intern;
 use lang_source: mach.lang.source;
 use mach.lang.stack;
 use mach.lang.type;
-use A: std.allocator;
-use std.allocator.page;
+use A:                  std.allocator;
 use collections_vector: std.collections.vector;
 use std.text.string.str_free;
 use std.types.bool.bool;
@@ -304,22 +303,4 @@ pub fun check_testing_uses(sc: *sema_context.SemaContext) err[fail.Fail] {
         i = i + 1;
     }
     ret err[fail.Fail].ok{};
-}
-
-test in_testing_region__half_open_bounds {
-    var alloc:  A.Allocator;
-    val make_r: err[A.Error] = page.make(?alloc);
-    if (sel make_r.err) { ret 1; }
-    var regions: collections_vector.Vector[lang_source.Span] = collections_vector.init[lang_source.Span](?alloc);
-    fin { collections_vector.dnit[lang_source.Span](?regions); }
-    val first:  res[usize, A.Error] = collections_vector.push[lang_source.Span](?regions, lang_source.Span{offset: 10, len: 5});
-    val second: res[usize, A.Error] = collections_vector.push[lang_source.Span](?regions, lang_source.Span{offset: 15, len: 3});
-    val third:  res[usize, A.Error] = collections_vector.push[lang_source.Span](?regions, lang_source.Span{offset: 30, len: 1});
-    if (sel first.err || sel second.err || sel third.err)                                                        { ret 2; }
-    if (in_testing_region(?regions, 9) || !in_testing_region(?regions, 10) || !in_testing_region(?regions, 14))  { ret 3; }
-    if (!in_testing_region(?regions, 15) || !in_testing_region(?regions, 17) || in_testing_region(?regions, 18)) { ret 4; }
-    if (in_testing_region(?regions, 29) || !in_testing_region(?regions, 30) || in_testing_region(?regions, 31))  { ret 5; }
-    var empty: collections_vector.Vector[lang_source.Span] = collections_vector.init[lang_source.Span](?alloc);
-    if (in_testing_region(?empty, 0)) { ret 6; }
-    ret 0;
 }

@@ -21,11 +21,6 @@ pub val GP:   i32 = X3;
 pub val TP:   i32 = X4;
 pub val FP:   i32 = X8;
 
-#[testing]
-pub val STACK_REG: i32 = SP;
-#[testing]
-pub val FRAME_REG: i32 = FP;
-
 val     T0: i32 = X5;
 val     T1: i32 = X6;
 pub val T2: i32 = X7;

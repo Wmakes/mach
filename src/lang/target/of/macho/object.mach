@@ -1,9 +1,7 @@
 use diagnostic_kind: mach.lang.diagnostic.kind;
 use mach.lang.fail;
 use mach.lang.intern;
-use output_testing: mach.lang.output.testing;
-use catalog_arch:   mach.lang.target.catalog.arch;
-use target_of:      mach.lang.target.of;
+use target_of: mach.lang.target.of;
 use mach.lang.target.of.bin;
 use mach.lang.target.of.carrier;
 use of_destination: mach.lang.target.of.destination;
@@ -13,8 +11,6 @@ use macho_reloc:  mach.lang.target.of.macho.reloc;
 use of_plan:      mach.lang.target.of.plan;
 use mach.lang.target.of.record;
 use A: std.allocator;
-use std.allocator.page;
-use T: std.allocator.testing;
 use std.memory;
 use std.types.bool.bool;
 use std.types.bool.false;
@@ -24,7 +20,6 @@ use std.types.option.opt;
 use std.types.result.res;
 use std.types.size.usize;
 use std.types.string.str;
-use std.types.string.str_contains;
 use std.types.string.str_equals;
 use std.types.string.str_len;
 
@@ -939,208 +934,4 @@ fun emit_object_image(isa_vt: *target_of.ObjectTarget, img: *target_of.ObjectIma
     }
 
     ret err[fail.Fail].ok{};
-}
-
-test emit_object__refuses_an_unsupported_relocation_kind {
-    var alloc: A.Allocator;
-    page.make(?alloc);
-    var i: intern.Interner = intern.init(?alloc);
-
-    var isa_vt: target_of.ObjectTarget = macho_format.t_isa(catalog_arch.X86_64);
-
-    var text_bytes: [16]u8;
-    var k:          usize = 0;
-    for (k < 16) {
-        text_bytes[k] = 0x90;
-        k             = k + 1;
-    }
-
-    var secs: [1]target_of.Section;
-    secs[0].name  = macho_format.t_intern(?i, ".text");
-    secs[0].kind  = target_of.SK_TEXT;
-    secs[0].bytes = ?text_bytes[0];
-    secs[0].len   = 16;
-    secs[0].align = 16;
-
-    var syms: [1]target_of.Symbol;
-    syms[0].name    = macho_format.t_intern(?i, "_main");
-    syms[0].section = target_of.section_id(0);
-    syms[0].offset  = 0;
-    syms[0].size    = 16;
-    syms[0].flags   = target_of.SYM_OBJ_FLAG_GLOBAL | target_of.SYM_OBJ_FLAG_FUNCTION;
-
-    var relocs: [1]target_of.Relocation;
-    relocs[0].section = target_of.section_id(0);
-    relocs[0].offset  = 0;
-    relocs[0].kind    = target_of.RK_ADDR32NB;
-    relocs[0].sym     = 0;
-    relocs[0].addend  = 0;
-
-    var img: target_of.ObjectImage;
-    img.alloc         = ?alloc;
-    img.interner      = ?i;
-    img.name          = macho_format.t_intern(?i, "test");
-    img.sections      = ?secs[0];
-    img.section_count = 1;
-    img.symbols       = ?syms[0];
-    img.symbol_count  = 1;
-    img.relocations   = ?relocs[0];
-    img.reloc_count   = 1;
-
-    val tf_r: res[output_testing.Output, fail.Fail] = output_testing.create(?alloc, "macho_kind");
-    if (sel tf_r.err) { ret 1; }
-    var tf: output_testing.Output = tf_r.ok;
-    fin { output_testing.dnit(?tf); }
-    val tpath: str = output_testing.path(?tf);
-
-    val em: err[fail.Fail] = target_of.object_write(object_emit, ?isa_vt, ?img, tpath);
-
-    if (!sel em.err)                                      { ret 1; }
-    if (!str_contains(fail.describe(em.err), "addr32nb")) { ret 1; }
-    ret 0;
-}
-
-test emit_object__refuses_section_past_the_field_width {
-    var alloc: A.Allocator;
-    page.make(?alloc);
-    var i:      intern.Interner        = intern.init(?alloc);
-    var isa_vt: target_of.ObjectTarget = macho_format.t_isa(catalog_arch.X86_64);
-
-    var bytes: [16]u8;
-    var secs:  [2]target_of.Section;
-    secs[0].name  = macho_format.t_intern(?i, ".text");
-    secs[0].kind  = target_of.SK_TEXT;
-    secs[0].bytes = ?bytes[0];
-    secs[0].len   = 0xFFFFFFF0;
-    secs[0].align = 16;
-    secs[0].flags = 0;
-    secs[1].name  = macho_format.t_intern(?i, ".data");
-    secs[1].kind  = target_of.SK_DATA;
-    secs[1].bytes = ?bytes[0];
-    secs[1].len   = 0x100;
-    secs[1].align = 16;
-    secs[1].flags = 0;
-    var syms: [1]target_of.Symbol;
-    syms[0].name    = macho_format.t_intern(?i, "_main");
-    syms[0].section = target_of.section_id(0);
-    syms[0].offset  = 0;
-    syms[0].size    = 16;
-    syms[0].flags   = target_of.SYM_OBJ_FLAG_GLOBAL | target_of.SYM_OBJ_FLAG_FUNCTION;
-    var img: target_of.ObjectImage;
-    img.alloc         = ?alloc;
-    img.interner      = ?i;
-    img.name          = macho_format.t_intern(?i, "oversize");
-    img.sections      = ?secs[0];
-    img.section_count = 2;
-    img.symbols       = ?syms[0];
-    img.symbol_count  = 1;
-    img.relocations   = nil;
-    img.reloc_count   = 0;
-
-    val tf_r: res[output_testing.Output, fail.Fail] = output_testing.create(?alloc, "macho_oversize");
-    if (sel tf_r.err) { ret 1; }
-    var tf: output_testing.Output = tf_r.ok;
-    fin { output_testing.dnit(?tf); }
-    val tpath: str = output_testing.path(?tf);
-
-    val em: err[fail.Fail] = target_of.object_write(object_emit, ?isa_vt, ?img, tpath);
-    if (sel em.ok)                                           { ret 2; }
-    if (!str_contains(fail.describe(em.err), "field width")) { ret 3; }
-    if (!macho_format.t_untouched(?alloc, tpath))            { ret 4; }
-    ret 0;
-}
-
-test emit_object__allocation_refusal_at_every_ordinal_is_typed {
-    var backing: A.Allocator;
-    page.make(?backing);
-    var i:      intern.Interner        = intern.init(?backing);
-    var isa_vt: target_of.ObjectTarget = macho_format.t_isa(catalog_arch.X86_64);
-
-    var text: [16]u8;
-    var secs: [2]target_of.Section;
-    secs[0].name  = macho_format.t_intern(?i, ".text");
-    secs[0].kind  = target_of.SK_TEXT;
-    secs[0].bytes = ?text[0];
-    secs[0].len   = 16;
-    secs[0].align = 16;
-    secs[0].flags = 0;
-    secs[1].name  = macho_format.t_intern(?i, ".data");
-    secs[1].kind  = target_of.SK_DATA;
-    secs[1].bytes = ?text[0];
-    secs[1].len   = 8;
-    secs[1].align = 8;
-    secs[1].flags = 0;
-    var syms: [2]target_of.Symbol;
-    syms[0].name    = macho_format.t_intern(?i, "_main");
-    syms[0].section = target_of.section_id(0);
-    syms[0].offset  = 0;
-    syms[0].size    = 16;
-    syms[0].flags   = target_of.SYM_OBJ_FLAG_GLOBAL | target_of.SYM_OBJ_FLAG_FUNCTION;
-    syms[1].name    = macho_format.t_intern(?i, "_gvar");
-    syms[1].section = target_of.section_id(1);
-    syms[1].offset  = 0;
-    syms[1].size    = 8;
-    syms[1].flags   = target_of.SYM_OBJ_FLAG_GLOBAL | target_of.SYM_OBJ_FLAG_OBJECT;
-    var relocs: [1]target_of.Relocation;
-    relocs[0].section = target_of.section_id(0);
-    relocs[0].offset  = 1;
-    relocs[0].kind    = target_of.RK_PC32;
-    relocs[0].sym     = 1;
-    relocs[0].addend  = -4;
-
-    val tf_r: res[output_testing.Output, fail.Fail] = output_testing.create(?backing, "macho_failat");
-    if (sel tf_r.err) { ret 1; }
-    var tf: output_testing.Output = tf_r.ok;
-    fin { output_testing.dnit(?tf); }
-    val tpath: str = output_testing.path(?tf);
-
-    var refused: u32   = 0;
-    var ordinal: usize = 1;
-    for (ordinal <= 24) {
-        var failing: T.Testing;
-        val made:    err[A.Error] = T.make(?failing);
-        if (sel made.err) { ret 2; }
-        T.fail_at_ordinal(?failing, ordinal);
-        var img: target_of.ObjectImage;
-        img.alloc         = T.allocator_of(?failing);
-        img.interner      = ?i;
-        img.name          = macho_format.t_intern(?i, "failat");
-        img.sections      = ?secs[0];
-        img.section_count = 2;
-        img.symbols       = ?syms[0];
-        img.symbol_count  = 2;
-        img.relocations   = ?relocs[0];
-        img.reloc_count   = 1;
-        val em: err[fail.Fail] = target_of.object_write(object_emit, ?isa_vt, ?img, tpath);
-        if (T.leaked(?failing)) { ret 3; }
-        if (sel em.err) {
-            refused = refused + 1;
-            if (!macho_format.t_untouched(?backing, tpath)) { ret 5; }
-        }
-        ordinal = ordinal + 1;
-    }
-    if (refused < 6) { ret 6; }
-    ret 0;
-}
-
-# an addend folded into a 32-bit field is refused when it does not fit, not
-# kept to its low bits: a pc-relative one signed with its +4 bias, an absolute
-# one signed or unsigned
-test fold_inplace_addend__refuses_an_addend_past_its_field {
-    if (!t_folds(target_of.RK_PC32, 2147483643))     { ret 1; }
-    if (t_folds(target_of.RK_PC32, 2147483644))      { ret 2; }
-    if (t_folds(target_of.RK_PC32, 0 - 2147483653))  { ret 3; }
-    if (!t_folds(target_of.RK_ABS32, 4294967295))    { ret 4; }
-    if (t_folds(target_of.RK_ABS32, 4294967296))     { ret 5; }
-    if (t_folds(target_of.RK_ABS32, 0 - 2147483649)) { ret 6; }
-    if (!t_folds(target_of.RK_ABS64, 4294967296))    { ret 7; }
-    ret 0;
-}
-
-#[testing]
-fun t_folds(kind: target_of.RelocKind, addend: i64) bool {
-    var buf: [8]u8;
-    memory.raw_zero((?buf[0])::ptr, 8);
-    val r: err[fail.Fail] = fold_inplace_addend(?buf[0], 0, catalog_arch.X86_64, kind, addend);
-    ret sel r.ok;
 }

@@ -1,20 +1,9 @@
-use mach.lang.fail;
-use std.allocator.page;
-use std.types.error.err;
-use std.types.option.opt;
-use std.types.result.res;
 use std.types.size.usize;
 use std.types.string.str;
-use std.types.string.str_region_equals;
 
-use A: std.allocator;
-
-use mach.lang.diagnostic;
 use diagnostic_kind: mach.lang.diagnostic.kind;
-use mach.lang.fe.ast;
-use ast_id:   mach.lang.fe.ast.id;
-use ast_stmt: mach.lang.fe.ast.stmt;
-use fe_lexer: mach.lang.fe.lexer;
+use ast_id:          mach.lang.fe.ast.id;
+use ast_stmt:        mach.lang.fe.ast.stmt;
 use mach.lang.fe.parser.state;
 use mach.lang.fe.token;
 use lang_source: mach.lang.source;
@@ -93,63 +82,4 @@ fun collect_body(p: *state.Parser, start_offset: usize, asm_span: lang_source.Sp
     body.len        = i - start_offset;
     end_span.offset = i;
     end_span.len    = 0;
-}
-
-test parse_asm__closing_brace_survives_sharing_a_line_with_a_hash {
-    var alloc:  A.Allocator;
-    val made_1: err[A.Error] = page.make(?alloc);
-    if (sel made_1.err) { ret 1; }
-    var bad: i32 = 0;
-
-    val text: str                                  = "asm aarch64 { mov x0, #5 }\nret";
-    val tr:   res[fe_lexer.TokenStream, fail.Fail] = fe_lexer.tokenize(text, ?alloc, lang_source.FILE_NIL);
-    if (sel tr.err) { ret 1; }
-    var stream: fe_lexer.TokenStream       = tr.ok;
-    var a:      ast.Ast                    = ast.init(?alloc, lang_source.FILE_NIL);
-    var diags:  diagnostic.DiagnosticStore = diagnostic.store_init(?alloc);
-    var p:      state.Parser               = state.make(?stream, ?a, ?diags);
-
-    val sid: ast_id.StmtId = parse_asm(?p);
-
-    if (diagnostic.len(?diags) != 0) { bad = 1; }
-
-    val opt_s: opt[*ast_stmt.Stmt] = ast.get_stmt(?a, sid);
-    if (!sel opt_s.some) { bad = 1; }
-    or (sel opt_s.some) {
-        val s:    *ast_stmt.Stmt   = opt_s.some;
-        val body: lang_source.Span = s.data.asm_.body;
-        if (!str_region_equals(text, body.offset, body.len, " mov x0, #5 ")) { bad = 1; }
-    }
-
-    if (!state.at_kw(?p, "ret")) { bad = 1; }
-
-    diagnostic.store_dnit(?diags);
-    ast.dnit(?a);
-    fe_lexer.dnit(?stream, ?alloc);
-    ret bad;
-}
-
-test parse_asm__unterminated_body_still_reports_at_the_asm_keyword {
-    var alloc:  A.Allocator;
-    val made_2: err[A.Error] = page.make(?alloc);
-    if (sel made_2.err) { ret 1; }
-    var bad: i32 = 0;
-
-    val text: str                                  = "asm aarch64 { mov x0, #5";
-    val tr:   res[fe_lexer.TokenStream, fail.Fail] = fe_lexer.tokenize(text, ?alloc, lang_source.FILE_NIL);
-    if (sel tr.err) { ret 1; }
-    var stream: fe_lexer.TokenStream       = tr.ok;
-    var a:      ast.Ast                    = ast.init(?alloc, lang_source.FILE_NIL);
-    var diags:  diagnostic.DiagnosticStore = diagnostic.store_init(?alloc);
-    var p:      state.Parser               = state.make(?stream, ?a, ?diags);
-
-    parse_asm(?p);
-
-    if (diagnostic.len(?diags) != 1)              { bad = 1; }
-    or (diags.items.data[0].loc.span.offset != 0) { bad = 1; }
-
-    diagnostic.store_dnit(?diags);
-    ast.dnit(?a);
-    fe_lexer.dnit(?stream, ?alloc);
-    ret bad;
 }

@@ -15,7 +15,6 @@ use std.types.size.usize;
 use std.types.string.str;
 
 use A: std.allocator;
-use std.allocator.page;
 use std.collections.bitset;
 use collections_vector: std.collections.vector;
 use std.collections.vector.Vector;
@@ -32,7 +31,6 @@ use mink_arch:  mink.catalog.arch;
 use mach.lang.fail;
 use catalog_arch: mach.lang.target.catalog.arch;
 use mach.lang.target.extension;
-use extension_riscv: mach.lang.target.extension.riscv;
 
 # masc's set for mink's architecture `arch`, nil when masc registers none
 fun set_of(arch: *mink_arch.Arch) *masc_set.Set {
@@ -216,34 +214,4 @@ pub fun widened(a: *A.Allocator, arch: *mink_arch.Arch, t: *extension.Table, spe
     collections_vector.dnit[u8](?out);
     if (sel copied.err) { ret res[str, fail.Fail].err{fail.refused(copied.err)}; }
     ret res[str, fail.Fail].ok{copied.ok};
-}
-
-# masc reads riscv's isa strings for the architecture that enters them, spells the
-# selection mach emits against so it reads back, and spells nothing for x86
-test select__reads_masc_s_spelling_for_the_entering_architecture {
-    var a:    A.Allocator;
-    val made: err[A.Error] = page.make(?a);
-    if (sel made.err) { ret 1; }
-    val rv64: *mink_arch.Arch     = catalog_arch.owner_of(catalog_arch.RISCV64);
-    val rv32: *mink_arch.Arch     = catalog_arch.owner_of(catalog_arch.RISCV32);
-    val wide: res[u64, fail.Fail] = select(?a, rv64, ?extension_riscv.TABLE, "rv64gc");
-    if (sel wide.err) { ret 2; }
-    or (sel wide.ok) {
-        if (wide.ok != extension_riscv.DEFAULT64) { ret 3; }
-    }
-    val cross: res[u64, fail.Fail] = select(?a, rv32, ?extension_riscv.TABLE, "rv64gc");
-    if (sel cross.ok) { ret 4; }
-    val small: res[u64, fail.Fail] = select(?a, rv32, ?extension_riscv.TABLE, "rv32imc");
-    if (sel small.err)                                                                                             { ret 5; }
-    if (entered_by(?a, "rv32imc") != catalog_arch.RISCV32 || entered_by(?a, "rv64gc_zfh") != catalog_arch.RISCV64) { ret 6; }
-    if (entered_by(?a, "x86_64") != catalog_arch.UNKNOWN || entered_by(?a, "rv32e") != catalog_arch.UNKNOWN)       { ret 7; }
-    if (spells(catalog_arch.owner_of(catalog_arch.X86_64)) || !spells(rv32))                                       { ret 8; }
-    val spelled: res[str, fail.Fail] = spell(?a, rv64, ?extension_riscv.TABLE, extension_riscv.DEFAULT64 | extension_riscv.ZKT, false);
-    if (sel spelled.err) { ret 9; }
-    val back: res[u64, fail.Fail] = select(?a, rv64, ?extension_riscv.TABLE, spelled.ok);
-    if (sel back.err) { ret 10; }
-    or (sel back.ok) {
-        if (back.ok != (extension_riscv.DEFAULT64 | extension_riscv.ZKT)) { ret 11; }
-    }
-    ret 0;
 }

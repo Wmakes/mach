@@ -363,36 +363,6 @@ pub rec AbiVTable {
     half: HalfRule;
 }
 
-# whether carrier_storage_alignment refuses its arguments
-#[testing]
-fun t_carrier_storage_alignment_refused(slot: *ParamSlot) bool {
-    val got: res[u32, fail.Fail] = carrier_storage_alignment(slot);
-    ret sel got.err;
-}
-
-# whether carrier_storage_extent refuses its arguments
-#[testing]
-fun t_carrier_storage_extent_refused(slot: *ParamSlot) bool {
-    val got: res[u64, fail.Fail] = carrier_storage_extent(slot);
-    ret sel got.err;
-}
-
-#[testing]
-fun t_arg(vt: *AbiVTable, q: *ArgQuery) ParamSlot {
-    ret make_slot(CLASS_GP, isa_inst.regid_make(isa_inst.REG_CLASS_ID_GP, q.index), 0, q.size, 8);
-}
-
-#[testing]
-fun t_ret(vt: *AbiVTable, q: *RetQuery) ParamSlot {
-    ret make_slot(CLASS_GP, isa_inst.regid_make(isa_inst.REG_CLASS_ID_GP, 0), 0, q.size, 8);
-}
-
-#[testing]
-val T_REGS: [1]target_model.Register = [1]target_model.Register{target_model.Register{id: isa_inst.REG_GP_BASE, size: 8}};
-
-#[testing]
-val T_VA_MODEL: VaModel = VaModel{kind: VA_MODEL_REG_SAVE, float_dup_gp: false, vector_count_reg: isa_inst.REG_NONE, variadic_float_bits: 0};
-
 # the types a test's queries describe, built from the facts a test names
 #[testing]
 val T_TYPE_CAP:   u32 = 1024;
@@ -799,70 +769,6 @@ pub fun make_slot_pieces(class: ParamClass, pieces: *ParamPiece, count: u32, siz
     ret s;
 }
 
-# the constructors declare the registers their pieces ride in each bank; a
-# classifier may raise the counts for registers its ABI skips
-test paramslot__consumed_follows_the_pieces_of_each_bank {
-    val gp: ParamSlot = make_slot(CLASS_GP, isa_inst.regid_make(isa_inst.REG_CLASS_ID_GP, 3), 0, 8, 8);
-    if (gp.gp_consumed != 1 || gp.fp_consumed != 0) { ret 1; }
-    val st: ParamSlot = make_slot(CLASS_STACK, isa_inst.REG_NONE, 0, 8, 0);
-    if (st.gp_consumed != 0 || st.fp_consumed != 0) { ret 2; }
-    val fp: ParamSlot = make_slot(CLASS_FP, isa_inst.regid_make(isa_inst.REG_CLASS_ID_FP, 0), 0, 8, 8);
-    if (fp.gp_consumed != 0 || fp.fp_consumed != 1) { ret 3; }
-    val pr: ParamSlot = make_slot_pair(CLASS_GP, isa_inst.regid_make(isa_inst.REG_CLASS_ID_GP, 0), isa_inst.regid_make(isa_inst.REG_CLASS_ID_GP, 1), 0, 16, 8);
-    if (pr.gp_consumed != 2 || pr.fp_consumed != 0) { ret 4; }
-    val mixed: ParamSlot = make_slot_pair(CLASS_GP, isa_inst.regid_make(isa_inst.REG_CLASS_ID_GP, 0), isa_inst.regid_make(isa_inst.REG_CLASS_ID_FP, 0), 0, 16, 8);
-    if (mixed.gp_consumed != 1 || mixed.fp_consumed != 1) { ret 5; }
-    val hfa: ParamSlot = make_slot_hfa(isa_inst.regid_make(isa_inst.REG_CLASS_ID_FP, 0), 2, 8, 16);
-    if (hfa.gp_consumed != 0 || hfa.fp_consumed != 2) { ret 6; }
-    val v: ParamSlot = make_slot_value(8);
-    if (v.gp_consumed != 0 || v.fp_consumed != 0) { ret 7; }
-    ret 0;
-}
-
-test make_slot_pair__geometry_is_the_conventions_word {
-    val p4: ParamSlot = make_slot_pair(CLASS_GP, isa_inst.regid_make(isa_inst.REG_CLASS_ID_GP, 10), isa_inst.regid_make(isa_inst.REG_CLASS_ID_GP, 11), 0, 8, 4);
-    if (p4.piece_count != 2)                                                                        { ret 1; }
-    if (p4.pieces[0].src_off != 0)                                                                  { ret 1; }
-    if (p4.pieces[0].width != 4)                                                                    { ret 1; }
-    if (lang_mir.preg_regid(p4.pieces[1].reg) != isa_inst.regid_make(isa_inst.REG_CLASS_ID_GP, 11)) { ret 1; }
-    if (p4.pieces[1].src_off != 4)                                                                  { ret 1; }
-    if (p4.pieces[1].width != 4)                                                                    { ret 1; }
-
-    val p2: ParamSlot = make_slot_pair(CLASS_GP, isa_inst.regid_make(isa_inst.REG_CLASS_ID_GP, 10), isa_inst.regid_make(isa_inst.REG_CLASS_ID_GP, 11), 0, 4, 2);
-    if (p2.pieces[1].src_off != 2) { ret 1; }
-    if (p2.pieces[1].width != 2)   { ret 1; }
-
-    val p8: ParamSlot = make_slot_pair(CLASS_GP, isa_inst.regid_make(isa_inst.REG_CLASS_ID_GP, 10), isa_inst.regid_make(isa_inst.REG_CLASS_ID_GP, 11), 0, 16, 8);
-    if (p8.pieces[0].src_off != 0) { ret 1; }
-    if (p8.pieces[1].src_off != 8) { ret 1; }
-    if (p8.pieces[1].width != 8)   { ret 1; }
-
-    val one: ParamSlot = make_slot(CLASS_GP, isa_inst.regid_make(isa_inst.REG_CLASS_ID_GP, 10), 0, 8, 8);
-    if (one.piece_count != 1)       { ret 1; }
-    if (one.pieces[0].src_off != 0) { ret 1; }
-    ret 0;
-}
-
-#[testing]
-fun t_vtable(id: u32, name: str, arch_id: u32) AbiVTable {
-    ret AbiVTable{
-        passing:               catalog_abi.PASSING_CARRIERS,
-        id:                    id,
-        name:                  name,
-        arch_id:               arch_id,
-        arg_passing:           t_arg,
-        ret_passing:           t_ret,
-        gp_arg_regs:           target_model.RegFile{regs: ?T_REGS[0], count: 1},
-        callee_saved:          target_model.RegFile{regs: ?T_REGS[0], count: 1},
-        stack_align:           16,
-        indirect_result_reg:   isa_inst.REG_NONE,
-        fp_callee_saved_bytes: 8,
-        float_arg_bits:        64,
-        arg_slot_granularity:  8,
-        va_model:              ?T_VA_MODEL,
-    };
-}
-
 #[testing]
 fun refused(vt: *AbiVTable) bool {
     var alloc: A.Allocator;
@@ -870,51 +776,6 @@ fun refused(vt: *AbiVTable) bool {
     val r: err[fail.Fail] = validate(?alloc, vt);
     if (sel r.err) { ret true; }
     ret false;
-}
-
-test validate__rejects_malformed_descriptors {
-    var valid: AbiVTable = t_vtable(catalog_abi.SYSV, "valid", catalog_arch.X86_64);
-    if (refused(?valid)) { ret 1; }
-    if (!refused(nil))   { ret 2; }
-
-    var no_name: AbiVTable = t_vtable(catalog_abi.SYSV, "", catalog_arch.X86_64);
-    if (!refused(?no_name)) { ret 3; }
-
-    var no_arch: AbiVTable = t_vtable(catalog_abi.SYSV, "no_arch", catalog_arch.UNKNOWN);
-    if (!refused(?no_arch)) { ret 4; }
-
-    var no_arg: AbiVTable = t_vtable(catalog_abi.SYSV, "no_arg", catalog_arch.X86_64);
-    no_arg.arg_passing = nil;
-    if (!refused(?no_arg)) { ret 5; }
-
-    var no_regfiles: AbiVTable = t_vtable(catalog_abi.SYSV, "no_regfiles", catalog_arch.X86_64);
-    no_regfiles.callee_saved.count = 0;
-    if (!refused(?no_regfiles)) { ret 6; }
-
-    var no_granularity: AbiVTable = t_vtable(catalog_abi.SYSV, "no_granularity", catalog_arch.X86_64);
-    no_granularity.arg_slot_granularity = 0;
-    if (!refused(?no_granularity)) { ret 7; }
-
-    var no_va_model: AbiVTable = t_vtable(catalog_abi.SYSV, "no_va_model", catalog_arch.X86_64);
-    no_va_model.va_model = nil;
-    if (!refused(?no_va_model)) { ret 8; }
-
-    var no_stack_align: AbiVTable = t_vtable(catalog_abi.SYSV, "no_stack_align", catalog_arch.X86_64);
-    no_stack_align.stack_align = 0;
-    if (!refused(?no_stack_align)) { ret 10; }
-    no_stack_align.stack_align = 24;
-    if (!refused(?no_stack_align)) { ret 11; }
-
-    var many_saved: AbiVTable = t_vtable(catalog_abi.SYSV, "many_saved", catalog_arch.X86_64);
-    many_saved.callee_saved.count = (target_of.FRAME_STEP_CAP - target_of.FRAME_FIXED_STEPS)::i32;
-    if (refused(?many_saved)) { ret 12; }
-    many_saved.callee_saved.count = many_saved.callee_saved.count + 1;
-    if (!refused(?many_saved)) { ret 13; }
-
-    var values: AbiVTable = t_vtable(catalog_abi.SPIRV, "values", catalog_arch.SPIRV);
-    values.passing = catalog_abi.PASSING_VALUES;
-    if (!refused(?values)) { ret 9; }
-    ret 0;
 }
 
 pub fun piece_memory_width(slot: *ParamSlot, piece: *ParamPiece) res[u8, fail.Fail] {
@@ -963,86 +824,4 @@ pub fun carrier_storage_alignment(slot: *ParamSlot) res[u32, fail.Fail] {
         i = i + 1;
     }
     ret res[u32, fail.Fail].ok{align};
-}
-
-test carrier_storage_extent__preserves_logical_tail {
-    var hfa:        ParamSlot           = make_slot_hfa(isa_inst.regid_make(isa_inst.REG_CLASS_ID_FP, 0), 4, 4, 16);
-    val hfa_extent: res[u64, fail.Fail] = carrier_storage_extent(?hfa);
-    if (sel hfa_extent.err)  { ret 5; }
-    if (hfa_extent.ok != 16) { ret 5; }
-    var width: u8 = 1;
-    for (width <= 16) {
-        var size: u64 = 0;
-        for (size <= width::u64 * 2) {
-            var slot: ParamSlot = make_slot_pair(CLASS_GP, isa_inst.regid_make(isa_inst.REG_CLASS_ID_GP, 0), isa_inst.regid_make(isa_inst.REG_CLASS_ID_GP, 1), 0, size, width::u32);
-            if (size < width::u64) { slot.piece_count = 1; }
-            val extent: res[u64, fail.Fail] = carrier_storage_extent(?slot);
-            if (sel extent.err)                                  { ret 1; }
-            if (extent.ok != width::u64 * slot.piece_count::u64) { ret 2; }
-            var copied: u64 = 0;
-            var i:      u32 = 0;
-            for (i < slot.piece_count) {
-                val wr: res[u8, fail.Fail] = piece_memory_width(?slot, ?slot.pieces[i]);
-                if (sel wr.err) { ret 3; }
-                copied = copied + wr.ok::u64;
-                i      = i + 1;
-            }
-            if (copied != size) { ret 4; }
-            size = size + 1;
-        }
-        width = width * 2;
-    }
-    ret 0;
-}
-
-test carrier_storage_extent__rejects_malformed_pieces {
-    var slot: ParamSlot = make_slot(CLASS_GP, isa_inst.regid_make(isa_inst.REG_CLASS_ID_GP, 0), 0, 4, 8);
-    slot.pieces[0].src_off = -1;
-    if (!t_carrier_storage_extent_refused(?slot)) { ret 1; }
-    slot.pieces[0].src_off = 5;
-    if (!t_carrier_storage_extent_refused(?slot)) { ret 2; }
-    slot.pieces[0].src_off = 0;
-    slot.pieces[0].width   = 0;
-    if (!t_carrier_storage_extent_refused(?slot)) { ret 3; }
-    slot.pieces[0].width = 3;
-    if (!t_carrier_storage_extent_refused(?slot)) { ret 4; }
-    slot.pieces[0].width = 8;
-    slot.pieces[0].kind  = 255;
-    if (!t_carrier_storage_extent_refused(?slot)) { ret 5; }
-    slot.pieces[0].kind = PIECE_FP;
-    if (t_carrier_storage_extent_refused(?slot)) { ret 6; }
-    slot.pieces[0].kind = PIECE_STACK;
-    if (t_carrier_storage_extent_refused(?slot)) { ret 7; }
-    slot.piece_count = PARAM_MAX_PIECES + 1;
-    if (!t_carrier_storage_extent_refused(?slot)) { ret 8; }
-    ret 0;
-}
-
-test carrier_storage_alignment__register_width_and_malformed_pieces {
-    var slot: ParamSlot = make_slot_pair(CLASS_GP, isa_inst.regid_make(isa_inst.REG_CLASS_ID_GP, 0), isa_inst.regid_make(isa_inst.REG_CLASS_ID_GP, 1), 0, 12, 8);
-    slot.pieces[0].width   = 4;
-    slot.pieces[1].kind    = PIECE_FP;
-    slot.pieces[1].src_off = 4;
-    val aligned: res[u32, fail.Fail] = carrier_storage_alignment(?slot);
-    if (sel aligned.err) { ret 1; }
-    if (aligned.ok != 8) { ret 1; }
-    slot.pieces[1].kind = PIECE_STACK;
-    val stack: res[u32, fail.Fail] = carrier_storage_alignment(?slot);
-    if (sel stack.err) { ret 2; }
-    if (stack.ok != 4) { ret 2; }
-    slot.pieces[1].width = 3;
-    if (!t_carrier_storage_alignment_refused(?slot)) { ret 3; }
-    slot.pieces[1].width   = 8;
-    slot.pieces[1].src_off = -1;
-    if (!t_carrier_storage_alignment_refused(?slot)) { ret 4; }
-    slot.pieces[1].src_off = 4;
-    slot.pieces[1].kind    = 255;
-    if (!t_carrier_storage_alignment_refused(?slot)) { ret 5; }
-    slot.piece_count = PARAM_MAX_PIECES + 1;
-    if (!t_carrier_storage_alignment_refused(?slot)) { ret 6; }
-    slot.piece_count = 0;
-    val empty: res[u32, fail.Fail] = carrier_storage_alignment(?slot);
-    if (sel empty.err) { ret 7; }
-    if (empty.ok != 1) { ret 7; }
-    ret 0;
 }

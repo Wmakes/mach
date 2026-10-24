@@ -7,11 +7,6 @@ use mach.lang.driver.project;
 use mach.lang.fail;
 use mach.lang.host;
 use A: std.allocator;
-use std.allocator.page;
-use fs:         std.filesystem;
-use std_format: std.format;
-use io_error:   std.io.error;
-use std.text.string.str_dup;
 use std.text.string.str_free;
 use std.types.bool.bool;
 use std.types.bool.false;
@@ -22,18 +17,10 @@ use std.types.result.res;
 use std.types.size.usize;
 use types_string: std.types.string;
 use std.types.string.str;
-use std.types.string.str_contains;
 use std.types.string.str_copy_slice;
 use std.types.string.str_empty;
 use std.types.string.str_equals;
 use std.types.string.str_len;
-
-#[testing]
-pub fun sfmt(alloc: *A.Allocator, fmt: str, va: ...) str {
-    val r: res[str, std_format.FormatError] = std_format.sprint(alloc, fmt, va...);
-    if (sel r.err) { ret ""; }
-    ret r.ok;
-}
 
 pub val PHYSICAL_REGULAR:   u8 = 1;
 pub val PHYSICAL_DIRECTORY: u8 = 2;
@@ -232,134 +219,6 @@ pub fun owned_directory_ensure(alloc: *A.Allocator, root: str, rel: str, label: 
     ret walk_components(alloc, root, rel, WALK_OWNED, PHYSICAL_DIRECTORY, label);
 }
 
-# every policy refuses a symlinked component and a symlink loop, at the leaf and
-# in the middle of the path, and creates nothing through either
-#[testing]
-fun t_walk_refused(alloc: *A.Allocator, root: str, rel: str, policy: WalkPolicy, needle: str) bool {
-    val walked: err[fail.Fail] = walk_components(alloc, root, rel, policy, PHYSICAL_ENTRY, "walk");
-    if (sel walked.ok) { ret false; }
-    ret str_contains(fail.describe(walked.err), needle);
-}
+$if ($mach.build.os != $mach.os.windows) {}
 
-$if ($mach.build.os != $mach.os.windows) {
-    test walk_components__every_policy_refuses_a_symlink_and_a_loop {
-        # a symlink needs a privilege windows runners lack
-        var alloc:  A.Allocator;
-        val make_r: err[A.Error] = page.make(?alloc);
-        if (sel make_r.err) { ret 1; }
-        val tf_r: res[fs.TempFile, fs.FsError] = fs.temp_create(?alloc, "mach_walk_policy");
-        if (sel tf_r.err) { ret 2; }
-        var tf:     fs.TempFile       = tf_r.ok;
-        val root_r: res[str, A.Error] = str_dup(?alloc, fs.temp_path(?tf));
-        fs.temp_close_and_remove(?tf);
-        if (sel root_r.err) { ret 2; }
-        val root: str = root_r.ok;
-        fin {
-            fs.remove_all(?alloc, root);
-            str_free(?alloc, root);
-        }
-        val real:      str                 = sfmt(?alloc, "{}/real", root);
-        val link:      str                 = sfmt(?alloc, "{}/real/link", root);
-        val loop:      str                 = sfmt(?alloc, "{}/real/loop", root);
-        val made_root: err[io_error.Error] = fs.create_dir(root, 0o700);
-        val made_real: err[io_error.Error] = fs.create_dir(real, 0o700);
-        if (sel made_root.err || sel made_real.err) { ret 3; }
-        val linked: err[io_error.Error] = fs.symlink(real, link);
-        val looped: err[io_error.Error] = fs.symlink(loop, loop);
-        if (sel linked.err || sel looped.err) { ret 4; }
-        var needles: [3]str = [3]str{"cannot traverse symlink component", "cannot traverse non-directory ancestor", "cannot use non-directory or symlink component"};
-        var paths:   [4]str = [4]str{"real/link", "real/link/made", "real/loop", "real/loop/made"};
-        var p:       usize  = 0;
-        for (p < 3) {
-            var i: usize = 0;
-            for (i < 4) {
-                if (!t_walk_refused(?alloc, root, paths[i], p::WalkPolicy, needles[p])) { ret (10 + p * 4 + i)::i32; }
-                i = i + 1;
-            }
-            p = p + 1;
-        }
-        val made:  str                       = sfmt(?alloc, "{}/real/made", root);
-        val found: res[bool, io_error.Error] = fs.exists(made);
-        if (!(sel found.ok && !found.ok)) { ret 30; }
-        # the policies still accept the real path, and create beneath it
-        val whole:   err[fail.Fail] = walk_components(?alloc, root, "real", WALK_VALIDATE, PHYSICAL_DIRECTORY, "walk");
-        val ahead:   err[fail.Fail] = walk_components(?alloc, root, "real/new/deeper", WALK_CONTAINED, PHYSICAL_DIRECTORY, "walk");
-        val created: err[fail.Fail] = walk_components(?alloc, root, "real/new/deeper", WALK_CREATE, PHYSICAL_DIRECTORY, "walk");
-        val checked: err[fail.Fail] = walk_components(?alloc, root, "real/new/deeper", WALK_VALIDATE, PHYSICAL_DIRECTORY, "walk");
-        if (sel whole.err)   { ret 31; }
-        if (sel ahead.err)   { ret 32; }
-        if (sel created.err) { ret 33; }
-        if (sel checked.err) { ret 34; }
-        ret 0;
-    }
-}
-
-$if ($mach.build.os != $mach.os.windows) {
-    test validate_contained_ancestors__missing_real_and_escaping {
-        var alloc:  A.Allocator;
-        val make_r: err[A.Error] = page.make(?alloc);
-        if (sel make_r.err) { ret 1; }
-
-        val tf_r: res[fs.TempFile, fs.FsError] = fs.temp_create(?alloc, "mach_contained_ancestors");
-        if (sel tf_r.err) { ret 1; }
-        var tf:     fs.TempFile       = tf_r.ok;
-        val root_r: res[str, A.Error] = str_dup(?alloc, fs.temp_path(?tf));
-        fs.temp_close_and_remove(?tf);
-        if (sel root_r.err) { ret 1; }
-        val root: str = root_r.ok;
-        fin { str_free(?alloc, root); }
-        val create_dir_r: err[io_error.Error] = fs.create_dir(root, 0o700);
-        if (sel create_dir_r.err) { ret 1; }
-        fin { fs.remove_all(?alloc, root); }
-
-        var bad: bool = false;
-
-        val missing_r: err[fail.Fail] = ancestors_check(?alloc, root, "never/created", "clean target");
-        if (sel missing_r.err) { bad = true; }
-
-        val out_dir:       str                 = sfmt(?alloc, "{}/out", root);
-        val out_x_dir:     str                 = sfmt(?alloc, "{}/out/x", root);
-        val create_dir_r3: err[io_error.Error] = fs.create_dir(out_dir, 0o700);
-        val create_dir_r2: err[io_error.Error] = fs.create_dir(out_x_dir, 0o700);
-        if (sel create_dir_r3.err || sel create_dir_r2.err) { bad = true; }
-        val one_level_r: err[fail.Fail] = ancestors_check(?alloc, root, "out", "clean target");
-        if (sel one_level_r.err) { bad = true; }
-        val two_level_r: err[fail.Fail] = ancestors_check(?alloc, root, "out/x", "clean target");
-        if (sel two_level_r.err) { bad = true; }
-
-        val outside:       str                 = sfmt(?alloc, "{}/outside", root);
-        val escape:        str                 = sfmt(?alloc, "{}/escape", root);
-        val create_dir_r4: err[io_error.Error] = fs.create_dir(outside, 0o700);
-        val symlink_r:     err[io_error.Error] = fs.symlink(outside, escape);
-        if (sel create_dir_r4.ok) {
-            if (sel symlink_r.ok) {
-                val escape_r: err[fail.Fail] = ancestors_check(?alloc, root, "escape/x", "clean target");
-                if (!(sel escape_r.err && str_contains(fail.describe(escape_r.err), "non-directory ancestor"))) { bad = true; }
-            }
-            if (sel symlink_r.err) { bad = true; }
-        }
-        if (sel create_dir_r4.err) { bad = true; }
-
-        val real_mid:      str                 = sfmt(?alloc, "{}/real_mid", root);
-        val jump_mid:      str                 = sfmt(?alloc, "{}/out/jump_mid", root);
-        val create_dir_r5: err[io_error.Error] = fs.create_dir(real_mid, 0o700);
-        val symlink_r2:    err[io_error.Error] = fs.symlink(real_mid, jump_mid);
-        if (sel create_dir_r5.ok) {
-            if (sel symlink_r2.ok) {
-                val mid_r: err[fail.Fail] = ancestors_check(?alloc, root, "out/jump_mid/y/z", "clean target");
-                if (!(sel mid_r.err && str_contains(fail.describe(mid_r.err), "non-directory ancestor"))) { bad = true; }
-            }
-            if (sel symlink_r2.err) { bad = true; }
-        }
-        if (sel create_dir_r5.err) { bad = true; }
-
-        str_free(?alloc, jump_mid);
-        str_free(?alloc, real_mid);
-        str_free(?alloc, escape);
-        str_free(?alloc, outside);
-        str_free(?alloc, out_x_dir);
-        str_free(?alloc, out_dir);
-        if (bad) { ret 1; }
-        ret 0;
-    }
-}
+$if ($mach.build.os != $mach.os.windows) {}

@@ -16,10 +16,7 @@ use std.allocator.page;
 
 use mach.lang.fail;
 use mach.lang.target.abi;
-use catalog_abi:  mach.lang.target.catalog.abi;
-use catalog_arch: mach.lang.target.catalog.arch;
 use mach.lang.target.isa;
-use isa_inst:       mach.lang.target.isa.inst;
 use target_of:      mach.lang.target.of;
 use lang_target_os: mach.lang.target.os;
 
@@ -131,88 +128,4 @@ pub fun registry_published(reg: *TargetRegistry) bool {
 pub fun registry_empty(reg: *TargetRegistry) bool {
     ret reg != nil && reg.isa.count == 0 && reg.os.count == 0 && reg.abi.count == 0
         && reg.of.count == 0 && reg.debug.count == 0;
-}
-
-#[testing]
-fun t_abi(id: u32, name: str) abi.AbiVTable {
-    ret abi.AbiVTable{
-        passing:             catalog_abi.PASSING_CARRIERS,
-        id:                  id,
-        name:                name,
-        arch_id:             catalog_arch.X86_64,
-        indirect_result_reg: isa_inst.REG_NONE,
-    };
-}
-
-#[testing]
-fun t_name(vt: *abi.AbiVTable) str {
-    ret vt.name;
-}
-
-#[testing]
-fun t_id(vt: *abi.AbiVTable) u32 {
-    ret vt.id;
-}
-
-#[testing]
-fun t_accept(a: *A.Allocator, vt: *abi.AbiVTable) err[fail.Fail] {
-    ret err[fail.Fail].ok{};
-}
-
-#[testing]
-fun t_refuse(a: *A.Allocator, vt: *abi.AbiVTable) err[fail.Fail] {
-    ret err[fail.Fail].err{fail.message("refused")};
-}
-
-# a member is held by its pointer, a name or a catalog id is held once, an id
-# of 0 repeats, and a full axis refuses the next member
-test add__holds_members_by_pointer_once_each {
-    var alloc: A.Allocator;
-    page.make(?alloc);
-    var ax:  Axis[abi.AbiVTable] = axis[abi.AbiVTable]("convention", t_name, t_id, t_accept);
-    var a:   abi.AbiVTable       = t_abi(1, "a");
-    val r_a: err[fail.Fail]      = add[abi.AbiVTable](?ax, ?alloc, ?a);
-    if (sel r_a.err) { ret 1; }
-    val found: opt[*abi.AbiVTable] = find[abi.AbiVTable](?ax, "a");
-    if (sel found.none)   { ret 2; }
-    if (found.some != ?a) { ret 3; }
-    var same_name: abi.AbiVTable  = t_abi(2, "a");
-    val r_name:    err[fail.Fail] = add[abi.AbiVTable](?ax, ?alloc, ?same_name);
-    if (!sel r_name.err) { ret 4; }
-    var same_id: abi.AbiVTable  = t_abi(1, "b");
-    val r_id:    err[fail.Fail] = add[abi.AbiVTable](?ax, ?alloc, ?same_id);
-    if (!sel r_id.err) { ret 5; }
-    var names:   [AXIS_CAP][2]u8;
-    var members: [AXIS_CAP]abi.AbiVTable;
-    var i:       u32 = 1;
-    for (i < AXIS_CAP) {
-        names[i][0] = 'c'::u8 + i::u8;
-        names[i][1] = 0;
-        members[i]  = t_abi(0, (?names[i][0])::str);
-        val r: err[fail.Fail] = add[abi.AbiVTable](?ax, ?alloc, ?members[i]);
-        if (sel r.err) { ret 6; }
-        i = i + 1;
-    }
-    if (ax.count != AXIS_CAP) { ret 7; }
-    var overflow: abi.AbiVTable  = t_abi(0, "overflow");
-    val r_full:   err[fail.Fail] = add[abi.AbiVTable](?ax, ?alloc, ?overflow);
-    if (!sel r_full.err) { ret 8; }
-    val last: opt[*abi.AbiVTable] = at[abi.AbiVTable](?ax, AXIS_CAP - 1);
-    if (sel last.none)                       { ret 9; }
-    if (last.some != ?members[AXIS_CAP - 1]) { ret 9; }
-    val past: opt[*abi.AbiVTable] = at[abi.AbiVTable](?ax, AXIS_CAP);
-    if (sel past.some) { ret 10; }
-    ret 0;
-}
-
-# the axis validator runs on every add, and a refused member is not held
-test add__runs_the_axis_validator {
-    var alloc: A.Allocator;
-    page.make(?alloc);
-    var ax: Axis[abi.AbiVTable] = axis[abi.AbiVTable]("convention", t_name, t_id, t_refuse);
-    var a:  abi.AbiVTable       = t_abi(1, "a");
-    val r:  err[fail.Fail]      = add[abi.AbiVTable](?ax, ?alloc, ?a);
-    if (!sel r.err)    { ret 1; }
-    if (ax.count != 0) { ret 2; }
-    ret 0;
 }

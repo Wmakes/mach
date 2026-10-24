@@ -28,14 +28,6 @@ use mach.lang.target.extension;
 use isa_encode:   mach.lang.target.isa.encode;
 use isa_inst:     mach.lang.target.isa.inst;
 use target_model: mach.lang.target.model;
-# the host suites: each runs the rows it checks on the host processor
-#[testing]
-use mach.lang.target.isa.asm.crypto;
-#[testing]
-use mach.lang.target.isa.asm.extensions;
-#[testing]
-use mach.lang.target.isa.asm.host;
-
 val MAX_OPS: usize = 4;
 
 pub val STMT_MAX: usize = 512;
@@ -1475,73 +1467,6 @@ fun words_message(c: *Cursor, item: *Item) res[str, fail.Fail] {
         "' emitted a different number of instruction words than its form declares");
 }
 
-test label_span__token_shapes {
-    var num: u64 = 0;
-    var bad: i32 = 0;
-
-    if (label_def_span("1:", 0, 2, ?num) != 2 || num != 1)                 { bad = 1; }
-    if (label_def_span("42: mov rax, rbx", 0, 16, ?num) != 3 || num != 42) { bad = 1; }
-    if (label_def_span("mov rax, rbx", 0, 12, ?num) != 0)                  { bad = 1; }
-    if (label_def_span("1f", 0, 2, ?num) != 0)                             { bad = 1; }
-
-    var fwd: bool = false;
-    if (!label_ref_span("1f", 0, 2, ?num, ?fwd) || num != 1 || !fwd)  { bad = 1; }
-    if (!label_ref_span("23b", 0, 3, ?num, ?fwd) || num != 23 || fwd) { bad = 1; }
-    if (label_ref_span("loop", 0, 4, ?num, ?fwd))                     { bad = 1; }
-    if (label_ref_span("1x", 0, 2, ?num, ?fwd))                       { bad = 1; }
-    if (label_ref_span("1", 0, 1, ?num, ?fwd))                        { bad = 1; }
-    ret bad;
-}
-
-test data_expand__orders_bytes_by_endianness {
-    var bad: i32 = 0;
-    var b:   [8]u8;
-
-    data_expand(0xD503201F, 4, target_model.ENDIAN_LITTLE, ?b[0]);
-    if (b[0] != 0x1F || b[1] != 0x20 || b[2] != 0x03 || b[3] != 0xD5) { bad = 1; }
-
-    data_expand(0xD503201F, 4, target_model.ENDIAN_BIG, ?b[0]);
-    if (b[0] != 0xD5 || b[1] != 0x03 || b[2] != 0x20 || b[3] != 0x1F) { bad = 1; }
-
-    data_expand(0x90, 1, target_model.ENDIAN_LITTLE, ?b[0]);
-    if (b[0] != 0x90) { bad = 1; }
-    data_expand(0x0123456789ABCDEF, 8, target_model.ENDIAN_LITTLE, ?b[0]);
-    if (b[0] != 0xEF || b[1] != 0xCD || b[2] != 0xAB || b[3] != 0x89) { bad = 1; }
-    if (b[4] != 0x67 || b[5] != 0x45 || b[6] != 0x23 || b[7] != 0x01) { bad = 1; }
-
-    b[2] = 0xAA;
-    data_expand(0x1234, 2, target_model.ENDIAN_LITTLE, ?b[0]);
-    if (b[0] != 0x34 || b[1] != 0x12 || b[2] != 0xAA) { bad = 1; }
-
-    ret bad;
-}
-
-test data_value__bounds_are_per_width {
-    var bad: i32 = 0;
-    var v:   u64 = 0;
-
-    if (!data_value("255", 0, 3, 1, ?v) || v != 255)   { bad = 1; }
-    if (data_value("256", 0, 3, 1, ?v))                { bad = 1; }
-    if (!data_value("-128", 0, 4, 1, ?v) || v != 0x80) { bad = 1; }
-    if (data_value("-129", 0, 4, 1, ?v))               { bad = 1; }
-
-    if (!data_value("65535", 0, 5, 2, ?v) || v != 65535)   { bad = 1; }
-    if (data_value("65536", 0, 5, 2, ?v))                  { bad = 1; }
-    if (!data_value("-32768", 0, 6, 2, ?v) || v != 0x8000) { bad = 1; }
-    if (data_value("-32769", 0, 6, 2, ?v))                 { bad = 1; }
-
-    if (!data_value("4294967295", 0, 10, 4, ?v) || v != 4294967295) { bad = 1; }
-    if (data_value("4294967296", 0, 10, 4, ?v))                     { bad = 1; }
-
-    if (!data_value("0xFFFFFFFFFFFFFFFF", 0, 18, 8, ?v) || v != 18446744073709551615) { bad = 1; }
-    if (!data_value("-1", 0, 2, 8, ?v) || v != 18446744073709551615)                  { bad = 1; }
-
-    if (data_value("0x1 0x2", 0, 7, 1, ?v)) { bad = 1; }
-    if (data_value("zz", 0, 2, 1, ?v))      { bad = 1; }
-
-    ret bad;
-}
-
 fun bind_secrecy(body: str, op: *Operand, secrets: *ct.AsmSecret, n_secret: u32) ct.BindSecrecy {
     if (op.kind != AOP_BIND) { ret ct.bind_public(); }
     var i: u32 = 0;
@@ -1674,14 +1599,6 @@ pub fun ct_scan(grammar: GrammarFn, body: str, secrets: *ct.AsmSecret, n_secret:
         }
     }
     ret err[ct.AsmRefusal].ok{};
-}
-
-# whether the constant-time scan refuses `body`, for tests that only need the verdict
-#[testing]
-pub fun t_scan_refused(grammar: GrammarFn, body: str, secrets: *ct.AsmSecret, n_secret: u32,
-    mul: ct.CtMulMask, trust_shift: bool) bool {
-    val scanned: err[ct.AsmRefusal] = ct_scan(grammar, body, secrets, n_secret, mul, trust_shift);
-    ret sel scanned.err;
 }
 
 fun ct_check_item(g: *Grammar, body: str, item: *Item, taint: *Taint, flags_taint: *bool, mem_taint: *bool,

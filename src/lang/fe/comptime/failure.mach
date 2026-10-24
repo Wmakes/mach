@@ -1,15 +1,10 @@
 # why a comptime evaluation has no value: refused for good, waiting on a later phase or
 # an instance, or failed inside the compiler
-use lang_alloc: mach.lang.alloc;
 use mach.lang.diagnostic;
 use diagnostic_kind: mach.lang.diagnostic.kind;
 use mach.lang.fail;
-use mach.lang.fe.ast;
-use ast_expr:    mach.lang.fe.ast.expr;
-use ast_id:      mach.lang.fe.ast.id;
 use lang_source: mach.lang.source;
 use A:           std.allocator;
-use T:           std.allocator.testing;
 use std.types.bool.bool;
 use std.types.error.err;
 use std.types.option.opt;
@@ -82,9 +77,4 @@ pub fun init_not_constant_report(alloc: *A.Allocator, diags: *diagnostic.Diagnos
     val reported: err[fail.Fail] = diagnostic.report(diags, diagnostic_kind.GLOBAL_INIT_NOT_CONSTANT, file, span, joined.ok);
     A.deallocate[u8](alloc, joined.ok::*u8, str_len(joined.ok) + 1);
     ret reported;
-}
-
-#[testing]
-pub fun t_catalog_expression(node: *ast_expr.Expr, a: *ast.Ast, eid: ast_id.ExprId) res[ast_expr.Expr, EvalFail] {
-    ret res[ast_expr.Expr, EvalFail].ok{@node};
 }

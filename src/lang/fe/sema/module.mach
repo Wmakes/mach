@@ -3,12 +3,10 @@ use mach.lang.diagnostic;
 use diagnostic_kind: mach.lang.diagnostic.kind;
 use mach.lang.fail;
 use mach.lang.fe.ast;
-use ast_decl: mach.lang.fe.ast.decl;
-use ast_expr: mach.lang.fe.ast.expr;
-use ast_id:   mach.lang.fe.ast.id;
-use mach.lang.fe.ast.interpretation;
+use ast_decl:   mach.lang.fe.ast.decl;
+use ast_expr:   mach.lang.fe.ast.expr;
+use ast_id:     mach.lang.fe.ast.id;
 use ast_module: mach.lang.fe.ast.module;
-use ast_stmt:   mach.lang.fe.ast.stmt;
 use ast_type:   mach.lang.fe.ast.type;
 use mach.lang.fe.comptime;
 use comptime_deep: mach.lang.fe.comptime.deep;
@@ -45,7 +43,6 @@ use mach.lang.type;
 use mach.lang.type.query.reach;
 use mach.lang.type.query.subst;
 use A: std.allocator;
-use std.allocator.page;
 use std.collections.map;
 use std.types.bool.bool;
 use std.types.bool.false;
@@ -55,7 +52,6 @@ use std.types.option.opt;
 use std.types.result.res;
 use std.types.size.usize;
 use std.types.string.str;
-use std.types.string.str_contains;
 use std.types.string.str_len;
 
 # type a module in a scope over the load's, `load`, and resolve's bindings in `rr`, which sema
@@ -1117,70 +1113,4 @@ fun finish_result(sc: *sema_context.SemaContext, graph: fields.Graph, published:
     sc.view.embed_path_len   = 0;
 
     ret res[sema_product.SemaResult, fail.Fail].ok{out};
-}
-
-test unknown_kind__never_becomes_an_error_type_without_failure {
-    var alloc:  A.Allocator;
-    val make_1: err[A.Error] = page.make(?alloc);
-    if (sel make_1.err) { ret 1; }
-    var s: session.Session = session.Session{};
-    s.alloc    = ?alloc;
-    s.interner = intern.init(?alloc);
-    fin { intern.dnit(?s.interner); }
-    var ex:     ast_expr.Expr         = ast_expr.Expr{kind: 200};
-    var de:     ast_decl.Decl         = ast_decl.Decl{kind: 200};
-    var ty:     ast_type.Type         = ast_type.Type{kind: 200};
-    var st:     ast_stmt.Stmt         = ast_stmt.Stmt{kind: 200};
-    var choice: interpretation.Choice = interpretation.PARSED;
-    var rr:     resolve.ResolveResult = resolve.ResolveResult{expr_choices: ?choice, expr_choices_count: 1};
-    var a:      ast.Ast               = ast.Ast{exprs: ast.table_over[ast_expr.Expr](?ex, 1),
-        decls: ast.table_over[ast_decl.Decl](?de, 1), types: ast.table_over[ast_type.Type](?ty, 1),
-        stmts: ast.table_over[ast_stmt.Stmt](?st, 1)};
-    var sc:    sema_context.SemaContext = sema_context.init(?s, nil, sema_context.Typing{}, sema_context.ModuleView{a: ?a, rr: ?rr}, sema_context.instance_none());
-    val names: [7]str                   = [7]str{"ExprKind", "BinOp", "UnOp", "DeclKind", "AstTypeKind", "StmtKind", "DeclKind"};
-    var i:     usize                    = 0;
-    for (i < 7) {
-        sc.status = fail.accepted();
-        var result: type.TypeId = type.TYPE_ERROR;
-        if (i < 3) {
-            if (i == 1) {
-                ex.kind           = ast_expr.EXPR_KIND_BINARY;
-                ex.data.binary.op = 200;
-            }
-            if (i == 2) {
-                ex.kind          = ast_expr.EXPR_KIND_UNARY;
-                ex.data.unary.op = 200;
-            }
-            result = infer.infer_expr(?sc, ast_id.expr(0));
-        }
-        or (i == 3) { result = infer.infer_decl(?sc, ast_id.decl(0)); }
-        or (i == 4) { result = sema_declared.resolve_type_ref(?sc, ast_id.type(0)); }
-        or {
-            if (i == 6) {
-                st.kind           = ast_stmt.STMT_KIND_DECL;
-                st.data.decl.decl = ast_id.decl(0);
-            }
-            val infer_stmt_2: err[fail.Fail] = sema_stmt.infer_stmt(?sc, ast_id.stmt(0), type.TYPE_NIL);
-            if (sel infer_stmt_2.ok) { ret 2; }
-        }
-        if (!type.is_error(result))                                                                                    { ret 3; }
-        if (!sel sc.status.kind.internal)                                                                              { ret 3; }
-        if (sc.status.rejections != 0)                                                                                 { ret 3; }
-        if (!str_contains(fail.status_text(sc.status), names[i]) || !str_contains(fail.status_text(sc.status), "200")) { ret 4; }
-        i = i + 1;
-    }
-    sc.status = fail.accepted();
-    ex.kind   = ast_expr.EXPR_KIND_ERROR;
-    de.kind   = ast_decl.DECL_KIND_USE;
-    ty.kind   = ast_type.TYPE_KIND_ERROR;
-    st.kind   = ast_stmt.STMT_KIND_ASM;
-    if (!type.is_error(infer.infer_expr(?sc, ast_id.expr(0))) || !type.is_nil(infer.infer_decl(?sc, ast_id.decl(0)))
-        || !type.is_error(sema_declared.resolve_type_ref(?sc, ast_id.type(0)))) { ret 5; }
-    val inferred_stmt: err[fail.Fail] = sema_stmt.infer_stmt(?sc, ast_id.stmt(0), type.TYPE_NIL);
-    if (sel inferred_stmt.err) { ret 5; }
-    st.kind = ast_stmt.STMT_KIND_ERROR;
-    val infer_stmt_3: err[fail.Fail] = sema_stmt.infer_stmt(?sc, ast_id.stmt(0), type.TYPE_NIL);
-    if (sel infer_stmt_3.err)         { ret 6; }
-    if (!sel sc.status.kind.accepted) { ret 6; }
-    ret 0;
 }

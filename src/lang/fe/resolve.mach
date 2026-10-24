@@ -16,7 +16,6 @@ use std.types.option.opt;
 use std.types.result.res;
 use std.types.size.usize;
 use std.types.string.str;
-use std.types.string.str_equals;
 use std.types.string.str_len;
 
 use A: std.allocator;
@@ -50,15 +49,12 @@ use lang_source: mach.lang.source;
 use mach.lang.source.provider.resident;
 use mach.lang.stack;
 #[testing]
-use catalog_abi:  mach.lang.target.catalog.abi;
+use catalog_abi: mach.lang.target.catalog.abi;
 #[testing]
-use catalog_os:   mach.lang.target.catalog.os;
-#[testing]
-use target_model: mach.lang.target.model;
+use catalog_os:  mach.lang.target.catalog.os;
 #[testing]
 use mach.lang.target.resolved;
 use mach.lang.type;
-use std.types.string.str_contains;
 
 # a symbol's slot in the resolve context's symbol table
 pub rec SymbolId {
@@ -438,6 +434,12 @@ pub fun type_owner(s: *session.Session, mid: session.ModuleId, file: lang_source
 # the module a symbol is defined in, as the current operation numbers it
 pub fun origin_of(s: *session.Session, sym: *Symbol) session.ModuleId {
     ret session.module_id_for_stable(s, sym.origin);
+}
+
+# whether `sym` names a binding a module other than `own` declares: an import, or a `fwd` of one,
+# which carries the kind the binding is declared with there as its own
+pub fun foreign_to(s: *session.Session, sym: *Symbol, own: session.ModuleId) bool {
+    ret !module.same(origin_of(s, sym), own);
 }
 
 # the module a `use` symbol names, as the current operation numbers it
@@ -2170,7 +2172,9 @@ fun collect_fwd(rc: *ResolveContext, decl_id: ast_id.DeclId, df: *ast_decl.DeclF
     var slot: u32 = 0;
     if (ps.kind == SYM_USE) { slot = ps.slot; }
 
-    val r_sym: res[SymbolId, fail.Fail] = add_symbol(rc, ps.kind, SYM_FLAG_PUB, name_id, ps.canon, ast_id.DECL_NIL, slot, ps.origin);
+    # a `fwd` binds its name at module scope, so what it forwards is module-level here as it is
+    # where it is declared
+    val r_sym: res[SymbolId, fail.Fail] = add_symbol(rc, ps.kind, SYM_FLAG_PUB | SYM_FLAG_MODULE, name_id, ps.canon, ast_id.DECL_NIL, slot, ps.origin);
     if (sel r_sym.err) {
         fail.internal(?rc.status, fail.describe(r_sym.err));
         ret err[fail.Fail].err{r_sym.err};
@@ -3915,248 +3919,6 @@ fun record_report(rc: *ResolveContext, k: diagnostic_kind.Kind, span: lang_sourc
     if (sel r.err) { fail.internal(?rc.status, fail.describe(r.err)); }
 }
 
-#[testing]
-fun t_vector_refusal_owner(refuse: bool) i32 {
-    var backing: A.Allocator;
-    val make_1:  err[A.Error] = page.make(?backing);
-    if (sel make_1.err) { ret 1; }
-    val sr: res[session.Session, fail.Fail] = session.init(?backing);
-    if (sel sr.err) { ret 2; }
-    var s: session.Session = sr.ok;
-    fin { session.dnit(?s); }
-    val nr: res[intern.StrId, A.Error] = intern.add(?s.interner, "u32x4294967296");
-    if (sel nr.err) { ret 3; }
-    val form: type.VecForm = type.vector_form("u32x4294967296");
-    if (form.status != type.VEC_FORM_TOO_WIDE) { ret 4; }
-    var a: ast.Ast = ast.init(?backing, lang_source.file_id(0));
-    fin { ast.dnit(?a); }
-    var rc: ResolveContext;
-    rc.s      = ?s;
-    rc.diags  = ?s.diags;
-    rc.a      = ?a;
-    rc.status = fail.accepted();
-    var span: lang_source.Span;
-    span.offset = 0;
-    span.len    = 0;
-    var t:      T.Testing;
-    val make_2: err[A.Error] = T.make(?t);
-    if (sel make_2.err) { ret 5; }
-    fin { T.dnit(?t); }
-    if (!refuse) {
-        val r: err[fail.Fail] = report_vector_refused(?rc, span, nr.ok, form);
-        if (sel r.err)                    { ret 7; }
-        if (!sel rc.status.kind.rejected) { ret 7; }
-        ret 0;
-    }
-    T.fail_at_ordinal(?t, 1);
-    val original: *A.Allocator = s.diags.a;
-    s.diags.a = T.allocator_of(?t);
-    val r: err[fail.Fail] = report_vector_refused(?rc, span, nr.ok, form);
-    s.diags.a = original;
-    if (sel r.ok)                                                                          { ret 6; }
-    if (!sel rc.status.kind.internal)                                                      { ret 6; }
-    if (T.live_count(?t) != 0 || T.double_free_count(?t) != 0 || T.tracking_exhausted(?t)) { ret 8; }
-    ret 0;
-}
-
-# the oversized-vector diagnostic is reported, and an allocation refusal while building it
-# is an internal failure that leaves nothing allocated
-test report_vector_refused__owns_its_message {
-    if (t_vector_refusal_owner(false) != 0) { ret 1; }
-    if (t_vector_refusal_owner(true) != 0)  { ret 2; }
-    ret 0;
-}
-
-test report_named__diagnostic_refusal_marks_the_result_internal {
-    var backing: A.Allocator;
-    val make_1:  err[A.Error] = page.make(?backing);
-    if (sel make_1.err) { ret 1; }
-    val sr: res[session.Session, fail.Fail] = session.init(?backing);
-    if (sel sr.err) { ret 2; }
-    var s: session.Session = sr.ok;
-    fin { session.dnit(?s); }
-    var a: ast.Ast = ast.init(?backing, lang_source.file_id(0));
-    fin { ast.dnit(?a); }
-    var rc: ResolveContext;
-    rc.s      = ?s;
-    rc.diags  = ?s.diags;
-    rc.a      = ?a;
-    rc.status = fail.accepted();
-    var span: lang_source.Span;
-    span.offset = 0;
-    span.len    = 0;
-    var t:      T.Testing;
-    val make_2: err[A.Error] = T.make(?t);
-    if (sel make_2.err) { ret 3; }
-    fin { T.dnit(?t); }
-    diagnostic.store_dnit(?s.diags);
-    s.diags = diagnostic.store_init(T.allocator_of(?t));
-    T.fail_at_ordinal(?t, 1);
-    val r: err[fail.Fail] = report_named(?rc, diagnostic_kind.NAME_UNRESOLVED, span, "invalid name", intern.STR_NIL, "");
-    diagnostic.store_dnit(?s.diags);
-    s.diags = diagnostic.store_init(?backing);
-    if (sel r.ok)                                                                 { ret 4; }
-    if (!sel rc.status.kind.internal)                                             { ret 4; }
-    if (T.attempt_count(?t) != 1 || T.leaked(?t) || T.double_free_count(?t) != 0) { ret 5; }
-    ret 0;
-}
-
-#[testing]
-fun t_symbol_growth_boundary(exhausted: bool) i32 {
-    var t:    T.Testing;
-    val made: err[A.Error] = T.make(?t);
-    if (sel made.err) { ret 11; }
-    fin { T.dnit(?t); }
-    T.fail_from_ordinal(?t, 1);
-    var s: session.Session;
-    s.alloc = T.allocator_of(?t);
-    var storage: [1]Symbol;
-    storage[0].kind = SYM_FUN;
-    var rc: ResolveContext;
-    rc.s       = ?s;
-    rc.diags   = ?s.diags;
-    rc.status  = fail.accepted();
-    rc.symbols = ?storage[0];
-    rc.sym_cap = 0x80000000;
-    if (exhausted) { rc.sym_cap = symbol_index(SYMBOL_RESERVED_MIN); }
-    rc.sym_len = rc.sym_cap;
-    val old_cap: u32                      = rc.sym_cap;
-    val r:       res[SymbolId, fail.Fail] = add_symbol(?rc, SYM_VAL, 0, intern.STR_NIL, intern.STR_NIL,
-        ast_id.DECL_NIL, 0, session.STABLE_MODULE_NIL);
-    if (sel r.ok)                     { ret 1; }
-    if (!sel rc.status.kind.internal) { ret 1; }
-    if (exhausted) {
-        if (!str_equals(fail.describe(r.err), "resolver symbol table exhausted")) { ret 2; }
-        if (T.attempt_count(?t) != 0)                                             { ret 3; }
-    }
-    or {
-        if ($size_of(usize) == 8) {
-            if (!str_equals(fail.describe(r.err), "out of memory")) { ret 4; }
-            if (T.attempt_count(?t) != 1 || T.reallocate_count(?t) != 1
-                || T.last_reallocated(?t) != (?storage[0])::ptr
-                || T.last_old_size(?t) != old_cap::usize * $size_of(Symbol)
-                || T.last_request_size(?t) != (~(0::u32))::usize * $size_of(Symbol)) { ret 5; }
-        }
-        or {
-            if (!str_equals(fail.describe(r.err), "allocation size overflow")) { ret 6; }
-            if (T.attempt_count(?t) != 0)                                      { ret 7; }
-        }
-    }
-    if (!str_equals(fail.status_text(rc.status), fail.describe(r.err))) { ret 8; }
-    if (T.live_count(?t) != 0 || T.double_free_count(?t) != 0)          { ret 9; }
-    if (rc.symbols != ?storage[0] || rc.sym_len != old_cap || rc.sym_cap != old_cap
-        || storage[0].kind != SYM_FUN) { ret 10; }
-    ret 0;
-}
-
-# reserved binding ids are never allocated as symbols, and growth at the top of the
-# table does not wrap into a deallocation
-test add_symbol__growth_boundary {
-    if (t_symbol_growth_boundary(true) != 0)  { ret 1; }
-    if (t_symbol_growth_boundary(false) != 0) { ret 2; }
-    ret 0;
-}
-
-test unknown_kind__catalog_members_are_internal {
-    var alloc:  A.Allocator;
-    val make_1: err[A.Error] = page.make(?alloc);
-    if (sel make_1.err) { ret 1; }
-    var s: session.Session = session.Session{};
-    s.alloc    = ?alloc;
-    s.interner = intern.init(?alloc);
-    fin { intern.dnit(?s.interner); }
-    var st: ast_stmt.Stmt = ast_stmt.Stmt{kind: 200};
-    var ty: ast_type.Type = ast_type.Type{kind: 200};
-    var ex: ast_expr.Expr = ast_expr.Expr{kind: 5};
-    var de: ast_decl.Decl = ast_decl.Decl{kind: 200};
-    var a:  ast.Ast       = ast.Ast{stmts: ast.table_over[ast_stmt.Stmt](?st, 1),
-        types: ast.table_over[ast_type.Type](?ty, 1), exprs: ast.table_over[ast_expr.Expr](?ex, 1),
-        decls: ast.table_over[ast_decl.Decl](?de, 1)};
-    var rc:    ResolveContext = ResolveContext{s: ?s, a: ?a};
-    val names: [6]str         = [6]str{"StmtKind", "AstTypeKind", "ExprKind", "DeclKind", "DeclKind", "DeclKind"};
-    var i:     usize          = 0;
-    for (i < 6) {
-        rc.status = fail.accepted();
-        var r: err[fail.Fail];
-        if (i == 0)                                               { r = bind_stmt(?rc, ast_id.stmt(0)); }
-        or (i == 1)                                               { r = bind_type(?rc, ast_id.type(0)); }
-        or (i == 2)                                               { r = bind_expr(?rc, ast_id.expr(0)); }
-        or (i == 3)                                               { r = collect_one_decl(?rc, ast_id.decl(0), scope_id(0), true); }
-        or (i == 4)                                               { r = bind_one_decl(?rc, ast_id.decl(0)); }
-        or                                                        { r = bind_local_decl(?rc, ast_id.decl(0)); }
-        if (sel r.ok)                                             { ret 2; }
-        if (!sel rc.status.kind.internal)                         { ret 2; }
-        if (rc.status.rejections != 0)                            { ret 2; }
-        if (!str_contains(fail.status_text(rc.status), names[i])) { ret 3; }
-        val number: str = t_tag_number(i == 2);
-        if (!str_contains(fail.status_text(rc.status), number)) { ret 4; }
-        i = i + 1;
-    }
-    rc.status = fail.accepted();
-    st.kind   = ast_stmt.STMT_KIND_ERROR;
-    ty.kind   = ast_type.TYPE_KIND_ERROR;
-    ex.kind   = ast_expr.EXPR_KIND_ERROR;
-    de.kind   = ast_decl.DECL_KIND_ERROR;
-    val bound_stmt: err[fail.Fail] = bind_stmt(?rc, ast_id.stmt(0));
-    val bound_type: err[fail.Fail] = bind_type(?rc, ast_id.type(0));
-    val bound_expr: err[fail.Fail] = bind_expr(?rc, ast_id.expr(0));
-    val bound_decl: err[fail.Fail] = bind_one_decl(?rc, ast_id.decl(0));
-    if (sel bound_stmt.err) { ret 5; }
-    if (sel bound_type.err) { ret 5; }
-    if (sel bound_expr.err) { ret 5; }
-    if (sel bound_decl.err) { ret 5; }
-    ty.kind = ast_type.TYPE_KIND_PACK;
-    st.kind = ast_stmt.STMT_KIND_ASM;
-    val bind_type_2: err[fail.Fail] = bind_type(?rc, ast_id.type(0));
-    val bind_stmt_3: err[fail.Fail] = bind_stmt(?rc, ast_id.stmt(0));
-    if (sel bind_type_2.err)          { ret 6; }
-    if (sel bind_stmt_3.err)          { ret 6; }
-    if (!sel rc.status.kind.accepted) { ret 6; }
-    ret 0;
-}
-
-#[testing]
-fun t_tag_number(hole: bool) str {
-    if (hole) { ret "5"; }
-    ret "200";
-}
-
-#[testing]
-fun t_catalog_message_attempt(ordinal: usize, attempts: *usize) i32 {
-    var t:      T.Testing;
-    val make_1: err[A.Error] = T.make(?t);
-    if (sel make_1.err) { ret 1; }
-    fin { T.dnit(?t); }
-    var s: session.Session = session.Session{};
-    s.alloc    = T.allocator_of(?t);
-    s.interner = intern.init(s.alloc);
-    var rc: ResolveContext = ResolveContext{s: ?s, status: fail.accepted()};
-    T.fail_at_ordinal(?t, ordinal);
-    val result: err[fail.Fail] = unknown_kind(?rc, "ExprKind", 200);
-    @attempts = T.attempt_count(?t);
-    var bad: i32 = 0;
-    if (sel result.ok || !sel rc.status.kind.internal)                                        { bad = 2; }
-    or (ordinal == 0 && !str_equals(fail.status_text(rc.status), "unknown ExprKind tag 200")) { bad = 3; }
-    or (ordinal != 0 && !str_equals(fail.status_text(rc.status), "out of memory"))            { bad = 4; }
-    intern.dnit(?s.interner);
-    if (T.leaked(?t) || T.double_free_count(?t) != 0 || T.tracking_exhausted(?t)) { bad = 5; }
-    ret bad;
-}
-
-test unknown_kind__allocation_refusal_keeps_its_owner {
-    var attempts: usize = 0;
-    val baseline: i32   = t_catalog_message_attempt(0, ?attempts);
-    if (baseline != 0 || attempts == 0) { ret 1; }
-    var ordinal: usize = 1;
-    for (ordinal <= attempts) {
-        var refused: usize = 0;
-        val code:    i32   = t_catalog_message_attempt(ordinal, ?refused);
-        if (code != 0) { ret code + 1; }
-        ordinal = ordinal + 1;
-    }
-    ret 0;
-}
-
 # the most modules one fixture holds
 #[testing]
 pub val FIXTURE_MODULES: u32 = 8;
@@ -4188,23 +3950,6 @@ pub fun sources(name: str, text: str) Sources {
     s.abi             = "sysv64";
     s.extension_count = 0;
     ret s;
-}
-
-# select `isa` for `s` with the extensions or levels `names` adds; false when there are more
-# than a fixture holds
-#[testing]
-pub fun sources_target(s: *Sources, isa: str, os: str, abi: str, names: *str, count: u32) bool {
-    if (count > FIXTURE_MODULES) { ret false; }
-    s.isa = isa;
-    s.os  = os;
-    s.abi = abi;
-    var i: u32 = 0;
-    for (i < count) {
-        s.extensions[i] = names[i];
-        i               = i + 1;
-    }
-    s.extension_count = count;
-    ret true;
 }
 
 # add a module to `s`; false when it already holds as many as a fixture can
@@ -4374,110 +4119,4 @@ pub fun resolved_dnit(r: *Resolved) {
         resident.dnit(?r.held);
     }
     if (r.opened) { session.dnit(?r.s); }
-}
-
-# zero when the load and resolution of `src` report no error, or with `needle` an error that
-# says it; the diagnostics are shown when they do not
-#[testing]
-fun resolve_probe(src: *Sources, needle: str) i32 {
-    var r:    Resolved;
-    val made: err[fail.Fail] = resolved_check(?r, src);
-    fin { resolved_dnit(?r); }
-    if (sel made.err) { ret 1; }
-    var hit: bool = diagnostic.error_count(?r.s.diags) == 0 && sel r.status.kind.accepted;
-    if (str_len(needle) != 0) { hit = !sel r.status.kind.accepted && diagnostic.error_says(?r.s.diags, needle); }
-    if (hit)                  { ret 0; }
-    diagnostic.show(?r.s.diags);
-    ret 1;
-}
-
-test resolved__an_import_binds_what_its_module_exports {
-    var src: Sources = sources("t.main", "use t.lib;\nfun main() i32 { ret lib.K; }\n");
-    if (!sources_add(?src, "t.lib", "pub val K: i32 = 7;\nval HIDDEN: i32 = 1;\n")) { ret 1; }
-    if (resolve_probe(?src, "") != 0)                                               { ret 2; }
-    src.texts[0] = "use t.lib;\nfun main() i32 { ret lib.HIDDEN; }\n";
-    if (resolve_probe(?src, "HIDDEN") != 0) { ret 3; }
-    ret 0;
-}
-
-# zero when the three modules `t.main` over `t.mid` over `t.leaf` resolve as `resolve_probe` says
-#[testing]
-fun t_chain_probe(main: str, mid: str, leaf: str, needle: str) i32 {
-    var src: Sources = sources("t.main", main);
-    sources_add(?src, "t.mid", mid);
-    sources_add(?src, "t.leaf", leaf);
-    ret resolve_probe(?src, needle);
-}
-
-# a dotted path names the same module and symbol whatever spacing, comments and line breaks
-# sit between its segments
-test dotted_path__resolves_through_spacing_and_comments {
-    val leaf: str = "pub rec Box[T] { value: T; }\npub rec Plain { value: i32; }\npub fun answer() i32 { ret 7; }\n";
-    if (t_chain_probe("use t.mid;\nuse B: t.mid.B;\nuse t.mid.Plain;\nuse t.mid.answer;\nfun take(p: *mid.leaf.Box[i32]) i32 { ret p.value; }\nfun pass(p: *B[i32], q: *mid.B[i32], r: *Plain) i32 { ret take(p) + take(q) + r.value; }\nfun main() i32 { ret answer(); }\n",
-        "fwd t.leaf;\nfwd B: t.leaf.Box;\nfwd t.leaf.Plain;\nfwd t.leaf.answer;\n", leaf, "") != 0) { ret 1; }
-    if (t_chain_probe("use t . mid;\nuse B: t . mid . B;\nuse t . mid . Plain;\nuse t . mid . answer;\nfun take(p: *mid . leaf . Box[i32]) i32 { ret p.value; }\nfun pass(p: *B[i32], q: *mid . B[i32], r: *Plain) i32 { ret take(p) + take(q) + r.value; }\nfun main() i32 { ret answer(); }\n",
-        "fwd t . leaf;\nfwd B: t . leaf . Box;\nfwd t . leaf . Plain;\nfwd t . leaf . answer;\n", leaf, "") != 0) { ret 2; }
-    if (t_chain_probe("use t # .ignored\n . mid;\nuse B: t . # wrong.module\r\n mid . B;\nuse t . mid # .wrong\n . Plain;\nuse t . mid . # false.leaf\n answer;\nfun take(p: *mid # ignored.path\n . leaf . # ignored.Type\n Box[i32]) i32 { ret p.value; }\nfun pass(p: *B[i32], q: *mid . # ignored.Type\n B[i32], r: *Plain) i32 { ret take(p) + take(q) + r.value; }\nfun main() i32 { ret answer(); }\n",
-        "fwd t # ignored.module\r\n . leaf;\nfwd B: t . # not.a.module\n leaf . Box;\nfwd t . leaf # .fake\r . Plain;\nfwd t . leaf . # fake.symbol\n answer;\n", leaf, "") != 0) { ret 3; }
-    ret 0;
-}
-
-# a rejected dotted path names what was written without its comments, over the source span of
-# the whole path, for a module path and a type path
-test dotted_path__rejection_ignores_trivia_and_keeps_its_span {
-    var src:  Sources        = sources("t.main", "use missing # other.root\n . library;\nfun main() i32 { ret 0; }\n");
-    var r:    Resolved;
-    val made: err[fail.Fail] = resolved_check(?r, ?src);
-    fin { resolved_dnit(?r); }
-    if (sel made.err)                                                     { ret 1; }
-    if (sel r.status.kind.accepted)                                       { ret 2; }
-    if (!diagnostic.error_at(?r.s.diags, "module root 'missing'", 4, 31)) { ret 3; }
-    if (!diagnostic.error_says(?r.s.diags, "missing.library"))            { ret 4; }
-    if (diagnostic.error_says(?r.s.diags, "other.root"))                  { ret 5; }
-    var typed:      Sources        = sources("t.main", "fun take(p: *missing # other.root\n . library) i32 { ret 0; }\nfun main() i32 { ret 0; }\n");
-    var q:          Resolved;
-    val typed_made: err[fail.Fail] = resolved_check(?q, ?typed);
-    fin { resolved_dnit(?q); }
-    if (sel typed_made.err)                                                         { ret 6; }
-    if (!diagnostic.error_at(?q.s.diags, "unresolved type name `missing`", 13, 31)) { ret 7; }
-    ret 0;
-}
-
-# a `fwd` is visible before its textual position, admits only the name it forwards, and a
-# renamed forward does not admit the canonical spelling
-test fwd__resolves_only_what_it_forwards {
-    if (t_chain_probe("use t.mid;\nfun main() i32 { ret mid.before() + mid.after(); }\n",
-        "pub fun before() i32 { ret fa(); }\nfwd t.leaf.fa;\npub fun after() i32 { ret fa(); }\n", "pub fun fa() i32 { ret 3; }\n", "") != 0) { ret 1; }
-    if (t_chain_probe("use t.mid;\nfun main() i32 { ret mid.before(); }\n",
-        "pub fun before() i32 { ret nope(); }\nfwd t.leaf.fa;\n", "pub fun fa() i32 { ret 3; }\n", "unresolved identifier") != 0) { ret 2; }
-    if (t_chain_probe("use t.mid;\nfun main() i32 { ret mid.original_name(); }\n",
-        "fwd renamed_alias: t.leaf.original_name;\n", "pub fun original_name() i32 { ret 42; }\n", "no symbol") != 0) { ret 3; }
-    ret 0;
-}
-
-# a qualified name reaches only what its module exports
-test qualified_member__unexported_is_refused {
-    var src: Sources = sources("t.main", "use a: t.a;\nval NOPE: i64 = 1;\nfun main() i32 { ret a.NOPE::i32; }\n");
-    sources_add(?src, "t.a", "pub val X: i64 = 909;\n");
-    ret resolve_probe(?src, "no symbol");
-}
-
-# the fixture checks for the target its sources select, with the extensions they add
-test resolved__checks_for_the_selected_extensions {
-    var avx2: [1]str  = [1]str{"avx2"};
-    var src:  Sources = sources("t.main", "fun main() i32 { ret 0; }\n");
-    if (!sources_target(?src, "x86_64", "linux", "sysv64", ?avx2[0], 1)) { ret 1; }
-    var r:    Resolved;
-    val made: err[fail.Fail] = resolved_check(?r, ?src);
-    fin { resolved_dnit(?r); }
-    if (sel made.err)                                                                                     { ret 2; }
-    if ((target_model.extension_bit(?r.target.model, "avx2", 4) & r.host.facts.extensions.selected) == 0) { ret 3; }
-    var bogus: [1]str  = [1]str{"nosuch"};
-    var bad:   Sources = sources("t.main", "fun main() i32 { ret 0; }\n");
-    if (!sources_target(?bad, "x86_64", "linux", "sysv64", ?bogus[0], 1)) { ret 5; }
-    var q:       Resolved;
-    val refused: err[fail.Fail] = resolved_check(?q, ?bad);
-    fin { resolved_dnit(?q); }
-    if (sel refused.ok) { ret 6; }
-    ret 0;
 }

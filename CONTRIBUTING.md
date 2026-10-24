@@ -46,10 +46,8 @@ chain through each pinned mach commit. The last step builds `a` from your tree,
 `a` builds `b`, and `b` builds `c`. It fails when `cmp b c` differs and
 otherwise leaves `c` as the compiler, with its path in `out/boot/env`. Use `RUNNER_OS=macOS` or
 `Windows` on those hosts (the outputs are then `a.exe`, `b.exe` and `c.exe` on
-Windows), and `--profile release` for the release fixpoint. Run the unit
-suites with `c`, as in [Testing and formatting](#testing-and-formatting),
-because the test code may use language the seed release predates. Without
-`--fixpoint` it stops at `b`, which is what CI builds before `mach test`.
+Windows), and `--profile release` for the release fixpoint. Without
+`--fixpoint` it stops at `b`.
 
 `-o` names a canonical path inside the project root: relative, `/`-separated,
 with no `.` or `..` component. `-o ../a`, `-o ./a` and an absolute path are
@@ -57,87 +55,42 @@ refused with `-o must name a canonical path inside the project root`, so keep
 the stage outputs in the checkout. `.gitignore` covers `a`, `b` and `c`.
 
 
-## Testing and formatting
+## Formatting and checks
 
-Run the tests and the formatter through the compiler you just built, never
+Run the formatter and the checks through the compiler you just built, never
 the seed on `PATH`:
 
 ```bash
-out/linux-x86_64/debug/bin/mach test .
-out/linux-x86_64/debug/bin/mach test . -p release
 out/linux-x86_64/debug/bin/mach fmt .
+out/linux-x86_64/debug/bin/mach check .
 ```
 
-`mach test .` runs every test in the compiler's own closure, and that is every
-test the compiler has: each sits beside the code it covers, or in the module
-that composes what it drives, as [test.md](doc/language/test.md#test-policy)
-says, so a new test needs no wiring.
+The compiler carries no tests of its own: no unit `test` blocks, no goldens
+and no corpus. `mach test` and the language's `test` blocks are features for
+the projects Mach builds. CI is the build: it walks the bootstrap chain and
+builds the compiler with itself, and nothing else.
 
 The tree is canonical: `mach fmt .` must leave it unchanged before a pull
-request is opened (`mach fmt --check .` reports what differs). `.` reaches only
-the compiler's own source, so the test sources are held to it one operand at a
-time: each file under `test/cases` and `test/lib`, and each project under
-`test/link/cases` (its `mach.toml`) and `test/f16proof`; the command is under
-[Checks CI does not run](#checks-ci-does-not-run). The fuzz corpus is retained input and is left as it is.
-
-Two tests in `src/lang/driver/hygiene.mach` hold the source to its import
-and surface rules. A module is imported under the same name in every file, and
-a name imports one module in every file, but for the arms of a
-declaration-level `$if`. A `pub` declaration is named in some other file, or
-its doc comment says what reaches it, as in `reached only by mach-lsp`. The
-code that leaves for mirl, masc and mink is exempt.
+request is opened (`mach fmt --check .` reports what differs).
 
 The API reference is held the same way: `doc/mach` and `doc/README.md` are what `mach doc .`
 writes, so a change to a doc-comment or to the module tree regenerates them in
-the same pull request, and the docs check below fails when the committed pages
-differ from a fresh generation.
+the same pull request.
 
-### Checks CI does not run
+### Local checks
 
-CI is the build and the unit suite (`mach test .`) and nothing else. Every other check is a local command, run from the repository
-root with the compiler you built (`$MACH`, the path in `out/boot/env`, or
-`out/<host>/debug/bin/mach`). A pull request that touches what a check covers
-runs that check before it is marked ready. Each command exits non-zero on
+Run from the repository root with the compiler you built (`$MACH`, the path in
+`out/boot/env`, or `out/<host>/debug/bin/mach`). Each command exits non-zero on
 failure.
 
 | check | command |
 |---|---|
-| formatter | the block below |
+| formatter | `"$MACH" fmt --check .` |
 | committed reference | `"$MACH" doc . -o out/docgen -q && diff -r out/docgen/mach doc/mach && diff out/docgen/README.md doc/README.md` |
 | documented flags are accepted | `python3 .github/scripts/doc-flags.py "$MACH" doc` |
 | doc and source markers cite open issues | `GH_TOKEN=$(gh auth token) GH_REPO=briar-systems/mach python3 .github/scripts/doc-markers.py` |
-| release notes selection | `bash .github/scripts/release-notes-test.sh` |
-| `doc/language` code blocks | `MACH="$MACH" bash test/run.sh --docs` |
-| warm rebuilds match clean | `MACH="$MACH" bash test/run.sh --incremental` |
-| codegen corpus, one target | `MACH="$MACH" bash test/run.sh --target x86_64-linux` |
-| codegen corpus, every target | `MACH="$MACH" bash test/run.sh --qemu` |
-| listings reassemble | `MACH="$MACH" bash test/run.sh --target x86_64-linux --asm` |
-| debug info verifies | `MACH="$MACH" bash test/run.sh --dwarf --target x86_64-linux` |
-| link cases (leaving with the linker) | `MACH="$MACH" bash test/run.sh --link` |
-| f16 proof | `MACH="$MACH" bash test/run.sh --f16proof --target x86_64-linux --shard 0/64` |
 | cross-build the compiler | `"$MACH" build . --target darwin-x86_64 --profile release -o out/cross-darwin-x86_64` (also `darwin-aarch64`, `linux-riscv64`) |
 | fixpoint | see [Fixpoint](#fixpoint) |
-
-The formatter holds `.`, each corpus case and library file, and each project
-under `test/link/cases` and `test/f16proof`:
-
-```bash
-rc=0
-"$MACH" fmt --check . || rc=1
-for f in $(find test/cases test/lib -name '*.mach' | sort); do "$MACH" fmt --check "$f" || rc=1; done
-for p in $(find test/link/cases -name mach.toml | sort) test/f16proof; do "$MACH" fmt --check "$p" || rc=1; done
-exit "$rc"
-```
-
-`test/run.sh` needs `cc`, and the corpus columns, `--dwarf`, `--asm` and
-`--link` need the readers they cite (`spirv-val`, `llvm-dwarfdump`, GNU as,
-qemu); it names a missing one and exits 2. See [test/README.md](test/README.md)
-for the runner, its per-case timeout and the exit contract.
-
-### Test policy
-
-What earns a test, and where it sits, is set by the
-[test policy](doc/language/test.md#test-policy).
 
 
 ## Branching
@@ -173,12 +126,12 @@ For example, `chore: update dependencies`.
 - Link the issue with `Closes #N`.
 - Leave `CHANGELOG.md` alone. The changelog is written from the merged
   commits when `dev` is released to `main`.
-- Say briefly what changed and which tests you ran. Every pull request runs
-  the build and the unit suites on the linux runners. The windows, darwin and
-  release lanes run when the CI workflow is dispatched with a `lane`, which is
-  worth doing before a windows or darwin change reaches `dev`, and `lane=all`
-  runs green on `dev` before every release. Every other check is local, see
-  [Checks CI does not run](#checks-ci-does-not-run).
+- Say briefly what changed. Every pull request builds the compiler through the
+  bootstrap chain on the linux runners. The windows, darwin and release lanes
+  run when the CI workflow is dispatched with a `lane`, which is worth doing
+  before a windows or darwin change reaches `dev`, and `lane=all` runs green on
+  `dev` before every release. Every other check is local, see
+  [Local checks](#local-checks).
 - Merge with a merge commit. Never rebase or fast-forward.
 - When the target is not the default branch, close the linked issue by hand
   after the merge.

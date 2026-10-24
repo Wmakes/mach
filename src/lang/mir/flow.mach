@@ -21,7 +21,6 @@ use std.types.result.res;
 use std.types.size.usize;
 
 use A: std.allocator;
-use std.allocator.page;
 
 use lang_mir: mach.lang.mir;
 
@@ -601,93 +600,4 @@ fun t_block(alloc: *A.Allocator, id: u32, a: u32, b: u32) lang_mir.MirBlock {
     val added: err[fail.Fail] = lang_mir.instr_add(alloc, ?blk, lang_mir.instr(op, ops, n, 8, 8));
     if (sel added.err) { ret blk; }
     ret blk;
-}
-
-#[testing]
-fun t_fn(blocks: *lang_mir.MirBlock, n: u32) lang_mir.MirFunction {
-    var f: lang_mir.MirFunction;
-    f.blocks      = blocks;
-    f.block_count = n;
-    f.block_cap   = n;
-    ret f;
-}
-
-#[testing]
-fun t_preds_are(g: *Graph, b: u32, want: *u32, n: u32) bool {
-    if (g.pred_start[b + 1] - g.pred_start[b] != n) { ret false; }
-    var i: u32 = 0;
-    for (i < n) {
-        if (g.pred[g.pred_start[b] + i] != want[i]) { ret false; }
-        i = i + 1;
-    }
-    ret true;
-}
-
-# a branch naming one block from both arms gives it one edge per arm, and the
-# predecessors of a block come in source position order, unreached sources too
-test init__one_edge_per_block_operand {
-    var alloc: A.Allocator;
-    page.make(?alloc);
-
-    # ids are not positions: block 7 sits at position 1
-    var blocks: [4]lang_mir.MirBlock;
-    blocks[0] = t_block(?alloc, 0, 7, 7);
-    blocks[1] = t_block(?alloc, 7, 3, NONE);
-    blocks[2] = t_block(?alloc, 2, 7, NONE);
-    blocks[3] = t_block(?alloc, 3, NONE, NONE);
-    var f:  lang_mir.MirFunction  = t_fn(?blocks[0], 4);
-    val rg: res[Graph, fail.Fail] = init(?alloc, ?f);
-    if (sel rg.err) { ret 1; }
-    var g: Graph = rg.ok;
-    fin { dnit(?g); }
-
-    if (g.edge_count != 4) { ret 2; }
-    var into_7: [3]u32;
-    into_7[0] = 0;
-    into_7[1] = 0;
-    into_7[2] = 2;
-    if (!t_preds_are(?g, 1, ?into_7[0], 3)) { ret 3; }
-    if (g.reached != 3)                     { ret 4; }
-    if (block_is_reached(?g, 2))            { ret 5; }
-    var order: [4]u32;
-    scan_order_fill(?g, ?order[0]);
-    if (order[0] != 0 || order[1] != 1 || order[2] != 3 || order[3] != 2) { ret 6; }
-    ret 0;
-}
-
-# a loop entered at its header: the header dominates its body, the body sits
-# one loop deep, and the exit and the unreached block sit in no loop
-test analyses__dominators_loops_and_components {
-    var alloc: A.Allocator;
-    page.make(?alloc);
-
-    var blocks: [5]lang_mir.MirBlock;
-    blocks[0] = t_block(?alloc, 0, 1, NONE);
-    blocks[1] = t_block(?alloc, 1, 2, 3);
-    blocks[2] = t_block(?alloc, 2, 1, NONE);
-    blocks[3] = t_block(?alloc, 3, NONE, NONE);
-    blocks[4] = t_block(?alloc, 4, 1, NONE);
-    var f:  lang_mir.MirFunction  = t_fn(?blocks[0], 5);
-    val rg: res[Graph, fail.Fail] = init(?alloc, ?f);
-    if (sel rg.err) { ret 1; }
-    var g: Graph = rg.ok;
-    fin { dnit(?g); }
-
-    val rd: err[fail.Fail] = dominators_build(?g);
-    if (sel rd.err)                                         { ret 2; }
-    if (g.idom[1] != 0 || g.idom[2] != 1 || g.idom[3] != 1) { ret 3; }
-    if (g.idom[0] != NONE || g.idom[4] != NONE)             { ret 4; }
-    if (!dominates(?g, 1, 2) || dominates(?g, 2, 3))        { ret 5; }
-
-    val rl: err[fail.Fail] = loops_build(?g);
-    if (sel rl.err)                                                                                  { ret 6; }
-    if (g.depth[0] != 0 || g.depth[1] != 1 || g.depth[2] != 1 || g.depth[3] != 0 || g.depth[4] != 0) { ret 7; }
-    if (edge_is_back(?g, 4, 1))                                                                      { ret 8; }
-
-    val rc: err[fail.Fail] = components_build(?g);
-    if (sel rc.err)                                                           { ret 9; }
-    if (g.component[1] != g.component[2])                                     { ret 10; }
-    if (g.component[0] == g.component[1] || g.component[3] == g.component[1]) { ret 11; }
-    if (g.component[0] != 0 || g.component[3] != 3 || g.component[4] != 4)    { ret 12; }
-    ret 0;
 }

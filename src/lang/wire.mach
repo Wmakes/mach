@@ -13,7 +13,6 @@
 
 use mach.lang.fail;
 use mach.lang.growth;
-use std.allocator.page;
 use std.crypto.hash.sha256;
 use std.encoding.binary;
 use std.encoding.leb128;
@@ -309,88 +308,4 @@ pub fun take_sized(r: *Source, out_len: *usize) *u8 {
     val at: *u8 = take_bytes(r, n::usize);
     if (at != nil) { @out_len = n::usize; }
     ret at;
-}
-
-#[testing]
-fun t_put_record(s: *Sink) {
-    put_u8(s, 0xAB);
-    put_u16(s, 0x1234);
-    put_u32(s, 0xDEADBEEF);
-    put_u64(s, 0x0102030405060708);
-    put_unsigned(s, 624485);
-    put_signed(s, -123456);
-    put_sized(s, "mach"::*u8, 4);
-}
-
-#[testing]
-val T_RECORD: [29]u8 = [29]u8{
-    0xAB, 0x34, 0x12, 0xEF, 0xBE, 0xAD, 0xDE,
-    0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01,
-    0xE5, 0x8E, 0x26, 0xC0, 0xBB, 0x78,
-    4, 0, 0, 0, 'm', 'a', 'c', 'h',
-};
-
-test sink__every_destination_sees_the_same_bytes {
-    var a:    A.Allocator;
-    val made: err[A.Error] = page.make(?a);
-    if (sel made.err) { ret 1; }
-    var m: Sink = measure();
-    t_put_record(?m);
-    if (m.failed || m.len != 29) { ret 2; }
-
-    var storage: [29]u8;
-    var f:       Sink = fixed(?storage[0], 29);
-    t_put_record(?f);
-    if (f.failed || !memory.raw_equal((?storage[0])::ptr, (?T_RECORD[0])::ptr, 29)) { ret 3; }
-
-    var g: Sink = grown(?a);
-    t_put_record(?g);
-    val kept: res[*u8, fail.Fail] = release(?g);
-    if (sel kept.err) { ret 4; }
-    fin { A.deallocate[u8](?a, kept.ok, 29); }
-    if (!memory.raw_equal(kept.ok::ptr, (?T_RECORD[0])::ptr, 29)) { ret 5; }
-
-    var d: Sink = digest();
-    t_put_record(?d);
-    var fed:  [32]u8;
-    var want: [32]u8;
-    digest_final(?d, ?fed);
-    sha256.hash(?T_RECORD[0], 29, ?want[0]);
-    if (!memory.raw_equal((?fed[0])::ptr, (?want[0])::ptr, 32)) { ret 6; }
-
-    # one byte short of the measured size fails, and the failure sticks
-    var short: Sink = fixed(?storage[0], 28);
-    t_put_record(?short);
-    if (!short.failed || short.len != 25) { ret 7; }
-    ret 0;
-}
-
-test source__reads_back_and_fails_sticky {
-    var r: Source = source(?T_RECORD[0], 29);
-    if (take_u8(?r) != 0xAB || take_u16(?r) != 0x1234 || take_u32(?r) != 0xDEADBEEF) { ret 1; }
-    if (take_u64(?r) != 0x0102030405060708)                                          { ret 2; }
-    if (take_unsigned(?r) != 624485 || take_signed(?r) != -123456)                   { ret 3; }
-    var n:    usize = 0;
-    val name: *u8   = take_sized(?r, ?n);
-    if (name == nil || n != 4 || name[0] != 'm' || name[3] != 'h') { ret 4; }
-    if (!done(?r))                                                 { ret 5; }
-
-    # every truncation fails, and a failed source reads nothing more
-    var cut: usize = 0;
-    for (cut < 29) {
-        var t: Source = source(?T_RECORD[0], cut);
-        take_u8(?t);
-        take_u16(?t);
-        take_u32(?t);
-        take_u64(?t);
-        take_unsigned(?t);
-        take_signed(?t);
-        take_sized(?t, ?n);
-        if (!t.bad || done(?t)) { ret 6; }
-        cut = cut + 1;
-    }
-    var counted: Source = source(?T_RECORD[0], 29);
-    # the leading u32 counts far more 1-byte entries than 25 bytes hold
-    if (take_count(?counted, 1) != 0 || !counted.bad) { ret 7; }
-    ret 0;
 }

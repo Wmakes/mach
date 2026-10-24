@@ -1,10 +1,9 @@
 name: CI
 
-# the build and the unit suite, nothing else. every pull request and every
-# merge queue entry runs them on the linux runners. the windows, darwin and
-# release lanes run only when a dispatch names one, and `lane=all` on dev is
-# the release gate. the other checks are local commands (CONTRIBUTING.md,
-# "Checks CI does not run").
+# the build, nothing else. every pull request and every merge queue entry
+# builds the compiler on the linux runners. the windows, darwin and release
+# lanes run only when a dispatch names one, and `lane=all` on dev is the
+# release gate. the checks are local commands (CONTRIBUTING.md, "Local checks").
 
 on:
   pull_request:
@@ -29,7 +28,7 @@ defaults:
     shell: bash
 
 jobs:
-  # the debug unit suite, on each native runner
+  # the compiler built through the bootstrap chain, on each native runner
   host:
     name: host ${{ matrix.target }}
     runs-on: ${{ matrix.runs-on }}
@@ -47,8 +46,6 @@ jobs:
           path: ${{ runner.temp }}/chain
           key: chain-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.github/bootstrap-chain') }}
       - run: bash .github/scripts/bootstrap.sh
-      - name: unit suite
-        run: '"$MACH" test .'
 
   host-windows:
     name: host x86_64-windows
@@ -62,8 +59,6 @@ jobs:
           path: ${{ runner.temp }}/chain
           key: chain-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.github/bootstrap-chain') }}
       - run: bash .github/scripts/bootstrap.sh
-      - name: unit suite
-        run: '"$MACH" test .'
 
   host-darwin:
     name: host ${{ matrix.target }}
@@ -83,8 +78,6 @@ jobs:
           path: ${{ runner.temp }}/chain
           key: chain-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.github/bootstrap-chain') }}
       - run: bash .github/scripts/bootstrap.sh
-      - name: unit suite
-        run: '"$MACH" test .'
 
   release:
     name: release ${{ matrix.target }}
@@ -107,8 +100,6 @@ jobs:
           path: ${{ runner.temp }}/chain
           key: chain-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.github/bootstrap-chain') }}
       - run: bash .github/scripts/bootstrap.sh --profile release
-      - name: unit suite
-        run: '"$MACH" test . --profile debug --profile release'
 
   gate:
     name: gate

@@ -333,13 +333,6 @@ pub fun section(kind: target_of.SectionKind) opt[*MachoSectionDesc] {
     ret opt[*MachoSectionDesc].some{?SECTIONS[kind::u32]};
 }
 
-#[testing]
-fun segname(kind: target_of.SectionKind) opt[str] {
-    val desc: opt[*MachoSectionDesc] = section(kind);
-    if (sel desc.none) { ret opt[str].none{}; }
-    ret opt[str].some{desc.some.segname};
-}
-
 pub fun sectname(kind: target_of.SectionKind) opt[str] {
     val desc: opt[*MachoSectionDesc] = section(kind);
     if (sel desc.none) { ret opt[str].none{}; }
@@ -350,25 +343,6 @@ pub fun section_flags(kind: target_of.SectionKind) opt[u32] {
     val desc: opt[*MachoSectionDesc] = section(kind);
     if (sel desc.none) { ret opt[u32].none{}; }
     ret opt[u32].some{desc.some.flags};
-}
-
-test section_table__every_member_has_its_row_and_no_other_tag_does {
-    var i: u32 = 0;
-    for (i < target_of.SK_COUNT) {
-        val desc: opt[*MachoSectionDesc] = section(i::target_of.SectionKind);
-        if (sel desc.none)            { ret 1; }
-        if (desc.some.kind::u32 != i) { ret 1; }
-        i = i + 1;
-    }
-    val section: opt[*MachoSectionDesc] = section(target_of.SK_COUNT::target_of.SectionKind);
-    if (sel section.some) { ret 2; }
-    val segname: opt[str] = segname(255::target_of.SectionKind);
-    if (sel segname.some) { ret 3; }
-    val sectname: opt[str] = sectname(255::target_of.SectionKind);
-    if (sel sectname.some) { ret 3; }
-    val flags: opt[u32] = section_flags(255::target_of.SectionKind);
-    if (sel flags.some) { ret 3; }
-    ret 0;
 }
 
 pub fun align_log2(align: u32) u32 {

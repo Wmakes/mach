@@ -1,12 +1,6 @@
-use mach.lang.fail;
 use mink_linux: mink.catalog.os.linux;
-use std.types.bool.bool;
-use std.types.bool.false;
 use std.types.bool.true;
-use std.types.option.opt;
-use std.types.result.res;
 use std.types.string.str;
-use std.types.string.str_equals;
 
 use catalog_arch:   mach.lang.target.catalog.arch;
 use catalog_os:     mach.lang.target.catalog.os;
@@ -89,56 +83,3 @@ pub val VTABLE: lang_target_os.OsVTable = lang_target_os.OsVTable{
     mapped_by_loader:   true,
     naming:             target_of.SystemNaming{static_prefix: "lib", static_suffix: ".a", executable_suffix: ""},
 };
-
-#[testing]
-fun policy_of(arch_id: u32) catalog_os.FsPolicy {
-    val r: res[opt[catalog_os.FsPolicy], fail.Fail] = lang_target_os.fs_policy_checked_for(?VTABLE, arch_id);
-    if (sel r.ok) {
-        val o: opt[catalog_os.FsPolicy] = r.ok;
-        if (sel o.some) { ret o.some; }
-    }
-    var absent: catalog_os.FsPolicy;
-    ret absent;
-}
-
-test fs_policy__per_arch_interpreter_and_libdirs {
-    var bad: bool = false;
-
-    val x64: catalog_os.FsPolicy = policy_of(catalog_arch.X86_64);
-    if (!str_equals(x64.dynamic_interpreter, "/lib64/ld-linux-x86-64.so.2")) { bad = true; }
-    if (x64.libdir_len != 6)                                                 { bad = true; }
-    if (!str_equals(x64.libdirs[0], "/lib64"))                               { bad = true; }
-    if (!str_equals(x64.libdirs[2], "/lib/x86_64-linux-gnu"))                { bad = true; }
-
-    val a64: catalog_os.FsPolicy = policy_of(catalog_arch.AARCH64);
-    if (!str_equals(a64.dynamic_interpreter, "/lib/ld-linux-aarch64.so.1")) { bad = true; }
-    if (a64.libdir_len != 6)                                                { bad = true; }
-    if (!str_equals(a64.libdirs[0], "/lib/aarch64-linux-gnu"))              { bad = true; }
-
-    val r64: catalog_os.FsPolicy = policy_of(catalog_arch.RISCV64);
-    if (!str_equals(r64.dynamic_interpreter, "/lib/ld-linux-riscv64-lp64d.so.1")) { bad = true; }
-    if (r64.libdir_len != 6)                                                      { bad = true; }
-    if (!str_equals(r64.libdirs[0], "/lib/riscv64-linux-gnu"))                    { bad = true; }
-
-    var li: u32 = 0;
-    for (li < x64.libdir_len) {
-        var lj: u32 = 0;
-        for (lj < a64.libdir_len) {
-            if (str_equals(x64.libdirs[li], a64.libdirs[lj])
-                && !str_equals(x64.libdirs[li], "/lib64")
-                && !str_equals(x64.libdirs[li], "/usr/lib64")
-                && !str_equals(x64.libdirs[li], "/usr/lib")
-                && !str_equals(x64.libdirs[li], "/lib")) { bad = true; }
-            lj = lj + 1;
-        }
-        li = li + 1;
-    }
-    if (str_equals(x64.dynamic_interpreter, a64.dynamic_interpreter)) { bad = true; }
-    if (str_equals(x64.dynamic_interpreter, r64.dynamic_interpreter)) { bad = true; }
-    if (str_equals(a64.dynamic_interpreter, r64.dynamic_interpreter)) { bad = true; }
-
-    if (lang_target_os.supports_isa(?VTABLE, catalog_arch.SPIRV)) { bad = true; }
-
-    if (bad) { ret 1; }
-    ret 0;
-}

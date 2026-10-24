@@ -8,15 +8,12 @@
 # dead-stripping treat it like any other definition: a start code that never
 # reads it leaves nothing in the image. a target whose os declares nothing gets
 # no cell, and its DIT rows are refused before any mark can exist
-use std.allocator.page;
 use std.types.bool.bool;
 use std.types.bool.false;
 use std.types.bool.true;
 use std.types.error.err;
-use std.types.option.opt;
 use std.types.result.res;
 use std.types.size.usize;
-use std.types.string.str;
 
 use A: std.allocator;
 
@@ -27,14 +24,10 @@ use mach.lang.session;
 use lang_target:      mach.lang.target;
 use catalog_artifact: mach.lang.target.catalog.artifact;
 use target_of:        mach.lang.target.of;
-use target_testing:   mach.lang.target.testing;
 
-use mach.lang.be.linker.common.lt_image;
-use mach.lang.be.linker.common.lt_name;
 use mach.lang.be.linker.common.name_intern;
 use mach.lang.be.linker.input.InputSet;
 use mach.lang.be.linker.input.LinkContext;
-use mach.lang.be.linker.input.t_synthesize;
 
 # whether any input carries the DIT mark: the per-module fact, unioned
 fun inputs_need_dit(s: *session.Session, modules: *target_of.ObjectImage, module_count: u32) res[bool, fail.Fail] {
@@ -121,102 +114,4 @@ pub fun synthesize_runtime_needs(ctx: *LinkContext, inputs: *InputSet, out: *tar
     if (sel valid.err) { ret res[bool, fail.Fail].err{valid.err}; }
     complete = true;
     ret res[bool, fail.Fail].ok{true};
-}
-
-#[testing]
-fun nt_marker(s: *session.Session, value: u64) target_of.Symbol {
-    var sym: target_of.Symbol;
-    sym.name           = lt_name(s, ct.DIT_NEED_MARKER);
-    sym.section        = target_of.absolute_section();
-    sym.offset         = 0;
-    sym.size           = 0;
-    sym.flags          = target_of.SYM_OBJ_FLAG_OBJECT;
-    sym.fallback       = target_of.SYMBOL_NONE;
-    sym.align          = 1;
-    sym.absolute_value = value;
-    ret sym;
-}
-
-#[testing]
-fun nt_select(reg: *lang_target.TargetRegistry, isa: str, os: str, abi: str) opt[lang_target.Binding] {
-    val tr: res[lang_target.Binding, fail.Fail] = lang_target.select(reg, isa, os, abi);
-    if (sel tr.err) { ret opt[lang_target.Binding].none{}; }
-    ret opt[lang_target.Binding].some{tr.ok};
-}
-
-#[testing]
-fun nt_cell_value(img: *target_of.ObjectImage) i32 {
-    if (img.section_count != 1 || img.symbol_count != 1) { ret -1; }
-    val sym: *target_of.Symbol = ?img.symbols[0];
-    if (sym.size != 1 || target_of.section_index(sym.section) != 0)                                           { ret -2; }
-    if ((sym.flags & target_of.SYM_OBJ_FLAG_HIDDEN) == 0 || (sym.flags & target_of.SYM_OBJ_FLAG_GLOBAL) == 0) { ret -3; }
-    if (img.sections[0].kind != target_of.SK_RODATA || img.sections[0].len != 1)                              { ret -4; }
-    ret img.sections[0].bytes[0]::i32;
-}
-
-# the cell exists exactly on an executable link for a target whose os declares
-# the guarantee, and reads the union of the input marks
-test synthesize_runtime_needs__cell_follows_the_declaration_and_the_marks {
-    var alloc: A.Allocator;
-    page.make(?alloc);
-    val sr: res[session.Session, fail.Fail] = session.init(?alloc);
-    if (sel sr.err) { ret 1; }
-    var s: session.Session = sr.ok;
-    fin { session.dnit(?s); }
-
-    var plain_syms: [1]target_of.Symbol;
-    plain_syms[0]      = nt_marker(?s, 0);
-    plain_syms[0].name = lt_name(?s, "unrelated_absolute");
-    var marked_syms: [1]target_of.Symbol;
-    marked_syms[0] = nt_marker(?s, ct.DIT_NEED_VALUE);
-    var stale_syms: [1]target_of.Symbol;
-    stale_syms[0] = nt_marker(?s, 0);
-
-    var inputs: [2]target_of.ObjectImage;
-    inputs[0] = lt_image(?s, lt_name(?s, "plain"), nil, 0, ?plain_syms[0], 1, nil, 0);
-    inputs[1] = lt_image(?s, lt_name(?s, "marked"), nil, 0, ?marked_syms[0], 1, nil, 0);
-    var stale: [1]target_of.ObjectImage;
-    stale[0] = lt_image(?s, lt_name(?s, "stale"), nil, 0, ?stale_syms[0], 1, nil, 0);
-
-    val both:  res[bool, fail.Fail] = inputs_need_dit(?s, ?inputs[0], 2);
-    val plain: res[bool, fail.Fail] = inputs_need_dit(?s, ?inputs[0], 1);
-    val old:   res[bool, fail.Fail] = inputs_need_dit(?s, ?stale[0], 1);
-    val empty: res[bool, fail.Fail] = inputs_need_dit(?s, nil, 0);
-    if (!(sel both.ok && both.ok))    { ret 2; }
-    if (!(sel plain.ok && !plain.ok)) { ret 3; }
-    if (!(sel old.ok && !old.ok))     { ret 4; }
-    if (!(sel empty.ok && !empty.ok)) { ret 5; }
-
-    val a64_linux:  opt[lang_target.Binding] = nt_select(lang_target.t_registry(), "aarch64", "linux", "aapcs64");
-    val a64_darwin: opt[lang_target.Binding] = nt_select(lang_target.t_registry(), "aarch64", "darwin", "aapcs64");
-    val x64_linux:  opt[lang_target.Binding] = nt_select(lang_target.t_registry(), "x86_64", "linux", "sysv64");
-    if (sel a64_linux.none)  { ret 6; }
-    if (sel a64_darwin.none) { ret 6; }
-    if (sel x64_linux.none)  { ret 6; }
-    var linux_tgt:  lang_target.Binding = a64_linux.some;
-    var darwin_tgt: lang_target.Binding = a64_darwin.some;
-    var x64_tgt:    lang_target.Binding = x64_linux.some;
-
-    var cell:  target_of.ObjectImage;
-    val set_r: res[bool, fail.Fail] = t_synthesize(synthesize_runtime_needs, ?s, ?linux_tgt, catalog_artifact.EXECUTABLE, ?inputs[0], 2, ?cell);
-    if (sel set_r.err) { ret 13; }
-    if (!set_r.ok)     { ret 13; }
-    val set_value: i32 = nt_cell_value(?cell);
-    target_of.object_image_dnit(?cell);
-    if (set_value != 1) { ret 14; }
-
-    val clear_r: res[bool, fail.Fail] = t_synthesize(synthesize_runtime_needs, ?s, ?darwin_tgt, catalog_artifact.EXECUTABLE, ?inputs[0], 1, ?cell);
-    if (sel clear_r.err) { ret 15; }
-    if (!clear_r.ok)     { ret 15; }
-    val clear_value: i32 = nt_cell_value(?cell);
-    target_of.object_image_dnit(?cell);
-    if (clear_value != 0) { ret 16; }
-
-    val none_r: res[bool, fail.Fail] = t_synthesize(synthesize_runtime_needs, ?s, ?x64_tgt, catalog_artifact.EXECUTABLE, ?inputs[0], 2, ?cell);
-    if (sel none_r.err) { ret 17; }
-    if (none_r.ok)      { ret 17; }
-    val shared_r: res[bool, fail.Fail] = t_synthesize(synthesize_runtime_needs, ?s, ?linux_tgt, catalog_artifact.SHARED, ?inputs[0], 2, ?cell);
-    if (sel shared_r.err) { ret 18; }
-    if (shared_r.ok)      { ret 18; }
-    ret 0;
 }

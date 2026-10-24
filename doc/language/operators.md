@@ -126,8 +126,7 @@ path above makes the one the target's native half instruction would.
 x86-64 takes the rows above with or without AVX-512 FP16, which mach does not
 emit.
 
-That is proven, not assumed: the exhaustive proof `test/run.sh --f16proof`
-checks every pair of `f16` operands for each operator, and every input of
+That was proven, not assumed: an exhaustive proof checked every pair of `f16` operands for each operator, and every input of
 the `f16` conversions, against a reference computed in integers. On x86-64 with
 and without `x86-64-v3`, aarch64 with and without `fp16`, and riscv64 with and
 without `zfh` (under qemu-user), every result is bit-identical to it, NaNs by the

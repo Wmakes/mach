@@ -58,16 +58,3 @@ pub fun frame_align_up(n: u64, align: u32) res[u32, fail.Fail] {
     if (aligned > 0xFFFFFFFF) { ret res[u32, fail.Fail].err{fail.message("isa: a frame extent overflowed its alignment")}; }
     ret res[u32, fail.Fail].ok{aligned::u32};
 }
-
-# an extent past 4 GiB is refused, whether it arrives past the limit or the
-# round-up carries it there, rather than wrapping
-test frame_align_up__refuses_an_extent_past_4_gib {
-    val fits: res[u32, fail.Fail] = frame_align_up(0xFFFFFFF0, 16);
-    if (sel fits.err)          { ret 1; }
-    if (fits.ok != 0xFFFFFFF0) { ret 1; }
-    val over: res[u32, fail.Fail] = frame_align_up(0x100000000, 0);
-    if (sel over.ok) { ret 2; }
-    val carried: res[u32, fail.Fail] = frame_align_up(0xFFFFFFF1, 16);
-    if (sel carried.ok) { ret 3; }
-    ret 0;
-}

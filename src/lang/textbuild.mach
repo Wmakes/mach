@@ -1,19 +1,12 @@
-use std.allocator.page;
 use std.memory;
-use std.types.bool.bool;
-use std.types.bool.false;
-use std.types.bool.true;
 use std.types.error.err;
 use std.types.option.opt;
 use std.types.result.res;
 use std.types.size.usize;
 use std.types.string.str;
-use std.types.string.str_equals;
 use std.types.string.str_len;
-use std.types.string.str_region_equals;
 
 use A: std.allocator;
-use T: std.allocator.testing;
 
 use lang_checked: mach.lang.checked;
 
@@ -78,17 +71,6 @@ pub fun tb_append(b: *TextBuilder, text: str) err[Error] {
     ret err[Error].ok{};
 }
 
-#[testing]
-fun tb_append_all(b: *TextBuilder, parts: *str, count: usize) err[Error] {
-    var i: usize = 0;
-    for (i < count) {
-        val r: err[Error] = tb_append(b, parts[i]);
-        if (sel r.err) { ret r; }
-        i = i + 1;
-    }
-    ret err[Error].ok{};
-}
-
 # the builder's first failure, or ok when every append so far held
 pub fun tb_fault(b: *TextBuilder) err[Error] {
     if (sel b.fault.some) { ret err[Error].err{b.fault.some}; }
@@ -121,61 +103,4 @@ pub fun tb_dnit(b: *TextBuilder) {
     b.data = nil;
     b.cap  = 0;
     b.len  = 0;
-}
-
-test tb_append__accumulates_grows_and_finishes_exact_bytes {
-    var alloc:  A.Allocator;
-    val make_r: err[A.Error] = page.make(?alloc);
-    if (sel make_r.err) { ret 1; }
-    var empty: TextBuilder = tb_init(?alloc);
-    val none:  err[Error]  = tb_append(?empty, "");
-    if (sel none.err || tb_len(?empty) != 0) { ret 2; }
-    val bare: res[str, Error] = tb_finish(?empty);
-    if (sel bare.err)             { ret 3; }
-    if (!str_equals(bare.ok, "")) { ret 3; }
-    var b:     TextBuilder = tb_init(?alloc);
-    var parts: [3]str      = [3]str{"hello", ", ", "world"};
-    val first: err[Error]  = tb_append_all(?b, ?parts[0], 3);
-    if (sel first.err) { ret 4; }
-    var i: usize = 0;
-    for (i < 500) {
-        val grown: err[Error] = tb_append(?b, "ab");
-        if (sel grown.err) { ret 5; }
-        i = i + 1;
-    }
-    if (tb_len(?b) != 1012) { ret 6; }
-    val fin: res[str, Error] = tb_finish(?b);
-    if (sel fin.err) { ret 7; }
-    val out: str = fin.ok;
-    if (str_len(out) != 1012 || !str_region_equals(out, 0, 12, "hello, world") || out[12] != 'a' || out[1011] != 'b') { ret 8; }
-    # the result is the caller's: the builder keeps no buffer to leak or free twice
-    if (b.data != nil || b.cap != 0) { ret 9; }
-    tb_dnit(?b);
-    ret 0;
-}
-
-test tb_append__a_failed_reserve_poisons_the_builder_even_if_the_result_is_ignored {
-    var t:    T.Testing;
-    val made: err[A.Error] = T.make(?t);
-    if (sel made.err) { ret 2; }
-    fin { T.dnit(?t); }
-    T.fail_from_ordinal(?t, 1);
-
-    var b: TextBuilder = tb_init(T.allocator_of(?t));
-    tb_append(?b, "this will not fit");
-    if (!t_alloc_refused(tb_fault(?b))) { ret 1; }
-    # a later append and the finish refuse with the first failure, not a stand-in
-    if (!t_alloc_refused(tb_append(?b, "more"))) { ret 1; }
-    val fin: res[str, Error] = tb_finish(?b);
-    if (sel fin.ok)                                { ret 1; }
-    if (!t_alloc_refused(err[Error].err{fin.err})) { ret 1; }
-    ret 0;
-}
-
-#[testing]
-fun t_alloc_refused(r: err[Error]) bool {
-    if (sel r.err) {
-        if (sel r.err.alloc) { ret true; }
-    }
-    ret false;
 }

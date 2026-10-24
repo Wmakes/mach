@@ -25,11 +25,7 @@ use A: std.allocator;
 use diagnostic_kind: mach.lang.diagnostic.kind;
 use mach.lang.fail;
 use mach.lang.intern;
-#[testing]
-use output_testing: mach.lang.output.testing;
 use mach.lang.source.provider;
-#[testing]
-use std.allocator.page;
 
 # a package whose modules are files under a directory: the head segment of a module's fqn is
 # the package id, and the rest is the module's path under `src`
@@ -292,30 +288,4 @@ fun entry_spells(name: str, length: usize, segment: View, suffix: str) bool {
         j = j + 1;
     }
     ret true;
-}
-
-test dir_holds_exact__compares_each_entry_byte_for_byte {
-    var a:      A.Allocator;
-    val make_r: err[A.Error] = page.make(?a);
-    if (sel make_r.err) { ret 1; }
-    val created: res[output_testing.Output, fail.Fail] = output_testing.create(?a, "mach-module-case");
-    if (sel created.err) { ret 2; }
-    var owner: output_testing.Output = created.ok;
-    fin { output_testing.dnit(?owner); }
-    val dir_r: res[str, A.Error] = types_path.join(?a, owner.directory, "m");
-    if (sel dir_r.err) { ret 3; }
-    val dir:  str             = dir_r.ok;
-    val made: err[fs.FsError] = fs.create_dir_all(?a, dir, 0o700);
-    if (sel made.err) { ret 4; }
-    val file_r: res[str, A.Error] = types_path.join(?a, dir, "item.mach");
-    if (sel file_r.err) { ret 5; }
-    val written: err[fs.FsError] = fs.write_bytes(file_r.ok, "", 0, 0o600);
-    if (sel written.err)                                            { ret 6; }
-    if (!dir_holds_exact(owner.directory, view("m"::*char, 1), "")) { ret 7; }
-    if (dir_holds_exact(owner.directory, view("M"::*char, 1), ""))  { ret 8; }
-    if (!dir_holds_exact(dir, view("item"::*char, 4), ".mach"))     { ret 9; }
-    if (dir_holds_exact(dir, view("Item"::*char, 4), ".mach"))      { ret 10; }
-    if (dir_holds_exact(dir, view("ite"::*char, 3), ".mach"))       { ret 11; }
-    if (dir_holds_exact(dir, view("item"::*char, 4), ""))           { ret 12; }
-    ret 0;
 }

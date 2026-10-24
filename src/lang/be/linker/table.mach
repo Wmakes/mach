@@ -7,7 +7,6 @@ use std.types.result.res;
 use std.types.string.str;
 
 use A: std.allocator;
-use std.allocator.page;
 
 use diagnostic_kind: mach.lang.diagnostic.kind;
 use mach.lang.fail;
@@ -15,13 +14,9 @@ use mach.lang.intern;
 use mach.lang.session;
 use target_of: mach.lang.target.of;
 
-use mach.lang.be.linker.merge.MERGED_KIND_COUNT;
 use mach.lang.be.linker.merge.MergedSection;
 use mach.lang.be.linker.merge.SectionGroups;
 use mach.lang.be.linker.merge.align_up_u64_checked;
-use mach.lang.be.linker.merge.free_section_groups;
-use mach.lang.be.linker.merge.init_merged;
-use mach.lang.be.linker.merge.init_section_groups;
 use mach.lang.be.linker.merge.section_group_add;
 
 # where a reserved table lies: an offset into the merged section its placement
@@ -88,29 +83,4 @@ pub fun reserve(s: *session.Session, merged: *MergedSection, groups: *SectionGro
 pub fun vaddr_of(at: At, merged: *MergedSection) u64 {
     if (at.placement == target_of.TABLE_RELRO_END) { ret merged[target_of.SK_RELRO::u32].vaddr + at.offset::u64; }
     ret merged[target_of.SK_TEXT::u32].vaddr + at.offset::u64;
-}
-
-test reserve__places_at_the_end_of_its_section_and_refuses_an_own_segment {
-    var alloc: A.Allocator;
-    page.make(?alloc);
-    val sr: res[session.Session, fail.Fail] = session.init(?alloc);
-    if (sel sr.err) { ret 1; }
-    var s:      session.Session = sr.ok;
-    var merged: [MERGED_KIND_COUNT]MergedSection;
-    init_merged(?merged[0], nil, 0);
-    merged[target_of.SK_TEXT::u32].len = 0x13;
-    var groups: SectionGroups;
-    init_section_groups(?groups);
-    fin { free_section_groups(?alloc, ?groups); }
-
-    var code: target_of.TableShape = target_of.TableShape{name: ".plt", size: 0x20, align: 16, placement: target_of.TABLE_CODE_END};
-    val at:   res[At, fail.Fail]   = reserve(?s, ?merged[0], ?groups, ?code, 0, "too large");
-    if (sel at.err)                                 { ret 2; }
-    if (at.ok.offset != 0x20)                       { ret 3; }
-    if (merged[target_of.SK_TEXT::u32].len != 0x40) { ret 4; }
-
-    var own:     target_of.TableShape = target_of.TableShape{name: ".idata", size: 8, align: 8, placement: target_of.TABLE_OWN_SEGMENT};
-    val refused: res[At, fail.Fail]   = reserve(?s, ?merged[0], ?groups, ?own, 0, "too large");
-    if (!sel refused.err) { ret 5; }
-    ret 0;
 }

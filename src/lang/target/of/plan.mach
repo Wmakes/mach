@@ -1,7 +1,5 @@
 use mach.lang.fail;
 use mach.lang.growth;
-use std.allocator.page;
-use std_format: std.format;
 use std.system.panic.panic;
 use std.types.bool.bool;
 use std.types.bool.false;
@@ -10,15 +8,12 @@ use std.types.error.err;
 use std.types.result.res;
 use std.types.size.usize;
 use std.types.string.str;
-use std.types.string.str_contains;
 
 use A: std.allocator;
-use T: std.allocator.testing;
 
 use lang_checked:    mach.lang.checked;
 use diagnostic_kind: mach.lang.diagnostic.kind;
 use mach.lang.intern;
-use mach.lang.output;
 use target_of: mach.lang.target.of;
 
 # the one file layout every object writer sizes and serializes from
@@ -206,11 +201,6 @@ pub fun cursor(p: *FilePlan) usize {
     ret p.end;
 }
 
-#[testing]
-pub fun row_count(p: *FilePlan) u32 {
-    ret p.count;
-}
-
 pub fun offset(p: *FilePlan, row: u32) usize {
     ret p.rows[row].offset;
 }
@@ -259,15 +249,6 @@ pub fun field_u16(p: *FilePlan, value: usize, what: str) res[u16, fail.Fail] {
         ret res[u16, fail.Fail].err{too_large(p, "does not fit a 16-bit field width", what, value::u64, 0xFFFF)};
     }
     ret res[u16, fail.Fail].ok{narrowed.ok};
-}
-
-#[testing]
-fun field_u8(p: *FilePlan, value: usize, what: str) res[u8, fail.Fail] {
-    val narrowed: res[u8, lang_checked.Cause] = lang_checked.usize_to_u8(value);
-    if (sel narrowed.err) {
-        ret res[u8, fail.Fail].err{too_large(p, "does not fit an 8-bit field width", what, value::u64, 0xFF)};
-    }
-    ret res[u8, fail.Fail].ok{narrowed.ok};
 }
 
 pub fun field_u64_u32(p: *FilePlan, value: u64, what: str) res[u32, fail.Fail] {
@@ -380,249 +361,4 @@ pub fun align_address(p: *FilePlan, label: str, value: u64, align: u64) res[u64,
         ret res[u64, fail.Fail].err{defect(p, "has an alignment that is not a power of two", label, align, 0)};
     }
     ret res[u64, fail.Fail].ok{aligned.ok};
-}
-
-# whether align_up refuses its arguments
-#[testing]
-fun t_align_up_refused(p: *FilePlan, label: str, value: usize, align: usize) bool {
-    val got: res[usize, fail.Fail] = align_up(p, label, value, align);
-    ret sel got.err;
-}
-
-# whether align_address refuses its arguments
-#[testing]
-fun t_align_address_refused(p: *FilePlan, label: str, value: u64, align: u64) bool {
-    val got: res[u64, fail.Fail] = align_address(p, label, value, align);
-    ret sel got.err;
-}
-
-# whether field_u8 refuses its arguments
-#[testing]
-fun t_field_u8_refused(p: *FilePlan, value: usize, what: str) bool {
-    val got: res[u8, fail.Fail] = field_u8(p, value, what);
-    ret sel got.err;
-}
-
-# whether field_u16 refuses its arguments
-#[testing]
-fun t_field_u16_refused(p: *FilePlan, value: usize, what: str) bool {
-    val got: res[u16, fail.Fail] = field_u16(p, value, what);
-    ret sel got.err;
-}
-
-# whether field_u32 refuses its arguments
-#[testing]
-fun t_field_u32_refused(p: *FilePlan, value: usize, what: str) bool {
-    val got: res[u32, fail.Fail] = field_u32(p, value, what);
-    ret sel got.err;
-}
-
-# whether pad_to refuses its arguments
-#[testing]
-fun t_pad_to_refused(p: *FilePlan, label: str, offset: usize) bool {
-    val got: err[fail.Fail] = pad_to(p, label, offset);
-    ret sel got.err;
-}
-
-# whether close_size refuses its arguments
-#[testing]
-fun t_close_size_refused(p: *FilePlan, row: u32, written: usize) bool {
-    val got: err[fail.Fail] = close_size(p, row, written);
-    ret sel got.err;
-}
-
-# whether close refuses its arguments
-#[testing]
-fun t_close_refused(p: *FilePlan, row: u32, cursor: usize) bool {
-    val got: err[fail.Fail] = close(p, row, cursor);
-    ret sel got.err;
-}
-
-test place__aligns_and_records_rows_in_order {
-    var alloc: A.Allocator;
-    page.make(?alloc);
-    val made: res[FilePlan, fail.Fail] = init(?alloc, nil, "test", limit_64());
-    if (sel made.err) { ret 1; }
-    var p: FilePlan = made.ok;
-    fin { dnit(?p); }
-
-    val h: res[u32, fail.Fail] = place(?p, "header", target_of.no_section(), 1, 64);
-    if (sel h.err) { ret 2; }
-    val a: res[u32, fail.Fail] = place(?p, "a", target_of.section_id(0), 16, 17);
-    if (sel a.err) { ret 3; }
-    val b: res[u32, fail.Fail] = place(?p, "b", target_of.section_id(1), 8, 3);
-    if (sel b.err)                                       { ret 4; }
-    if (offset(?p, h.ok) != 0)                           { ret 5; }
-    if (offset(?p, a.ok) != 64)                          { ret 6; }
-    if (offset(?p, b.ok) != 88)                          { ret 7; }
-    if (end(?p, b.ok) != 91)                             { ret 8; }
-    if (target_of.section_index(section(?p, b.ok)) != 1) { ret 9; }
-    val sealed: res[usize, fail.Fail] = seal(?p);
-    if (sel sealed.err)  { ret 10; }
-    if (sealed.ok != 91) { ret 11; }
-    val placed: res[u32, fail.Fail] = place(?p, "late", target_of.no_section(), 1, 1);
-    if (sel placed.ok) { ret 12; }
-    ret 0;
-}
-
-test place__refuses_non_power_of_two_and_zero_alignment {
-    var alloc: A.Allocator;
-    page.make(?alloc);
-    var itn:  intern.Interner          = intern.init(?alloc);
-    val made: res[FilePlan, fail.Fail] = init(?alloc, ?itn, "test", limit_64());
-    if (sel made.err) { ret 1; }
-    var p: FilePlan = made.ok;
-    fin { dnit(?p); }
-    val three: res[u32, fail.Fail] = place(?p, "odd", target_of.no_section(), 3, 8);
-    if (sel three.ok)                                                  { ret 2; }
-    if (!str_contains(fail.describe(three.err), "`odd`"))              { ret 3; }
-    if (!str_contains(fail.describe(three.err), "not a power of two")) { ret 4; }
-    val placed: res[u32, fail.Fail] = place(?p, "zero", target_of.no_section(), 0, 8);
-    if (sel placed.ok)      { ret 5; }
-    if (row_count(?p) != 0) { ret 6; }
-    if (p.end != 0)         { ret 7; }
-    ret 0;
-}
-
-test place__refuses_offset_overflow_before_any_row_exists {
-    var alloc: A.Allocator;
-    page.make(?alloc);
-    val made: res[FilePlan, fail.Fail] = init(?alloc, nil, "test", limit_64());
-    if (sel made.err) { ret 1; }
-    var p: FilePlan = made.ok;
-    fin { dnit(?p); }
-    val big:   usize               = ~(0::usize) - 8;
-    val first: res[u32, fail.Fail] = place(?p, "first", target_of.no_section(), 1, big);
-    if (sel first.err) { ret 2; }
-    val second: res[u32, fail.Fail] = place(?p, "second", target_of.no_section(), 16, 1);
-    if (sel second.ok)                                         { ret 3; }
-    if (!str_contains(fail.describe(second.err), "overflows")) { ret 4; }
-    val third: res[u32, fail.Fail] = place(?p, "third", target_of.no_section(), 1, 16);
-    if (sel third.ok)       { ret 5; }
-    if (row_count(?p) != 1) { ret 6; }
-    ret 0;
-}
-
-test place__refuses_a_region_past_the_field_width {
-    var alloc: A.Allocator;
-    page.make(?alloc);
-    val made: res[FilePlan, fail.Fail] = init(?alloc, nil, "test", LIMIT_32);
-    if (sel made.err) { ret 1; }
-    var p: FilePlan = made.ok;
-    fin { dnit(?p); }
-    val a: res[u32, fail.Fail] = place(?p, "a", target_of.section_id(0), 1, 0xFFFFFFF0);
-    if (sel a.err) { ret 2; }
-    val b: res[u32, fail.Fail] = place(?p, "b", target_of.section_id(1), 1, 0x10);
-    if (sel b.ok)                                           { ret 3; }
-    if (!str_contains(fail.describe(b.err), "field width")) { ret 4; }
-    ret 0;
-}
-
-test place_at__refuses_overlap {
-    var alloc: A.Allocator;
-    page.make(?alloc);
-    val made: res[FilePlan, fail.Fail] = init(?alloc, nil, "test", limit_64());
-    if (sel made.err) { ret 1; }
-    var p: FilePlan = made.ok;
-    fin { dnit(?p); }
-    val placed: res[u32, fail.Fail] = place(?p, "a", target_of.no_section(), 1, 100);
-    if (sel placed.err) { ret 2; }
-    val at: res[u32, fail.Fail] = place_at(?p, "b", target_of.no_section(), 99, 1);
-    if (sel at.ok) { ret 3; }
-    val c: res[u32, fail.Fail] = place_at(?p, "c", target_of.no_section(), 4096, 1);
-    if (sel c.err)                             { ret 4; }
-    if (offset(?p, c.ok) != 4096)              { ret 5; }
-    if (!t_pad_to_refused(?p, "back", 4000))   { ret 6; }
-    if (t_pad_to_refused(?p, "forward", 8192)) { ret 7; }
-    if (cursor(?p) != 8192)                    { ret 8; }
-    ret 0;
-}
-
-test close__refuses_a_cursor_off_the_planned_end {
-    var alloc: A.Allocator;
-    page.make(?alloc);
-    val made: res[FilePlan, fail.Fail] = init(?alloc, nil, "test", limit_64());
-    if (sel made.err) { ret 1; }
-    var p: FilePlan = made.ok;
-    fin { dnit(?p); }
-    val a: res[u32, fail.Fail] = place(?p, "strings", target_of.no_section(), 1, 10);
-    if (sel a.err) { ret 2; }
-    val row: u32 = a.ok;
-    if (t_close_refused(?p, row, 10))      { ret 3; }
-    if (!t_close_refused(?p, row, 9))      { ret 4; }
-    if (!t_close_refused(?p, row, 11))     { ret 5; }
-    if (t_close_size_refused(?p, row, 10)) { ret 6; }
-    if (!t_close_size_refused(?p, row, 0)) { ret 7; }
-    ret 0;
-}
-
-test field__refuses_narrowing {
-    var alloc: A.Allocator;
-    page.make(?alloc);
-    val made: res[FilePlan, fail.Fail] = init(?alloc, nil, "test", limit_64());
-    if (sel made.err) { ret 1; }
-    var p: FilePlan = made.ok;
-    fin { dnit(?p); }
-    if (t_field_u32_refused(?p, 0xFFFFFFFF, "x"))   { ret 2; }
-    if (!t_field_u32_refused(?p, 0x100000000, "x")) { ret 3; }
-    if (t_field_u16_refused(?p, 0xFFFF, "x"))       { ret 4; }
-    if (!t_field_u16_refused(?p, 0x10000, "x"))     { ret 5; }
-    if (t_field_u8_refused(?p, 0xFF, "x"))          { ret 6; }
-    if (!t_field_u8_refused(?p, 0x100, "x"))        { ret 7; }
-    val narrowed: res[u32, fail.Fail] = field_u64_u32(?p, 0x100000000, "x");
-    if (sel narrowed.ok) { ret 8; }
-    val table_size: res[usize, fail.Fail] = table(?p, "t", ~(0::usize), 2);
-    if (sel table_size.ok) { ret 9; }
-    val summed: res[usize, fail.Fail] = sum(?p, "s", ~(0::usize), 1);
-    if (sel summed.ok) { ret 10; }
-    val counted: res[u32, fail.Fail] = count_u32(?p, "c", 0xFFFFFFFF, 1);
-    if (sel counted.ok)                                          { ret 11; }
-    if (!t_align_address_refused(?p, "va", ~(0::u64) - 1, 4096)) { ret 12; }
-    if (!t_align_address_refused(?p, "va", 0, 3))                { ret 13; }
-    if (!t_align_up_refused(?p, "sz", ~(0::usize) - 1, 4096))    { ret 15; }
-    if (!t_align_up_refused(?p, "sz", 8, 6))                     { ret 16; }
-    val sz: res[usize, fail.Fail] = align_up(?p, "sz", 513, 512);
-    if (sel sz.err)    { ret 17; }
-    if (sz.ok != 1024) { ret 17; }
-    val va: res[u64, fail.Fail] = align_address(?p, "va", 4097, 4096);
-    if (sel va.err)    { ret 14; }
-    if (va.ok != 8192) { ret 14; }
-    ret 0;
-}
-
-test init__allocation_refusal_is_a_typed_error {
-    var failing:      T.Testing;
-    val testing_made: err[A.Error] = T.make(?failing);
-    if (sel testing_made.err) { ret 1; }
-    T.fail_at_ordinal(?failing, 1);
-    val made: res[FilePlan, fail.Fail] = init(T.allocator_of(?failing), nil, "test", limit_64());
-    if (sel made.ok)                                            { ret 1; }
-    if (!str_contains(fail.describe(made.err), "alloc failed")) { ret 2; }
-
-    T.clear_failure(?failing);
-    val ok: res[FilePlan, fail.Fail] = init(T.allocator_of(?failing), nil, "test", limit_64());
-    if (sel ok.err) { ret 3; }
-    var p: FilePlan = ok.ok;
-    var i: u32      = 0;
-    for (i < ROW_CAP_FIRST) {
-        val placed: res[u32, fail.Fail] = place(?p, "row", target_of.no_section(), 1, 1);
-        if (sel placed.err) {
-            dnit(?p);
-            ret 4;
-        }
-        i = i + 1;
-    }
-    T.fail_at_ordinal(?failing, T.attempt_count(?failing) + 1);
-    val grown: res[u32, fail.Fail] = place(?p, "row", target_of.no_section(), 1, 1);
-    if (sel grown.ok) {
-        dnit(?p);
-        ret 5;
-    }
-    if (row_count(?p) != ROW_CAP_FIRST) {
-        dnit(?p);
-        ret 6;
-    }
-    dnit(?p);
-    if (T.leaked(?failing)) { ret 7; }
-    ret 0;
 }

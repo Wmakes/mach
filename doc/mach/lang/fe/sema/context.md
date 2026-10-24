@@ -3,6 +3,14 @@
 the state of one sema walk: the module typing it shares, the module it reads, the
 instance it types and its own walk state, with the reads and reports every check makes
 
+## fun foreign
+
+```mach
+pub fun foreign(sc: *SemaContext, sym: *resolve.Symbol) bool;
+```
+
+whether `sym` names a binding a module other than this view's declares
+
 ## fun imported_definition
 
 ```mach

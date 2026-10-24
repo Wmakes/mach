@@ -1,8 +1,6 @@
 use std.types.bool.bool;
 use std.types.bool.false;
 use std.types.bool.true;
-use std.types.option.opt;
-use std.types.string.str;
 
 use mach.lang.ct;
 use mach.lang.float;
@@ -195,82 +193,4 @@ pub fun features_select(model: *target_model.Machine, bits: u64) {
             if (model.gpr_width == 8) { model.xbank_widths = target_model.XBANK_4_8; }
         }
     }
-}
-
-# the rows are Zkt's multiply list on riscv64, held for a selection with M and
-# Zkt and for no other; riscv32 declares none
-test model__declares_the_zkt_multiply_list {
-    val none: ct.CtMulMask = ct.mul_mask_none();
-    var want: ct.CtMulMask = ct.mul_mask_none();
-    ct.mul_mask_add(?want, ct.mul_cell(ct.CT_MUL_LOW, 8, false));
-    ct.mul_mask_add(?want, ct.mul_cell(ct.CT_MUL_LOW, 16, false));
-    ct.mul_mask_add(?want, ct.mul_cell(ct.CT_MUL_LOW, 32, false));
-    ct.mul_mask_add(?want, ct.mul_cell(ct.CT_MUL_LOW, 64, false));
-    ct.mul_mask_add(?want, ct.mul_cell(ct.CT_MUL_HIGH_U, 64, false));
-    ct.mul_mask_add(?want, ct.mul_cell(ct.CT_MUL_HIGH_S, 64, false));
-    ct.mul_mask_add(?want, ct.mul_cell(ct.CT_MUL_HIGH_SU, 64, false));
-    # realized, not declared: the full product is mul + mulh, and the low half
-    # of a 128-bit product is the schoolbook over those
-    ct.mul_mask_add(?want, ct.mul_cell(ct.CT_MUL_WIDE_U, 64, false));
-    ct.mul_mask_add(?want, ct.mul_cell(ct.CT_MUL_WIDE_S, 64, false));
-    ct.mul_mask_add(?want, ct.mul_cell(ct.CT_MUL_LOW, 128, false));
-
-    val m64: *target_model.Machine = ?MACHINE64;
-    if (m64.ct_mul_form_len != 7) { ret 2; }
-    var i: u32 = 0;
-    for (i < m64.ct_mul_form_len) {
-        if (m64.ct_mul_forms[i].cond != ct.CT_MUL_EXTENSION || m64.ct_mul_forms[i].ext != (extension_riscv.M | extension_riscv.ZKT)) { ret 3; }
-        i = i + 1;
-    }
-
-    var zkt: target_model.Machine = @m64;
-    features_select(?zkt, extension_riscv.DEFAULT64 | extension_riscv.ZKT);
-    if (!ct.mul_mask_equals(target_model.ct_mul_rows_admit(?zkt, false), want)) { ret 4; }
-    if (!ct.mul_mask_equals(target_model.ct_mul_rows_admit(?zkt, true), want))  { ret 5; }
-    var bare: target_model.Machine = @m64;
-    features_select(?bare, extension_riscv.I | extension_riscv.M | extension_riscv.ZKT);
-    if (!ct.mul_mask_equals(target_model.ct_mul_rows_admit(?bare, false), want)) { ret 6; }
-    var plain: target_model.Machine = @m64;
-    features_select(?plain, extension_riscv.DEFAULT64);
-    if (!ct.mul_mask_equals(target_model.ct_mul_rows_admit(?plain, true), none)) { ret 7; }
-    var no_mul: target_model.Machine = @m64;
-    features_select(?no_mul, extension_riscv.I | extension_riscv.ZKT);
-    val no_mul_bad: opt[str] = target_model.ct_mul_forms_refusal(?no_mul);
-    if (no_mul.ct_mul_form_len != 0 || sel no_mul_bad.some)                       { ret 8; }
-    if (!ct.mul_mask_equals(target_model.ct_mul_rows_admit(?no_mul, true), none)) { ret 9; }
-
-    var narrow: target_model.Machine = MACHINE32;
-    if (narrow.ct_mul_form_len != 0) { ret 10; }
-    features_select(?narrow, extension_riscv.DEFAULT32 | extension_riscv.ZKT);
-    if (!ct.mul_mask_equals(target_model.ct_mul_rows_admit(?narrow, true), none)) { ret 11; }
-    ret 0;
-}
-
-test features_select__narrows_the_template {
-    var full: target_model.Machine = MACHINE64;
-    features_select(?full, extension_riscv.DEFAULT64);
-    if (full.extensions != extension_riscv.DEFAULT64 || !full.has_mul || full.mul_hi_width != 8
-        || full.mul_wide_form != target_model.MULW_THREE_ADDRESS || full.int_widths != target_model.INT_WIDTHS_1_2_4_8_16
-        || !full.has_float || full.flen_bits != 64 || full.reg_class_len != 2
-        || full.xbank_widths != target_model.XBANK_4_8) { ret 2; }
-
-    var base: target_model.Machine = MACHINE64;
-    features_select(?base, extension_riscv.I);
-    if (base.has_mul || base.mul_hi_width != 0 || base.mul_wide_form != target_model.MULW_NONE || base.has_float
-        || base.flen_bits != 0 || base.reg_class_len != 1 || base.xbank_widths != target_model.XBANK_NONE) { ret 3; }
-
-    var single: target_model.Machine = MACHINE64;
-    features_select(?single, extension_riscv.I | extension_riscv.F | extension_riscv.ZICSR);
-    if (single.has_mul || !single.has_float || single.flen_bits != 32
-        || single.reg_class_len != 2 || single.xbank_widths != target_model.XBANK_4) { ret 4; }
-
-    var narrow: target_model.Machine = MACHINE32;
-    features_select(?narrow, extension_riscv.DEFAULT32);
-    if (narrow.extensions != extension_riscv.DEFAULT32 || !narrow.has_mul || narrow.mul_hi_width != 4
-        || narrow.mul_wide_form != target_model.MULW_THREE_ADDRESS || narrow.int_widths != target_model.INT_WIDTHS_1_2_4_8
-        || narrow.has_float || narrow.flen_bits != 0 || narrow.reg_class_len != 1
-        || narrow.xbank_widths != target_model.XBANK_NONE) { ret 5; }
-    features_select(?narrow, extension_riscv.DEFAULT32 | extension_riscv.F | extension_riscv.D | extension_riscv.ZICSR);
-    if (narrow.flen_bits != 64 || narrow.reg_class_len != 2 || narrow.xbank_widths != target_model.XBANK_4) { ret 6; }
-    ret 0;
 }

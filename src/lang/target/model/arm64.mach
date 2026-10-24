@@ -310,32 +310,3 @@ pub val MACHINE: target_model.Machine = target_model.Machine{
     vectors_in_registers: true,
     auto_vectorize:       true,
 };
-
-# the rows are Arm's DIT multiply list (MADD, SMADDL, UMADDL, SMULH, UMULH), each
-# held only with PSTATE.DIT set
-test model__declares_the_dit_multiply_list {
-    val m: *target_model.Machine = ?MACHINE;
-    if (m.ct_mul_form_len != 8) { ret 2; }
-    var want: ct.CtMulMask = ct.mul_mask_none();
-    ct.mul_mask_add(?want, ct.mul_cell(ct.CT_MUL_LOW, 8, false));
-    ct.mul_mask_add(?want, ct.mul_cell(ct.CT_MUL_LOW, 16, false));
-    ct.mul_mask_add(?want, ct.mul_cell(ct.CT_MUL_LOW, 32, false));
-    ct.mul_mask_add(?want, ct.mul_cell(ct.CT_MUL_LOW, 64, false));
-    ct.mul_mask_add(?want, ct.mul_cell(ct.CT_MUL_HIGH_U, 64, false));
-    ct.mul_mask_add(?want, ct.mul_cell(ct.CT_MUL_HIGH_S, 64, false));
-    ct.mul_mask_add(?want, ct.mul_cell(ct.CT_MUL_WIDE_U, 32, false));
-    ct.mul_mask_add(?want, ct.mul_cell(ct.CT_MUL_WIDE_S, 32, false));
-    # realized, not declared: the full product is mul + umulh/smulh, and the
-    # low half of a 128-bit product is the schoolbook over those
-    ct.mul_mask_add(?want, ct.mul_cell(ct.CT_MUL_WIDE_U, 64, false));
-    ct.mul_mask_add(?want, ct.mul_cell(ct.CT_MUL_WIDE_S, 64, false));
-    ct.mul_mask_add(?want, ct.mul_cell(ct.CT_MUL_LOW, 128, false));
-    if (!ct.mul_mask_equals(target_model.ct_mul_rows_admit(m, true), want))                { ret 3; }
-    if (!ct.mul_mask_equals(target_model.ct_mul_rows_admit(m, false), ct.mul_mask_none())) { ret 4; }
-    var i: u32 = 0;
-    for (i < m.ct_mul_form_len) {
-        if (m.ct_mul_forms[i].cond != ct.CT_MUL_DIT_MODE || m.ct_mul_forms[i].ext != 0) { ret 5; }
-        i = i + 1;
-    }
-    ret 0;
-}

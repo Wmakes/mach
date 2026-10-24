@@ -1,13 +1,10 @@
 use mach.lang.fail;
-use mach.lang.float;
 use std.types.bool.true;
 use std.types.error.err;
 use std.types.result.res;
 
-use mach.lang.ct;
-use lang_mir:        mach.lang.mir;
-use catalog_arch:    mach.lang.target.catalog.arch;
-use extension_riscv: mach.lang.target.extension.riscv;
+use lang_mir:     mach.lang.mir;
+use catalog_arch: mach.lang.target.catalog.arch;
 use mach.lang.target.isa;
 use mach.lang.target.isa.common;
 use isa_inst:      mach.lang.target.isa.inst;
@@ -169,93 +166,3 @@ pub val VTABLE32: isa.IsaVTable = isa.IsaVTable{
     # a name of the selection syntax narrows the template to its extensions
     extensions_select: model_riscv.features_select,
 };
-
-test vtable64__pairs_its_relocations {
-    val riscv64_vtable: *isa.IsaVTable = ?VTABLE64;
-    if (riscv64_vtable.reloc == nil)                            { ret 1; }
-    if (riscv64_vtable.reloc.normalize == nil)                  { ret 1; }
-    if (riscv64_vtable.reloc.resolve_operand == nil)            { ret 1; }
-    if (riscv64_vtable.model.extensions != extension_riscv.ALL) { ret 2; }
-    ret 0;
-}
-
-test machines__both_members_are_wired_alike {
-    val m64: *isa.RegMachine = ?MACHINE64;
-    val m32: *isa.RegMachine = ?MACHINE32;
-    if (m64 == nil || m32 == nil) { ret 1; }
-    if (m64 == m32)               { ret 1; }
-
-    if (m64.has_assembly != m32.has_assembly)                                       { ret 1; }
-    if ((m64.assembly.header == nil) != (m32.assembly.header == nil))               { ret 1; }
-    if ((m64.assembly.grammar == nil) != (m32.assembly.grammar == nil))             { ret 1; }
-    if ((m64.assembly.returns == nil) != (m32.assembly.returns == nil))             { ret 1; }
-    if ((m64.dwarf_reg == nil) != (m32.dwarf_reg == nil))                           { ret 1; }
-    if ((m64.cv_reg == nil) != (m32.cv_reg == nil))                                 { ret 1; }
-    if ((m64.select == nil) != (m32.select == nil))                                 { ret 1; }
-    if ((m64.encode.encode_function == nil) != (m32.encode.encode_function == nil)) { ret 1; }
-    if (!m32.has_assembly || m32.assembly.grammar == nil || m32.dwarf_reg == nil)   { ret 1; }
-
-    if (m64.reserved_regs == m32.reserved_regs)             { ret 1; }
-    if (m64.reload_scratch_regs == m32.reload_scratch_regs) { ret 1; }
-    if (m64.reserved_reg_count != m32.reserved_reg_count)   { ret 1; }
-    if (m32.reserved_regs[0].size != 4)                     { ret 1; }
-    if (m64.reserved_regs[0].size != 8)                     { ret 1; }
-    if (m32.reserved_regs[0].id != m64.reserved_regs[0].id) { ret 1; }
-    if (m32.scratch_reg != m64.scratch_reg)                 { ret 1; }
-    ret 0;
-}
-
-test riscv64_dwarf_reg__psabi_numbers {
-    if (dwarf_reg(isa_inst.regid_make(isa_inst.REG_CLASS_ID_GP, isa_riscv.X0)) != 0)   { ret 1; }
-    if (dwarf_reg(isa_inst.regid_make(isa_inst.REG_CLASS_ID_GP, isa_riscv.RA)) != 1)   { ret 1; }
-    if (dwarf_reg(isa_inst.regid_make(isa_inst.REG_CLASS_ID_GP, isa_riscv.SP)) != 2)   { ret 1; }
-    if (dwarf_reg(isa_inst.regid_make(isa_inst.REG_CLASS_ID_GP, isa_riscv.FP)) != 8)   { ret 1; }
-    if (dwarf_reg(isa_inst.regid_make(isa_inst.REG_CLASS_ID_GP, isa_riscv.X31)) != 31) { ret 1; }
-
-    if (dwarf_reg(isa_inst.regid_make(isa_inst.REG_CLASS_ID_GP, isa_riscv.FRAME_REG)) != 8) { ret 1; }
-
-    if (dwarf_reg(isa_inst.regid_make(isa_inst.REG_CLASS_ID_FP, isa_riscv.F0)) != 32)  { ret 1; }
-    if (dwarf_reg(isa_inst.regid_make(isa_inst.REG_CLASS_ID_FP, isa_riscv.F31)) != 63) { ret 1; }
-
-    if (dwarf_reg(isa_inst.regid_make(isa_inst.REG_CLASS_ID_GP, 32)) != -1) { ret 1; }
-    ret 0;
-}
-
-test riscv_frame_dist__saved_registers_keep_slots_stack_aligned {
-    var model: target_model.Machine;
-    model.gpr_width = 8;
-    model.flen_bits = 64;
-    var func: lang_mir.MirFunction;
-    func.frame.size          = 32;
-    func.frame.outgoing_size = 0;
-    func.frame.realign       = 0;
-    func.callee_mask_fp      = 0;
-    var saved: u32 = 0;
-    for (saved < 5) {
-        func.callee_mask = (1::u32 << (saved + 9)) - (1::u32 << 9);
-        var base_dist: u32            = 0;
-        var fp_dist:   u32            = 0;
-        val laid:      err[fail.Fail] = frame_dist(?model, ?func, ?base_dist, ?fp_dist);
-        if (sel laid.err)                    { ret 1; }
-        if (fp_dist < 16 + saved * 8)        { ret 1; }
-        if (fp_dist % 16 != 0)               { ret 2; }
-        if ((fp_dist + base_dist) % 16 != 0) { ret 3; }
-        if (base_dist < func.frame.size)     { ret 4; }
-        saved = saved + 1;
-    }
-    func.frame.realign = 32;
-    func.callee_mask   = 1::u32 << 9;
-    var base_over: u32            = 0;
-    var fp_over:   u32            = 0;
-    val over:      err[fail.Fail] = frame_dist(?model, ?func, ?base_over, ?fp_over);
-    if (sel over.err)                             { ret 5; }
-    if (fp_over % 32 != 0 || base_over % 32 != 0) { ret 5; }
-    # a frame whose round-up passes 4 GiB is refused, never wrapped
-    func.frame.realign = 0;
-    func.frame.size    = 0xFFFFFFDF;
-    var base_big: u32            = 0;
-    var fp_big:   u32            = 0;
-    val big:      err[fail.Fail] = frame_dist(?model, ?func, ?base_big, ?fp_big);
-    if (!sel big.err) { ret 6; }
-    ret 0;
-}

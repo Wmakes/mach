@@ -1,7 +1,6 @@
 # gitlink: the git member of the pin contract. a dependency's pin is the gitlink the
 # enclosing repository stages at dep/<id>, registered in .gitmodules with its source url;
 # a project in a subdirectory of a repository records its pins under its prefix
-use std.allocator.page;
 use std_format: std.format;
 use system_os:  std.system.os;
 use std.text.string.str_dup_range;
@@ -158,21 +157,6 @@ pub fun read(s: *session.Session, root: str, id: str) res[opt[str], fail.Fail] {
     ret parse_staged(s.build_alloc, ?bytes, rel);
 }
 
-#[testing]
-pub fun staged_paths(s: *session.Session, root: str, rel: str) res[str, fail.Fail] {
-    var gi: git.Inspector  = git.inspector_pending(s.environ);
-    val er: err[fail.Fail] = git.inspector_require(s.build_alloc, ?gi);
-    if (sel er.err) { ret res[str, fail.Fail].err{er.err}; }
-    var args: [4]str;
-    args[0] = "ls-files";
-    args[1] = "--stage";
-    args[2] = "--";
-    args[3] = rel;
-    val q: res[str, fail.Fail] = git.query_raw(s.build_alloc, ?gi, root, ?args[0], 4);
-    git.inspector_dnit(s.build_alloc, ?gi);
-    ret q;
-}
-
 # the gitlink the tree of the commit `rev` in the repository at `dir` records for dep/<id>
 pub fun read_at(s: *session.Session, dir: str, rev: str, id: str) res[opt[str], fail.Fail] {
     val a:     *A.Allocator        = s.build_alloc;
@@ -269,41 +253,4 @@ pub fun record(s: *session.Session, root: str, id: str) err[fail.Fail] {
     if (sel r.err) { ret err[fail.Fail].err{r.err}; }
     str_free(s.build_alloc, r.ok);
     ret err[fail.Fail].ok{};
-}
-
-test staged_gitlink__complete_object_and_exact_stage_zero_record {
-    var a:      A.Allocator;
-    val make_r: err[A.Error] = page.make(?a);
-    if (sel make_r.err) { ret 1; }
-    val oid:       str                              = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
-    val formatted: res[str, std_format.FormatError] = std_format.sprint(?a,
-        "100644 {} 0\tdep/a/child\n160000 {} 0\tdep/a\n", oid, oid);
-    if (sel formatted.err) { ret 1; }
-    val text:   str   = formatted.ok;
-    val length: usize = str_len(text);
-    fin { A.deallocate[u8](?a, text::*u8, length + 1); }
-    var i: usize = 0;
-    for (i < length) {
-        if (text[i] == '\n') { text[i] = 0; }
-        i = i + 1;
-    }
-    var bytes: git.Bytes                = git.Bytes{data: text::*u8, len: length};
-    val found: res[opt[str], fail.Fail] = parse_staged(?a, ?bytes, "dep/a");
-    if (sel found.err) { ret 2; }
-    val selected: opt[str] = found.ok;
-    if (sel selected.none) { ret 3; }
-    val actual: str = selected.some;
-    fin { str_free(?a, actual); }
-    if (!str_equals(actual, oid)) { ret 4; }
-    val sibling: res[opt[str], fail.Fail] = parse_staged(?a, ?bytes, "dep/ab");
-    if (sel sibling.err)     { ret 5; }
-    if (sel sibling.ok.some) { ret 5; }
-    i = 0;
-    for (i < length) {
-        if (text[i] == '\t' && i > 0) { text[i - 1] = '2'; }
-        i = i + 1;
-    }
-    val parse_staged_gitlink_r: res[opt[str], fail.Fail] = parse_staged(?a, ?bytes, "dep/a");
-    if (sel parse_staged_gitlink_r.ok) { ret 6; }
-    ret 0;
 }

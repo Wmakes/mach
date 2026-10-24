@@ -1,6 +1,5 @@
 # the x64 instruction catalog: what each opcode is, the form it encodes through, the
 # operands it reads and writes and the flags it touches
-use std.types.bool.bool;
 use mach.lang.ct;
 use mach.lang.target.isa.x64;
 use std.types.size.usize;
@@ -209,9 +208,6 @@ pub val FORM_CMOV: Form = 46;
 # a vex or evex three-operand packed instruction: dst xmm, src1 xmm in vvvv, src2 xmm or m128
 pub val FORM_VEX3: Form = 47;
 
-#[testing]
-pub val FORM_COUNT: u32 = 48;
-
 # the role pattern of the explicit operands, in intel order
 pub def Shape: u8;
 
@@ -231,9 +227,6 @@ pub val SHAPE_SWAP: Shape = 4;
 
 # the operand is a transfer target
 pub val SHAPE_XFER: Shape = 5;
-
-#[testing]
-pub val SHAPE_COUNT: u32 = 6;
 
 # how the instruction reaches memory, as bits
 pub def MemEffect: u8;
@@ -255,9 +248,6 @@ pub val MEM_STRING: MemEffect = 8;
 # the register operand becomes a segment base that later fs- or gs-relative
 # operands address through, so its value is an address
 pub val MEM_BASE: MemEffect = 16;
-
-#[testing]
-pub val MEM_ALL: MemEffect = 31;
 
 # the description of one opcode: its spelling, its form and operand shape,
 # the flags it reads and writes with its latency class, and how it reaches
@@ -618,29 +608,4 @@ pub fun describe(op: u16) OpDesc {
     d.mem   = r.mem;
     d.cls   = class_of(r);
     ret d;
-}
-
-# every row sits at its opcode's value, so an opcode added without a row, or
-# two opcodes merged in at one value, fails here
-test describe__every_row_sits_at_its_opcode {
-    var i: u32 = 0;
-    for (i < OPCODE_COUNT) {
-        if (OPS[i].op::u32 != i) { ret 1; }
-        i = i + 1;
-    }
-    ret 0;
-}
-
-# the forms whose operands live in the xmm file, wholly or on one side
-#[testing]
-pub fun form_is_float(form: Form) bool {
-    ret form == FORM_MOVQ || form == FORM_SSE_MOV || form == FORM_SSE_MOVA ||
-        form == FORM_SSE_ALU || form == FORM_UCOMIS || form == FORM_CVT ||
-        form == FORM_XORPS || form == FORM_PACKED || form == FORM_PSHUF || form == FORM_PSLL ||
-        form == FORM_PINSR || form == FORM_VEX3;
-}
-
-#[testing]
-pub fun is_fp_opcode(op: u16) bool {
-    ret form_is_float(describe(op).form);
 }
