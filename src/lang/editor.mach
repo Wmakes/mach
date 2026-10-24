@@ -640,6 +640,7 @@ pub rec ProjectRequest {
 # message:     the failure's text, or the internal standing's, "" for neither
 # diagnostics: the owned store, with related locations, fix edits and lost-diagnostic evidence
 # sources:     the owned source versions every diagnostic location refers to
+# key:         the owned copies of the request's selection strings, which the loaded project borrows
 pub rec ProjectSnapshot {
     alloc:           *A.Allocator;
     session:         *session.Session;
@@ -654,6 +655,7 @@ pub rec ProjectSnapshot {
     message:         str;
     diagnostics:     *diagnostic.DiagnosticStore;
     sources:         Vector[AnalysisSource];
+    key:             ProjKey;
 }
 
 # a request for the project at `root` to `phase`, on mach's own selection and with no buffers
@@ -697,6 +699,8 @@ pub fun project_open(s: *session.Session, req: *ProjectRequest) res[ProjectSnaps
         if (sel held.err) { ret res[ProjectSnapshot, fail.Fail].err{snapshot_fail(s, held.err)}; }
         i = i + 1;
     }
+    val captured: err[fail.Fail] = proj_key_capture(s.alloc, ?req.selection, ?snap.key);
+    if (sel captured.err) { ret res[ProjectSnapshot, fail.Fail].err{snapshot_fail(s, captured.err)}; }
     diagnostic.store_dnit(?s.diags);
     s.diags = diagnostic.store_init(s.alloc);
 
@@ -755,7 +759,8 @@ fun snapshot_load(snap: *ProjectSnapshot, req: *ProjectRequest) err[fail.Fail] {
     val manifest_alloc: *A.Allocator      = s.build_alloc;
     fin { manifest.dnit(?m, manifest_alloc); }
 
-    val composed: res[request.BuildRequest, fail.Fail] = project_build(s, ?m, req.root, ?req.selection);
+    var owned:    ProjectSelection                     = ProjectSelection{artifact: snap.key.artifact, target: snap.key.target, profile: snap.key.profile};
+    val composed: res[request.BuildRequest, fail.Fail] = project_build(s, ?m, req.root, ?owned);
     if (sel composed.err) { ret err[fail.Fail].err{composed.err}; }
     var build: request.BuildRequest = composed.ok;
     fin { project_build_dnit(?build); }
@@ -841,6 +846,7 @@ pub fun project_dnit(snap: *ProjectSnapshot) err[fail.Fail] {
         i = i + 1;
     }
     if (snap.loaded) { project.dnit_project(?snap.project); }
+    proj_key_free(snap.alloc, ?snap.key);
     # a removal moves the last overlay into its place, so the highest index goes first
     sort.sort_by[session.PreparedOverlay](removals.data, removals.len, removal_order);
     i = 0;
@@ -1767,18 +1773,18 @@ fun views_drop(es: *EditorSession) {
     diags_reset(es);
 }
 
-fun proj_key_free(es: *EditorSession, k: *ProjKey) {
+fun proj_key_free(alloc: *A.Allocator, k: *ProjKey) {
     if (!k.valid)          { ret; }
-    if (k.target != nil)   { str_free(es.alloc, k.target); }
-    if (k.profile != nil)  { str_free(es.alloc, k.profile); }
-    if (k.artifact != nil) { str_free(es.alloc, k.artifact); }
+    if (k.target != nil)   { str_free(alloc, k.target); }
+    if (k.profile != nil)  { str_free(alloc, k.profile); }
+    if (k.artifact != nil) { str_free(alloc, k.artifact); }
     k.valid    = false;
     k.target   = nil;
     k.profile  = nil;
     k.artifact = nil;
 }
 
-fun proj_key_capture(es: *EditorSession, chosen: *ProjectSelection, out: *ProjKey) err[fail.Fail] {
+fun proj_key_capture(alloc: *A.Allocator, chosen: *ProjectSelection, out: *ProjKey) err[fail.Fail] {
     var k: ProjKey;
     k.valid    = true;
     k.target   = nil;
@@ -1786,15 +1792,15 @@ fun proj_key_capture(es: *EditorSession, chosen: *ProjectSelection, out: *ProjKe
     k.artifact = nil;
     var complete: bool = false;
     fin {
-        if (!complete) { proj_key_free(es, ?k); }
+        if (!complete) { proj_key_free(alloc, ?k); }
     }
-    val target: res[str, types_string.StrError] = str_copy(es.alloc, chosen.target);
+    val target: res[str, types_string.StrError] = str_copy(alloc, chosen.target);
     if (sel target.err) { ret err[fail.Fail].err{fail.str_refused(target.err)}; }
     k.target = target.ok;
-    val profile: res[str, types_string.StrError] = str_copy(es.alloc, chosen.profile);
+    val profile: res[str, types_string.StrError] = str_copy(alloc, chosen.profile);
     if (sel profile.err) { ret err[fail.Fail].err{fail.str_refused(profile.err)}; }
     k.profile = profile.ok;
-    val artifact: res[str, types_string.StrError] = str_copy(es.alloc, chosen.artifact);
+    val artifact: res[str, types_string.StrError] = str_copy(alloc, chosen.artifact);
     if (sel artifact.err) { ret err[fail.Fail].err{fail.str_refused(artifact.err)}; }
     k.artifact = artifact.ok;
     complete   = true;
@@ -1852,7 +1858,7 @@ fun proj_refresh_edited(es: *EditorSession) res[bool, fail.Fail] {
 }
 
 fun proj_teardown(es: *EditorSession) {
-    proj_key_free(es, ?es.proj_key);
+    proj_key_free(es.alloc, ?es.proj_key);
     if (!es.proj_loaded) { ret; }
     project.dnit_project(?es.proj);
     arena.dnit(?es.proj_arena);
@@ -2050,13 +2056,13 @@ fun proj_ensure(es: *EditorSession, fid: lang_source.FileId) res[opt[*project.Mo
     }
 
     var key:      ProjKey        = ProjKey{valid: false, target: nil, profile: nil, artifact: nil};
-    val captured: err[fail.Fail] = proj_key_capture(es, ?want_selection, ?key);
+    val captured: err[fail.Fail] = proj_key_capture(es.alloc, ?want_selection, ?key);
     if (sel captured.err) {
         ret res[opt[*project.ModuleEntry], fail.Fail].err{captured.err};
     }
     var key_committed: bool = false;
     fin {
-        if (!key_committed) { proj_key_free(es, ?key); }
+        if (!key_committed) { proj_key_free(es.alloc, ?key); }
     }
 
     val rebuilt: err[fail.Fail] = proj_roots_rebuild(es, root, id_text, src_text);
@@ -2128,7 +2134,7 @@ fun proj_ensure(es: *EditorSession, fid: lang_source.FileId) res[opt[*project.Mo
     collections_vector.clear[lang_source.FileId](?es.proj_edited);
     es.proj_phase = want_phase;
     es.proj_loads = es.proj_loads + 1;
-    proj_key_free(es, ?es.proj_key);
+    proj_key_free(es.alloc, ?es.proj_key);
     es.proj_key   = key;
     key_committed = true;
 
