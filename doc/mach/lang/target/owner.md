@@ -37,7 +37,7 @@ names: the names of masc's catalog the selection adds over the baseline
 ## fun assemble_for
 
 ```mach
-pub fun assemble_for(a: *A.Allocator, os_id: u32, arch_id: u32, abi_id: u32, spelled: opt[str], t: *extension.Table, bits: u64) res[opt[*Assembled], fail.Fail];
+pub fun assemble_for(a: *A.Allocator, os_id: u32, arch_id: u32, abi_id: u32, stated_env: str, spelled: opt[str], t: *extension.Table, bits: u64) res[opt[*Assembled], fail.Fail];
 ```
 
 the target of the cell of `os_id`, `arch_id` and `abi_id` standing on the selection the
@@ -77,7 +77,7 @@ pub fun release(a: *A.Allocator, x: *Assembled);
 ## fun owned_for
 
 ```mach
-pub fun owned_for(a: *A.Allocator, os_id: u32, arch_id: u32, abi_id: u32, spelled: opt[str], t: *extension.Table, bits: u64) res[opt[Owned], fail.Fail];
+pub fun owned_for(a: *A.Allocator, os_id: u32, arch_id: u32, abi_id: u32, env: str, spelled: opt[str], t: *extension.Table, bits: u64) res[opt[Owned], fail.Fail];
 ```
 
 what the owners state of the cell of `os_id`, `arch_id` and `abi_id` standing on

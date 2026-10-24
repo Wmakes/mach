@@ -314,5 +314,5 @@ the byte offset of member `i` of a structure or union
 pub fun stride(l: *mirl_target.Layout, ty: Type) res[u64, fail.Fail];
 ```
 
-the bytes from one element of an array to the next
+the bytes from one element of the array `ty` to the next
 

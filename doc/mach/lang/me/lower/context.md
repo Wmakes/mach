@@ -636,12 +636,6 @@ pub fun type_is_secret(lc: *LowerContext, tid: type.TypeId) bool;
 pub fun type_contains_secret(lc: *LowerContext, tid: type.TypeId) bool;
 ```
 
-## fun type_carries_secret
-
-```mach
-pub fun type_carries_secret(lc: *LowerContext, tid: type.TypeId) bool;
-```
-
 ## fun substitute_type
 
 ```mach

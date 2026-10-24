@@ -178,12 +178,6 @@ pub fun align_of(b: *Builder, ty: Type) u64;
 pub fun offset_of(b: *Builder, ty: Type, member: u32) u64;
 ```
 
-## fun stride_of
-
-```mach
-pub fun stride_of(b: *Builder, ty: Type) u64;
-```
-
 ## fun enter
 
 ```mach
