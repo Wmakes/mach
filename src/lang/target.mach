@@ -454,8 +454,8 @@ pub fun resolve(reg: *TargetRegistry, req: *TargetRequest) res[binding.Binding, 
 
     val caps_r: res[mink_os.Caps, fail.Fail] = target_host.caps(?reg.alloc, os_vt.id, arch_vt.id, abi_vt.id);
     if (sel caps_r.err) { ret res[binding.Binding, fail.Fail].err{caps_r.err}; }
-    t.dit_guaranteed = (caps_r.ok & mink_os.DIT_GUARANTEED) != 0;
-    t.pie_default    = (caps_r.ok & mink_os.PIE_DEFAULT) != 0;
+    t.timing_mode_provable = (caps_r.ok & mink_os.TIMING_MODE_PROVABLE) != 0;
+    t.pie_default          = (caps_r.ok & mink_os.PIE_DEFAULT) != 0;
 
     val page_r: res[u64, fail.Fail] = tuple_page_size(?reg.alloc, os_vt, arch_vt, of_vt);
     if (sel page_r.err) { ret res[binding.Binding, fail.Fail].err{page_r.err}; }

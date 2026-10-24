@@ -52,8 +52,9 @@ pub rec Target {
     va_list_size:            u32;
     va_list_align:           u32;
     fs_policy:               catalog_os.FsPolicy;
-    # the host guarantees the data-independent-timing mode `model.dit_mode` names
-    dit_guaranteed: bool;
+    # the host reports the data-independent-timing mode `model.dit_mode` names and lets a
+    # process enable it
+    timing_mode_provable: bool;
     # the host runs an executable position independent unless asked otherwise
     pie_default: bool;
     env_id:      u32;
@@ -141,7 +142,7 @@ pub fun layout_machine(tgt: *Target) layout.Machine {
 # row needs: mink's host of the target declares it
 pub fun dit_mode_guaranteed(tgt: *Target) bool {
     if (tgt == nil) { ret false; }
-    ret tgt.dit_guaranteed;
+    ret tgt.timing_mode_provable;
 }
 
 # the constant-time multiply cells this target admits: the one decision the
