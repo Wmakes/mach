@@ -263,8 +263,8 @@ Win64 row is the convention GCC (mingw-w64) and Clang share: LLVM 18 made
 `i128` match `__int128` ("Changes to the X86 Backend", LLVM 18.1 release
 notes), and the Clang change that gave `fp128` the same treatment describes it
 as "identical to `i128`" and "the same as GCC": passed on the stack by
-reference and returned in `xmm0` ([llvm/llvm-project#115052][115052]). The
-corpus verifies each row against a clang `-O0` probe (`test/link/cases`).
+reference and returned in `xmm0` ([llvm/llvm-project#115052][115052]). Each row
+was taken from a clang `-O0` probe.
 
 The mach side of a 128-bit return on Win64 goes through a 16-byte frame slot:
 the two lanes are stored and `XMM0` is loaded from it (`movups`), because no
