@@ -8,21 +8,13 @@ pub val LOWERED_SURFACE: query.Kind = query.Kind;
 
 a module's source with what lowering omits cut away, keyed by its stable id
 
-## val INLINE_BODIES
-
-```mach
-pub val INLINE_BODIES: query.Kind = query.Kind;
-```
-
-the bodies a module offers its importers to inline, keyed by its back-half key
-
 ## val LOWER
 
 ```mach
 pub val LOWER: query.Kind = query.Kind;
 ```
 
-a module's optimized ir, keyed by its back-half key
+a module's lowered unit, keyed by its back-half key; the codegen product spends it
 
 ## val CODEGEN
 
@@ -30,7 +22,7 @@ a module's optimized ir, keyed by its back-half key
 pub val CODEGEN: query.Kind = query.Kind;
 ```
 
-a module's object image, keyed by its back-half key
+a module's object, mink's, keyed by its back-half key
 
 ## val LINK
 
@@ -126,12 +118,6 @@ pub fun codegen_reusable(p: *project.Project, mid: session.ModuleId) res[bool, f
 pub fun test_build(p: *project.Project) bool;
 ```
 
-## fun debug_info_of
-
-```mach
-pub fun debug_info_of(p: *project.Project) res[codegen.DebugInfo, fail.Fail];
-```
-
 ## fun run_lower_pass
 
 ```mach
@@ -150,9 +136,8 @@ pub fun prepare_lower_pass(p: *project.Project) err[fail.Fail];
 pub fun acquire_codegen_inputs(p: *project.Project) err[fail.Fail];
 ```
 
-the modules that still lower here are those without a product restored under
-this operation's snapshot; a module restored in the lower operation keeps its
-staged product when the snapshot is unchanged and lowers now if it changed
+the modules that still lower here are those without a product restored under this
+operation's snapshot
 
 ## fun acquire_test_inputs
 
@@ -160,8 +145,8 @@ staged product when the snapshot is unchanged and lowers now if it changed
 pub fun acquire_test_inputs(p: *project.Project) err[fail.Fail];
 ```
 
-the test operation's inputs: the typed definitions and each test object's
-lowered ir, unless the load restored its object from `obj/`
+the test operation's inputs: the typed definitions and each test object's lowered unit,
+unless the load restored its object from `obj/`
 
 ## fun run_test_object_pass
 
@@ -175,26 +160,6 @@ pub fun run_test_object_pass(p: *project.Project) err[fail.Fail];
 pub fun run_codegen_pass(p: *project.Project) err[fail.Fail];
 ```
 
-## fun code_sources
-
-```mach
-pub fun code_sources(p: *project.Project, mid: session.ModuleId, seed: *me_ir.Module, a: *A.Allocator) res[CodeSources, fail.Fail];
-```
-
-the other modules' lowered ir a whole-module backend reads to generate `seed`, module mid's ir
-
-## rec CodeSources
-
-```mach
-pub rec CodeSources;
-```
-
-## fun sources_dnit
-
-```mach
-pub fun sources_dnit(a: *A.Allocator, cs: *CodeSources);
-```
-
 ## fun test_codegen_reusable
 
 ```mach
@@ -202,6 +167,21 @@ pub fun test_codegen_reusable(p: *project.Project, mid: session.ModuleId) res[bo
 ```
 
 the test object's codegen product is current or cached, so no worker generates it
+
+## fun compile_object
+
+```mach
+pub fun compile_object(p: *project.Project, u: *me_lower.Unit) res[Object, fail.Fail];
+```
+
+the unit `u` compiled into an object, which owns its storage in the session's backing
+allocator. compiling spends the unit's module, so a unit compiles once
+
+## fun object_handle_decode
+
+```mach
+pub fun object_handle_decode(e: query.QueryView) *Object;
+```
 
 ## fun run_link_pass
 
