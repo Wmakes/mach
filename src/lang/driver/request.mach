@@ -361,6 +361,14 @@ pub fun compose(a: *A.Allocator, itn: *intern.Interner, m: *manifest.Manifest,
     if (o.work != nil)   { r.work = o.work::str; }
 
     r.link_tokens = collections_vector.init[LinkToken](a);
+    r.lib_dirs    = collections_vector.init[str](a);
+    var moved: bool = false;
+    fin {
+        if (!moved) {
+            collections_vector.dnit[LinkToken](?r.link_tokens);
+            collections_vector.dnit[str](?r.lib_dirs);
+        }
+    }
     var ti: usize = 0;
     for (ti < o.link_tokens.len) {
         var t: LinkToken;
@@ -371,7 +379,6 @@ pub fun compose(a: *A.Allocator, itn: *intern.Interner, m: *manifest.Manifest,
         }
         ti = ti + 1;
     }
-    r.lib_dirs = collections_vector.init[str](a);
     var di: usize = 0;
     for (di < o.lib_dirs.len) {
         val dr: res[usize, A.Error] = collections_vector.push[str](?r.lib_dirs, o.lib_dirs.data[di]::str);
@@ -384,6 +391,7 @@ pub fun compose(a: *A.Allocator, itn: *intern.Interner, m: *manifest.Manifest,
     r.include_deps = o.include_deps;
     r.no_cache     = o.no_cache;
     r.object_cache = goal_caches(goal) && !o.no_cache;
+    moved = true;
     ret res[BuildRequest, fail.Fail].ok{r};
 }
 
