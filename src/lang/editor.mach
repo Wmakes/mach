@@ -19,14 +19,10 @@ use std.types.result.res;
 use std.types.size.usize;
 use types_string: std.types.string;
 use std.types.string.str;
-use std.types.string.str_contains;
 use std.types.string.str_copy;
 use std.types.string.str_copy_slice;
 use std.types.string.str_equals;
-use std.types.string.str_index_of;
-use std.types.string.str_join;
 use std.types.string.str_len;
-use std.types.string.str_region_equals;
 
 use std.text.string.str_free;
 
@@ -63,9 +59,6 @@ use mach.lang.fe.token;
 use mach.lang.growth;
 use mach.lang.intern;
 use mach.lang.manifest;
-use mach.lang.manifest.target.host_isa_name;
-use mach.lang.manifest.target.host_os_name;
-use mach.lang.manifest.target.host_target_table;
 use mach.lang.module;
 use mach.lang.query;
 use mach.lang.retention;
