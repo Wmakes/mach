@@ -1680,7 +1680,7 @@ pub fun lower_stored_rvalue(ctx: *lower_context.LowerContext, eid: ast_id.ExprId
     if (sel res_v.err) { ret res_v; }
     var v: value.Value = res_v.ok;
     # the store reads the source itself, so it carries the secrecy the snapshot copy did
-    if (@borrowed && lower_context.type_carries_secret(ctx, lower_context.expr_type_of(ctx, eid))) { v.secret = true; }
+    if (@borrowed && lower_context.type_contains_secret(ctx, lower_context.expr_type_of(ctx, eid))) { v.secret = true; }
     ret res[value.Value, fail.Fail].ok{v};
 }
 
@@ -2293,7 +2293,7 @@ fun snapshot_aggregate(ctx: *lower_context.LowerContext, source_value: value.Val
     if (sel copied.err) { ret res[value.Value, fail.Fail].err{copied.err}; }
     # the value owns its bytes before later expressions can mutate its source
     var result: value.Value = value.retype(slot, source_value.ty);
-    result.secret = lower_context.type_carries_secret(ctx, sem_ty);
+    result.secret = lower_context.type_contains_secret(ctx, sem_ty);
     ret res[value.Value, fail.Fail].ok{result};
 }
 
@@ -2310,7 +2310,7 @@ fun rvalue_at(ctx: *lower_context.LowerContext, ptr: value.Value, ity: Type, sem
         }
         ret snapshot_aggregate(ctx, value.retype(ptr, ity), sem_ty, vol);
     }
-    builder.set_secret(?ctx.builder, lower_context.type_carries_secret(ctx, sem_ty));
+    builder.set_secret(?ctx.builder, lower_context.type_contains_secret(ctx, sem_ty));
     val res_: res[value.Value, fail.Fail] = builder.emit_load_marked(?ctx.builder, ptr, ity, vol);
     builder.set_secret(?ctx.builder, false);
     ret res_;

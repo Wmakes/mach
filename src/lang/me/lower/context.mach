@@ -1688,11 +1688,6 @@ fun held_secret(lc: *LowerContext, tid: type.TypeId) bool {
     ret held.ok;
 }
 
-pub fun type_carries_secret(lc: *LowerContext, tid: type.TypeId) bool {
-    if (type.is_nil(tid)) { ret false; }
-    ret type.carries_secret(?lc.s.types, substitute_type(lc, tid));
-}
-
 pub fun substitute_type(lc: *LowerContext, tid: type.TypeId) type.TypeId {
     if (lc.scope.subst == nil || lc.scope.subst_len == 0) { ret tid; }
     ret recover_type(lc, subst.substitute(lc.s, tid, ?lc.scope.subst_owner, lc.scope.subst, lc.scope.subst_len));
