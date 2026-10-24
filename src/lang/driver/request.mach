@@ -28,6 +28,8 @@ use mach.lang.manifest;
 use catalog_subsystem: mach.lang.target.catalog.subsystem;
 use mach.lang.wire;
 
+use mirl.pass.relaxation;
+
 # a binary profile lever as the command line sets it
 pub def Lever: u8;
 
@@ -194,7 +196,9 @@ pub rec BuildRequest {
     debug:     bool;
     pie:       bool;
     # whether the linker may relax the code, which mirl's relax build option states
-    linker_relax:   bool;
+    linker_relax: bool;
+    # the float relaxations the profile's `relax` permits, which mirl's floats build option states
+    floats:         relaxation.Relaxations;
     subsystem_flag: SubsystemFlag;
     subsystem:      catalog_subsystem.Subsystem;
     simd:           manifest.SimdMode;
@@ -232,6 +236,7 @@ pub fun defaults() BuildRequest {
     r.debug          = false;
     r.pie            = false;
     r.linker_relax   = true;
+    r.floats         = relaxation.EXACT;
     r.subsystem_flag = SUBSYSTEM_FLAG_NONE;
     r.subsystem      = catalog_subsystem.CONSOLE;
     r.simd           = manifest.SIMD_SCALARIZE;
@@ -382,6 +387,9 @@ fun levers_compose(a: *A.Allocator, itn: *intern.Interner, pf: *manifest.Resolve
     r.debug        = pf.debug;
     r.simd         = pf.simd;
     r.linker_relax = pf.linker_relax;
+    val floats: res[relaxation.Relaxations, fail.Fail] = floats_of(a, itn, pf.name, ?pf.relax);
+    if (sel floats.err) { ret err[fail.Fail].err{floats.err}; }
+    r.floats = floats.ok;
 
     val profiled: BuildRequest = @r;
     if (o.optimize == LEVER_ON)  { r.opt = OPT_RELEASE; }
@@ -412,8 +420,8 @@ fun profiles_check(a: *A.Allocator, itn: *intern.Interner, m: *manifest.Manifest
         if (sel passes.err) { ret passes; }
         val skips: err[fail.Fail] = no_names(a, itn, pf.name, ?pf.skip, "skip");
         if (sel skips.err) { ret skips; }
-        val relaxed: err[fail.Fail] = no_relaxation(a, itn, pf.name, ?pf.relax);
-        if (sel relaxed.err) { ret relaxed; }
+        val floats: res[relaxation.Relaxations, fail.Fail] = floats_of(a, itn, pf.name, ?pf.relax);
+        if (sel floats.err) { ret err[fail.Fail].err{floats.err}; }
     }
     ret err[fail.Fail].ok{};
 }
@@ -426,13 +434,27 @@ fun no_names(a: *A.Allocator, itn: *intern.Interner, profile: intern.StrId, name
     ret err[fail.Fail].err{fail.at(a, refused, names.sites[0])};
 }
 
-# a profile's `relax` list refused where its first name is written: mirl's build
-# options state no departure from exact semantics
-fun no_relaxation(a: *A.Allocator, itn: *intern.Interner, profile: intern.StrId, names: *manifest.NameList) err[fail.Fail] {
-    if (names.count == 0) { ret err[fail.Fail].ok{}; }
+# a profile's `relax` list refused where its name at `i` is written, for `why`
+fun relax_refused(a: *A.Allocator, itn: *intern.Interner, profile: intern.StrId, names: *manifest.NameList, i: u32, why: str) fail.Fail {
     val refused: fail.Fail = fail.formatted_user(a, diagnostic_kind.MANIFEST_INVALID_VALUE,
-        "mach.toml: [profile.{}].relax names \"{}\", which is not accepted yet: mirl has no build option that permits it (mirl#424)", intern.text(itn, profile), intern.text(itn, names.items[0]));
-    ret err[fail.Fail].err{fail.at(a, refused, names.sites[0])};
+        "mach.toml: [profile.{}].relax names \"{}\" {}", intern.text(itn, profile), intern.text(itn, names.items[i]), why);
+    ret fail.at(a, refused, names.sites[i]);
+}
+
+# the float relaxations a profile's `relax` list names, as mirl's relaxation table reads
+# them, refused where a name it holds no row for, or a repeated one, is written
+fun floats_of(a: *A.Allocator, itn: *intern.Interner, profile: intern.StrId, names: *manifest.NameList) res[relaxation.Relaxations, fail.Fail] {
+    var s: relaxation.Relaxations = relaxation.EXACT;
+    var i: u32                    = 0;
+    for (i < names.count) {
+        val name:   str                    = intern.text(itn, names.items[i]);
+        val member: opt[relaxation.Member] = relaxation.named(name);
+        if (sel member.none) { ret res[relaxation.Relaxations, fail.Fail].err{relax_refused(a, itn, profile, names, i, "which is no departure from exact semantics mirl permits")}; }
+        if (relaxation.holds(s, member.some)) { ret res[relaxation.Relaxations, fail.Fail].err{relax_refused(a, itn, profile, names, i, "more than once")}; }
+        s = relaxation.add(s, member.some);
+        i = i + 1;
+    }
+    ret res[relaxation.Relaxations, fail.Fail].ok{s};
 }
 
 # `work`, a `-w` value, in place of the root manifest `m`'s `[project].work`: a
@@ -485,6 +507,7 @@ fun write_semantic_fields(s: *wire.Sink, r: *BuildRequest) {
     put_flag(s, r.debug);
     put_flag(s, r.pie);
     put_flag(s, r.linker_relax);
+    wire.put_u32(s, r.floats.bits);
     wire.put_u8(s, r.simd);
     put_flag(s, r.include_deps);
 }
