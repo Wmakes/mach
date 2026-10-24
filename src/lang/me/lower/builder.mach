@@ -34,6 +34,7 @@ use mirl_instruction: mirl.ir.instruction;
 use mirl.ir.instruction.Branch;
 use mirl.ir.instruction.Request;
 use mirl_metadata: mirl.ir.metadata;
+use mirl.ir.native;
 use mirl.ir.metadata.Flags;
 use mirl.ir.module;
 use mirl.ir.opcode;
@@ -1314,6 +1315,27 @@ pub fun emit_asm(b: *Builder, block: *Assembly, values: *value.Value, n: u32) er
     }
     var imm: [1]Immediate = [1]Immediate{Immediate.assembly{block}};
     ret placed(b, opcode.ASM, ops.data, ops.len::u32, ?imm[0], 1);
+}
+
+# the target op `op` at the cursor over the `n` values at `values`, in its operands' order,
+# its result the one `op` states or none. the instruction copies the op, so it may be borrowed
+pub fun emit_target_op(b: *Builder, op: *native.Op, values: *value.Value, n: u32) res[value.Value, fail.Fail] {
+    var ops: vector.Vector[id.Value] = vector.init[id.Value](b.a);
+    fin { vector.dnit[id.Value](?ops); }
+    var i: u32 = 0;
+    for (i < n) {
+        val pushed: res[usize, A.Error] = vector.push[id.Value](?ops, use(b, values[i]));
+        if (sel pushed.err) { ret res[value.Value, fail.Fail].err{fail.refused(pushed.err)}; }
+        i = i + 1;
+    }
+    var code: Opcode = opcode.TARGET_OP;
+    if (native.touches(op)) { code = opcode.TARGET_OP_MEMORY; }
+    var imm: [1]Immediate = [1]Immediate{Immediate.op{op}};
+    val made: id.Instruction = mbuild.emit(?b.mb, request(code, ops.data, ops.len::u32, ?imm[0], 1));
+    if (mbuild.failed(?b.mb))  { ret after(b, value.none()); }
+    if (op.results.size == 0) { ret ok(value.none()); }
+    val r: id.Value = mbuild.result(?b.mb, made, 0);
+    ret after(b, value.ssa(r, op.results.data[0], secret_of(b, r)));
 }
 
 pub fun emit_unreachable(b: *Builder) err[fail.Fail] {

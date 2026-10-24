@@ -70,6 +70,7 @@ use mirl_point:  mirl.ir.point;
 use types:       mirl.ir.type;
 use mirl.ir.type.Type;
 use mirl_target: mirl.target;
+use mirl_record: mirl.target.record;
 use std.collections.slice.Slice;
 use std.types.view.View;
 
@@ -1889,15 +1890,14 @@ fun ast_source(s: *session.Session, a: *ast.Ast) res[str, fail.Fail] {
     ret res[str, fail.Fail].ok{sf.some.text};
 }
 
-# the operation of the selected target an `#[op]` function stands for, NO_OP_SET for any other
-pub fun declared_op(lc: *LowerContext, d: Declared, out_op: *u32) u32 {
-    if (intern.str_is_nil(d.declaration.op_set)) { ret target_definition.NO_OP_SET; }
+# the operation of the selected target an `#[op]` function stands for, none for any other
+pub fun declared_op(lc: *LowerContext, d: Declared) opt[*target_definition.Op] {
+    if (intern.str_is_nil(d.declaration.op_set)) { ret opt[*target_definition.Op].none{}; }
     val set_s: str                   = intern.text(?lc.s.interner, d.declaration.op_set);
     val nam_s: str                   = intern.text(?lc.s.interner, d.declaration.op_name);
     val od:    *target_definition.Op = target_definition.op_of_region(lc.tgt.defs, set_s, 0, str_len(set_s), nam_s, 0, str_len(nam_s));
-    if (od == nil) { ret target_definition.NO_OP_SET; }
-    @out_op = od.opcode;
-    ret od.set_tag;
+    if (od == nil) { ret opt[*target_definition.Op].none{}; }
+    ret opt[*target_definition.Op].some{od};
 }
 
 # a source variable named at `name_span` begins: one held in a stack slot is bound to the

@@ -281,14 +281,12 @@ fun lower_fun(ctx: *lower_context.LowerContext, did: ast_id.DeclId, d: *ast_decl
 
     val own: opt[*fe_sema.interface.Declaration] = fe_sema.interface.declaration_at(ctx.scope.iface, did);
     if (sel own.none) { ret err[fail.Fail].err{fail.message("lower: a function has no declaration in its module's interface")}; }
-    var op_code: u32 = 0;
-    val op_set:  u32 = lower_context.declared_op(ctx, lower_context.Declared{iface: ctx.scope.iface, declaration: own.some}, ?op_code);
+    # an instruction on the selected target is no function there: each call is the instruction
+    val op: opt[*target_definition.Op] = lower_context.declared_op(ctx, lower_context.Declared{iface: ctx.scope.iface, declaration: own.some});
+    if (sel op.some) { ret lower_shader.refuse_core_op(ctx, d, op.some); }
 
-    if (op_set != target_definition.NO_OP_SET) { ret lower_shader.refuse_op(ctx, d); }
-
-    # an instruction on the selected target has no body there, and a body the normal object
-    # defines is declared in the test object
-    var declared_only: bool = (d.flags & ast_decl.DECL_FLAG_EXT) != 0 || ast_id.stmt_is_nil(d.data.fun_.body) || op_set != target_definition.NO_OP_SET;
+    # a body the normal object defines is declared in the test object
+    var declared_only: bool = (d.flags & ast_decl.DECL_FLAG_EXT) != 0 || ast_id.stmt_is_nil(d.data.fun_.body);
     if (lower_context.normal_defines(ctx, name)) { declared_only = true; }
     if (declared_only) {
         val declared: res[u32, fail.Fail] = lower_context.ensure_extern_function(ctx, name, sig);
