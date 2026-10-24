@@ -403,6 +403,13 @@ fun lower_global(ctx: *lower_context.LowerContext, did: ast_id.DeclId, d: *ast_d
     if (sel res_gty.err) { ret err[fail.Fail].err{res_gty.err}; }
     val gty: Type = res_gty.ok;
 
+    # mirl's globals state no secrecy, so a secret one would read as public to every
+    # constant-time walk
+    if (lower_context.type_contains_secret(ctx, sem)) {
+        ret err[fail.Fail].err{lower_context.report_gate(ctx, diagnostic_kind.SECRET_UNVERIFIABLE, d.data.bind.name,
+            "a module-level binding holding a secret waits for mirl to state a global's secrecy (mirl#441)")};
+    }
+
     val res_bare: res[intern.StrId, A.Error] = intern.range_add(?ctx.s.interner, lower_context.module_source(ctx), d.data.bind.name.offset, d.data.bind.name.len);
     if (sel res_bare.err) { ret err[fail.Fail].err{fail.refused(res_bare.err)}; }
     val bare: intern.StrId = res_bare.ok;
