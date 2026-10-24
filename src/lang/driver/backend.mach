@@ -165,7 +165,7 @@ pub fun compile(b: *Back, a: *A.Allocator, u: *lower_context.Unit, level: u8, ch
 # why mirl did not compile the module `name`: a constant-time function the target cannot
 # time is the source's to change, and every other refusal is the compiler's
 fun uncompiled(a: *A.Allocator, m: *Module, name: str, e: mirl_compile.Error) fail.Fail {
-    if (sel e.timing) { ret untimed(a, m, name, e.timing); }
+    if (sel e.timing) { ret untimed(a, m, name, e.timing, "the ir's constant-time check"); }
     val block: opt[fail.Fail] = assembly_refused(a, name, e);
     if (sel block.some) { ret block.some; }
     var why: str = "its back end refused it";
@@ -195,7 +195,7 @@ fun register_refused(a: *A.Allocator, m: *Module, name: str, e: mirl_machine.Err
     if (sel e.alloc) { ret fail.refused(e.alloc); }
     if (sel e.timing) {
         val unmet: mct.Unmet = e.timing;
-        if (sel unmet.refused) { ret untimed(a, m, name, unmet.refused); }
+        if (sel unmet.refused) { ret untimed(a, m, name, unmet.refused, "the walk of its encoded code"); }
         val fname: res[str, fail.Fail] = function_name(a, m, unmet.unfollowed.function);
         if (sel fname.err) { ret fname.err; }
         ret fail.user_of(diagnostic_kind.SECRET_UNVERIFIABLE, fail.join(a, "'", fname.ok, "' of '", name, "' requires constant time, and mirl could not follow its encoded code: ", unmet.unfollowed.unread.message));
@@ -268,17 +268,20 @@ fun spirv_refusal(e: mirl_spirv.Error) str {
 # a function of the module `name` that requires constant time, refused as mirl words it: a
 # set that classifies no timing is the target's, and a secret where the code may hold none is
 # the source's
-fun untimed(a: *A.Allocator, m: *Module, name: str, r: mct.Refused) fail.Fail {
+fun untimed(a: *A.Allocator, m: *Module, name: str, r: mct.Refused, by: str) fail.Fail {
     val fname: res[str, fail.Fail] = function_name(a, m, r.function);
     if (sel fname.err) { ret fname.err; }
+    var at: str = "the function as a whole";
+    if (sel r.at.instruction) { at = "an instruction of it"; }
+    or (sel r.at.offset)      { at = "a byte of its encoded code"; }
     var kind: diagnostic_kind.Kind = diagnostic_kind.SECRET_UNVERIFIABLE;
     if (r.refusal.reason == masc_ct.UNCLASSIFIED) { kind = diagnostic_kind.SECRET_TARGET_UNVERIFIABLE; }
     if (sel r.callee.some) {
         val callee: res[str, fail.Fail] = function_name(a, m, r.callee.some);
         if (sel callee.err) { ret callee.err; }
-        ret fail.user_of(kind, fail.join(a, "'", fname.ok, "' of '", name, "' requires constant time, which mirl refused: ", masc_ct.message(?r.refusal), ", '", callee.ok, "'"));
+        ret fail.user_of(kind, fail.join(a, "'", fname.ok, "' of '", name, "' requires constant time, which ", by, " refused at ", at, ": ", masc_ct.message(?r.refusal), ", '", callee.ok, "'"));
     }
-    ret fail.user_of(kind, fail.join(a, "'", fname.ok, "' of '", name, "' requires constant time, which mirl refused: ", masc_ct.message(?r.refusal)));
+    ret fail.user_of(kind, fail.join(a, "'", fname.ok, "' of '", name, "' requires constant time, which ", by, " refused at ", at, ": ", masc_ct.message(?r.refusal)));
 }
 
 # the name a function of `m` is declared by, copied
