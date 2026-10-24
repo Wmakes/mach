@@ -8,21 +8,14 @@ pub val LOWERED_SURFACE: query.Kind = query.Kind;
 
 a module's source with what lowering omits cut away, keyed by its stable id
 
-## val LOWER
-
-```mach
-pub val LOWER: query.Kind = query.Kind;
-```
-
-a module's lowered unit, keyed by its back-half key; the codegen product spends it
-
 ## val CODEGEN
 
 ```mach
 pub val CODEGEN: query.Kind = query.Kind;
 ```
 
-a module's object, mink's, keyed by its back-half key
+a module's object, mink's, and the facts its lowering kept, keyed by its back-half key. one
+step lowers and compiles the module, so no mirl module outlives its own codegen
 
 ## val LINK
 
@@ -124,6 +117,9 @@ pub fun test_build(p: *project.Project) bool;
 pub fun run_lower_pass(p: *project.Project) err[fail.Fail];
 ```
 
+the lowering's inputs, acquired before any module is lowered: each module's typed
+definition and its lowered surface. the codegen pass lowers each module in its step
+
 ## fun prepare_lower_pass
 
 ```mach
@@ -136,8 +132,8 @@ pub fun prepare_lower_pass(p: *project.Project) err[fail.Fail];
 pub fun acquire_codegen_inputs(p: *project.Project) err[fail.Fail];
 ```
 
-the modules that still lower here are those without a product restored under this
-operation's snapshot
+the codegen operation's inputs: the typed definitions every step reads. the facts a
+module's step keeps are read from its product as the pass takes it
 
 ## fun acquire_test_inputs
 
@@ -145,8 +141,7 @@ operation's snapshot
 pub fun acquire_test_inputs(p: *project.Project) err[fail.Fail];
 ```
 
-the test operation's inputs: the typed definitions and each test object's lowered unit,
-unless the load restored its object from `obj/`
+the test operation's inputs: the typed definitions every test object's step reads
 
 ## fun run_test_object_pass
 
@@ -168,20 +163,14 @@ pub fun test_codegen_reusable(p: *project.Project, mid: session.ModuleId) res[bo
 
 the test object's codegen product is current or cached, so no worker generates it
 
-## fun compile_object
+## fun compile_module
 
 ```mach
-pub fun compile_object(p: *project.Project, u: *me_lower.Unit) res[Object, fail.Fail];
+pub fun compile_module(p: *project.Project, m: *Module, name: str) res[Object, fail.Fail];
 ```
 
-the unit `u` compiled into an object, which owns its storage in the session's backing
-allocator. compiling spends the unit's module, so a unit compiles once
-
-## fun object_handle_decode
-
-```mach
-pub fun object_handle_decode(e: query.QueryView) *Object;
-```
+the mirl module `m` compiled into an object, which owns its storage in the session's backing
+allocator. compiling spends the module
 
 ## fun run_link_pass
 

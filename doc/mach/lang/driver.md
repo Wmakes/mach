@@ -108,7 +108,7 @@ pub fun append_frontend_roots(p: *project.Project, roots: *Vector[query.QueryKey
 pub fun append_test_roots(p: *project.Project, roots: *Vector[query.QueryKey]) err[fail.Fail];
 ```
 
-the backend's roots and each test object's lowering and codegen
+the backend's roots and each test object's codegen
 
 ## fun phase_finish
 

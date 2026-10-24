@@ -58,12 +58,12 @@ mink's failure `f` as mach's, under `lead`
 ## fun compile
 
 ```mach
-pub fun compile(b: *Back, a: *A.Allocator, u: *lower_context.Unit, level: u8, checked: bool, relax: bool, floats: relaxation.Relaxations, name: str) res[Object, fail.Fail];
+pub fun compile(b: *Back, a: *A.Allocator, m: *Module, level: u8, checked: bool, relax: bool, floats: relaxation.Relaxations, name: str) res[Object, fail.Fail];
 ```
 
-the unit `u` compiled to mink's object at mirl's level `level`, its schedule's own checks run
-with `checked`, the linker let relax its code with `relax` and the float relaxations `floats`
-permitted. the unit's module is the schedule's to rewrite, so it is spent here
+the mirl module `m` compiled to mink's object at mirl's level `level`, its schedule's own checks
+run with `checked`, the linker let relax its code with `relax` and the float relaxations `floats`
+permitted. the module is the schedule's to rewrite, so it is spent here
 
 ## fun object_bytes
 

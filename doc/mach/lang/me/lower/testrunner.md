@@ -58,7 +58,7 @@ so one pass over the pool reads every branch at any depth without descending
 ## fun synthesize_dispatcher
 
 ```mach
-pub fun synthesize_dispatcher(s: *session.Session, machine: *lower_context.Machine, tests: *Test, count: u32) res[lower_context.Unit, fail.Fail];
+pub fun synthesize_dispatcher(s: *session.Session, machine: *lower_context.Machine, tests: *Test, count: u32) res[mirl_module.Module, fail.Fail];
 ```
 
 synthesize the test dispatcher module: a `main(argc, argv)` that parses argv[1]
@@ -71,7 +71,7 @@ s: the session whose interner names the dispatcher and `main`
 machine: the target the dispatcher is built for
 tests: the collected tests in dispatch order, indexed by argv[1]
 count: how many tests there are, at least one
-ret: the dispatcher unit, owned by the caller, or why it could not be built
+ret: the dispatcher's mirl module, owned by the caller, or why it could not be built
 
 ## fun push
 

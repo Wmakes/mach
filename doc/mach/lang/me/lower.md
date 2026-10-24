@@ -259,8 +259,9 @@ forwards [`mach.lang.me.lower.context.symbol_of`](lower/context.md#fun-symbol_of
 ## fun lower_module
 
 ```mach
-pub fun lower_module(req: *lower_context.LowerRequest) res[lower_context.Unit, fail.Fail];
+pub fun lower_module(req: *lower_context.LowerRequest, m: *mirl_module.Module) res[lower_context.Unit, fail.Fail];
 ```
 
-the unit of the module `req` names, lowered into mirl and held to mirl's verifier
+the module `req` names lowered into the mirl module `m` and held to mirl's verifier, and the
+unit of facts kept of it
 

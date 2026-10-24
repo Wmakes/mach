@@ -44,8 +44,8 @@ defined: the module gives it a body
 pub rec Unit;
 ```
 
-a lowered module: the mirl module, the facts mach keeps of its functions, and the
-allocator both live in
+what mach keeps of a lowered module once its mirl module is compiled and gone: its name
+and the facts of its functions
 
 exports: the linkage names a root-project `fwd` puts on a shared library's surface,
          which another module of the image defines
@@ -53,10 +53,10 @@ exports: the linkage names a root-project `fwd` puts on a shared library's surfa
 ## fun unit_init
 
 ```mach
-pub fun unit_init(a: *A.Allocator, machine: *Machine, name: intern.StrId, root_project: bool) res[Unit, fail.Fail];
+pub fun unit_init(a: *A.Allocator, name: intern.StrId, root_project: bool) Unit;
 ```
 
-an empty unit named `name`, its module built for the machine's target
+an empty unit named `name`, its facts held in `a`
 
 ## fun unit_dnit
 
@@ -64,7 +64,15 @@ an empty unit named `name`, its module built for the machine's target
 pub fun unit_dnit(u: *Unit);
 ```
 
-release a unit's module and facts
+release a unit's facts
+
+## fun module_init
+
+```mach
+pub fun module_init(a: *A.Allocator, machine: *Machine) res[mirl_module.Module, fail.Fail];
+```
+
+an empty mirl module in `a`, built for the machine's target and stated as mach's
 
 ## fun fn_info
 
@@ -201,7 +209,7 @@ pub fun scope_leave(lc: *LowerContext, mark: ScopeMark) err[fail.Fail];
 ## fun init_context
 
 ```mach
-pub fun init_context(lc: *LowerContext, req: *LowerRequest, unit: *Unit) err[fail.Fail];
+pub fun init_context(lc: *LowerContext, req: *LowerRequest, m: *mirl_module.Module, unit: *Unit) err[fail.Fail];
 ```
 
 ## fun dnit_context

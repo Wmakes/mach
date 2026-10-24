@@ -3,19 +3,11 @@
 ## fun emit_asm
 
 ```mach
-pub fun emit_asm(p: *project.Project, destination: str, u: *lower_context.Unit) err[fail.Fail];
+pub fun emit_asm() err[fail.Fail];
 ```
 
 assembly listings come from masc's listing of the object mirl compiled, which masc
 does not offer yet (masc#484)
-
-## fun emit_ir
-
-```mach
-pub fun emit_ir(p: *project.Project, destination: str, u: *lower_context.Unit) err[fail.Fail];
-```
-
-mirl's text of the module `u` holds, as the schedule left it compiling the module
 
 ## fun artifact_product_name
 
