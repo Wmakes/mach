@@ -640,6 +640,7 @@ pub rec ProjectRequest {
 # message:     the failure's text, or the internal standing's, "" for neither
 # diagnostics: the owned store, with related locations, fix edits and lost-diagnostic evidence
 # sources:     the owned source versions every diagnostic location refers to
+# root:        the owned copy of the request's root, which the loaded project's request borrows
 # key:         the owned copies of the request's selection strings, which the loaded project borrows
 pub rec ProjectSnapshot {
     alloc:           *A.Allocator;
@@ -655,6 +656,7 @@ pub rec ProjectSnapshot {
     message:         str;
     diagnostics:     *diagnostic.DiagnosticStore;
     sources:         Vector[AnalysisSource];
+    root:            str;
     key:             ProjKey;
 }
 
@@ -699,6 +701,9 @@ pub fun project_open(s: *session.Session, req: *ProjectRequest) res[ProjectSnaps
         if (sel held.err) { ret res[ProjectSnapshot, fail.Fail].err{snapshot_fail(s, held.err)}; }
         i = i + 1;
     }
+    val rooted: res[str, types_string.StrError] = str_copy(s.alloc, req.root);
+    if (sel rooted.err) { ret res[ProjectSnapshot, fail.Fail].err{fail.str_refused(rooted.err)}; }
+    snap.root = rooted.ok;
     val captured: err[fail.Fail] = proj_key_capture(s.alloc, ?req.selection, ?snap.key);
     if (sel captured.err) { ret res[ProjectSnapshot, fail.Fail].err{snapshot_fail(s, captured.err)}; }
     diagnostic.store_dnit(?s.diags);
@@ -753,14 +758,14 @@ fun snapshot_overlay(snap: *ProjectSnapshot, path: str, text: str) err[fail.Fail
 # load the manifest, compose the request as `mach check` does and analyze the root's union
 fun snapshot_load(snap: *ProjectSnapshot, req: *ProjectRequest) err[fail.Fail] {
     val s:    *session.Session                  = snap.session;
-    val read: res[manifest.Manifest, fail.Fail] = driver.load_manifest(s, req.root);
+    val read: res[manifest.Manifest, fail.Fail] = driver.load_manifest(s, snap.root);
     if (sel read.err) { ret err[fail.Fail].err{read.err}; }
     var m:              manifest.Manifest = read.ok;
     val manifest_alloc: *A.Allocator      = s.build_alloc;
     fin { manifest.dnit(?m, manifest_alloc); }
 
     var owned:    ProjectSelection                     = ProjectSelection{artifact: snap.key.artifact, target: snap.key.target, profile: snap.key.profile};
-    val composed: res[request.BuildRequest, fail.Fail] = project_build(s, ?m, req.root, ?owned);
+    val composed: res[request.BuildRequest, fail.Fail] = project_build(s, ?m, snap.root, ?owned);
     if (sel composed.err) { ret err[fail.Fail].err{composed.err}; }
     var build: request.BuildRequest = composed.ok;
     fin { project_build_dnit(?build); }
@@ -791,7 +796,7 @@ fun snapshot_load(snap: *ProjectSnapshot, req: *ProjectRequest) err[fail.Fail] {
         i = i + 1;
     }
 
-    val analyzed: res[project.Project, fail.Fail] = root_analyze(s, ?m, req.root, ?build, roots, count, snap.phase);
+    val analyzed: res[project.Project, fail.Fail] = root_analyze(s, ?m, snap.root, ?build, roots, count, snap.phase);
     if (sel analyzed.err) { ret err[fail.Fail].err{analyzed.err}; }
     snap.project = analyzed.ok;
     snap.loaded  = true;
@@ -847,6 +852,7 @@ pub fun project_dnit(snap: *ProjectSnapshot) err[fail.Fail] {
     }
     if (snap.loaded) { project.dnit_project(?snap.project); }
     proj_key_free(snap.alloc, ?snap.key);
+    str_free(snap.alloc, snap.root);
     # a removal moves the last overlay into its place, so the highest index goes first
     sort.sort_by[session.PreparedOverlay](removals.data, removals.len, removal_order);
     i = 0;
