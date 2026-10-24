@@ -208,6 +208,7 @@ pub val VTABLE: target_of.OfVTable = target_of.OfVTable{
     header_in_first_segment: true,
     maps_by_page:            true,
     carries_stack_size:      true,
+    carries_record:          true,
     default_stack_reserve:   0,
     header_span:             loadcmd.header_span,
     stub_shape:              dyld.stub_shape,

@@ -1786,6 +1786,7 @@ pub val VTABLE: target_of.OfVTable = target_of.OfVTable{
     header_in_first_segment: false,
     maps_by_page:            true,
     carries_stack_size:      false,
+    carries_record:          true,
     default_stack_reserve:   0,
     stub_shape:              stub_shape,
     unwind_shape:            unwind_shape,

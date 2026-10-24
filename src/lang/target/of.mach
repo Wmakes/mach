@@ -2296,6 +2296,9 @@ pub rec OfVTable {
     maps_by_page: bool;
 
     carries_stack_size: bool;
+    # an object of the format holds a section of opaque bytes, which the object cache
+    # keeps a module's record in; an object of a format with none is never restored
+    carries_record: bool;
     # the image header records a Subsystem; a format without the field refuses
     # a declared one as unsupported rather than reading it silently
     carries_subsystem: bool;

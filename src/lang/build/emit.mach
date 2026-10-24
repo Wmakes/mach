@@ -790,7 +790,7 @@ pub rec ObjectWrite {
 
 pub fun write_object(w: *ObjectWrite, destination: str) err[fail.Fail] {
     var laid: res[Sink, fail.Fail] = res[Sink, fail.Fail].err{fail.message("")};
-    if (w.record != nil && w.record.bytes != nil) {
+    if (w.record != nil && w.record.bytes != nil && w.p.target.of.carries_record) {
         laid = backend.object_bytes_with(?w.p.back, w.p.alloc, w.o, backend.RECORD_SECTION, w.record.bytes, w.record.len::usize);
     }
     or                { laid = backend.object_bytes(?w.p.back, w.p.alloc, w.o); }

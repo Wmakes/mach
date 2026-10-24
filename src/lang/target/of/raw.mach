@@ -125,6 +125,7 @@ pub val VTABLE: target_of.OfVTable = target_of.OfVTable{
     header_in_first_segment: false,
     maps_by_page:            false,
     carries_stack_size:      false,
+    carries_record:          false,
     default_stack_reserve:   0,
     covers_isa_any:          true,
     inputs:                  ?INPUT_NAMING,
