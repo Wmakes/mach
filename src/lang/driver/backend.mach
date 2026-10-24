@@ -29,6 +29,7 @@ use mirl_pass:    mirl.pass.schedule;
 use mirl_compile: mirl.target.compile;
 use mirl_family:  mirl.target.family;
 use mirl_record:  mirl.target.record;
+use mirl_spirv:   mirl.target.spirv.error;
 
 use mink.base.diag;
 use mink_fail: mink.base.fail;
@@ -156,6 +157,15 @@ fun uncompiled(a: *A.Allocator, name: str, e: mirl_compile.Error) fail.Fail {
     val block: opt[fail.Fail] = assembly_refused(a, name, e);
     if (sel block.some) { ret block.some; }
     var why: str = "its back end refused it";
+    if (sel e.back) {
+        val back: mirl_family.Back = e.back;
+        if (sel back.spirv) {
+            val q: mirl_spirv.Error = back.spirv;
+            if (sel q.unmet)    { ret fail.message_of(fail.join(a, "mirl did not compile '", name, "': it needs ", q.unmet.name, ", which the target's selection does not hold")); }
+            if (sel q.encoding) { ret fail.message_of(fail.join(a, "mirl did not compile '", name, "': masc refused an instruction: ", q.encoding.message)); }
+            why = spirv_refusal(q);
+        }
+    }
     if (sel e.unserved)   { why = "no family of mirl serves the target"; }
     or (sel e.listing)    { why = "mirl's families do not list their owners"; }
     or (sel e.foreign)    { why = "it holds an operation the target's family does not serve"; }
@@ -164,6 +174,29 @@ fun uncompiled(a: *A.Allocator, name: str, e: mirl_compile.Error) fail.Fail {
     or (sel e.introduced) { why = "mirl's schedule left an operation the target's family does not serve"; }
     or (sel e.alloc)      { ret fail.refused(e.alloc); }
     ret fail.message_of(fail.join(a, "mirl did not compile '", name, "': ", why));
+}
+
+# what mirl's spir-v back end refused of a module, in the words of its error's cases
+fun spirv_refusal(e: mirl_spirv.Error) str {
+    if (sel e.ir)            { ret "the spir-v back end could not read the module"; }
+    if (sel e.layout)        { ret "the spir-v data layout gave a type no extent"; }
+    if (sel e.basis)         { ret "the selection a spir-v unit is read under was not opened"; }
+    if (sel e.analysis)      { ret "a function's structure was not read"; }
+    if (sel e.unselected)    { ret "an instruction spir-v has no form of yet"; }
+    if (sel e.untyped)       { ret "a type spir-v has no form of here"; }
+    if (sel e.unpointed)     { ret "a pointer whose pointee no definition or use states"; }
+    if (sel e.reinterpreted) { ret "an access through a pointer at a type other than what it points to"; }
+    if (sel e.variable)      { ret "a pointer chosen at run time, which logical addressing reaches only through variable pointers"; }
+    if (sel e.storage)       { ret "a global whose address is used in another storage class than its own"; }
+    if (sel e.slot)          { ret "a stack slot whose pointer is not into the Function class"; }
+    if (sel e.entry)         { ret "an entry point that takes or returns a value"; }
+    if (sel e.imported)      { ret "an image that imports a function or a global"; }
+    if (sel e.unmet)         { ret "a capability, extension or version the module needs that the selection does not hold"; }
+    if (sel e.unstructured)  { ret "a function whose region tree the emitter cannot follow"; }
+    if (sel e.encoding)      { ret "masc refused an instruction"; }
+    if (sel e.builder)       { ret "masc's builder refused the module"; }
+    if (sel e.container)     { ret "mink's object refused the module"; }
+    ret "the spir-v back end refused it";
 }
 
 # an asm block of the module `name` that selection refused, which the source states,
