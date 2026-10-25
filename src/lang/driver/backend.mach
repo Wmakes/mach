@@ -28,6 +28,8 @@ use masc_ct: masc.core.ct;
 use mct:     mirl.ct;
 use mirl.ir.id.Function;
 use mirl.ir.module.Module;
+use opcode_row:   mirl.ir.opcode.row;
+use opcode_table: mirl.ir.opcode.table;
 use mirl_machine: mirl.machine.compile;
 use mirl_inline:  mirl.machine.inline;
 use mirl_engine:  mirl.machine.select.engine;
@@ -261,9 +263,39 @@ fun register_refused(a: *A.Allocator, m: *Module, name: str, e: mirl_machine.Err
         if (sel fname.err) { ret fname.err; }
         var step: str = "before its steps";
         if (sel failed.step.some) { step = failed.step.some; }
-        ret fail.message_of(fail.join(a, "mirl did not compile '", fname.ok, "' of '", name, "': ", stage_refusal(failed.stage), " (", step, ")"));
+        ret fail.message_of(fail.join(a, "mirl did not compile '", fname.ok, "' of '", name, "': ", stage_refusal(failed.stage), " (", step, ")", selection_lead(failed.stage), selection_named(failed.stage)));
     }
     ret fail.message_of(fail.join(a, "mirl did not compile '", name, "': ", why));
+}
+
+# what selection could not select, as a clause after its stage, "" for any other stage
+fun selection_lead(s: mirl_machine.Stage) str {
+    if (!(sel s.select)) { ret ""; }
+    val e: mirl_engine.Error = s.select;
+    if (sel e.unmatched) {
+        val op: mirl_engine.Operation = e.unmatched.operation;
+        if (sel op.opcode) { ret ": no rule selects "; }
+        ret ": no rule materialises a constant";
+    }
+    if (sel e.unheld)    { ret ": no register class holds a value of its type"; }
+    if (sel e.ambiguous) { ret ": two register classes hold a value of its type"; }
+    if (sel e.aggregate) { ret ": a value of an aggregate type, which no register holds"; }
+    if (sel e.unplaced)  { ret ": an entry whose parameters the abi legalisation did not place"; }
+    if (sel e.placed)    { ret ": a piece at a place selection does not carry"; }
+    if (sel e.unchecked) { ret ": a division without the checked mark"; }
+    ret "";
+}
+
+# the opcode selection found no rule for, "" when it refused anything else
+fun selection_named(s: mirl_machine.Stage) str {
+    if (!(sel s.select)) { ret ""; }
+    val e: mirl_engine.Error = s.select;
+    if (!(sel e.unmatched)) { ret ""; }
+    val op: mirl_engine.Operation = e.unmatched.operation;
+    if (!(sel op.opcode)) { ret ""; }
+    val row: opt[opcode_row.Row] = opcode_table.row(op.opcode);
+    if (sel row.some) { ret row.some.name; }
+    ret "";
 }
 
 # what refused a function at a stage of the register back end, by the stage's case
