@@ -406,49 +406,56 @@ fun indexed_object(a: *A.Allocator, data: *u8, len: usize, index: *PackIndex,
     ret res[Object, str].ok{Object{id: hashed.ok, kind: kind, bytes: bytes, offset: offset, depth: depth}};
 }
 
-# read one object and its delta bases through a v2 pack index, verifying both files
-pub fun read_indexed(a: *A.Allocator, data: *u8, len: usize,
-    index_data: *u8, index_len: usize, id: *object.Id) res[Object, str] {
-    val h: usize = id.len;
+pub rec IndexedPack { data: *u8; len: usize; index: PackIndex; }
+
+# verify immutable pack and index buffers once before repeated object reads
+pub fun open_indexed(data: *u8, len: usize,
+    index_data: *u8, index_len: usize, h: usize) res[IndexedPack, str] {
     if ((h != 20 && h != 32) || data == nil || index_data == nil || len < 12 + h || len > MAX_TOTAL
-        || index_len < 1032 + h * 2 || index_len > MAX_TOTAL) { ret res[Object, str].err{"invalid Git indexed pack size"}; }
+        || index_len < 1032 + h * 2 || index_len > MAX_TOTAL) { ret res[IndexedPack, str].err{"invalid Git indexed pack size"}; }
     if (data[0] != 'P' || data[1] != 'A' || data[2] != 'C' || data[3] != 'K'
-        || (read_be32(?data[4]) != 2 && read_be32(?data[4]) != 3)) { ret res[Object, str].err{"invalid Git indexed pack header"}; }
+        || (read_be32(?data[4]) != 2 && read_be32(?data[4]) != 3)) { ret res[IndexedPack, str].err{"invalid Git indexed pack header"}; }
     if (read_be32(index_data) != 0xff744f63 || read_be32(?index_data[4]) != 2) {
-        ret res[Object, str].err{"unsupported Git pack index format"};
+        ret res[IndexedPack, str].err{"unsupported Git pack index format"};
     }
     val count: usize = read_be32(?index_data[1028])::usize;
     val end:   usize = index_len - h * 2;
     if (count > MAX_OBJECTS || count != read_be32(?data[8])::usize || count > (end - 1032) / (h + 8)) {
-        ret res[Object, str].err{"invalid Git pack index object count"};
+        ret res[IndexedPack, str].err{"invalid Git pack index object count"};
     }
     val index_hash: res[object.Id, str] = object.digest(index_data, index_len - h, h);
-    if (sel index_hash.err) { ret res[Object, str].err{index_hash.err}; }
+    if (sel index_hash.err) { ret res[IndexedPack, str].err{index_hash.err}; }
     val pack_hash: res[object.Id, str] = object.digest(data, len - h, h);
-    if (sel pack_hash.err) { ret res[Object, str].err{pack_hash.err}; }
+    if (sel pack_hash.err) { ret res[IndexedPack, str].err{pack_hash.err}; }
     var ih: object.Id = index_hash.ok;
     var ph: object.Id = pack_hash.ok;
     var i:  usize     = 0;
     for (i < h) {
         if (ih.bytes[i] != index_data[index_len - h + i] || ph.bytes[i] != data[len - h + i]
-            || ph.bytes[i] != index_data[end + i]) { ret res[Object, str].err{"Git pack or index checksum mismatch"}; }
+            || ph.bytes[i] != index_data[end + i]) { ret res[IndexedPack, str].err{"Git pack or index checksum mismatch"}; }
         i = i + 1;
     }
     var prior: u32 = 0;
     i = 0;
     for (i < 256) {
         val value: u32 = read_be32(?index_data[8 + i * 4]);
-        if (value < prior || value::usize > count) { ret res[Object, str].err{"invalid Git pack index fanout"}; }
+        if (value < prior || value::usize > count) { ret res[IndexedPack, str].err{"invalid Git pack index fanout"}; }
         prior = value;
         i     = i + 1;
     }
     var index: PackIndex = PackIndex{data: index_data, count: count, hash_len: h,
         offsets: 1032 + count * (h + 4), large: 1032 + count * (h + 8), end: end};
-    if ((end - index.large) % 8 != 0) { ret res[Object, str].err{"invalid Git pack index large offset table"}; }
-    val offset: res[usize, str] = indexed_offset(?index, id);
+    if ((end - index.large) % 8 != 0) { ret res[IndexedPack, str].err{"invalid Git pack index large offset table"}; }
+    ret res[IndexedPack, str].ok{IndexedPack{data: data, len: len, index: index}};
+}
+
+# the owner keeps both verified buffers immutable for this view's entire lifetime
+pub fun read_opened(a: *A.Allocator, p: *IndexedPack, id: *object.Id) res[Object, str] {
+    if (id.len != p.index.hash_len) { ret res[Object, str].err{"Git indexed object format mismatch"}; }
+    val offset: res[usize, str] = indexed_offset(?p.index, id);
     if (sel offset.err) { ret res[Object, str].err{offset.err}; }
     var budget:  usize            = 0;
-    val decoded: res[Object, str] = indexed_object(a, data, len, ?index, offset.ok, 0, ?budget);
+    val decoded: res[Object, str] = indexed_object(a, p.data, p.len, ?p.index, offset.ok, 0, ?budget);
     if (sel decoded.err) { ret decoded; }
     var result: Object = decoded.ok;
     if (!object.equal(?result.id, id)) {
@@ -456,6 +463,13 @@ pub fun read_indexed(a: *A.Allocator, data: *u8, len: usize,
         ret res[Object, str].err{"Git indexed object hash mismatch"};
     }
     ret res[Object, str].ok{result};
+}
+
+pub fun read_indexed(a: *A.Allocator, data: *u8, len: usize, index_data: *u8, index_len: usize, id: *object.Id) res[Object, str] {
+    val opened: res[IndexedPack, str] = open_indexed(data, len, index_data, index_len, id.len);
+    if (sel opened.err) { ret res[Object, str].err{opened.err}; }
+    var p: IndexedPack = opened.ok;
+    ret read_opened(a, ?p, id);
 }
 
 use std.allocator.page;

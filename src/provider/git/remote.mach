@@ -35,6 +35,7 @@ pub rec Advertisement {
     sideband:      bool;
     ofs_delta:     bool;
     object_format: bool;
+    include_tag:   bool;
 }
 
 fun same(data: *u8, len: usize, text: str) bool {
@@ -49,6 +50,7 @@ fun same(data: *u8, len: usize, text: str) bool {
 
 fun capability(ad: *Advertisement, data: *u8, len: usize) err[str] {
     if (same(data, len, "side-band-64k")) { ad.sideband = true; }
+    if (same(data, len, "include-tag"))   { ad.include_tag = true; }
     if (same(data, len, "ofs-delta"))     { ad.ofs_delta = true; }
     if (same(data, len, "object-format=sha1")) {
         ad.hash_len      = 20;
@@ -198,6 +200,8 @@ pub fun request(a: *A.Allocator, ad: *Advertisement, wanted: *object.Id) res[Vec
     if (wanted.len != ad.hash_len) { ret res[Vector[u8], str].err{"Git requested object format mismatch"}; }
     var id: [65]u8;
     if (!object.format_id(wanted, ?id[0])) { ret res[Vector[u8], str].err{"invalid Git requested object ID"}; }
+    var include_tag: str = "";
+    if (ad.include_tag) { include_tag = " include-tag"; }
     var sideband:      str = "";
     var delta:         str = "";
     var object_format: str = "";
@@ -207,7 +211,7 @@ pub fun request(a: *A.Allocator, ad: *Advertisement, wanted: *object.Id) res[Vec
         object_format = " object-format=sha1";
         if (ad.hash_len == 32) { object_format = " object-format=sha256"; }
     }
-    val line: res[str, format.FormatError] = format.sprint(a, "want {}{}{}{}\n", (?id[0])::str, sideband, delta, object_format);
+    val line: res[str, format.FormatError] = format.sprint(a, "want {}{}{}{}{}\n", (?id[0])::str, sideband, delta, object_format, include_tag);
     if (sel line.err) { ret res[Vector[u8], str].err{"Git request allocation refused"}; }
     fin { str_free(a, line.ok); }
     var out:  Vector[u8] = vector.init[u8](a);
