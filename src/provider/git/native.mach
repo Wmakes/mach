@@ -1101,8 +1101,19 @@ fun change_checkout(c: *wt.Context, revision: str) err[str] {
             val full: res[str, str] = store.join(c.a, c.root, name);
             if (sel full.err) { ret err[str].err{full.err}; }
             val observed: res[fs.Metadata, io_error.Error] = fs.metadata_link(full.ok);
+            if (sel observed.ok) {
+                var meta: fs.Metadata = observed.ok;
+                if (fs.meta_is_dir(?meta)) {
+                    val removed: err[io_error.Error] = fs.remove_dir(full.ok);
+                    if (sel removed.ok) {
+                        str_free(c.a, full.ok);
+                        cnt;
+                    }
+                }
+                str_free(c.a, full.ok);
+                ret err[str].err{"checkout would overwrite an untracked path; existing checkout retained"};
+            }
             str_free(c.a, full.ok);
-            if (sel observed.ok)                         { ret err[str].err{"checkout would overwrite an untracked path; existing checkout retained"}; }
             if (observed.err.kind != io_error.NOT_FOUND) { ret err[str].err{"Git checkout path inspection failed"}; }
         }
     }
@@ -1155,7 +1166,28 @@ fun change_checkout(c: *wt.Context, revision: str) err[str] {
     for (i < c.staged.entries.len) {
         val e: *index.Entry = ?c.staged.entries.data[i];
         i = i + 1;
-        if (e.mode == 0o160000) { cnt; }
+        if (e.mode == 0o160000) {
+            var replaced: bool  = false;
+            var j:        usize = 0;
+            for (j < next.entries.len) {
+                val incoming: *index.Entry = ?next.entries.data[j];
+                if (incoming.mode != 0o160000 && str_equals(e.name.data::str, incoming.name.data::str)) {
+                    replaced = true;
+                    brk;
+                }
+                j = j + 1;
+            }
+            if (!replaced) { cnt; }
+            val gitlink: res[str, str] = store.join(c.a, c.root, e.name.data::str);
+            if (sel gitlink.err) { ret err[str].err{gitlink.err}; }
+            val contents: res[Vector[str], fs.FsError] = fs.read_dir(c.a, gitlink.ok);
+            str_free(c.a, gitlink.ok);
+            if (sel contents.err) { ret err[str].err{"Git checkout gitlink directory inspection failed"}; }
+            var names:    Vector[str] = contents.ok;
+            val occupied: bool        = names.len != 0;
+            free_names(c.a, ?names);
+            if (occupied) { ret err[str].err{"checkout would overwrite a populated gitlink; existing checkout retained"}; }
+        }
         val src: res[str, str] = store.join(c.a, c.root, e.name.data::str);
         if (sel src.err) { ret err[str].err{src.err}; }
         fin { str_free(c.a, src.ok); }
