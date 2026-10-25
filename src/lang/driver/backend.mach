@@ -31,6 +31,7 @@ use mirl.ir.module.Module;
 use mirl_machine: mirl.machine.compile;
 use mirl_inline:  mirl.machine.inline;
 use mirl_engine:  mirl.machine.select.engine;
+use pass_failure: mirl.pass.failure;
 use mirl.pass.relaxation;
 use mirl_pass:    mirl.pass.schedule;
 use mirl_compile: mirl.target.compile;
@@ -183,10 +184,54 @@ fun uncompiled(a: *A.Allocator, m: *Module, name: str, e: mirl_compile.Error) fa
     or (sel e.listing)    { why = "mirl's families do not list their owners"; }
     or (sel e.foreign)    { why = "it holds an operation the target's family does not serve"; }
     or (sel e.open)       { why = "mirl opened no build of the target's selection"; }
-    or (sel e.schedule)   { why = "a pass of mirl's schedule refused it"; }
+    or (sel e.schedule)   { ret schedule_refused(a, m, name, e.schedule); }
     or (sel e.introduced) { why = "mirl's schedule left an operation the target's family does not serve"; }
     or (sel e.alloc)      { ret fail.refused(e.alloc); }
     ret fail.message_of(fail.join(a, "mirl did not compile '", name, "': ", why));
+}
+
+# what mirl's pass schedule refused of the module `name`: the pass, the function and why, as
+# mirl's error states them
+fun schedule_refused(a: *A.Allocator, m: *Module, name: str, e: pass_failure.Error) fail.Fail {
+    if (sel e.alloc) { ret fail.refused(e.alloc); }
+    if (sel e.input) { ret fail.message_of(fail.join(a, "mirl's schedule refused '", name, "' before any pass ran: ", e.input.what)); }
+    if (sel e.unverified) {
+        val u:    pass_failure.Unverified = e.unverified;
+        var what: str                     = "the verifier ran out of storage";
+        if (sel u.error.refused) { what = u.error.refused.what; }
+        ret fail.message_of(fail.join(a, "mirl's verifier refused '", name, "' after the pass ", u.pass, ": ", what));
+    }
+    if (sel e.refused) {
+        val r:     pass_failure.Refusal = e.refused;
+        var where: str                  = "the module";
+        if (sel r.function.some) {
+            val fname: res[str, fail.Fail] = function_name(a, m, r.function.some);
+            if (sel fname.err) { ret fname.err; }
+            where = fname.ok;
+        }
+        ret fail.message_of(fail.join(a, "mirl's pass ", r.pass, " refused '", where, "' of '", name, "': ", pass_why(r.why)));
+    }
+    if (sel e.schedule) { ret fail.message_of(fail.join(a, "mirl's schedule for '", name, "' is malformed at the pass ", e.schedule.pass)); }
+    ret fail.message_of(fail.join(a, "mirl's schedule for '", name, "' was given a machine opened for another target"));
+}
+
+# why a pass refused, in the words of its case
+fun pass_why(w: pass_failure.Why) str {
+    if (sel w.reason)      { ret w.reason; }
+    if (sel w.alloc)       { ret "the allocator refused storage"; }
+    if (sel w.ir)          { ret "the module or a body refused an edit or a read"; }
+    if (sel w.cfg)         { ret "a graph edit or a copy was refused"; }
+    if (sel w.build)       { ret "the builder stopped"; }
+    if (sel w.convention)  { ret "a call, an entry or a return was not classified"; }
+    if (sel w.pieces)      { ret "an assignment is not carried in pieces of the ir"; }
+    if (sel w.text)        { ret "a function delivered in the text form was not read"; }
+    if (sel w.timing)      { ret "a function that requires constant time would take a time that depends on a secret"; }
+    if (sel w.condition)   { ret "a capability's condition was not read on the build's machine"; }
+    if (sel w.unheld)      { ret "a float type the target holds no unit for"; }
+    if (sel w.threaded)    { ret "a thread-local global the build's threads reach no variable of yet"; }
+    if (sel w.indexed)     { ret "a thread-local global reached through the runtime's index, which no selection forms yet"; }
+    if (sel w.specialized) { ret "a specialization constant, on a target that holds none"; }
+    ret "a pointer slot the target holds no pointer in";
 }
 
 # what mirl's register back end refused of the module `name`: a constant-time walk of the
