@@ -10,7 +10,7 @@ use std.types.size.usize;
 use std.types.string.str;
 
 $if ($mach.build.os == $mach.os.darwin) {
-    #[library("System")]
+    #[library("libSystem")]
     #[symbol("readlink")]
     ext fun bsd_readlink(pathname: *u8, buffer: *u8, capacity: usize) i64;
 }
@@ -34,23 +34,23 @@ pub fun read(a: *A.Allocator, pathname: str) res[Vector[u8], str] {
         $or ($mach.build.arch == $mach.arch.aarch64) {
             asm aarch64 {
                 mov x0, -100
-                mov x1, {pathname}
-                mov x2, {data}
-                mov x3, {capacity}
+                ldr x1, {pathname}
+                ldr x2, {data}
+                ldr x3, {capacity}
                 mov x8, 78
                 svc 0
-                mov {count}, x0
+                str x0, {count}
             }
         }
         $or ($mach.build.arch == $mach.arch.riscv64) {
             asm riscv64 {
                 li a0, -100
-                mv a1, {pathname}
-                mv a2, {data}
-                mv a3, {capacity}
+                ld a1, {pathname}
+                ld a2, {data}
+                ld a3, {capacity}
                 li a7, 78
                 ecall
-                mv {count}, a0
+                sd a0, {count}
             }
         }
     }
