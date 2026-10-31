@@ -38,6 +38,16 @@ isa = "aarch64"
 os  = "darwin"
 abi = "aapcs64"
 
+# MachOS programs are static x86_64 ELF images linked at 4 MiB. The platform
+# selects the MachOS syscall layer in the operating system's std fork.
+[target.machos]
+isa      = "x86_64"
+os       = "freestanding"
+abi      = "sysv64"
+of       = "elf"
+base     = 0x400000
+platform = "machos"
+
 [profile.debug]
 default = true
 opt = 0
@@ -58,7 +68,7 @@ kind = "bin"
 default = true
 entry = "bin/main.mach"
 out = "bin/mach"
-targets = ["linux-x86_64", "linux-arm64", "linux-riscv64", "darwin-x86_64", "darwin-aarch64"]
+targets = ["linux-x86_64", "linux-arm64", "linux-riscv64", "darwin-x86_64", "darwin-aarch64", "machos"]
 link = []
 need = []
 
@@ -81,8 +91,8 @@ link = []
 need = []
 
 [dep.std]
-git = "https://github.com/briar-systems/mach-std"
-version = "^9.4.1"
+git = "https://github.com/Wmakes/machos-std"
+ref = "commit/40117e91031830f125f40d85733b608b9b5c72a2"
 
 [dep.http]
 git = "https://github.com/briar-systems/mach-http"

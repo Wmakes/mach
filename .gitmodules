@@ -1,6 +1,6 @@
 [submodule "dep/std"]
 	path = dep/std
-	url = https://github.com/briar-systems/mach-std
+	url = https://github.com/Wmakes/machos-std
 [submodule "dep/http"]
 	path = dep/http
 	url = https://github.com/briar-systems/mach-http

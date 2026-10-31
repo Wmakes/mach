@@ -82,10 +82,11 @@ fwd treg.registry_dnit;
 fwd treg.registry_published;
 
 pub fun host_os_id() u32 {
-    $if ($mach.build.os == $mach.os.linux)   { ret os.OS_LINUX; }
-    $or ($mach.build.os == $mach.os.darwin)  { ret os.OS_DARWIN; }
-    $or ($mach.build.os == $mach.os.windows) { ret os.OS_WINDOWS; }
-    $or                                      { ret os.OS_UNKNOWN; }
+    $if ($mach.build.os == $mach.os.linux)        { ret os.OS_LINUX; }
+    $or ($mach.build.os == $mach.os.darwin)       { ret os.OS_DARWIN; }
+    $or ($mach.build.os == $mach.os.windows)      { ret os.OS_WINDOWS; }
+    $or ($mach.build.os == $mach.os.freestanding) { ret os.OS_FREESTANDING; }
+    $or                                           { ret os.OS_UNKNOWN; }
 }
 
 pub fun host_arch_id() u32 {
@@ -902,7 +903,12 @@ pub fun selection_spelling(isa_vt: *isa.IsaVTable, model: *isa.MachineModel, buf
 # without an object format, resolves: the host os, isa and abi by their
 # registered names, the object format left to the os default
 pub fun host_request() TargetRequest {
-    ret target_request(isa.arch_name_for(host_arch_id()), os.os_name_for(host_os_id()), abi.abi_name_for(host_abi_id()));
+    var req: TargetRequest = target_request(isa.arch_name_for(host_arch_id()), os.os_name_for(host_os_id()), abi.abi_name_for(host_abi_id()));
+    $if ($mach.build.os == $mach.os.freestanding && $mach.build.platform == "machos") {
+        with_of(?req, "elf");
+        with_image(?req, 0x400000, 0, 0);
+    }
+    ret req;
 }
 
 pub fun select(reg: *TargetRegistry, isa_name: str, os_name: str, abi_name: str) res[resolved.Target, fail.Fail] {
